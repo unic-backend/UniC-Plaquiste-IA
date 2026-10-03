@@ -688,13 +688,13 @@ def handle_turn(
         caps.append("draft_email")
     elif intent == "send_email":
         reply_text = (
-            "L'envoi d'e-mail est **NON DISPONIBLE** : aucun connecteur SMTP/IMAP n'est configuré. "
-            "Je peux préparer un brouillon. Dites « écris l'e-mail »."
+            "Je n'envoie jamais un e-mail depuis le chat. Page **Réseaux & mail** : "
+            "relis le brouillon, **approuve**, puis **envoie** (SMTP requis)."
         )
     elif intent == "connector_na":
         reply_text = (
-            "Connecteurs site web, réseaux sociaux et Google Business Profile : **NON DISPONIBLES** "
-            "(non configurés). Je peux rédiger un texte / une légende en brouillon, sans publication."
+            "Réseaux, fiche Google et site web : page **Réseaux & mail**. Je prépare des brouillons "
+            "(post, réponse à un avis) ; la publication reste **manuelle** (API non configurée)."
         )
         if re.search(r"post|l[eé]gende|hashtag|seo|page", text, re.I):
             reply_text += (

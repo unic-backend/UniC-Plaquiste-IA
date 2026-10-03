@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Courrier, Reseaux } from "./Reseaux";
 import { api, downloadAuth, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
@@ -105,6 +106,8 @@ const NAV = [
   { to: "/fournisseurs", label: "Fournisseurs" },
   { to: "/materiaux", label: "Matériaux" },
   { to: "/documents", label: "Documents" },
+  { to: "/courrier", label: "Courrier" },
+  { to: "/reseaux", label: "Réseaux & Google" },
   { to: "/parametres", label: "Paramètres" },
 ];
 
@@ -1011,6 +1014,8 @@ export default function App() {
         <Route path="/livraisons" element={<Livraisons />} />
         <Route path="/livraisons/:id" element={<DocDetail kind="dn" />} />
         <Route path="/documents" element={<Documents />} />
+        <Route path="/courrier" element={<Courrier />} />
+        <Route path="/reseaux" element={<Reseaux />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="/sante" element={<Sante />} />
       </Routes>

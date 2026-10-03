@@ -19,6 +19,47 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res as unknown as T;
 }
 
+export type Platform = {
+  id: string; label: string; description: string; tip: string; max_chars: number;
+  linked: boolean; handle: string; page_url: string; auto_publish: boolean;
+};
+export type Post = {
+  id: string; platform: string; kind: string; title: string; body: string; hashtags: string;
+  in_reply_to: string; status: string; created_at: string | null;
+};
+export type Mail = {
+  id: string; from_addr: string; subject: string; date: string; body: string;
+  summary: string; category: string; reply_draft_id: string | null;
+};
+export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
+
+const json = (b: unknown) => ({ body: JSON.stringify(b) });
+
+export const net = {
+  platforms: () =>
+    request<{ platforms: Platform[]; auto_publish_note: string; ai_available: boolean }>("/api/reseaux/platforms"),
+  setAccount: (id: string, b: { handle: string; page_url: string; linked: boolean }) =>
+    request(`/api/reseaux/accounts/${id}`, { method: "PUT", ...json(b) }),
+  posts: () => request<Post[]>("/api/reseaux/posts"),
+  createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
+  advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
+  deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  generate: (b: { platform: string; topic?: string; details?: string; comment?: string }) =>
+    request<{ text: string; warning: string | null }>("/api/reseaux/generate", { method: "POST", ...json(b) }),
+  boost: (b: { target: string; facts?: string }) =>
+    request<{ plan: string; note: string }>("/api/reseaux/boost", { method: "POST", ...json(b) }),
+  mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
+  mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
+  mails: () => request<Mail[]>("/api/mail"),
+  analyze: (id: string) => request<Mail & { priority: string; action: string }>(`/api/mail/${id}/analyze`, { method: "POST" }),
+  replyDraft: (id: string, instruction: string) =>
+    request<MailDraft>(`/api/mail/${id}/reply-draft`, { method: "POST", ...json({ instruction }) }),
+  editDraft: (id: string, b: Partial<MailDraft>) =>
+    request<MailDraft>(`/api/mail/drafts/${id}`, { method: "PATCH", ...json(b) }),
+  approveDraft: (id: string) => request(`/api/mail/drafts/${id}/approve`, { method: "POST" }),
+  sendDraft: (id: string) => request(`/api/mail/drafts/${id}/send`, { method: "POST" }),
+};
+
 export const api = {
   me: () => request<User>("/api/auth/me"),
   conversations: (q = "") =>

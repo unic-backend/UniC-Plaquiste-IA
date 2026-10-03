@@ -487,3 +487,18 @@ input, textarea, select {
 @media (min-width: 861px) {
   .sidebar { transform: none !important; }
 }
+
+/* Réseaux & courrier */
+.plat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 16px 0; }
+.plat { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 12px; border: 1px solid var(--line, #d9d2c5); border-radius: 14px; background: #fff; cursor: pointer; font: inherit; color: inherit; }
+.plat span { font-size: 12px; opacity: .7; }
+.plat.on { border-color: #b4733f; box-shadow: 0 0 0 2px rgba(180, 115, 63, .18); }
+.plat.mail { width: 100%; margin-bottom: 8px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; align-items: start; }
+@media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+.card-box { border: 1px solid var(--line, #d9d2c5); border-radius: 16px; padding: 16px; background: #fff; margin-bottom: 12px; }
+.card-box label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; margin: 12px 0 6px; opacity: .7; }
+.card-box input, .card-box textarea { width: 100%; }
+.post-body { white-space: pre-wrap; }
+.plan { white-space: pre-wrap; background: #f6f2ea; border-radius: 12px; padding: 12px; font: inherit; font-size: 14px; max-height: 320px; overflow: auto; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #26312d; color: #fff; padding: 12px 18px; border-radius: 14px; font-size: 14px; max-width: 90vw; z-index: 60; }

@@ -1,0 +1,304 @@
+import { useEffect, useState } from "react";
+import { net, type Mail, type MailDraft, type Platform, type Post } from "./api";
+
+const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
+const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
+
+function useToast() {
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(() => setMsg(""), 3500);
+    return () => clearTimeout(t);
+  }, [msg]);
+  return { msg, say: setMsg };
+}
+
+async function copy(text: string, say: (m: string) => void) {
+  try {
+    await navigator.clipboard.writeText(text);
+    say("Texte copié.");
+  } catch {
+    say("Copie impossible : sélectionnez le texte.");
+  }
+}
+
+export function Reseaux() {
+  const [plats, setPlats] = useState<Platform[]>([]);
+  const [note, setNote] = useState("");
+  const [ai, setAi] = useState(false);
+  const [sel, setSel] = useState("linkedin");
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [handle, setHandle] = useState("");
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [tags, setTags] = useState("#UniC #Plaquisterie #BTP #Senegal");
+  const [topic, setTopic] = useState("");
+  const [comment, setComment] = useState("");
+  const [plan, setPlan] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { msg, say } = useToast();
+
+  const load = () => {
+    net.platforms().then((r) => {
+      setPlats(r.platforms);
+      setNote(r.auto_publish_note);
+      setAi(r.ai_available);
+    }).catch((e) => say(e.message));
+    net.posts().then(setPosts).catch((e) => say(e.message));
+  };
+  useEffect(load, []);
+
+  const p = plats.find((x) => x.id === sel);
+  useEffect(() => {
+    setHandle(p?.handle ?? "");
+    setUrl(p?.page_url ?? "");
+  }, [sel, plats.length]);
+
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) say(ok);
+    } catch (e: any) {
+      say(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!p) return <div className="page">Chargement…</div>;
+  const full = body + (tags ? `\n\n${tags}` : "");
+  const label = (id: string) => plats.find((x) => x.id === id)?.label ?? id;
+
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Réseaux, fiche Google & site</h1>
+        <p className="lede">{note}</p>
+        <div className="plat-grid">
+          {plats.map((x) => (
+            <button key={x.id} className={`plat ${x.id === sel ? "on" : ""}`} onClick={() => setSel(x.id)}>
+              <b>{x.label}</b>
+              <span>{x.linked ? "● Profil enregistré" : "○ Non renseigné"}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="two-col">
+          <section className="card-box">
+            <h3>Profil {p.label}</h3>
+            <p className="hint">{p.description}</p>
+            <label>Identifiant / @handle</label>
+            <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="@unicplaquiste" />
+            <label>URL de la page</label>
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+            <div className="toolbar">
+              <button className="btn btn-copper" disabled={busy}
+                onClick={() => run(async () => { await net.setAccount(p.id, { handle, page_url: url, linked: true }); load(); }, "Profil enregistré.")}>
+                Enregistrer
+              </button>
+              <button className="btn btn-line" disabled={busy}
+                onClick={() => run(async () => { await net.setAccount(p.id, { handle: "", page_url: "", linked: false }); load(); }, "Profil retiré.")}>
+                Retirer
+              </button>
+            </div>
+            <p className="hint">Enregistre le profil UniC. Ce n'est pas une connexion API : rien n'est publié automatiquement.</p>
+          </section>
+
+          <section className="card-box">
+            <h3>Rédiger pour {p.label}</h3>
+            <p className="hint">{p.tip}</p>
+            <label>Sujet (l'IA rédige à partir de faits que vous donnez)</label>
+            <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Ex. cloison terminée à Diamniadio" />
+            <label>Avis / commentaire à répondre (optionnel)</label>
+            <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+            <div className="toolbar">
+              <button className="btn btn-line" disabled={busy || (!topic && !comment)}
+                onClick={() => run(async () => {
+                  const r = await net.generate({ platform: p.id, topic, comment, details: body });
+                  setBody(r.text);
+                  if (r.warning) say(r.warning);
+                })}>
+                {ai ? "Rédiger avec l'IA" : "IA non disponible"}
+              </button>
+            </div>
+            <label>Titre (optionnel)</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <label>Texte</label>
+            <textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+            <div className={`hint ${full.length > p.max_chars ? "error" : ""}`}>{full.length}/{p.max_chars}</div>
+            <label>Hashtags</label>
+            <input value={tags} onChange={(e) => setTags(e.target.value)} />
+            <div className="toolbar">
+              <button className="btn btn-copper" disabled={busy || !body.trim()}
+                onClick={() => run(async () => {
+                  await net.createPost({ platform: p.id, kind: comment ? "reply" : "post", title, body, hashtags: tags, in_reply_to: comment });
+                  setBody(""); setTitle(""); setComment(""); setTopic("");
+                  load();
+                }, "Brouillon enregistré.")}>
+                Enregistrer le brouillon
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <section className="card-box">
+          <h3>Booster ({p.label})</h3>
+          <p className="hint">Plan de conseils pour gagner en visibilité. Aucune action lancée, aucun budget dépensé.</p>
+          <button className="btn btn-line" disabled={busy || !ai}
+            onClick={() => run(async () => setPlan((await net.boost({ target: p.label, facts: `Profil : ${p.handle || "non renseigné"} ${p.page_url}` })).plan))}>
+            {ai ? "Générer le plan" : "IA non disponible"}
+          </button>
+          {plan && <pre className="plan">{plan}</pre>}
+        </section>
+
+        <h2>Brouillons & file d'attente</h2>
+        {posts.length === 0 && <div className="empty">Aucun brouillon.</div>}
+        {posts.map((d) => (
+          <article key={d.id} className="card-box">
+            <div className="toolbar">
+              <b>{label(d.platform)} · {d.kind === "reply" ? "Réponse" : "Post"} · {STATUS[d.status] ?? d.status}</b>
+            </div>
+            {d.in_reply_to && <p className="hint">En réponse à : « {d.in_reply_to.slice(0, 200)} »</p>}
+            {d.title && <p className="hint">{d.title}</p>}
+            <p className="post-body">{d.body}</p>
+            {d.hashtags && <p className="hint">{d.hashtags}</p>}
+            <div className="toolbar">
+              {NEXT[d.status] && (
+                <button className="btn btn-copper btn-small" disabled={busy}
+                  onClick={() => run(async () => { await net.advance(d.id); load(); })}>
+                  {NEXT[d.status]}
+                </button>
+              )}
+              <button className="btn btn-line btn-small" onClick={() => copy(`${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, say)}>Copier</button>
+              <button className="btn btn-ghost btn-small" disabled={busy}
+                onClick={() => run(async () => { await net.deletePost(d.id); load(); })}>Supprimer</button>
+            </div>
+          </article>
+        ))}
+        {msg && <div className="toast" role="status">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function Courrier() {
+  const [status, setStatus] = useState<{ read: boolean; send: boolean; ai: boolean; note: string } | null>(null);
+  const [mails, setMails] = useState<Mail[]>([]);
+  const [open, setOpen] = useState<Mail | null>(null);
+  const [info, setInfo] = useState<{ priority?: string; action?: string }>({});
+  const [draft, setDraft] = useState<MailDraft | null>(null);
+  const [instr, setInstr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { msg, say } = useToast();
+
+  const load = () => net.mails().then(setMails).catch((e) => say(e.message));
+  useEffect(() => {
+    net.mailStatus().then(setStatus).catch((e) => say(e.message));
+    load();
+  }, []);
+
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) say(ok);
+    } catch (e: any) {
+      say(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status) return <div className="page">Chargement…</div>;
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Courrier</h1>
+        <p className="lede">
+          {status.read ? "Lecture seule : vos mails ne sont ni modifiés ni marqués lus." : status.note}
+          {" "}Rien ne part sans votre approbation.
+        </p>
+        <div className="toolbar">
+          <button className="btn btn-copper" disabled={busy || !status.read}
+            onClick={() => run(async () => { const r = await net.mailSync(); await load(); say(`${r.new} nouveau(x) mail(s).`); })}>
+            Relever la boîte
+          </button>
+        </div>
+        {mails.length === 0 && <div className="empty">Aucun mail relevé.</div>}
+        <div className="two-col">
+          <div>
+            {mails.map((m) => (
+              <button key={m.id} className={`plat mail ${open?.id === m.id ? "on" : ""}`}
+                onClick={() => { setOpen(m); setInfo({}); setDraft(null); }}>
+                <b>{m.subject || "(sans objet)"}</b>
+                <span>{m.from_addr}{m.category ? ` · ${m.category}` : ""}</span>
+              </button>
+            ))}
+          </div>
+          {open && (
+            <section className="card-box">
+              <h3>{open.subject}</h3>
+              <p className="hint">De : {open.from_addr} · {open.date}</p>
+              {open.summary && <p><b>Résumé :</b> {open.summary}</p>}
+              {info.action && <p><b>Action conseillée :</b> {info.action} {info.priority ? `(priorité ${info.priority})` : ""}</p>}
+              <pre className="plan">{open.body}</pre>
+              <div className="toolbar">
+                <button className="btn btn-line" disabled={busy || !status.ai}
+                  onClick={() => run(async () => {
+                    const r = await net.analyze(open.id);
+                    setInfo({ priority: r.priority, action: r.action });
+                    setOpen(r);
+                    load();
+                  })}>
+                  {status.ai ? "Comprendre" : "IA non disponible"}
+                </button>
+              </div>
+              <label>Consigne pour la réponse (optionnel)</label>
+              <input value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="Ex. proposer une visite jeudi" />
+              <div className="toolbar">
+                <button className="btn btn-copper" disabled={busy || !status.ai}
+                  onClick={() => run(async () => setDraft(await net.replyDraft(open.id, instr)), "Réponse proposée.")}>
+                  Proposer une réponse
+                </button>
+              </div>
+              {draft && (
+                <div>
+                  <label>À</label>
+                  <input value={draft.to_addr} disabled={draft.status !== "draft"} onChange={(e) => setDraft({ ...draft, to_addr: e.target.value })} />
+                  <label>Objet</label>
+                  <input value={draft.subject} disabled={draft.status !== "draft"} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
+                  <label>Message</label>
+                  <textarea rows={8} value={draft.body} disabled={draft.status !== "draft"} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+                  <div className="toolbar">
+                    {draft.status === "draft" && (
+                      <button className="btn btn-copper" disabled={busy}
+                        onClick={() => run(async () => {
+                          await net.editDraft(draft.id, { to_addr: draft.to_addr, subject: draft.subject, body: draft.body });
+                          await net.approveDraft(draft.id);
+                          setDraft({ ...draft, status: "approved" });
+                        }, "Approuvé.")}>
+                        Approuver
+                      </button>
+                    )}
+                    {draft.status === "approved" && (
+                      <button className="btn btn-copper" disabled={busy || !status.send}
+                        onClick={() => run(async () => { await net.sendDraft(draft.id); setDraft({ ...draft, status: "sent" }); }, "E-mail envoyé.")}>
+                        {status.send ? "Envoyer" : "Envoi NON DISPONIBLE (SMTP)"}
+                      </button>
+                    )}
+                    <button className="btn btn-line" onClick={() => copy(draft.body, say)}>Copier</button>
+                    {draft.status === "sent" && <span className="badge">Envoyé</span>}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+        {msg && <div className="toast" role="status">{msg}</div>}
+      </div>
+    </div>
+  );
+}

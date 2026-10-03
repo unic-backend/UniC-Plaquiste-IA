@@ -561,3 +561,52 @@ class CalculationTrace(Base):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SocialAccount(Base):
+    """Profil enregistré par plateforme. `linked` = profil noté, PAS une connexion API."""
+
+    __tablename__ = "social_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    handle: Mapped[str] = mapped_column(String(255), default="")
+    page_url: Mapped[str] = mapped_column(String(512), default="")
+    linked: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class SocialPost(Base):
+    """Publication ou réponse (commentaire, avis) en brouillon → revue → approuvé → publié (manuel)."""
+
+    __tablename__ = "social_posts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="post")  # post | reply
+    title: Mapped[str] = mapped_column(String(255), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    hashtags: Mapped[str] = mapped_column(String(512), default="")
+    in_reply_to: Mapped[str] = mapped_column(Text, default="")  # texte du commentaire/avis visé
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    external_url: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InboxMessage(Base):
+    """E-mail lu par IMAP (lecture seule). Contenu non fiable : jamais exécuté comme instruction."""
+
+    __tablename__ = "inbox_messages"
+    __table_args__ = (UniqueConstraint("uid", name="uq_inbox_uid"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    uid: Mapped[str] = mapped_column(String(255), index=True)  # Message-ID ou UID IMAP
+    from_addr: Mapped[str] = mapped_column(String(255), default="")
+    subject: Mapped[str] = mapped_column(String(512), default="")
+    date: Mapped[str] = mapped_column(String(64), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(32), default="")
+    reply_draft_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

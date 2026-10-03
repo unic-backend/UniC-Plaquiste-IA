@@ -148,3 +148,10 @@ UniC AI n’invente pas : prix, clients, fournisseurs, cotes, paiements, clauses
 ## Licence interne
 
 Usage exclusif UniC Plaquiste.
+
+## Courrier, réseaux, fiche Google
+
+- **Courrier** : lecture IMAP (lecture seule), résumé, réponse proposée, **approbation puis envoi** SMTP. Rien ne part seul.
+- **Réseaux & Google** : 11 cibles (LinkedIn, Facebook, Instagram, TikTok, YouTube, Reddit, X, WhatsApp, Pinterest, fiche Google, site). Brouillon → revue → approbation → publication **manuelle**. Publication auto = NON DISPONIBLE (API/OAuth non configurées).
+- **Booster** : plan de conseils par IA. Aucune action lancée, aucun budget dépensé.
+- IA requise pour résumer / rédiger : `OPENAI_API_KEY` ou `LOCAL_AI_URL`.

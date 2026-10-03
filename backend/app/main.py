@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api import router
+from app.api_reseaux import router as reseaux_router
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.seed import seed_if_empty
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+app.include_router(reseaux_router, prefix="/api")
 
 
 @app.on_event("startup")

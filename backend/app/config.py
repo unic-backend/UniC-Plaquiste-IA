@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    smtp_from: str = ""
 
     max_upload_mb: int = 250
 

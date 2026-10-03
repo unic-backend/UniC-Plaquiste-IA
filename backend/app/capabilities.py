@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from app import ocr
+from app import mailbox, ocr
 from app.config import settings
 from app.ai import providers_health
 
@@ -23,7 +23,7 @@ class Capability:
 
 
 def _connectors():
-    email_ok = bool(settings.smtp_host and settings.smtp_user)
+    email_ok = mailbox.imap_configured()
     return {
         "email": email_ok,
         "website": False,
@@ -76,17 +76,17 @@ def registry_snapshot() -> list[dict]:
                    {"query": "str"}, {"articles": "list"}, ["user"], True),
         Capability("draft_email", "Rédiger un brouillon d'e-mail (sans envoi auto)",
                    {"to": "str", "subject": "str"}, {"draft": "object"}, ["user"], True),
-        Capability("read_email", "Lire la messagerie connectée",
+        Capability("read_email", "Lire la boîte mail (IMAP), résumer, proposer des réponses",
                    {}, {}, ["user"], conn["email"],
-                   "" if conn["email"] else "NON DISPONIBLE — connecteur e-mail non configuré."),
-        Capability("create_social_post", "Préparer un post réseaux (brouillon)",
+                   "" if conn["email"] else "NON DISPONIBLE — IMAP non configuré (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)."),
+        Capability("create_social_post", "Préparer posts et réponses (11 plateformes, brouillon → revue → approbation)",
                    {"text": "str"}, {"draft": "object"}, ["manager"], True),
-        Capability("publish_social_post", "Publier sur les réseaux officiels",
+        Capability("publish_social_post", "Publier automatiquement sur les réseaux (API)",
                    {"post_id": "str"}, {}, ["admin"], False,
-                   "NON DISPONIBLE — aucun connecteur social configuré."),
-        Capability("manage_google_business", "Google Business Profile",
+                   "NON DISPONIBLE — publication manuelle : copiez le texte approuvé, puis « Marquer publié »."),
+        Capability("manage_google_business", "Fiche Google : publier / répondre aux avis via API",
                    {}, {}, ["admin"], False,
-                   "NON DISPONIBLE — API Google Business non configurée."),
+                   "NON DISPONIBLE — API non configurée. Textes d'actualités et réponses aux avis préparés en brouillon."),
         Capability("website_update", "Préparer une mise à jour du site UniC",
                    {"content": "str"}, {"draft": "object"}, ["admin"], False,
                    "NON DISPONIBLE — connecteur site non configuré. La préparation de texte reste possible."),
