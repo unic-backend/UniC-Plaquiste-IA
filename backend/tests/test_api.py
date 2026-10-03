@@ -361,3 +361,62 @@ def test_chat_deep_without_claude_key_is_honest(client, monkeypatch):
     r = client.post("/api/chat", json={"message": "réfléchis en profondeur à la qualité de vie au Sénégal", "deep": True}).json()
     txt = r["message"]["content"]
     assert "avis local" in txt and "Claude NON DISPONIBLE" in txt
+
+
+def test_memory_persists_across_conversations(client, monkeypatch):
+    import httpx
+    from app import ai
+    from app.config import settings
+    r = client.post("/api/chat", json={"message": "Retiens que le BA13 hydrofuge se pose dans les salles de bain"}).json()
+    assert "Retenu" in r["message"]["content"]
+    assert any("hydrofuge" in m["text"] for m in client.get("/api/memory").json())
+    # nouvelle conversation : le souvenir part dans le prompt envoyé à Claude
+    monkeypatch.setattr(settings, "local_ai_url", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "k")
+    seen = []
+
+    def handler(req):
+        import json as j
+        seen.append(j.loads(req.content))
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "[]" if len(seen) % 2 == 0 else "ok salle de bain"}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    out = client.post("/api/chat", json={"message": "Quel type de plaque pour une salle de bain, dis-moi"}).json()
+    assert "ok salle de bain" in out["message"]["content"]
+    assert "hydrofuge" in seen[0]["system"] and "MÉMOIRE UNIC" in seen[0]["system"]
+
+
+def test_memory_auto_extract_dedupe_and_delete(client, monkeypatch):
+    import httpx
+    from app import ai
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_ai_url", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "k")
+    calls = {"n": 0}
+
+    def handler(req):
+        calls["n"] += 1
+        txt = '["Awa Diop est une cliente fidèle de Dakar"]' if "Extrais" in req.content.decode() else "Bien noté."
+        return httpx.Response(200, json={"content": [{"type": "text", "text": txt}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    msg = "Pour info, Awa Diop est une cliente fidèle de Dakar, fais attention aux délais"
+    for _ in range(2):
+        client.post("/api/chat", json={"message": msg})
+    items = [m for m in client.get("/api/memory").json() if "Awa Diop" in m["text"]]
+    assert len(items) == 1 and items[0]["source"] == "auto"
+    assert client.delete(f"/api/memory/{items[0]['id']}").status_code == 200
+    assert client.delete(f"/api/memory/{items[0]['id']}").status_code == 404
+
+
+def test_note_alone_is_not_a_memory_command():
+    from app import memory
+    assert memory.parse_remember("Note la différence entre BA13 et BA18") is None
+    assert memory.parse_remember("Note que le client veut du blanc mat") == "le client veut du blanc mat"
+
+
+def test_question_without_numbers_never_crashes(client):
+    for q in ("Quel type de plaque pour une salle de bain", "cloison", "faux plafond", "peinture"):
+        assert client.post("/api/chat", json={"message": q}).status_code == 200

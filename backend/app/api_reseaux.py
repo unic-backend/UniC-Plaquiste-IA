@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, google_business as gbp, mailbox
+from app import assistant, google_business as gbp, mailbox, memory as mem
 from app.database import get_db
 from app.models import EmailDraft, InboxMessage, SocialAccount, SocialPost, User, utcnow
 from app.security import get_current_user
@@ -194,15 +194,15 @@ class GenerateIn(BaseModel):
 
 
 @router.post("/reseaux/generate")
-def generate(body: GenerateIn, user: User = Depends(get_current_user)):
+def generate(body: GenerateIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if body.platform not in PLATFORMS:
         raise HTTPException(404, "Plateforme inconnue")
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
     if body.comment:
-        text = assistant.reply_to_comment(body.platform, body.comment, body.instruction)
+        text = assistant.reply_to_comment(body.platform, body.comment, body.instruction, memory=mem.block(db, body.comment))
     elif body.topic:
-        text = assistant.draft_post(body.platform, body.topic, body.details)
+        text = assistant.draft_post(body.platform, body.topic, body.details, memory=mem.block(db, body.topic))
     else:
         raise HTTPException(400, "Donnez un sujet ou un commentaire")
     if not text:
@@ -217,10 +217,10 @@ class BoostIn(BaseModel):
 
 
 @router.post("/reseaux/boost")
-def boost(body: BoostIn, user: User = Depends(get_current_user)):
+def boost(body: BoostIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
-    plan = assistant.boost_plan(body.target, body.facts, body.deep)
+    plan = assistant.boost_plan(body.target, body.facts, body.deep, mem.block(db, body.target))
     if not plan:
         raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
     return {"plan": plan, "note": "Conseils uniquement. Aucune action n'est lancée, aucun budget dépensé."}
@@ -280,7 +280,7 @@ def mail_analyze(mid: str, db: Session = Depends(get_db), user: User = Depends(g
     m = _get_mail(db, mid)
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
-    res = assistant.analyze_email(m.from_addr, m.subject, m.body)
+    res = assistant.analyze_email(m.from_addr, m.subject, m.body, mem.block(db, m.subject))
     if res is None:
         raise HTTPException(502, "Analyse impossible")
     m.summary = str(res.get("summary", ""))[:1000]
@@ -299,7 +299,7 @@ def mail_reply_draft(mid: str, body: ReplyIn, db: Session = Depends(get_db), use
     m = _get_mail(db, mid)
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
-    text = assistant.propose_reply(m.from_addr, m.subject, m.body, body.instruction, body.deep)
+    text = assistant.propose_reply(m.from_addr, m.subject, m.body, body.instruction, body.deep, mem.block(db, m.subject + " " + body.instruction))
     if not text:
         raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
     subject = m.subject if m.subject.lower().startswith("re:") else f"Re: {m.subject}"
@@ -416,7 +416,7 @@ def google_reply_draft(review_id: str, body: ReviewReplyIn, db: Session = Depend
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
     hint = f"Note de l'avis : {body.stars}/5. " if body.stars else ""
-    text = assistant.reply_to_comment("google_business", body.comment, hint + body.instruction)
+    text = assistant.reply_to_comment("google_business", body.comment, hint + body.instruction, memory=mem.block(db, body.comment))
     if not text:
         raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
     err = check_post("google_business", text)
@@ -429,3 +429,42 @@ def google_reply_draft(review_id: str, body: ReviewReplyIn, db: Session = Depend
     audit(db, user.id, "google_reply_draft", "social_post", p.id)
     db.commit()
     return _post_out(p)
+
+
+# ---------- mémoire ----------
+
+class MemoryIn(BaseModel):
+    text: str = Field(..., min_length=5, max_length=mem.MAX_TEXT)
+    kind: str = Field("fact", pattern="^(fact|preference|correction)$")
+    pinned: bool = False
+
+
+def _mem_out(m) -> dict:
+    return {"id": m.id, "text": m.text, "kind": m.kind, "source": m.source, "pinned": m.pinned,
+            "created_at": m.created_at.isoformat() if m.created_at else None}
+
+
+@router.get("/memory")
+def memory_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.models import Memory
+    return [_mem_out(m) for m in db.query(Memory).order_by(Memory.pinned.desc(), Memory.created_at.desc()).all()]
+
+
+@router.post("/memory")
+def memory_add(body: MemoryIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    m = mem.add(db, body.text, kind=body.kind, source="user", pinned=body.pinned)
+    if m is None:
+        raise HTTPException(409, "Déjà en mémoire ou trop court")
+    db.commit()
+    return _mem_out(m)
+
+
+@router.delete("/memory/{mid}")
+def memory_delete(mid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.models import Memory
+    m = db.get(Memory, mid)
+    if m is None:
+        raise HTTPException(404, "Souvenir introuvable")
+    db.delete(m)
+    db.commit()
+    return {"ok": True}

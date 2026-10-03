@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app import calc
+from app import memory as mem
 from app.ai import chat_complete, deep_available, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
@@ -212,6 +213,8 @@ def _intent(text: str, state: dict) -> str:
         ):
             return "continue_pending"
 
+    if mem.parse_remember(text):
+        return "remember"
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
     if re.search(r"aide|help|que peux-tu|what can you", t) or re.fullmatch(
@@ -264,7 +267,7 @@ def _intent(text: str, state: dict) -> str:
         return "prices"
     if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
         return "search_doc"
-    if calc.detect_calc_kind(t):
+    if calc.detect_calc_kind(t) and re.search(r"\d", t):
         return "calculate"
     if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
         return "analyze_doc"
@@ -393,6 +396,12 @@ def handle_turn(
     if intent == "cancel_pending":
         state.pop("pending", None)
         reply_text = "Action en cours annulée."
+    elif intent == "remember":
+        saved = mem.add(db, mem.parse_remember(text) or "", source="user", pinned=True)
+        reply_text = (
+            f"Retenu : « {saved.text} ». Je m'en souviendrai dans toutes les conversations."
+            if saved else "Déjà en mémoire (ou trop court). Rien ajouté."
+        )
     elif intent == "help":
         reply_text = _help_text()
     elif intent == "health":
@@ -819,14 +828,17 @@ def handle_turn(
                     .all()
                 )
                 context = "\n\n".join(f"### {a.title}\n{a.body[:1500]}" for a in arts[:3])
-                msgs = [{"role": "system", "content": SYSTEM_RULES + (
-                    f"\nBASE UNIC (seule source pour les infos entreprise) :\n{context}" if context else "")}]
+                memory_block = mem.block(db, text)
+                msgs = [{"role": "system", "content": SYSTEM_RULES
+                         + (f"\n\n{memory_block}" if memory_block else "")
+                         + (f"\n\nBASE UNIC (seule source pour les infos entreprise) :\n{context}" if context else "")}]
                 for m in reversed(history):
                     msgs.append({"role": m.role, "content": m.content[:2000]})
                 msgs.append({"role": "user", "content": text})
                 ai = chat_complete(msgs, deep=deep)
                 if ai.available and ai.text:
                     reply_text = ai.text
+                    mem.extract_and_store(db, text)
                     if deep and ai.provider != "claude":
                         reply_text += (
                             "\n\n_Raisonnement profond Claude NON DISPONIBLE"

@@ -611,3 +611,16 @@ class InboxMessage(Base):
     category: Mapped[str] = mapped_column(String(32), default="")
     reply_draft_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Memory(Base):
+    """Mémoire durable de l'assistant : faits, préférences, corrections. Persiste entre conversations."""
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    text: Mapped[str] = mapped_column(String(600))
+    kind: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | correction
+    source: Mapped[str] = mapped_column(String(16), default="user")  # user (explicite) | auto
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

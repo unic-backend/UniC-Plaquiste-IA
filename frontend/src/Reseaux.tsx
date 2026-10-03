@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { net, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
+import { net, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
 const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
 const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
@@ -381,6 +381,70 @@ export function Courrier() {
             </section>
           )}
         </div>
+        {msg && <div className="toast" role="status">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+const KIND: Record<string, string> = { fact: "Fait", preference: "Préférence", correction: "Correction" };
+
+export function Memoire() {
+  const [items, setItems] = useState<Memo[]>([]);
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState("fact");
+  const { msg, say } = useToast();
+  const load = () => net.memories().then(setItems).catch((e) => say(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Mémoire</h1>
+        <p className="lede">
+          Ce que l'assistant sait de vous, dans toutes les conversations. Dites « Retiens que… » dans le chat, ou ajoutez ici.
+          Il apprend aussi seul de vos messages. Supprimez ce qui est faux.
+        </p>
+        <section className="card-box">
+          <label>Nouveau souvenir</label>
+          <textarea rows={2} value={text} maxLength={500} onChange={(e) => setText(e.target.value)}
+            placeholder="Ex. Je facture toujours un acompte de 30 % avant de commencer" />
+          <div className="toolbar">
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              {Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <button className="btn btn-copper" disabled={text.trim().length < 5}
+              onClick={async () => {
+                try {
+                  await net.addMemory({ text, kind, pinned: true });
+                  setText("");
+                  load();
+                } catch (e: any) {
+                  say(e.message);
+                }
+              }}>
+              Retenir
+            </button>
+          </div>
+        </section>
+        {items.length === 0 && <div className="empty">Rien en mémoire pour l'instant.</div>}
+        {items.map((m) => (
+          <article key={m.id} className="card-box">
+            <p className="post-body">{m.text}</p>
+            <div className="toolbar">
+              <span className="badge">{KIND[m.kind] ?? m.kind}</span>
+              <span className="hint">{m.source === "auto" ? "appris seul" : "demandé par vous"}</span>
+              <button className="btn btn-ghost btn-small"
+                onClick={async () => {
+                  await net.deleteMemory(m.id);
+                  load();
+                }}>
+                Oublier
+              </button>
+            </div>
+          </article>
+        ))}
         {msg && <div className="toast" role="status">{msg}</div>}
       </div>
     </div>

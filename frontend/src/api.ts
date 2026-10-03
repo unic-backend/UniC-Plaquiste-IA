@@ -35,6 +35,8 @@ export type GReview = { id: string; author: string; stars: number; comment: stri
 export type GProfile = { title: string; website: string; phone: string; description: string; gaps: string[]; complete: boolean };
 export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
 
+export type Memo = { id: string; text: string; kind: string; source: string; pinned: boolean; created_at: string | null };
+
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const net = {
@@ -56,6 +58,10 @@ export const net = {
   gReviews: () => request<GReview[]>("/api/google/reviews"),
   gReplyDraft: (id: string, b: { comment: string; stars: number }) =>
     request<Post>(`/api/google/reviews/${encodeURIComponent(id)}/reply-draft`, { method: "POST", ...json(b) }),
+  memories: () => request<Memo[]>("/api/memory"),
+  addMemory: (b: { text: string; kind: string; pinned: boolean }) =>
+    request<Memo>("/api/memory", { method: "POST", ...json(b) }),
+  deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),
   mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
   mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
   mails: () => request<Mail[]>("/api/mail"),
