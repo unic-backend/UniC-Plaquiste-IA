@@ -168,3 +168,9 @@ Prérequis : tu es propriétaire de la fiche. Google exige d'**approuver** l'acc
 6. ⚙️ Mets les 5 variables dans `.env`, relance. La page **Réseaux & Google → Fiche Google** passe à « Charger fiche et avis ».
 
 Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses proposées par l'IA, actualités. **Tout passe par brouillon → revue → approbation → « Publier sur Google »**.
+
+## Moteurs IA
+
+- **Par défaut : modèle local** (`LOCAL_AI_URL`, ex. Ollama `http://IP:11434/v1`, + `LOCAL_AI_MODEL`). Serveur éteint → repli sur OpenAI-compatible si configuré, sinon message honnête.
+- **Raisonnement profond : Claude** (`ANTHROPIC_API_KEY`). Jamais automatique : bouton ✦ dans le chat, ou « réfléchis en profondeur ». Facturé à l'usage.
+- Claude absent ou en panne → réponse du moteur local, signalée dans le message.

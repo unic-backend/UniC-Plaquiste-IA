@@ -293,3 +293,63 @@ def test_google_bad_review_id_and_denied(client, monkeypatch):
     gbp._token_cache.update(value="", exp=0.0)
     r = client.get("/api/google/reviews")
     assert r.status_code == 502 and "Accès refusé" in r.json()["detail"]
+
+
+def test_ai_chain_local_first_claude_on_deep(monkeypatch):
+    from app import ai
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
+    monkeypatch.setattr(settings, "anthropic_api_key", "k")
+    assert [p.id for p in ai.provider_chain()] == ["local"]
+    assert [p.id for p in ai.provider_chain(deep=True)] == ["claude", "local"]
+
+
+def test_claude_request_shape_and_local_fallback(monkeypatch):
+    import httpx
+    from app import ai
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
+    monkeypatch.setattr(settings, "anthropic_api_key", "secret-key")
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if "anthropic" in str(req.url):
+            seen["h"] = dict(req.headers)
+            seen["b"] = req.content
+            return httpx.Response(200, json={"content": [{"type": "text", "text": "réponse profonde"}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "réponse locale"}}]})
+
+    real = httpx.Client
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    msgs = [{"role": "system", "content": "règles"}, {"role": "user", "content": "q"}]
+    r = ai.chat_complete(msgs, deep=True)
+    assert r.provider == "claude" and r.text == "réponse profonde"
+    assert seen["h"]["x-api-key"] == "secret-key" and seen["h"]["anthropic-version"] == "2023-06-01"
+    import json
+    body = json.loads(seen["b"])
+    assert body["system"] == "règles" and body["messages"] == [{"role": "user", "content": "q"}]
+    r2 = ai.chat_complete(msgs)  # normal → local, jamais Claude
+    assert r2.provider == "local" and r2.text == "réponse locale"
+
+    # Claude en panne → repli local
+    def broken(req):
+        if "anthropic" in str(req.url):
+            return httpx.Response(500, json={})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "secours"}}]})
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(broken), **kw))
+    r3 = ai.chat_complete(msgs, deep=True)
+    assert r3.provider == "local" and "secret-key" not in (r3.error or "")
+
+
+def test_chat_deep_without_claude_key_is_honest(client, monkeypatch):
+    import httpx
+    from app import ai
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    real = httpx.Client
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "avis local"}}]})), **kw))
+    r = client.post("/api/chat", json={"message": "réfléchis en profondeur à la qualité de vie au Sénégal", "deep": True}).json()
+    txt = r["message"]["content"]
+    assert "avis local" in txt and "Claude NON DISPONIBLE" in txt

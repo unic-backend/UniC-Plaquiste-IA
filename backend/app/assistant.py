@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 
-from app.ai import pick_chat_provider
+from app.ai import chat_complete, provider_chain
 from app.social import PLATFORMS
 
 _UNTRUSTED = (
@@ -24,14 +24,13 @@ _BASE = (
 
 
 def ai_available() -> bool:
-    return bool(pick_chat_provider().health().get("available"))
+    return bool(provider_chain())
 
 
-def _ask(system: str, user: str) -> str | None:
-    provider = pick_chat_provider()
-    if not provider.health().get("available"):
+def _ask(system: str, user: str, deep: bool = False) -> str | None:
+    if not provider_chain(deep):
         return None
-    res = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}])
+    res = chat_complete([{"role": "system", "content": system}, {"role": "user", "content": user}], deep=deep)
     return res.text.strip() if res.available and res.text else None
 
 
@@ -55,12 +54,13 @@ def analyze_email(sender: str, subject: str, body: str) -> dict | None:
     return data
 
 
-def propose_reply(sender: str, subject: str, body: str, instruction: str = "") -> str | None:
+def propose_reply(sender: str, subject: str, body: str, instruction: str = "", deep: bool = False) -> str | None:
     return _ask(
         f"{_BASE} {_UNTRUSTED} Rédige UNE réponse prête à envoyer, signée « UniC Plaquiste ». "
         "Ne promets ni prix ni date non fournis.",
         f"Consigne du patron : {instruction or 'réponse polie et utile'}\n"
         f"<donnee>De: {sender}\nObjet: {subject}\n\n{body[:6000]}</donnee>",
+        deep,
     )
 
 
@@ -83,11 +83,12 @@ def reply_to_comment(platform: str, comment: str, instruction: str = "") -> str 
     )
 
 
-def boost_plan(target: str, facts: str = "") -> str | None:
+def boost_plan(target: str, facts: str = "", deep: bool = False) -> str | None:
     """Plan d'amélioration de visibilité (conseils, pas d'action automatique)."""
     return _ask(
         f"{_BASE} Donne un plan concret et court (8 points max) pour améliorer la visibilité de : {target}. "
         "Conseils gratuits d'abord (contenu, SEO local, avis clients, fiche Google, régularité). "
         "Ne promets aucun résultat chiffré.",
         f"Faits connus sur l'entreprise : {facts or 'aucun'}",
+        deep,
     )

@@ -83,6 +83,7 @@ class ChatIn(BaseModel):
     conversation_id: str | None = None
     file_ids: list[str] = Field(default_factory=list)
     project_id: str | None = None
+    deep: bool = False  # raisonnement profond (Claude) à la demande
 
 
 @router.get("/conversations")
@@ -165,7 +166,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_c
     db.flush()
     if conv.title == "Nouvelle conversation" and text:
         conv.title = text[:80]
-    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids)
+    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
     meta = {
         "structured": reply.structured,
         "artifacts": reply.artifacts,

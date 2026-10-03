@@ -211,6 +211,7 @@ def generate(body: GenerateIn, user: User = Depends(get_current_user)):
 
 
 class BoostIn(BaseModel):
+    deep: bool = False
     target: str = Field(..., max_length=300)  # ex. « fiche Google », « site web », « Instagram »
     facts: str = Field("", max_length=3000)
 
@@ -219,7 +220,7 @@ class BoostIn(BaseModel):
 def boost(body: BoostIn, user: User = Depends(get_current_user)):
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
-    plan = assistant.boost_plan(body.target, body.facts)
+    plan = assistant.boost_plan(body.target, body.facts, body.deep)
     if not plan:
         raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
     return {"plan": plan, "note": "Conseils uniquement. Aucune action n'est lancée, aucun budget dépensé."}
@@ -289,6 +290,7 @@ def mail_analyze(mid: str, db: Session = Depends(get_db), user: User = Depends(g
 
 
 class ReplyIn(BaseModel):
+    deep: bool = False
     instruction: str = Field("", max_length=500)
 
 
@@ -297,7 +299,7 @@ def mail_reply_draft(mid: str, body: ReplyIn, db: Session = Depends(get_db), use
     m = _get_mail(db, mid)
     if not assistant.ai_available():
         raise HTTPException(503, NO_AI)
-    text = assistant.propose_reply(m.from_addr, m.subject, m.body, body.instruction)
+    text = assistant.propose_reply(m.from_addr, m.subject, m.body, body.instruction, body.deep)
     if not text:
         raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
     subject = m.subject if m.subject.lower().startswith("re:") else f"Re: {m.subject}"

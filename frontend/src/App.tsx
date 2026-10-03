@@ -196,6 +196,7 @@ function Chat({ initialId }: { initialId?: string }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
+  const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -228,7 +229,8 @@ function Chat({ initialId }: { initialId?: string }) {
         file_ids.push(up.id);
       }
       setPending([]);
-      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids });
+      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep });
+      setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
         nav(`/c/${out.conversation_id}`, { replace: true });
@@ -333,7 +335,10 @@ function Chat({ initialId }: { initialId?: string }) {
             <button className={`tool ${rec ? "rec" : ""}`} title="Voix" onClick={voice}>
               ●
             </button>
-            <div className="grow">{pending.length ? `${pending.length} fichier(s)` : "Entrée pour envoyer"}</div>
+            <button className={`tool ${deep ? "rec" : ""}`} title="Réflexion profonde (Claude), pour cette question" aria-pressed={deep} onClick={() => setDeep((d) => !d)}>
+              ✦
+            </button>
+            <div className="grow">{deep ? "Réflexion profonde (Claude)" : pending.length ? `${pending.length} fichier(s)` : "Entrée pour envoyer"}</div>
             <button className="send" onClick={() => send()} disabled={busy}>
               ↑
             </button>

@@ -76,7 +76,7 @@ export const api = {
   getConversation: (id: string) => request<ConvDetail>(`/api/conversations/${id}`),
   deleteConversation: (id: string) =>
     request(`/api/conversations/${id}`, { method: "DELETE" }),
-  chat: (body: { message: string; conversation_id?: string; file_ids?: string[] }) =>
+  chat: (body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean }) =>
     request<ChatOut>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
   upload: async (file: File, projectId?: string) => {
     const fd = new FormData();

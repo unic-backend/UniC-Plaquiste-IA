@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app import calc
-from app.ai import pick_chat_provider
+from app.ai import chat_complete, deep_available, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
@@ -51,6 +51,8 @@ from app.services import (
     selling_price_for_sku,
 )
 
+
+DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
 SYSTEM_RULES = """Tu es JARVIS, l'assistant personnel du patron d'UniC Plaquiste. Tu l'aides en conversation ET sur ses travaux (plaquisterie, cloisons, faux plafonds, plâtre, peinture, portes, finitions, métrés, chantiers, clients, e-mails, réseaux).
 Tu es direct, court, utile. Tu parles comme un collègue de chantier, pas comme un robot.
@@ -359,6 +361,7 @@ def handle_turn(
     user: Any,
     text: str,
     file_ids: list[str] | None = None,
+    deep: bool = False,
 ) -> AssistantReply:
     state = _state(conv)
     file_ids = file_ids or []
@@ -791,6 +794,7 @@ def handle_turn(
     else:
         # general: knowledge + optional LLM polish. Never invent.
         arts = _search_knowledge(db, text)
+        deep = deep or bool(DEEP_RE.search(text))
         calc_try = calc.calculate_from_text(text, {
             "waste": company_dict(db).get("default_waste") or 0.08,
             "board_width_m": company_dict(db).get("board_width_m") or 1.2,
@@ -802,13 +806,11 @@ def handle_turn(
             structured = calc_try.to_dict()
             state["last_calc"] = structured
             caps.append("calculate_materials")
-        elif arts:
+        elif arts and not provider_chain(deep):
             reply_text = f"Extrait de la base UniC — **{arts[0].title}**\n\n{arts[0].body}"
             caps.append("search_company_knowledge")
         else:
-            provider = pick_chat_provider()
-            health = provider.health()
-            if health.get("available"):
+            if provider_chain(deep):
                 history = (
                     db.query(Message)
                     .filter(Message.conversation_id == conv.id)
@@ -816,17 +818,25 @@ def handle_turn(
                     .limit(8)
                     .all()
                 )
-                msgs = [{"role": "system", "content": SYSTEM_RULES}]
+                context = "\n\n".join(f"### {a.title}\n{a.body[:1500]}" for a in arts[:3])
+                msgs = [{"role": "system", "content": SYSTEM_RULES + (
+                    f"\nBASE UNIC (seule source pour les infos entreprise) :\n{context}" if context else "")}]
                 for m in reversed(history):
                     msgs.append({"role": m.role, "content": m.content[:2000]})
                 msgs.append({"role": "user", "content": text})
-                ai = provider.complete(msgs)
+                ai = chat_complete(msgs, deep=deep)
                 if ai.available and ai.text:
                     reply_text = ai.text
+                    if deep and ai.provider != "claude":
+                        reply_text += (
+                            "\n\n_Raisonnement profond Claude NON DISPONIBLE"
+                            + (" (clé absente)" if not deep_available() else " (échec)")
+                            + f" — réponse du moteur « {ai.provider} »._"
+                        )
                 else:
                     reply_text = (
-                        "Je n'ai pas cette information dans la base UniC. "
-                        "Précisez un calcul, un document, un devis, ou saisissez la donnée manquante."
+                        "Je n'ai pas cette information dans la base UniC, et le moteur IA ne répond pas "
+                        "(modèle local éteint ?). Précisez un calcul, un document, ou réessayez."
                     )
             else:
                 reply_text = (
