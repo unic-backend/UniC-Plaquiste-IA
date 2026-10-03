@@ -139,7 +139,7 @@ def seed_if_empty(db: Session) -> None:
         db.add(User(
             email=settings.unic_admin_email.lower(),
             name=settings.unic_admin_name,
-            password_hash=hash_password(settings.unic_admin_password),
+            password_hash=hash_password(""),
             role="admin",
         ))
     if db.query(CompanySettings).first() is None:

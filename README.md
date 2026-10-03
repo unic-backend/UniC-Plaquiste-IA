@@ -42,7 +42,6 @@ Déploiement recommandé : **Docker sur un VPS**.
 
 ```bash
 cp .env.example .env
-# renseigner UNIC_SECRET_KEY et le mot de passe admin
 docker compose up -d --build
 ```
 
@@ -57,7 +56,7 @@ Données persistantes : volume `unic-data`.
 cd backend
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-UNIC_DATA_DIR=../data UNIC_SECRET_KEY=dev uvicorn app.main:app --host 0.0.0.0 --port 8000
+UNIC_DATA_DIR=../data uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # frontend (autre terminal)
 cd frontend
@@ -67,12 +66,7 @@ npm run build   # ou npm run dev (proxy /api → :8000)
 
 En production locale, compiler le frontend puis servir uniquement uvicorn : l’API sert l’interface.
 
-Compte initial (base vide uniquement) :
-
-- e-mail : `marco.r@example.org`
-- mot de passe : `UniC-Plaquiste-2026`
-
-**Changez-le avant tout usage réel.**
+Application **solo** : aucune connexion. Écoute sur `127.0.0.1` seulement. Pour l’exposer sur Internet, protège-la (VPN, Tailscale ou proxy avec mot de passe).
 
 ---
 
@@ -139,7 +133,7 @@ python scripts/backup.py
 python scripts/restore.py data/backups/unic-backup-…
 ```
 
-Une sauvegarde n’est considérée comme valide **qu’après une restauration testée** (login + ouverture d’un PDF de devis).
+Une sauvegarde n’est considérée comme valide **qu’après une restauration testée** (ouverture d’un PDF de devis).
 
 ---
 

@@ -1,27 +1,9 @@
-const TOKEN_KEY = "unic_token";
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(path, { ...init, headers });
-  if (res.status === 401) {
-    setToken(null);
-    if (!path.includes("/auth/login")) window.location.href = "/login";
-    throw new Error("Session expirée");
-  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -38,11 +20,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  login: (email: string, password: string) =>
-    request<{ token: string; user: User }>(" /api/auth/login".trim(), {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
   me: () => request<User>("/api/auth/me"),
   conversations: (q = "") =>
     request<Conv[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -108,15 +85,8 @@ export type ConvDetail = { id: string; title: string; project_id?: string; messa
 export type ChatOut = { conversation_id: string; title: string; message: ChatMessage };
 export type Uploaded = { id: string; filename: string; processing: any };
 
-export function downloadUrl(path: string) {
-  const t = getToken();
-  if (!t) return path;
-  return path;
-}
-
 export async function downloadAuth(url: string, filename: string) {
-  const token = getToken();
-  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Téléchargement impossible");
   const blob = await res.blob();
   const a = document.createElement("a");

@@ -24,23 +24,16 @@ def client():
 
 
 @pytest.fixture(scope="module")
-def token(client):
-    r = client.post("/api/auth/login", json={"email": "marco.r@example.org", "password": "UniC-Plaquiste-2026"})
-    assert r.status_code == 200, r.text
-    return r.json()["token"]
+def token():
+    return None
 
 
 def auth(token):
-    return {"Authorization": f"Bearer {token}"}
+    return {}
 
 
-def test_login_ok(token):
-    assert token
-
-
-def test_login_fail(client):
-    r = client.post("/api/auth/login", json={"email": "marco.r@example.org", "password": "wrong"})
-    assert r.status_code == 401
+def test_no_login_needed(client):
+    assert client.get("/api/auth/me").status_code == 200
 
 
 def test_health(client):

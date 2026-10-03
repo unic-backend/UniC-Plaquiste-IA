@@ -13,15 +13,13 @@ class Settings(BaseSettings):
     )
 
     unic_env: str = "production"
-    unic_secret_key: str = "dev-only-change-me"
     unic_data_dir: str = "./data"
     unic_host: str = "0.0.0.0"
     unic_port: int = 8000
     unic_public_url: str = ""
 
-    unic_admin_email: str = "marco.r@example.org"
-    unic_admin_password: str = "UniC-Plaquiste-2026"
-    unic_admin_name: str = "Administrateur UniC"
+    unic_admin_email: str = "proprietaire@unic.local"
+    unic_admin_name: str = "UniC Plaquiste"
 
     database_url: str = ""
 
@@ -42,7 +40,6 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     imap_host: str = ""
 
-    jwt_expire_hours: int = 12
     max_upload_mb: int = 250
 
     @property

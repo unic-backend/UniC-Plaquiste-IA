@@ -41,7 +41,7 @@ from app.models import (
     utcnow,
 )
 from app.orchestrator import handle_turn
-from app.security import create_token, get_current_user, hash_password, require_roles, verify_password
+from app.security import get_current_user, require_roles
 from app.services import (
     apply_payment,
     approve_entity,
@@ -64,11 +64,6 @@ router = APIRouter()
 
 # ---------- auth ----------
 
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class UserOut(BaseModel):
     id: str
     email: str
@@ -76,39 +71,9 @@ class UserOut(BaseModel):
     role: str
 
 
-@router.post("/auth/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email.lower()).first()
-    if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Identifiants invalides")
-    if not user.is_active:
-        raise HTTPException(status_code=401, detail="Compte inactif")
-    user.last_login = utcnow()
-    audit(db, user.id, "login", "user", user.id)
-    db.commit()
-    return {"token": create_token(user), "user": UserOut(id=user.id, email=user.email, name=user.name, role=user.role)}
-
-
 @router.get("/auth/me")
 def me(user: User = Depends(get_current_user)):
     return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)
-
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    name: str
-    password: str
-    role: str = "manager"
-
-
-@router.post("/users")
-def create_user(body: UserCreate, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
-    if db.query(User).filter(User.email == body.email.lower()).first():
-        raise HTTPException(400, "E-mail déjà utilisé")
-    u = User(email=body.email.lower(), name=body.name, password_hash=hash_password(body.password), role=body.role)
-    db.add(u)
-    db.commit()
-    return {"id": u.id, "email": u.email, "role": u.role}
 
 
 # ---------- conversations / chat ----------

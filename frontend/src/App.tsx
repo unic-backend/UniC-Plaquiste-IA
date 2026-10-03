@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, downloadAuth, getToken, setToken, type ChatMessage, type Conv, type User } from "./api";
+import { api, downloadAuth, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -85,21 +85,13 @@ function MessageView({ m }: { m: ChatMessage }) {
   );
 }
 
-function useAuth() {
+function useOwner() {
   const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(false);
   useEffect(() => {
-    if (!getToken()) {
-      setReady(true);
-      return;
-    }
-    api
-      .me()
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setReady(true));
+    api.me().then(setUser).catch(() => setError(true));
   }, []);
-  return { user, setUser, ready };
+  return { user, error };
 }
 
 const NAV = [
@@ -116,7 +108,7 @@ const NAV = [
   { to: "/parametres", label: "Paramètres" },
 ];
 
-function Shell({ user, onLogout, children }: { user: User; onLogout: () => void; children: React.ReactNode }) {
+function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [convs, setConvs] = useState<Conv[]>([]);
   const [q, setQ] = useState("");
@@ -177,9 +169,6 @@ function Shell({ user, onLogout, children }: { user: User; onLogout: () => void;
             <Link to="/sante" style={{ color: "#d5ddd8" }}>
               Santé
             </Link>
-            <button className="btn-ghost" style={{ width: "auto", padding: 0 }} onClick={onLogout}>
-              Déconnexion
-            </button>
           </div>
         </div>
       </aside>
@@ -368,48 +357,6 @@ function Chat({ initialId }: { initialId?: string }) {
   );
 }
 
-function Login({ onLogin }: { onLogin: (u: User) => void }) {
-  const [email, setEmail] = useState("marco.r@example.org");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr("");
-    try {
-      const r = await api.login(email, password);
-      setToken(r.token);
-      onLogin(r.user);
-    } catch (ex: any) {
-      setErr(ex.message || "Connexion impossible");
-    }
-  }
-  return (
-    <div className="login">
-      <div className="login-card">
-        <Logo size={40} />
-        <h1>UniC AI</h1>
-        <p>Plateforme métier d'UniC Plaquiste. Accès réservé.</p>
-        <form onSubmit={submit}>
-          <label>
-            E-mail
-            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            Mot de passe
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-          </label>
-          {err && <div className="error">{err}</div>}
-          <button className="btn btn-copper" type="submit">
-            Entrer
-          </button>
-        </form>
-        <p className="hint">
-          Premier démarrage : compte admin créé automatiquement. Changez le mot de passe en production. Voir README.
-        </p>
-      </div>
-    </div>
-  );
-}
 
 function TablePage({
   title,
@@ -1042,19 +989,11 @@ function ChatRoute() {
 }
 
 export default function App() {
-  const { user, setUser, ready } = useAuth();
-  const nav = useNavigate();
-  if (!ready) return <div className="login">Chargement…</div>;
-  if (!user) return <Login onLogin={(u) => { setUser(u); nav("/"); }} />;
+  const { user, error } = useOwner();
+  if (error) return <div className="login">Serveur injoignable. Réessaie.</div>;
+  if (!user) return <div className="login">Chargement…</div>;
   return (
-    <Shell
-      user={user}
-      onLogout={() => {
-        setToken(null);
-        setUser(null);
-        nav("/login");
-      }}
-    >
+    <Shell user={user}>
       <Routes>
         <Route path="/" element={<Chat />} />
         <Route path="/c/:id" element={<ChatRoute />} />
@@ -1074,7 +1013,6 @@ export default function App() {
         <Route path="/documents" element={<Documents />} />
         <Route path="/parametres" element={<SettingsPage />} />
         <Route path="/sante" element={<Sante />} />
-        <Route path="/login" element={<Navigate to="/" />} />
       </Routes>
     </Shell>
   );
