@@ -1,0 +1,126 @@
+{
+  "entreprise": {
+    "nom": "UniC Plaquiste",
+    "accroche": "Rénovation & Décoration",
+    "specialite": "Spécialiste faux plafonds BA13, cloisons sèches & décoration",
+    "gerant": "Uthman",
+    "telephone": "+221 77 708 50 92",
+    "adresse": "Dakar, Sénégal — Disponible aussi à l'international",
+    "site": "www.unicplaquiste.com",
+    "applications": [
+      "app.unicplaquiste.com",
+      "expert.unicplaquiste.com"
+    ],
+    "fiche_google_maps": "https://maps.app.goo.gl/fKvNLhN1r3U88gsv9",
+    "reseaux_sociaux": {
+      "tiktok": "https://www.tiktok.com/@unic_plaquiste",
+      "instagram": "https://www.instagram.com/unic_plaquiste"
+    },
+    "email": "unicplaquiste@gmail.com",
+    "ninea": "013141677",
+    "rccm": "SN.DKR.2026.A.22010",
+    "devise": "FCFA"
+  },
+  "charte": {
+    "bleu": "#1A3FA0",
+    "jaune": "#F2C200",
+    "gris": "#666666",
+    "vert": "#1B7A3D"
+  },
+  "conventions": {
+    "numerotation": "UC-AAAA-MMJJ-CLI",
+    "lettre_par_type": {
+      "materiaux": "",
+      "portes": "P",
+      "main_oeuvre": "M"
+    },
+    "validite_devis_jours": [
+      15,
+      30
+    ],
+    "regle_surface": "Une cloison fermee sur ses deux faces se facture en surface developpee : la pose, les joints, l'enduit, le poncage et la peinture sont realises deux fois. Surface facturee = surface de mur x 2.",
+    "mention_prix_unitaire": "Les prix indiques dans la colonne « Prix Unitaire » sont des prix a l'unite, et non des montants totaux."
+  },
+  "prix_materiaux": {
+    "Plaque standard BA13": 4500,
+    "Plaque hydrofuge": 7000,
+    "Rails 48 mm": 1500,
+    "Montant 48 mm": 1600,
+    "Rails 7 cm (70 mm)": 2600,
+    "Montant 7 cm (70 mm)": 2700,
+    "Cornières": 700,
+    "Paquet de fourrures": 1200,
+    "Paquet chevilles à frapper": 5000,
+    "Chevilles à Leton": 6000,
+    "Pivot": 6500,
+    "Paquet vis (25 mm ou 35 mm)": 5000,
+    "Vis 9 mm": 5000,
+    "Tiges (à l'unité)": 300,
+    "Sac enduit": 12000,
+    "Bande à joints": 3000,
+    "Bande armée": 6500,
+    "Toile": 500,
+    "Papier ponçage": 6000,
+    "Scotch isolant": 1000,
+    "Peinture en eau Gylatex (coloris)": 11500,
+    "Enduit coloris": 10000,
+    "Laine de verre (paquet)": 30000,
+    "Seau enduit": 11000,
+    "Seau Katex": 25000,
+    "Paquet papier enduit": 10000,
+    "Ciment plâtre (5 kg)": 250,
+    "Bâche / Basse (5 m)": 1500
+  },
+  "prix_portes": {
+    "Feuille de contreplaqué (CTP) 9 mm": 17500,
+    "Planche en bois (4m50 x 35 cm)": 22050,
+    "Quincaillerie (serrure + paumelle + verrou)": 14000
+  },
+  "ratios_materiaux": {
+    "source": "devis UC-2026-0804-FG2 — 18 parois de 5,40 x 2,50 m, 486 m2 developpes",
+    "reference_m2_developpe": 486.0,
+    "reference_parois": 18,
+    "paroi_reference_m2_developpe": 27.0,
+    "suivent_la_surface": {
+      "Plaque standard BA13": 234,
+      "Montant 7 cm (70 mm)": 288,
+      "Rails 7 cm (70 mm)": 54,
+      "Seau enduit": 10,
+      "Seau Katex": 4,
+      "Paquet papier enduit": 1
+    },
+    "par_paroi": {
+      "Laine de verre (paquet)": 1,
+      "Paquet vis (25 mm ou 35 mm)": 1,
+      "Sac enduit": 1,
+      "Bande à joints": 1,
+      "Bande armée": 1,
+      "Paquet chevilles à frapper": 1
+    }
+  },
+  "main_oeuvre": {
+    "tarif_m2": 5000,
+    "libelle": "Forfait pose complète : ossature, isolation, pose BA13, joints, enduits, ponçage et peinture."
+  },
+  "metiers_hors_perimetre": [
+    "electricite",
+    "electrique",
+    "luminaire",
+    "bandeau led",
+    "plomberie",
+    "plombier",
+    "climatisation",
+    "climatiseur"
+  ],
+  "exclusions_habituelles": [
+    "Travaux d'électricité, de plomberie et de climatisation.",
+    "Luminaires et bandeaux LED.",
+    "Tout accessoire ou finition non listé dans les tableaux."
+  ],
+  "engagements": {
+    "qualite": "UniC Plaquiste s'engage a realiser un travail propre, precis et soigne du debut a la fin du chantier, dans le respect des regles de l'art et des delais, pour garantir une finition premium et un rendu impeccable.",
+    "geste_commercial": "Une remise commerciale marque le debut d'une collaboration : elle se justifie par la volonte de gagner la confiance du client et de poser les bases d'un partenariat durable, jamais par une baisse de la qualite.",
+    "remerciement": "UniC Plaquiste vous remercie de votre confiance."
+  },
+  "_provenance": "Repris de config/metier.yaml (dépôt arena-personal-ai) : devis et factures Fast Group des 14/07/2026 et 04/08/2026, bon de commande UC-2026-0820-FG, fournis par le propriétaire. Valeurs du propriétaire, non inventées. Prix de juillet-août 2026 : à revérifier avant usage."
+}

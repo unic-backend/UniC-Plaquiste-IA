@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -157,5 +159,8 @@ def seed_if_empty(db: Session) -> None:
         for slug, title, cat, body in ARTICLES:
             db.add(KnowledgeArticle(slug=slug, title=title, category=cat, body=body))
     db.commit()
-    from app.metier import import_metier
-    import_metier(db)
+    try:
+        from app.metier import import_metier
+        import_metier(db)
+    except Exception:  # l'application doit démarrer ; l'erreur reste visible dans les logs
+        logging.getLogger("unic.seed").exception("Import des connaissances métier impossible")

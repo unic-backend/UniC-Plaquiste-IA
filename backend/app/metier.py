@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from app import calc
 from app.models import CompanySettings, KnowledgeArticle, Material, MaterialPrice, Service, SocialAccount
 
-DATA = Path(__file__).parent / "data" / "metier_unic.json"
+# Dossier nommé « metier_data » (pas « data ») : .gitignore et .dockerignore excluent « data/ ».
+DATA = Path(__file__).parent / "metier_data" / "metier_unic.json"
 PRICE_SOURCE = "Devis Fast Group 14/07 et 04/08/2026 (grille propriétaire)"
 PRECISION = 6
 

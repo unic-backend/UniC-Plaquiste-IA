@@ -556,3 +556,26 @@ def test_access_code_guard(client, monkeypatch):
 
 def test_no_access_code_means_open_local(client):
     assert client.get("/api/auth/me").status_code == 200
+
+
+def test_metier_file_is_shippable():
+    """Régression : un dossier « data/ » est ignoré par git et docker → fichier absent en production."""
+    from pathlib import Path
+    from app import metier
+    assert metier.DATA.exists()
+    rel = metier.DATA.relative_to(Path(metier.__file__).parent)
+    assert "data" not in rel.parts
+
+
+def test_startup_survives_missing_metier_file(monkeypatch, tmp_path):
+    import logging
+    from app import metier, seed
+    from app.database import SessionLocal
+    monkeypatch.setattr(metier, "DATA", tmp_path / "absent.json")
+    metier.load.cache_clear()
+    db = SessionLocal()
+    try:
+        seed.seed_if_empty(db)  # ne doit pas lever
+    finally:
+        db.close()
+        metier.load.cache_clear()
