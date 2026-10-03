@@ -1,0 +1,10 @@
+{
+  "name": "UniC AI",
+  "short_name": "UniC AI",
+  "description": "Employé digital d'UniC Plaquiste",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EFEAE2",
+  "theme_color": "#1A2320",
+  "lang": "fr"
+}

@@ -1,0 +1,831 @@
+"""UNIC_ASSISTANT — un seul assistant, des capacités réelles, zéro invention de données métier."""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from app import calc
+from app.ai import pick_chat_provider
+from app.capabilities import registry_snapshot
+from app.config import settings
+from app.documents import find_in_document, process_file, search_pages
+from app.models import (
+    Artifact,
+    CalculationTrace,
+    Conversation,
+    Customer,
+    DeliveryNote,
+    EmailDraft,
+    ExtractedPage,
+    Invoice,
+    KnowledgeArticle,
+    Material,
+    MaterialPrice,
+    Message,
+    Project,
+    PurchaseOrder,
+    Quotation,
+    Service,
+    StoredFile,
+    Supplier,
+    ConstructionSite,
+    utcnow,
+)
+from app.services import (
+    apply_payment,
+    approve_entity,
+    company_dict,
+    create_delivery_note,
+    create_purchase_order,
+    current_price,
+    generate_invoice_pdf,
+    generate_quote_pdf,
+    generate_site_report_pdf,
+    invoice_from_quote,
+    quotation_from_quantities,
+    selling_price_for_sku,
+)
+
+
+SYSTEM_RULES = """Tu es UniC AI, l'employé digital d'UniC Plaquiste.
+Tu n'es PAS un assistant généraliste.
+Tu ne travailles que sur : plaquisterie, cloisons, faux plafonds, plâtre, peinture, portes, finitions, pose, démontage, gestion de chantier, métrés, devis, factures, bons, clients, fournisseurs.
+INTERDIT d'inventer prix, clients, fournisseurs, quantités, cotes, paiements, contrats, infos société.
+Si une info manque : dis « Je n'ai pas cette information dans la base UniC » et demande-la.
+Labelle CONFIRMED / ESTIMATED / ASSUMED / MISSING.
+Les actions sensibles restent en brouillon jusqu'à approbation.
+Réponds dans la langue de l'utilisateur (français par défaut).
+"""
+
+
+@dataclass
+class AssistantReply:
+    content: str
+    structured: dict = field(default_factory=dict)
+    artifacts: list[dict] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
+    state: dict = field(default_factory=dict)
+
+
+def _state(conv: Conversation) -> dict:
+    try:
+        return json.loads(conv.state_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_state(conv: Conversation, state: dict) -> None:
+    conv.state_json = json.dumps(state, ensure_ascii=False)
+    conv.updated_at = utcnow()
+
+
+def _art_payload(db: Session, artifact_id: str | None) -> dict | None:
+    if not artifact_id:
+        return None
+    a = db.get(Artifact, artifact_id)
+    if not a:
+        return None
+    return {
+        "artifact_id": a.artifact_key,
+        "id": a.id,
+        "filename": a.filename,
+        "mime_type": a.mime_type,
+        "status": a.status,
+        "download_url": f"/api/artifacts/{a.id}/download",
+        "size": a.size,
+    }
+
+
+def _fmt_calc(result: calc.CalcResult) -> str:
+    lines = [
+        f"**{result.title}**",
+        "",
+        "### Compréhension",
+        result.understanding,
+        "",
+        "### Données utilisées",
+    ]
+    for d in result.data_used:
+        st = (d.get("status") or "").upper()
+        unit = d.get("unit") or ""
+        lines.append(f"- {d['label']} : {d['value']} {unit}  _{st}_")
+    if result.steps:
+        lines += ["", "### Calcul"]
+        for s in result.steps:
+            lines.append(f"- **{s.label}**")
+            lines.append(f"  - Formule : `{s.formula}`")
+            lines.append(f"  - Résultat : **{s.result} {s.unit}**  _{s.status.upper()}_")
+    if result.quantities:
+        lines += ["", "### Résultat (quantités)"]
+        for q in result.quantities:
+            lines.append(f"- {q.name} : **{q.quantity} {q.unit}**  _{q.status.upper()}_")
+            if q.formula:
+                lines.append(f"  - `{q.formula}`")
+    if result.assumptions:
+        lines += ["", "### Hypothèses"]
+        lines += [f"- {a}" for a in result.assumptions]
+    if result.missing:
+        lines += ["", "### Informations manquantes"]
+        lines += [f"- {m}" for m in result.missing]
+    if result.next_step:
+        lines += ["", "### Prochaine étape", result.next_step]
+    return "\n".join(lines)
+
+
+def _search_knowledge(db: Session, query: str, limit: int = 5) -> list[KnowledgeArticle]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    tokens = [t for t in re.split(r"\W+", q.lower()) if len(t) > 2]
+    arts = db.query(KnowledgeArticle).all()
+    scored = []
+    for a in arts:
+        blob = (a.title + " " + a.body).lower()
+        score = sum(blob.count(t) for t in tokens)
+        if score:
+            scored.append((score, a))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [a for _, a in scored[:limit]]
+
+
+def _match_customer(db: Session, text: str) -> Customer | None:
+    t = text.lower()
+    for c in db.query(Customer).all():
+        if c.name and c.name.lower() in t:
+            return c
+        if c.code and c.code.lower() in t:
+            return c
+    return None
+
+
+def _match_supplier(db: Session, text: str) -> Supplier | None:
+    t = text.lower()
+    for s in db.query(Supplier).all():
+        if s.name and s.name.lower() in t:
+            return s
+    return None
+
+
+def _match_project(db: Session, text: str) -> Project | None:
+    t = text.lower()
+    for p in db.query(Project).all():
+        if p.name and p.name.lower() in t:
+            return p
+        if p.code and p.code.lower() in t:
+            return p
+    return None
+
+
+def _match_quote(db: Session, text: str) -> Quotation | None:
+    m = re.search(r"(DEV-\d{4}-\d+)", text, re.I)
+    if m:
+        return db.query(Quotation).filter(Quotation.number == m.group(1).upper()).first()
+    return None
+
+
+def _match_invoice(db: Session, text: str) -> Invoice | None:
+    m = re.search(r"(FAC-\d{4}-\d+|AVO-\d{4}-\d+)", text, re.I)
+    if m:
+        return db.query(Invoice).filter(Invoice.number == m.group(1).upper()).first()
+    return None
+
+
+def _last_quantities(state: dict) -> list[dict]:
+    calc_d = state.get("last_calc") or {}
+    return calc_d.get("quantities") or state.get("quantities") or []
+
+
+def _intent(text: str, state: dict) -> str:
+    t = text.lower().strip()
+    if state.get("pending") and not re.search(r"annule|cancel|stop", t):
+        if len(t) < 80 and not re.search(
+            r"devis|facture|commande|livraison|calcule|analyse|rapport", t
+        ):
+            return "continue_pending"
+
+    if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
+        return "cancel_pending"
+    if re.search(r"aide|help|que peux-tu|what can you", t):
+        return "help"
+    if re.search(r"sant[eé] du syst[eè]me|health|statut (du )?serveur", t):
+        return "health"
+    if re.search(r"base de connaissance|knowledge|procédure|services unic", t):
+        return "knowledge"
+    if re.search(r"liste des clients|mes clients|show customers", t):
+        return "list_customers"
+    if re.search(r"liste des fournisseurs|mes fournisseurs", t):
+        return "list_suppliers"
+    if re.search(r"liste des (chantiers|projets)|mes chantiers", t):
+        return "list_projects"
+    if re.search(r"liste des devis|mes devis", t):
+        return "list_quotes"
+    if re.search(r"liste des factures|mes factures", t):
+        return "list_invoices"
+    if re.search(r"nouveau client|cr[eé]e?r? un client|add customer", t):
+        return "create_customer"
+    if re.search(r"nouveau fournisseur|cr[eé]e?r? un fournisseur", t):
+        return "create_supplier"
+    if re.search(r"nouveau (projet|chantier)|cr[eé]e?r? (un )?(projet|chantier)", t):
+        return "create_project"
+    if re.search(r"statut .{0,40}(chantier|projet|site)|où en est|avancement", t):
+        return "site_status"
+    if re.search(r"approuve|approve", t):
+        return "approve"
+    if re.search(r"facture|invoice|acompte|avoir", t) and re.search(r"cr[eé]e|pr[eé]pare|fais|make|génère|etabl", t):
+        return "create_invoice"
+    if re.search(r"bon de commande|purchase order|\bbc\b", t):
+        return "create_po"
+    if re.search(r"bon de livraison|delivery note|\bbl\b", t):
+        return "create_dn"
+    if re.search(r"devis|quotation|quote", t) and re.search(
+        r"cr[eé]e|pr[eé]pare|fais|make|g[eé]n[eè]re|chiffre", t
+    ):
+        return "create_quote"
+    if re.search(r"e-?mail|courriel|mail", t):
+        if re.search(r"envoie|send|publie", t):
+            return "send_email"
+        return "draft_email"
+    if re.search(r"rapport de chantier|site report|pr[eé]pare (le )?rapport", t):
+        return "site_report"
+    if re.search(r"r[eé]seaux|social|google business|site web|seo", t):
+        return "connector_na"
+    if re.search(r"prix|tarif|rate", t):
+        return "prices"
+    if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
+        return "search_doc"
+    if calc.detect_calc_kind(t):
+        return "calculate"
+    if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
+        return "analyze_doc"
+    if re.search(r"photo|chantier", t) and re.search(r"analys", t):
+        return "analyze_photo"
+    return "chat"
+
+
+def _help_text() -> str:
+    return """Je suis **UniC AI**, l'employé digital d'UniC Plaquiste. La conversation suffit.
+
+Exemples :
+- « Calcule une cloison de 12 m × 2,50 m, deux faces, 2 portes »
+- « Combien de plaques pour 320 m de cloison, hauteur 2,50 m, deux faces ? »
+- « Fais le devis »  (à partir du dernier calcul)
+- « Prépare la facture à partir du devis DEV-2026-0001 »
+- « Crée le bon de commande »
+- « Crée le bon de livraison »
+- « Analyse ce plan » (après avoir joint un PDF)
+- « Trouve toutes les portes »
+- « Prépare le rapport de chantier »
+- « Écris l'e-mail au client » (brouillon, sans envoi automatique)
+
+Je calcule avec formules visibles. Je n'invente jamais un prix UniC.
+Les connecteurs e-mail / site / réseaux / Google Business sont **NON DISPONIBLES** tant qu'ils ne sont pas configurés."""
+
+
+def _render_missing_prices(db: Session) -> str:
+    mats = db.query(Material).filter(Material.is_active.is_(True)).all()
+    lines = ["Je n'invente aucun tarif. Voici l'état de la base UniC :", ""]
+    missing = 0
+    for m in mats:
+        sell = current_price(db, m.id, "selling")
+        buy = current_price(db, m.id, "purchase")
+        if sell is None and buy is None:
+            missing += 1
+            lines.append(f"- {m.sku} — {m.name} : **prix manquant**")
+        else:
+            s = f"{sell.amount}" if sell else "vente manquante"
+            b = f"{buy.amount}" if buy else "achat manquant"
+            lines.append(f"- {m.sku} — {m.name} : vente {s} / achat {b}")
+    if missing == len(mats):
+        lines.append("")
+        lines.append("Aucun prix n'est saisi. Allez dans **Matériaux** ou dites-moi un prix à enregistrer, par exemple : « prix de vente BA13 = 2500 ».")
+    return "\n".join(lines)
+
+
+def _create_named_party(db: Session, kind: str, text: str, user_id: str | None) -> str:
+    # "crée un client FAST GROUP"
+    name = text
+    name = re.sub(r"(?i)nouveau client|cr[eé]e(r)? un client|add customer|client", "", name)
+    name = re.sub(r"(?i)nouveau fournisseur|cr[eé]e(r)? un fournisseur|fournisseur", "", name)
+    name = name.strip(" :,-")
+    if not name or len(name) < 2:
+        return "Indiquez le nom, par exemple : « crée un client FAST GROUP »."
+    from app.services import next_number
+    if kind == "customer":
+        code = next_number(db, "customer")
+        c = Customer(code=code, name=name, created_by=user_id)
+        db.add(c)
+        db.commit()
+        return f"Client **{c.name}** créé sous le code `{c.code}`. Aucune autre information n'a été inventée (adresse, e-mail, téléphone : manquants)."
+    code = next_number(db, "supplier")
+    s = Supplier(code=code, name=name)
+    db.add(s)
+    db.commit()
+    return f"Fournisseur **{s.name}** créé sous le code `{s.code}`."
+
+
+def _create_project(db: Session, text: str, user_id: str | None) -> str:
+    from app.services import next_number
+    name = re.sub(r"(?i)nouveau (projet|chantier)|cr[eé]e(r)? (un )?(projet|chantier)", "", text)
+    name = name.strip(" :,-")
+    if not name:
+        return "Indiquez le nom du projet, par exemple : « crée un chantier FAST GROUP — Diamniadio »."
+    customer = _match_customer(db, text)
+    code = next_number(db, "project")
+    p = Project(code=code, name=name, customer_id=customer.id if customer else None, created_by=user_id, status="active")
+    db.add(p)
+    db.flush()
+    site = ConstructionSite(project_id=p.id, name=name, status="planned")
+    db.add(site)
+    db.commit()
+    extra = f" Rattaché au client {customer.name}." if customer else " Aucun client rattaché (non inventé)."
+    return f"Projet **{p.name}** créé (`{p.code}`) avec un chantier.{extra}"
+
+
+def handle_turn(
+    db: Session,
+    conv: Conversation,
+    user: Any,
+    text: str,
+    file_ids: list[str] | None = None,
+) -> AssistantReply:
+    state = _state(conv)
+    file_ids = file_ids or []
+    caps: list[str] = []
+    artifacts: list[dict] = []
+    structured: dict = {}
+
+    file_notes = []
+    for fid in file_ids:
+        rec = db.get(StoredFile, fid)
+        if rec is None:
+            continue
+        info = process_file(rec, db)
+        state["last_file_id"] = rec.id
+        state["last_filename"] = rec.filename
+        caps.append("read_pdf" if (rec.filename or "").lower().endswith(".pdf") else "analyze_site_photo")
+        pages = info.get("pages") or info.get("processed")
+        warn = info.get("warning") or info.get("error") or ""
+        file_notes.append(
+            f"Fichier **{rec.filename}** : statut `{info.get('status')}`"
+            + (f", {pages} page(s)" if pages else "")
+            + (f". {warn}" if warn else "")
+            + "."
+        )
+
+    intent = _intent(text, state)
+    reply_text = ""
+
+    if intent == "cancel_pending":
+        state.pop("pending", None)
+        reply_text = "Action en cours annulée."
+    elif intent == "help":
+        reply_text = _help_text()
+    elif intent == "health":
+        from app.capabilities import health_dashboard
+        h = health_dashboard()
+        reply_text = (
+            f"Système **{h['status']}**. Base : {h['database']['status']}. "
+            f"Stockage : {h['storage']['status']}.\n\n"
+            "Fournisseurs IA :\n"
+            + "\n".join(
+                f"- {p['id']} : {p['status']}" + (f" — {p.get('detail')}" if p.get("detail") else "")
+                for p in h["ai_providers"]
+            )
+            + "\n\nLe service cloud UniC AI reste disponible si le PC personnel est éteint."
+        )
+        structured = h
+        caps.append("health")
+    elif intent == "knowledge":
+        arts = _search_knowledge(db, text) or db.query(KnowledgeArticle).limit(5).all()
+        if not arts:
+            reply_text = "Je n'ai pas cette information dans la base UniC."
+        else:
+            chunks = [f"### {a.title}\n{a.body}" for a in arts]
+            reply_text = "\n\n".join(chunks)
+        caps.append("search_company_knowledge")
+    elif intent == "list_customers":
+        rows = db.query(Customer).order_by(Customer.name).all()
+        reply_text = "Aucun client en base." if not rows else "\n".join(f"- `{c.code}` **{c.name}**" for c in rows)
+    elif intent == "list_suppliers":
+        rows = db.query(Supplier).order_by(Supplier.name).all()
+        reply_text = "Aucun fournisseur en base." if not rows else "\n".join(f"- `{s.code}` **{s.name}**" for s in rows)
+    elif intent == "list_projects":
+        rows = db.query(Project).order_by(Project.created_at.desc()).all()
+        reply_text = "Aucun projet en base." if not rows else "\n".join(
+            f"- `{p.code}` **{p.name}** — {p.status}" for p in rows
+        )
+    elif intent == "list_quotes":
+        rows = db.query(Quotation).order_by(Quotation.created_at.desc()).limit(20).all()
+        reply_text = "Aucun devis." if not rows else "\n".join(
+            f"- `{q.number}` {q.title or ''} — {q.status} — total {'incomplet' if q.total is None else q.total}"
+            for q in rows
+        )
+    elif intent == "list_invoices":
+        rows = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(20).all()
+        reply_text = "Aucune facture." if not rows else "\n".join(
+            f"- `{i.number}` {i.kind} — {i.status} — total {i.total if i.total is not None else 'incomplet'} — payé {i.paid}"
+            for i in rows
+        )
+    elif intent == "create_customer":
+        reply_text = _create_named_party(db, "customer", text, user.id)
+        caps.append("manage_project")
+    elif intent == "create_supplier":
+        reply_text = _create_named_party(db, "supplier", text, user.id)
+    elif intent == "create_project":
+        reply_text = _create_project(db, text, user.id)
+        caps.append("manage_project")
+    elif intent == "prices":
+        # try to record a price: "prix de vente BA13-2500x1200 = 2500"
+        m = re.search(
+            r"prix\s+(de\s+)?(vente|achat|selling|purchase)\s+(\S+)\s*[=:]\s*(\d+(?:[.,]\d+)?)",
+            text, re.I,
+        )
+        if m:
+            kind = "selling" if m.group(2).lower() in ("vente", "selling") else "purchase"
+            sku = m.group(3).strip().upper().rstrip("=")
+            # allow partial sku
+            mat = db.query(Material).filter(Material.sku == sku).first()
+            if mat is None:
+                mat = db.query(Material).filter(Material.sku.ilike(f"%{sku}%")).first()
+            if mat is None:
+                reply_text = f"Je n'ai pas le matériau `{sku}` dans la base UniC. Consultez Matériaux."
+            else:
+                amount = calc.parse_number(m.group(4))
+                db.add(MaterialPrice(material_id=mat.id, kind=kind, amount=amount,
+                                     currency=company_dict(db).get("currency") or "",
+                                     source="saisie conversation", created_by=user.id))
+                db.commit()
+                reply_text = (
+                    f"Prix **{kind}** enregistré pour {mat.sku} ({mat.name}) : **{amount}**. "
+                    "Je n'ai rien inventé d'autre."
+                )
+        else:
+            reply_text = _render_missing_prices(db)
+        caps.append("calculate_price")
+    elif intent == "calculate":
+        company = company_dict(db)
+        defaults = {
+            "waste": company.get("default_waste") or 0.08,
+            "board_width_m": company.get("board_width_m") or 1.2,
+            "board_height_m": company.get("board_height_m") or 2.5,
+            "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
+        }
+        result = calc.calculate_from_text(text, defaults)
+        if result is None:
+            reply_text = "Je n'ai pas pu interpréter le calcul. Donnez longueur, hauteur, et le type (cloison, plafond, peinture)."
+        else:
+            reply_text = _fmt_calc(result)
+            structured = result.to_dict()
+            state["last_calc"] = structured
+            db.add(CalculationTrace(
+                kind=result.kind, source=text,
+                data_json=json.dumps(result.inputs, ensure_ascii=False),
+                formula="\n".join(s.formula for s in result.steps),
+                result_json=json.dumps(structured, ensure_ascii=False),
+                user_id=user.id, project_id=conv.project_id,
+            ))
+            db.commit()
+            caps.append("calculate_materials")
+    elif intent in ("create_quote", "continue_pending") and (intent == "create_quote" or state.get("pending") == "create_quote"):
+        qtys = _last_quantities(state)
+        customer = _match_customer(db, text)
+        project = _match_project(db, text)
+        if customer:
+            state["customer_id"] = customer.id
+        if project:
+            state["project_id"] = project.id
+        if not qtys:
+            state["pending"] = "create_quote"
+            reply_text = (
+                "Pour un devis, j'ai besoin d'un métré. "
+                "Donnez-moi par exemple : « cloison 12 m × 2,50 m deux faces » "
+                "puis « fais le devis »."
+            )
+        else:
+            title = "Devis plaquisterie"
+            if project:
+                title = f"Devis — {project.name}"
+            q = quotation_from_quantities(
+                db, title=title, quantities=qtys,
+                customer_id=state.get("customer_id"),
+                project_id=state.get("project_id") or conv.project_id,
+                user_id=user.id,
+                notes="Devis généré par UniC AI à partir du métré conversationnel.",
+                assumptions=(state.get("last_calc") or {}).get("assumptions"),
+                missing=(state.get("last_calc") or {}).get("missing"),
+            )
+            art = _art_payload(db, q.artifact_id)
+            if art:
+                artifacts.append(art)
+            state.pop("pending", None)
+            state["last_quote_id"] = q.id
+            extra = ""
+            if not q.prices_complete:
+                extra = (
+                    "\n\n**Attention** : des prix UniC manquent. "
+                    "Le PDF indique « prix non renseigné ». Rien n'a été inventé. "
+                    "Saisissez les tarifs dans Matériaux puis régénérez."
+                )
+            if not q.customer_id:
+                extra += "\nClient non renseigné (non inventé)."
+            reply_text = (
+                f"Devis **{q.number}** créé au statut **brouillon** (version {q.version}). "
+                f"PDF réel généré : {art['filename'] if art else '—'}."
+                f"{extra}\n\nDites « approuve {q.number} » après relecture."
+            )
+            structured = {"quotation_id": q.id, "number": q.number, "prices_complete": q.prices_complete}
+            caps.append("create_quote")
+            caps.append("generate_quote_pdf")
+    elif intent == "create_invoice":
+        quote = _match_quote(db, text)
+        if quote is None and state.get("last_quote_id"):
+            quote = db.get(Quotation, state["last_quote_id"])
+        if quote is None:
+            reply_text = "Indiquez le n° de devis, par exemple : « prépare la facture du devis DEV-2026-0001 »."
+        else:
+            kind = "invoice"
+            if re.search(r"acompte|deposit", text, re.I):
+                kind = "deposit"
+            elif re.search(r"solde|final", text, re.I):
+                kind = "final"
+            elif re.search(r"partielle|situation", text, re.I):
+                kind = "partial"
+            elif re.search(r"avoir|credit", text, re.I):
+                kind = "credit"
+            inv = invoice_from_quote(db, quote, kind, user.id)
+            art = _art_payload(db, inv.artifact_id)
+            if art:
+                artifacts.append(art)
+            state["last_invoice_id"] = inv.id
+            reply_text = (
+                f"Facture **{inv.number}** ({kind}) créée en brouillon à partir de {quote.number}. "
+                f"Payé {inv.paid} / reste {inv.remaining if inv.remaining is not None else 'inconnu'}."
+            )
+            caps += ["create_invoice", "generate_invoice_pdf"]
+    elif intent == "create_po":
+        qtys = _last_quantities(state)
+        if not qtys:
+            reply_text = "Aucun métré en mémoire. Calculez d'abord les quantités, puis « crée le bon de commande »."
+        else:
+            supplier = _match_supplier(db, text)
+            po = create_purchase_order(
+                db, title="Bon de commande matériaux", quantities=qtys,
+                supplier_id=supplier.id if supplier else None,
+                project_id=state.get("project_id") or conv.project_id,
+                user_id=user.id,
+            )
+            art = _art_payload(db, po.artifact_id)
+            if art:
+                artifacts.append(art)
+            reply_text = f"Bon de commande **{po.number}** créé en brouillon." + (
+                "" if supplier else " Fournisseur non renseigné (non inventé)."
+            )
+            caps.append("create_purchase_order")
+    elif intent == "create_dn":
+        qtys = _last_quantities(state)
+        if not qtys:
+            reply_text = "Aucun métré en mémoire. Calculez d'abord, puis « crée le bon de livraison »."
+        else:
+            customer = _match_customer(db, text)
+            dn = create_delivery_note(
+                db, title="Bon de livraison", quantities=qtys,
+                customer_id=customer.id if customer else state.get("customer_id"),
+                project_id=state.get("project_id") or conv.project_id,
+                user_id=user.id,
+            )
+            art = _art_payload(db, dn.artifact_id)
+            if art:
+                artifacts.append(art)
+            reply_text = f"Bon de livraison **{dn.number}** créé en brouillon."
+            caps.append("create_delivery_note")
+    elif intent == "site_report":
+        notes = [text]
+        if file_notes:
+            notes = file_notes + notes
+        project = _match_project(db, text)
+        art_row = generate_site_report_pdf(
+            db, title="Rapport de chantier",
+            body_lines=notes,
+            project_name=project.name if project else (state.get("project_name") or "Non renseigné"),
+            user_id=user.id,
+            photos_note="Photo(s) jointe(s) à la conversation." if file_ids else "",
+        )
+        art = _art_payload(db, art_row.id)
+        if art:
+            artifacts.append(art)
+        reply_text = (
+            f"Rapport **{art_row.artifact_key}** généré (PDF réel). "
+            "Les observations ne constituent pas un diagnostic structurel."
+        )
+        caps.append("create_site_report")
+    elif intent == "approve":
+        target = _match_quote(db, text) or _match_invoice(db, text)
+        if target is None:
+            reply_text = "Précisez le document, ex. « approuve DEV-2026-0001 »."
+        else:
+            approve_entity(db, target, user.id)
+            db.commit()
+            reply_text = f"**{getattr(target, 'number', target.id)}** est maintenant **approuvé**. L'envoi au client n'est pas automatique."
+    elif intent == "draft_email":
+        related = _match_quote(db, text) or _match_invoice(db, text)
+        customer = _match_customer(db, text)
+        subj = "UniC Plaquiste"
+        body = "Madame, Monsieur,\n\n"
+        if related and isinstance(related, Quotation):
+            subj = f"Devis {related.number} — UniC Plaquiste"
+            body += f"Veuillez trouver ci-joint notre devis {related.number}"
+            if related.title:
+                body += f" ({related.title})"
+            body += ".\n\nRestant à votre disposition,\nUniC Plaquiste\n"
+        elif related and isinstance(related, Invoice):
+            subj = f"Facture {related.number} — UniC Plaquiste"
+            body += f"Veuillez trouver ci-joint notre facture {related.number}.\n\nCordialement,\nUniC Plaquiste\n"
+        else:
+            body += "Nous revenons vers vous au sujet de votre projet.\n\nCordialement,\nUniC Plaquiste\n"
+        to_addr = customer.email if customer and customer.email else ""
+        draft = EmailDraft(
+            to_addr=to_addr, subject=subj, body=body, status="draft",
+            related_type=related.__class__.__name__.lower() if related else "",
+            related_id=related.id if related else "",
+            created_by=user.id,
+        )
+        db.add(draft)
+        db.commit()
+        missing = []
+        if not to_addr:
+            missing.append("Adresse e-mail du destinataire absente de la base UniC.")
+        reply_text = (
+            f"Brouillon d'e-mail préparé (**non envoyé**).\n\n"
+            f"**À :** {to_addr or 'manquante'}\n**Objet :** {subj}\n\n{body}\n\n"
+            "Connecteur d'envoi : **NON DISPONIBLE** (SMTP non configuré). "
+            "Copiez ce texte après relecture."
+        )
+        if missing:
+            reply_text += "\n\nInformations manquantes :\n" + "\n".join(f"- {m}" for m in missing)
+        caps.append("draft_email")
+    elif intent == "send_email":
+        reply_text = (
+            "L'envoi d'e-mail est **NON DISPONIBLE** : aucun connecteur SMTP/IMAP n'est configuré. "
+            "Je peux préparer un brouillon. Dites « écris l'e-mail »."
+        )
+    elif intent == "connector_na":
+        reply_text = (
+            "Connecteurs site web, réseaux sociaux et Google Business Profile : **NON DISPONIBLES** "
+            "(non configurés). Je peux rédiger un texte / une légende en brouillon, sans publication."
+        )
+        if re.search(r"post|l[eé]gende|hashtag|seo|page", text, re.I):
+            reply_text += (
+                "\n\nBrouillon proposé (à valider, non publié) :\n\n"
+                "_UniC Plaquiste — cloisons, plafonds, plâtre, peinture, portes. "
+                "Demandez-nous un métré ou un devis._\n\n"
+                "Je n'invente pas de réalisations, d'avis clients ou de chiffres."
+            )
+    elif intent == "search_doc":
+        fid = state.get("last_file_id")
+        topic = text
+        topic = re.sub(r"(?i)trouve(s|r)?|find|cherche(r)?|toutes les|tous les|les", " ", topic)
+        topic = topic.strip() or text
+        data = find_in_document(db, fid, topic)
+        if data["hit_count"] == 0:
+            alt = search_pages(db, fid, text)
+            if not alt:
+                reply_text = (
+                    "Aucune occurrence dans le document indexé. "
+                    "Si le PDF est scanné, l'OCR est NON DISPONIBLE."
+                )
+            else:
+                lines = [f"- Page {h['page']} ({h['classification']}) : {h['snippet']}" for h in alt[:12]]
+                reply_text = "Résultats :\n" + "\n".join(lines)
+        else:
+            lines = [
+                f"- **Page {h['page']}** ({h['classification']}) : {h['snippet']}"
+                + (f"\n  Cotes : {', '.join(h['dimensions'])}" if h.get("dimensions") else "")
+                for h in data["hits"][:15]
+            ]
+            reply_text = (
+                f"{data['hit_count']} page(s) pertinente(s) pour « {data['topic']} ».\n\n"
+                + "\n".join(lines)
+            )
+            if data.get("dimensions_sample"):
+                reply_text += "\n\nCotes relevées (brut document, non interprétées comme métré) : " + ", ".join(
+                    f"p.{d['page']} {d['value']}" for d in data["dimensions_sample"][:20]
+                )
+        structured = data
+        caps.append("analyze_large_pdf")
+        caps.append("analyze_architectural_plan")
+    elif intent == "analyze_doc":
+        fid = state.get("last_file_id")
+        if not fid:
+            reply_text = "Joignez d'abord un PDF dans la conversation."
+        else:
+            rec = db.get(StoredFile, fid)
+            pages = db.query(ExtractedPage).filter(ExtractedPage.file_id == fid).count()
+            empty = db.query(ExtractedPage).filter(ExtractedPage.file_id == fid, ExtractedPage.classification == "scanned_or_empty").count()
+            plans = db.query(ExtractedPage).filter(ExtractedPage.file_id == fid, ExtractedPage.classification == "plan").count()
+            reply_text = (
+                f"Document **{rec.filename if rec else fid}** indexé : {pages} page(s) traitée(s)"
+                + (f" sur {rec.page_count}" if rec and rec.page_count else "")
+                + f". Pages type plan : {plans}. Pages sans texte : {empty}.\n\n"
+                "Je n'envoie pas le PDF entier au modèle. Demandez par exemple : "
+                "« trouve les portes », « trouve les cloisons », « trouve les dimensions »."
+            )
+            if rec and rec.processing_error:
+                reply_text += f"\n\n{rec.processing_error}"
+            caps += ["read_pdf", "analyze_large_pdf"]
+    elif intent == "analyze_photo":
+        reply_text = (
+            "Photo enregistrée et rattachée à la conversation. "
+            "L'interprétation visuelle automatique est **NON DISPONIBLE** sans fournisseur IA vision. "
+            "Je ne tire aucune conclusion structurelle ou de sécurité d'une image."
+        )
+        if file_notes:
+            reply_text = "\n".join(file_notes) + "\n\n" + reply_text
+        caps.append("analyze_site_photo")
+    elif intent == "site_status":
+        project = _match_project(db, text)
+        if project is None:
+            rows = db.query(Project).order_by(Project.updated_at if hasattr(Project, "updated_at") else Project.created_at).all()
+            if not rows:
+                reply_text = "Aucun chantier en base UniC."
+            else:
+                reply_text = "Précisez le chantier. Projets connus :\n" + "\n".join(
+                    f"- `{p.code}` {p.name} ({p.status})" for p in rows
+                )
+        else:
+            sites = db.query(ConstructionSite).filter(ConstructionSite.project_id == project.id).all()
+            quotes = db.query(Quotation).filter(Quotation.project_id == project.id).all()
+            invs = db.query(Invoice).filter(Invoice.project_id == project.id).all()
+            reply_text = (
+                f"**{project.name}** (`{project.code}`) — statut {project.status}.\n"
+                f"Client : {project.customer.name if project.customer else 'non renseigné'}.\n"
+                f"Lieu : {project.location or 'non renseigné'}.\n"
+                f"Budget : {project.budget if project.budget is not None else 'non renseigné'}.\n"
+                f"Chantiers : {len(sites)} — " + ", ".join(f"{s.name} {s.progress_pct:.0f}%" for s in sites) + "\n"
+                f"Devis : {len(quotes)} / factures : {len(invs)}.\n\n"
+                "Je n'invente ni avancement ni problèmes non saisis."
+            )
+            caps.append("manage_project")
+    else:
+        # general: knowledge + optional LLM polish. Never invent.
+        arts = _search_knowledge(db, text)
+        calc_try = calc.calculate_from_text(text, {
+            "waste": company_dict(db).get("default_waste") or 0.08,
+            "board_width_m": company_dict(db).get("board_width_m") or 1.2,
+            "board_height_m": company_dict(db).get("board_height_m") or 2.5,
+            "stud_spacing_m": company_dict(db).get("stud_spacing_m") or 0.6,
+        })
+        if calc_try and calc_try.quantities:
+            reply_text = _fmt_calc(calc_try)
+            structured = calc_try.to_dict()
+            state["last_calc"] = structured
+            caps.append("calculate_materials")
+        elif arts:
+            reply_text = f"Extrait de la base UniC — **{arts[0].title}**\n\n{arts[0].body}"
+            caps.append("search_company_knowledge")
+        else:
+            provider = pick_chat_provider()
+            health = provider.health()
+            if health.get("available"):
+                history = (
+                    db.query(Message)
+                    .filter(Message.conversation_id == conv.id)
+                    .order_by(Message.created_at.desc())
+                    .limit(8)
+                    .all()
+                )
+                msgs = [{"role": "system", "content": SYSTEM_RULES}]
+                for m in reversed(history):
+                    msgs.append({"role": m.role, "content": m.content[:2000]})
+                msgs.append({"role": "user", "content": text})
+                ai = provider.complete(msgs)
+                if ai.available and ai.text:
+                    reply_text = ai.text
+                else:
+                    reply_text = (
+                        "Je n'ai pas cette information dans la base UniC. "
+                        "Précisez un calcul, un document, un devis, ou saisissez la donnée manquante."
+                    )
+            else:
+                reply_text = (
+                    "Je n'ai pas cette information dans la base UniC, et aucun fournisseur LLM n'est configuré. "
+                    "Je peux néanmoins calculer, lire un PDF, et produire devis / facture / BC / BL / rapport.\n\n"
+                    "Essayez : « cloison 12×2,5 m deux faces » ou « aide »."
+                )
+
+    if file_notes and intent not in ("analyze_doc", "analyze_photo", "site_report", "search_doc"):
+        reply_text = "\n".join(file_notes) + ("\n\n" + reply_text if reply_text else "")
+
+    _save_state(conv, state)
+    db.commit()
+    return AssistantReply(
+        content=reply_text or "Je n'ai pas compris. Dites « aide » pour les commandes utiles.",
+        structured=structured,
+        artifacts=artifacts,
+        capabilities=caps,
+        state=state,
+    )
