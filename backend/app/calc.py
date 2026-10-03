@@ -518,7 +518,7 @@ def _find_numbers(text: str) -> list[float]:
 def _extract_dimension_pair(text: str) -> tuple[float, float] | None:
     t = text.lower().replace("×", "x").replace("*", "x")
     m = re.search(
-        rf"({_NUM})\s*(?:m|ml|mètres?|metres?)?\s*[x/]\s*({_NUM})\s*(?:m|ml)?",
+        rf"({_NUM})\s*(?:m|ml|mètres?|metres?)?\s*(?:[x/]|sur|par)\s*({_NUM})\s*(?:m|ml)?",
         t,
         re.I,
     )

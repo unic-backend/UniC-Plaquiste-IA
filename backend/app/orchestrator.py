@@ -203,14 +203,16 @@ def _last_quantities(state: dict) -> list[dict]:
 def _intent(text: str, state: dict) -> str:
     t = text.lower().strip()
     if state.get("pending") and not re.search(r"annule|cancel|stop", t):
-        if len(t) < 80 and not re.search(
+        if len(t) < 80 and calc.detect_calc_kind(t) and re.search(r"\d", t) and not re.search(
             r"devis|facture|commande|livraison|calcule|analyse|rapport", t
         ):
             return "continue_pending"
 
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
-    if re.search(r"aide|help|que peux-tu|what can you", t):
+    if re.search(r"aide|help|que peux-tu|what can you", t) or re.fullmatch(
+        r"(bonjour|salut|bonsoir|coucou|hello|hi|salam)[\s!.]*", t
+    ):
         return "help"
     if re.search(r"sant[eé] du syst[eè]me|health|statut (du )?serveur", t):
         return "health"
@@ -286,8 +288,11 @@ Je calcule avec formules visibles. Je n'invente jamais un prix UniC.
 Les connecteurs e-mail / site / réseaux / Google Business sont **NON DISPONIBLES** tant qu'ils ne sont pas configurés."""
 
 
-def _render_missing_prices(db: Session) -> str:
+def _render_missing_prices(db: Session, text: str = "") -> str:
     mats = db.query(Material).filter(Material.is_active.is_(True)).all()
+    low = text.lower()
+    hit = [m for m in mats if m.sku.lower().split("-")[0] in low or m.name.lower() in low]
+    mats = hit or mats
     lines = ["Je n'invente aucun tarif. Voici l'état de la base UniC :", ""]
     missing = 0
     for m in mats:
@@ -465,7 +470,7 @@ def handle_turn(
                     "Je n'ai rien inventé d'autre."
                 )
         else:
-            reply_text = _render_missing_prices(db)
+            reply_text = _render_missing_prices(db, text)
         caps.append("calculate_price")
     elif intent == "calculate":
         company = company_dict(db)
@@ -493,6 +498,17 @@ def handle_turn(
             caps.append("calculate_materials")
     elif intent in ("create_quote", "continue_pending") and (intent == "create_quote" or state.get("pending") == "create_quote"):
         qtys = _last_quantities(state)
+        if not qtys:
+            company = company_dict(db)
+            fresh = calc.calculate_from_text(text, {
+                "waste": company.get("default_waste") or 0.08,
+                "board_width_m": company.get("board_width_m") or 1.2,
+                "board_height_m": company.get("board_height_m") or 2.5,
+                "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
+            })
+            if fresh is not None and fresh.quantities:
+                state["last_calc"] = fresh.to_dict()
+                qtys = _last_quantities(state)
         customer = _match_customer(db, text)
         project = _match_project(db, text)
         if customer:

@@ -123,3 +123,20 @@ def test_price_not_invented_in_quote_when_missing(client, token):
     assert q["total"] is None
     for it in q["items"]:
         assert it["unit_price"] is None
+
+
+def test_quote_in_one_message(client):
+    r = client.post("/api/chat", json={"message": "Cloison 320 m × 2,50 m, deux faces. Fais le devis."})
+    assert r.status_code == 200
+    assert "DEV-" in r.json()["message"]["content"]
+
+
+def test_greeting_and_price_question(client):
+    assert "UniC AI" in client.post("/api/chat", json={"message": "bonjour"}).json()["message"]["content"]
+    r = client.post("/api/chat", json={"message": "quel est le prix du BA13 ?"}).json()
+    assert "BA13" in r["message"]["content"]
+
+
+def test_dimension_with_sur(client):
+    r = client.post("/api/chat", json={"message": "combien de plaques pour un mur de 12m sur 2.6"}).json()
+    assert "12" in r["message"]["content"] and "2.6" in r["message"]["content"]
