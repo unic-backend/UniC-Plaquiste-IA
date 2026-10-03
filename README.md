@@ -193,3 +193,13 @@ Capacitor emballe l'interface dans une app Android native (`frontend/android`). 
 5. Mises à jour : même clé de signature, la nouvelle version s'installe par-dessus.
 
 Local : `cd frontend && npm run android:debug` (JDK 21 + Android SDK 35). La clé de signature du dépôt est une clé de **debug** : créer une vraie clé de release avant le Play Store.
+
+## Hébergement (Render + domaine Netlify)
+
+Netlify héberge des sites statiques : il ne peut pas faire tourner ce backend Python. Le domaine `unicplaquiste.com` reste sur Netlify ; on y ajoute **un sous-domaine** `ia.unicplaquiste.com` qui pointe vers Render. Les sites `www`, `app`, `expert` ne sont pas touchés.
+
+1. render.com → *New* → *Blueprint* → dépôt `UniC-Plaquiste-IA` (branche à déployer) → `render.yaml`.
+2. Saisir `UNIC_ACCESS_CODE` (code long) et `ANTHROPIC_API_KEY`.
+3. Render → service → *Settings* → *Custom Domains* → `ia.unicplaquiste.com` → noter la cible CNAME.
+4. Netlify → *Domains* → `unicplaquiste.com` → *DNS records* → ajouter `CNAME  ia  →  <cible Render>`.
+5. App Android : adresse du serveur `https://ia.unicplaquiste.com` + le code.
