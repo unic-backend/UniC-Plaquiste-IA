@@ -41,3 +41,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_columns() -> None:
+    """Ajoute les colonnes récentes manquantes (bases créées avant leur ajout). Additif uniquement."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = col.type.compile(dialect=engine.dialect)
+                default = ""
+                if isinstance(col.default.arg if col.default is not None else None, str):
+                    default = f" DEFAULT '{col.default.arg}'"
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{default}'))

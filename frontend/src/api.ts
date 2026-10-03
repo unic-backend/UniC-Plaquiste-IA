@@ -31,6 +31,8 @@ export type Mail = {
   id: string; from_addr: string; subject: string; date: string; body: string;
   summary: string; category: string; reply_draft_id: string | null;
 };
+export type GReview = { id: string; author: string; stars: number; comment: string; created: string; replied: boolean };
+export type GProfile = { title: string; website: string; phone: string; description: string; gaps: string[]; complete: boolean };
 export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
 
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
@@ -48,6 +50,12 @@ export const net = {
     request<{ text: string; warning: string | null }>("/api/reseaux/generate", { method: "POST", ...json(b) }),
   boost: (b: { target: string; facts?: string }) =>
     request<{ plan: string; note: string }>("/api/reseaux/boost", { method: "POST", ...json(b) }),
+  publish: (id: string) => request<Post>(`/api/reseaux/posts/${id}/publish`, { method: "POST" }),
+  gStatus: () => request<{ configured: boolean; missing: string[]; ai: boolean }>("/api/google/status"),
+  gProfile: () => request<GProfile>("/api/google/profile"),
+  gReviews: () => request<GReview[]>("/api/google/reviews"),
+  gReplyDraft: (id: string, b: { comment: string; stars: number }) =>
+    request<Post>(`/api/google/reviews/${encodeURIComponent(id)}/reply-draft`, { method: "POST", ...json(b) }),
   mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
   mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
   mails: () => request<Mail[]>("/api/mail"),

@@ -590,6 +590,7 @@ class SocialPost(Base):
     in_reply_to: Mapped[str] = mapped_column(Text, default="")  # texte du commentaire/avis visé
     status: Mapped[str] = mapped_column(String(16), default="draft")
     external_url: Mapped[str] = mapped_column(String(512), default="")
+    external_id: Mapped[str] = mapped_column(String(512), default="")  # ex. avis Google visé / post créé
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -155,3 +155,16 @@ Usage exclusif UniC Plaquiste.
 - **Réseaux & Google** : 11 cibles (LinkedIn, Facebook, Instagram, TikTok, YouTube, Reddit, X, WhatsApp, Pinterest, fiche Google, site). Brouillon → revue → approbation → publication **manuelle**. Publication auto = NON DISPONIBLE (API/OAuth non configurées).
 - **Booster** : plan de conseils par IA. Aucune action lancée, aucun budget dépensé.
 - IA requise pour résumer / rédiger : `OPENAI_API_KEY` ou `LOCAL_AI_URL`.
+
+## Connecter la fiche Google
+
+Prérequis : tu es propriétaire de la fiche. Google exige d'**approuver** l'accès à l'API Business Profile.
+
+1. 🔑 console.cloud.google.com → nouveau projet → active **Business Profile API** (+ *My Business Business Information API*).
+2. 📨 Demande l'accès API : formulaire « GBP API access request » (délai : jours). Sans accord, Google répond 403.
+3. 🪪 *Identifiants* → ID client OAuth (type Application Web). Redirect : `https://developers.google.com/oauthplayground`.
+4. 🎫 Va sur developers.google.com/oauthplayground → ⚙ « Use your own OAuth credentials » → colle ID + secret → scope `https://www.googleapis.com/auth/business.manage` → autorise → **Exchange** → copie le *refresh token*.
+5. 🆔 `GBP_ACCOUNT_ID` et `GBP_LOCATION_ID` : les nombres dans `accounts/{ID}/locations/{ID}` (API *accounts.list* / *locations.list* dans le Playground).
+6. ⚙️ Mets les 5 variables dans `.env`, relance. La page **Réseaux & Google → Fiche Google** passe à « Charger fiche et avis ».
+
+Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses proposées par l'IA, actualités. **Tout passe par brouillon → revue → approbation → « Publier sur Google »**.

@@ -210,3 +210,86 @@ def test_mail_flow_with_fakes(client, monkeypatch):
 def test_generate_without_ai_is_honest(client):
     r = client.post("/api/reseaux/generate", json={"platform": "facebook", "topic": "cloison"})
     assert r.status_code == 503 and "NON DISPONIBLE" in r.json()["detail"]
+
+
+def _gbp_env(monkeypatch):
+    from app.config import settings
+    for k, v in {"google_client_id": "cid", "google_client_secret": "sec", "google_refresh_token": "rt",
+                 "gbp_account_id": "111", "gbp_location_id": "222"}.items():
+        monkeypatch.setattr(settings, k, v)
+
+
+def test_google_unavailable_is_honest(client):
+    st = client.get("/api/google/status").json()
+    assert st["configured"] is False and "GOOGLE_REFRESH_TOKEN" in st["missing"]
+    assert client.get("/api/google/reviews").status_code == 503
+    p = client.post("/api/reseaux/posts", json={"platform": "facebook", "body": "x"}).json()
+    assert client.post(f"/api/reseaux/posts/{p['id']}/publish").status_code == 501
+
+
+def test_google_full_flow_with_mock_transport(client, monkeypatch):
+    import httpx
+    from app import assistant, google_business as gbp
+    _gbp_env(monkeypatch)
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append((req.method, str(req.url)))
+        u = str(req.url)
+        if u.startswith(gbp.TOKEN_URL):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        assert req.headers["authorization"] == "Bearer tok"
+        if "/reviews/" in u and u.endswith("/reply"):
+            assert req.method == "PUT" and b"Merci" in req.content
+            return httpx.Response(200, json={})
+        if u.startswith(f"{gbp.V4}/accounts/111/locations/222/reviews"):
+            return httpx.Response(200, json={"reviews": [
+                {"reviewId": "abc123", "reviewer": {"displayName": "Awa"}, "starRating": "FOUR",
+                 "comment": "Bon travail", "createTime": "2026-10-01T10:00:00Z"}]})
+        if u.endswith("/localPosts"):
+            return httpx.Response(200, json={"name": "accounts/111/locations/222/localPosts/9"})
+        if u.startswith(f"{gbp.INFO}/locations/222"):
+            return httpx.Response(200, json={"title": "UniC Plaquiste", "phoneNumbers": {"primaryPhone": "+221"}})
+        return httpx.Response(404, json={})
+
+    real = httpx.Client
+    monkeypatch.setattr(gbp, "_client", lambda: real(transport=httpx.MockTransport(handler), timeout=5))
+    gbp._token_cache.update(value="", exp=0.0)
+
+    prof = client.get("/api/google/profile").json()
+    assert "Site web non renseigné" in prof["gaps"] and "Téléphone non renseigné" not in prof["gaps"]
+    rev = client.get("/api/google/reviews").json()
+    assert rev[0]["stars"] == 4 and rev[0]["replied"] is False
+
+    monkeypatch.setattr(assistant, "ai_available", lambda: True)
+    monkeypatch.setattr(assistant, "reply_to_comment", lambda *a, **k: "Merci Awa pour votre confiance. UniC Plaquiste")
+    d = client.post("/api/google/reviews/abc123/reply-draft", json={"comment": "Bon travail", "stars": 4}).json()
+    assert d["kind"] == "reply" and d["external_id"] == "abc123"
+    assert client.post(f"/api/reseaux/posts/{d['id']}/publish").status_code == 409  # pas approuvé
+    for _ in range(2):
+        client.post(f"/api/reseaux/posts/{d['id']}/advance")
+    out = client.post(f"/api/reseaux/posts/{d['id']}/publish").json()
+    assert out["status"] == "published"
+
+    post = client.post("/api/reseaux/posts", json={"platform": "google_business", "body": "Nouveau chantier."}).json()
+    for _ in range(2):
+        client.post(f"/api/reseaux/posts/{post['id']}/advance")
+    done = client.post(f"/api/reseaux/posts/{post['id']}/publish").json()
+    assert done["external_id"].endswith("localPosts/9")
+
+
+def test_google_bad_review_id_and_denied(client, monkeypatch):
+    import httpx
+    from app import assistant, google_business as gbp
+    _gbp_env(monkeypatch)
+    monkeypatch.setattr(assistant, "ai_available", lambda: True)
+    assert client.post("/api/google/reviews/../x/reply-draft", json={"comment": "a"}).status_code in (400, 404, 405)
+    assert client.post("/api/google/reviews/a%2Fb/reply-draft", json={"comment": "a"}).status_code in (400, 404, 405)
+    assert client.post("/api/google/reviews/ab!cd$/reply-draft", json={"comment": "a"}).status_code == 400
+    real = httpx.Client
+    monkeypatch.setattr(gbp, "_client", lambda: real(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"access_token": "t", "expires_in": 3600}) if "oauth2" in str(r.url)
+        else httpx.Response(403, json={})), timeout=5))
+    gbp._token_cache.update(value="", exp=0.0)
+    r = client.get("/api/google/reviews")
+    assert r.status_code == 502 and "Accès refusé" in r.json()["detail"]

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { net, type Mail, type MailDraft, type Platform, type Post } from "./api";
+import { net, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
 const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
 const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
@@ -21,6 +21,82 @@ async function copy(text: string, say: (m: string) => void) {
   } catch {
     say("Copie impossible : sélectionnez le texte.");
   }
+}
+
+function GoogleFiche({ say, onDraft }: { say: (m: string) => void; onDraft: () => void }) {
+  const [st, setSt] = useState<{ configured: boolean; missing: string[]; ai: boolean } | null>(null);
+  const [prof, setProf] = useState<GProfile | null>(null);
+  const [reviews, setReviews] = useState<GReview[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    net.gStatus().then(setSt).catch((e) => say(e.message));
+  }, []);
+
+  const load = async () => {
+    setBusy(true);
+    try {
+      setProf(await net.gProfile());
+      setReviews(await net.gReviews());
+    } catch (e: any) {
+      say(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!st) return null;
+  if (!st.configured)
+    return (
+      <section className="card-box">
+        <h3>Fiche Google — connexion</h3>
+        <p className="hint">NON DISPONIBLE. Variables manquantes sur le serveur :</p>
+        <pre className="plan">{st.missing.join("\n")}</pre>
+        <p className="hint">Voir le guide « Connecter la fiche Google » dans le README. En attendant : brouillons + copier/coller.</p>
+      </section>
+    );
+  return (
+    <section className="card-box">
+      <h3>Fiche Google</h3>
+      <div className="toolbar">
+        <button className="btn btn-copper" disabled={busy} onClick={load}>Charger fiche et avis</button>
+      </div>
+      {prof && (
+        <div>
+          <p><b>{prof.title}</b> {prof.phone && `· ${prof.phone}`} {prof.website && `· ${prof.website}`}</p>
+          {prof.complete ? <p className="hint">Fiche complète.</p> : (
+            <>
+              <p className="hint">À améliorer (constaté sur votre fiche) :</p>
+              <ul>{prof.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+            </>
+          )}
+        </div>
+      )}
+      {reviews.map((r) => (
+        <div key={r.id} className="card-box">
+          <p><b>{r.author}</b> · {"★".repeat(r.stars)}{"☆".repeat(5 - r.stars)} {r.replied && <span className="badge">Répondu</span>}</p>
+          <p className="post-body">{r.comment || "(note sans commentaire)"}</p>
+          {!r.replied && (
+            <button className="btn btn-line btn-small" disabled={busy || !st.ai}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await net.gReplyDraft(r.id, { comment: r.comment || `Avis ${r.stars} étoiles sans commentaire`, stars: r.stars });
+                  say("Réponse proposée : voir les brouillons.");
+                  onDraft();
+                } catch (e: any) {
+                  say(e.message);
+                } finally {
+                  setBusy(false);
+                }
+              }}>
+              {st.ai ? "Proposer une réponse" : "IA non disponible"}
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
+  );
 }
 
 export function Reseaux() {
@@ -144,6 +220,8 @@ export function Reseaux() {
           </section>
         </div>
 
+        {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
+
         <section className="card-box">
           <h3>Booster ({p.label})</h3>
           <p className="hint">Plan de conseils pour gagner en visibilité. Aucune action lancée, aucun budget dépensé.</p>
@@ -170,6 +248,12 @@ export function Reseaux() {
                 <button className="btn btn-copper btn-small" disabled={busy}
                   onClick={() => run(async () => { await net.advance(d.id); load(); })}>
                   {NEXT[d.status]}
+                </button>
+              )}
+              {d.platform === "google_business" && d.status === "approved" && (
+                <button className="btn btn-copper btn-small" disabled={busy}
+                  onClick={() => run(async () => { await net.publish(d.id); load(); }, "Publié sur la fiche Google.")}>
+                  Publier sur Google
                 </button>
               )}
               <button className="btn btn-line btn-small" onClick={() => copy(`${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, say)}>Copier</button>

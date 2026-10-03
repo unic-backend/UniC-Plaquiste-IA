@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     imap_password: str = ""
     smtp_from: str = ""
 
+    # Fiche Google (Business Profile API) — OAuth refresh token + identifiants de la fiche
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
+    gbp_account_id: str = ""
+    gbp_location_id: str = ""
+
     max_upload_mb: int = 250
 
     @property

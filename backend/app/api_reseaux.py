@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, mailbox
+from app import assistant, google_business as gbp, mailbox
 from app.database import get_db
 from app.models import EmailDraft, InboxMessage, SocialAccount, SocialPost, User, utcnow
 from app.security import get_current_user
@@ -28,7 +28,7 @@ def _post_out(p: SocialPost) -> dict:
     return {
         "id": p.id, "platform": p.platform, "kind": p.kind, "title": p.title, "body": p.body,
         "hashtags": p.hashtags, "in_reply_to": p.in_reply_to, "status": p.status,
-        "external_url": p.external_url, "created_at": p.created_at.isoformat() if p.created_at else None,
+        "external_url": p.external_url, "external_id": p.external_id, "created_at": p.created_at.isoformat() if p.created_at else None,
         "published_at": p.published_at.isoformat() if p.published_at else None,
     }
 
@@ -148,6 +148,30 @@ def advance_post(pid: str, db: Session = Depends(get_db), user: User = Depends(g
         p.published_at = utcnow()
     p.status = nxt
     audit(db, user.id, f"social_{nxt}", "social_post", p.id, p.platform)
+    db.commit()
+    return _post_out(p)
+
+
+@router.post("/reseaux/posts/{pid}/publish")
+def publish_post(pid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publication réelle : uniquement fiche Google, texte approuvé, configuration complète."""
+    p = _get_post(db, pid)
+    if p.platform != "google_business":
+        raise HTTPException(501, "Publication automatique NON DISPONIBLE pour cette plateforme. Publiez à la main.")
+    if p.status != "approved":
+        raise HTTPException(409, "Approuvez le texte avant la publication.")
+    try:
+        if p.kind == "reply":
+            if not p.external_id:
+                raise HTTPException(400, "Avis visé inconnu : créez la réponse depuis la liste des avis Google.")
+            gbp.reply_review(p.external_id, p.body)
+        else:
+            p.external_id = gbp.create_post(p.body, p.hashtags if p.hashtags.startswith("http") else "")
+    except gbp.GoogleError as exc:
+        raise HTTPException(502, f"Publication échouée, rien n'a été publié. {exc}")
+    p.status = "published"
+    p.published_at = utcnow()
+    audit(db, user.id, "google_publish", "social_post", p.id, p.kind)
     db.commit()
     return _post_out(p)
 
@@ -342,3 +366,64 @@ def mail_draft_send(did: str, db: Session = Depends(get_db), user: User = Depend
     audit(db, user.id, "mail_sent", "email_draft", d.id, d.to_addr)
     db.commit()
     return {"id": d.id, "status": d.status}
+
+
+# ---------- fiche Google ----------
+
+def _gbp_guard() -> None:
+    if not gbp.configured():
+        raise HTTPException(503, "Fiche Google NON DISPONIBLE : configuration incomplète (" + ", ".join(gbp.missing_settings()) + ").")
+
+
+def _gbp_call(fn, *args):
+    try:
+        return fn(*args)
+    except gbp.GoogleError as exc:
+        raise HTTPException(502, str(exc))
+
+
+@router.get("/google/status")
+def google_status(user: User = Depends(get_current_user)):
+    return {"configured": gbp.configured(), "missing": gbp.missing_settings(), "ai": assistant.ai_available()}
+
+
+@router.get("/google/profile")
+def google_profile(user: User = Depends(get_current_user)):
+    _gbp_guard()
+    return gbp.audit_location(_gbp_call(gbp.get_location))
+
+
+@router.get("/google/reviews")
+def google_reviews(user: User = Depends(get_current_user)):
+    _gbp_guard()
+    return _gbp_call(gbp.list_reviews)
+
+
+class ReviewReplyIn(BaseModel):
+    comment: str = Field(..., max_length=4000)
+    stars: int = Field(0, ge=0, le=5)
+    instruction: str = Field("", max_length=500)
+
+
+@router.post("/google/reviews/{review_id}/reply-draft")
+def google_reply_draft(review_id: str, body: ReviewReplyIn, db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    """Crée un brouillon de réponse à un avis (à approuver puis publier)."""
+    if not gbp.REVIEW_ID_RE.match(review_id):
+        raise HTTPException(400, "Identifiant d'avis invalide")
+    if not assistant.ai_available():
+        raise HTTPException(503, NO_AI)
+    hint = f"Note de l'avis : {body.stars}/5. " if body.stars else ""
+    text = assistant.reply_to_comment("google_business", body.comment, hint + body.instruction)
+    if not text:
+        raise HTTPException(502, "L'IA n'a rien produit. Réessayez.")
+    err = check_post("google_business", text)
+    if err:
+        raise HTTPException(502, err)
+    p = SocialPost(platform="google_business", kind="reply", body=text.strip(),
+                   in_reply_to=body.comment[:5000], external_id=review_id)
+    db.add(p)
+    db.flush()
+    audit(db, user.id, "google_reply_draft", "social_post", p.id)
+    db.commit()
+    return _post_out(p)
