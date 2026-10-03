@@ -300,8 +300,10 @@ def test_ai_chain_local_first_claude_on_deep(monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
     monkeypatch.setattr(settings, "anthropic_api_key", "k")
-    assert [p.id for p in ai.provider_chain()] == ["local"]
+    assert [p.id for p in ai.provider_chain()] == ["local", "claude"]
     assert [p.id for p in ai.provider_chain(deep=True)] == ["claude", "local"]
+    monkeypatch.setattr(settings, "local_ai_url", "")
+    assert [p.id for p in ai.provider_chain()] == ["claude"]
 
 
 def test_claude_request_shape_and_local_fallback(monkeypatch):
@@ -328,8 +330,14 @@ def test_claude_request_shape_and_local_fallback(monkeypatch):
     import json
     body = json.loads(seen["b"])
     assert body["system"] == "règles" and body["messages"] == [{"role": "user", "content": "q"}]
-    r2 = ai.chat_complete(msgs)  # normal → local, jamais Claude
+    r2 = ai.chat_complete(msgs)  # normal → local d'abord
     assert r2.provider == "local" and r2.text == "réponse locale"
+    monkeypatch.setattr(settings, "local_ai_url", "")
+    r2b = ai.chat_complete(msgs)  # Claude seul → modèle rapide
+    assert r2b.provider == "claude" and r2b.model == settings.anthropic_fast_model
+    r2c = ai.chat_complete(msgs, deep=True)  # profond → modèle profond
+    assert r2c.model == settings.anthropic_model
+    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
 
     # Claude en panne → repli local
     def broken(req):

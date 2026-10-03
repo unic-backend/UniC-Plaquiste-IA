@@ -173,4 +173,5 @@ Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses prop
 
 - **Par défaut : modèle local** (`LOCAL_AI_URL`, ex. Ollama `http://IP:11434/v1`, + `LOCAL_AI_MODEL`). Serveur éteint → repli sur OpenAI-compatible si configuré, sinon message honnête.
 - **Raisonnement profond : Claude** (`ANTHROPIC_API_KEY`). Jamais automatique : bouton ✦ dans le chat, ou « réfléchis en profondeur ». Facturé à l'usage.
+- **Claude seul** (sans modèle local) : usage courant = `ANTHROPIC_FAST_MODEL` (Sonnet), ✦ = `ANTHROPIC_MODEL` (Opus). Chaque message IA est facturé.
 - Claude absent ou en panne → réponse du moteur local, signalée dans le message.

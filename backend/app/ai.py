@@ -206,9 +206,10 @@ PROVIDERS: dict[str, AIProvider] = {
 
 
 def provider_chain(deep: bool = False) -> list[AIProvider]:
-    """Ordre d'essai : modèle local d'abord ; Claude seulement si raisonnement profond demandé ;
-    OpenAI-compatible en secours. Seuls les fournisseurs configurés sont gardés."""
-    order = ["claude", "local", "cloud"] if deep else ["local", "cloud"]
+    """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
+    sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
+    # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
+    order = ["claude", "local", "cloud"] if deep else ["local", "cloud", "claude"]
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 
 
@@ -221,7 +222,10 @@ def chat_complete(messages: list[dict], deep: bool = False, **kwargs) -> AIResul
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
     last = AIResult("", "none", "", False, "not_configured")
     for provider in provider_chain(deep):
-        res = provider.complete(messages, **kwargs)
+        opts = dict(kwargs)
+        if provider.id == "claude":
+            opts.setdefault("model", settings.anthropic_model if deep else settings.anthropic_fast_model)
+        res = provider.complete(messages, **opts)
         if res.available and res.text:
             return res
         last = res

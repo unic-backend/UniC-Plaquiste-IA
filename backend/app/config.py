@@ -29,7 +29,8 @@ class Settings(BaseSettings):
 
     # Claude (Anthropic) — raisonnement profond, à la demande seulement
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-opus-5-5"
+    anthropic_model: str = "claude-opus-5-5"  # raisonnement profond
+    anthropic_fast_model: str = "claude-sonnet-5-5"  # usage courant quand Claude est le seul moteur
     anthropic_base_url: str = "https://api.anthropic.com"
 
     local_ai_url: str = ""
