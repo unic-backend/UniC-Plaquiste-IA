@@ -11,6 +11,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
+from app import ocr
 from app.config import settings
 from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
 
@@ -87,6 +88,8 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
             text = ""
         text = text.replace("\x00", " ").strip()
         if len(text) < 20:
+            text = ocr.ocr_pdf_page(path, i) or text
+        if len(text) < 20:
             empty_pages += 1
         box = page.mediabox
         width = float(box.width) if box else None
@@ -111,8 +114,11 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
         file_rec.processing_status = "completed_no_ocr"
         file_rec.processing_error = (
             "La majorité des pages n'ont pas de calque texte. "
-            "OCR n'est pas disponible sur ce serveur (Tesseract non installé). "
-            "Fournissez un PDF vectoriel ou activez l'OCR."
+            + (
+                "L'OCR n'a rien pu lire sur ces pages."
+                if ocr.disponible()
+                else "OCR NON DISPONIBLE (Tesseract non installé). Fournissez un PDF vectoriel."
+            )
         )
     db.commit()
     return {
@@ -288,17 +294,24 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
         elif ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             file_rec.processing_status = "completed"
             file_rec.page_count = 1
+            read = ocr.ocr_image(path)
             db.add(ExtractedPage(
                 file_id=file_rec.id, page_number=1,
-                text="[Image] Analyse visuelle détaillée : NON DISPONIBLE sans fournisseur IA vision configuré.",
-                classification="photo",
+                text=read or "[Image] Aucun texte lu. Analyse visuelle NON DISPONIBLE sans IA vision.",
+                classification=classify_page(read) if read else "photo",
             ))
+            for chunk in chunk_text(read):
+                db.add(DocumentChunk(file_id=file_rec.id, page_number=1, text=chunk))
             db.commit()
             return {
                 "file_id": file_rec.id,
                 "kind": "image",
                 "status": "completed",
-                "warning": "Pas de modèle vision configuré. L'image est stockée et rattachée, sans interprétation automatique.",
+                "chars": len(read),
+                "warning": None if read else (
+                    "Image stockée. Aucun texte lu : "
+                    + ("pas de texte détecté." if ocr.disponible() else "OCR NON DISPONIBLE et pas de modèle vision.")
+                ),
             }
         else:
             file_rec.processing_status = "unsupported"

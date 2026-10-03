@@ -9,7 +9,7 @@ RUN npm run build
 FROM python:3.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UNIC_DATA_DIR=/data
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo zlib1g \
+RUN apt-get update && apt-get install -y --no-install-recommends libjpeg62-turbo zlib1g tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt

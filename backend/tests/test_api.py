@@ -43,7 +43,8 @@ def test_health(client):
     assert data["database"]["status"] == "ok"
     caps = {c["id"]: c for c in data["capabilities"]}
     assert caps["create_quote"]["available"] is True
-    assert caps["ocr_document"]["available"] is False
+    from app import ocr
+    assert caps["ocr_document"]["available"] is ocr.disponible()
     assert caps["publish_social_post"]["available"] is False
 
 
@@ -140,3 +141,21 @@ def test_greeting_and_price_question(client):
 def test_dimension_with_sur(client):
     r = client.post("/api/chat", json={"message": "combien de plaques pour un mur de 12m sur 2.6"}).json()
     assert "12" in r["message"]["content"] and "2.6" in r["message"]["content"]
+
+
+def test_scanned_pdf_ocr_or_honest_warning(client):
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+    f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 48)
+    im = Image.new("RGB", (1600, 500), "white")
+    ImageDraw.Draw(im).text((50, 100), "Cloison 12 m x 2,50 m porte 90", font=f, fill="black")
+    buf = io.BytesIO()
+    im.save(buf, format="PDF")
+    r = client.post("/api/files", files={"file": ("scan.pdf", buf.getvalue(), "application/pdf")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    from app import ocr
+    if ocr.disponible():
+        assert body["processing"]["status"] == "completed"
+    else:
+        assert "OCR NON DISPONIBLE" in (body["processing"].get("warning") or "")

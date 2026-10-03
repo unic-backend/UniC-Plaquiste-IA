@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from app import ocr
 from app.config import settings
 from app.ai import providers_health
 
@@ -28,7 +29,7 @@ def _connectors():
         "website": False,
         "social": False,
         "gbp": False,
-        "ocr": False,
+        "ocr": ocr.disponible(),
         "voice_server": False,
     }
 
@@ -41,8 +42,8 @@ def registry_snapshot() -> list[dict]:
         Capability("analyze_large_pdf", "Indexer un PDF volumineux et rechercher par page",
                    {"file_id": "str", "query": "str"}, {"hits": "list"}, ["user"], True),
         Capability("ocr_document", "OCR de documents scannés",
-                   {"file_id": "str"}, {"text": "str"}, ["user"], False,
-                   "NON DISPONIBLE — Tesseract n'est pas installé sur ce serveur."),
+                   {"file_id": "str"}, {"text": "str"}, ["user"], ocr.disponible(),
+                   "" if ocr.disponible() else "NON DISPONIBLE — Tesseract n'est pas installé sur ce serveur."),
         Capability("analyze_architectural_plan", "Rechercher portes, cloisons, cotes dans un plan",
                    {"file_id": "str", "topic": "str"}, {"hits": "list"}, ["user"], True),
         Capability("analyze_site_photo", "Stocker une photo de chantier (vision si IA cloud)",
