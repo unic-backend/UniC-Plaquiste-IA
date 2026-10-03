@@ -1,9 +1,66 @@
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
+
+const SERVER_KEY = "unic_server";
+const CODE_KEY = "unic_code";
+
+export const isNative = Capacitor.isNativePlatform();
+
+function store(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export const getServer = () => store(SERVER_KEY).replace(/\/+$/, "");
+export const getCode = () => store(CODE_KEY);
+export function saveConnection(server: string, code: string) {
+  try {
+    localStorage.setItem(SERVER_KEY, server.trim().replace(/\/+$/, ""));
+    localStorage.setItem(CODE_KEY, code);
+  } catch {
+    /* stockage indisponible */
+  }
+}
+export function clearConnection() {
+  try {
+    localStorage.removeItem(SERVER_KEY);
+    localStorage.removeItem(CODE_KEY);
+  } catch {
+    /* empty */
+  }
+}
+
+export class AuthError extends Error {}
+
+/** Application native : adresse du serveur obligatoire. Web : même origine que l'API. */
+export const needsServer = () => isNative && !getServer();
+
+export function apiUrl(path: string): string {
+  return path.startsWith("http") ? path : getServer() + path;
+}
+
+function authHeaders(headers = new Headers()): Headers {
+  const code = getCode();
+  if (code) headers.set("X-Access-Code", code);
+  return headers;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
+  const headers = authHeaders(new Headers(init.headers));
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), { ...init, headers });
+  } catch {
+    throw new Error("Serveur injoignable. Vérifiez la connexion et l'adresse du serveur.");
+  }
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -140,10 +197,27 @@ export type ConvDetail = { id: string; title: string; project_id?: string; messa
 export type ChatOut = { conversation_id: string; title: string; message: ChatMessage };
 export type Uploaded = { id: string; filename: string; processing: any };
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function downloadAuth(url: string, filename: string) {
-  const res = await fetch(url);
+  const res = await fetch(apiUrl(url), { headers: authHeaders() });
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) throw new Error("Téléchargement impossible");
   const blob = await res.blob();
+  if (isNative) {
+    // WebView : pas de téléchargement par lien → fichier en cache + feuille de partage Android
+    const safe = filename.replace(/[^\w.\-]+/g, "_");
+    const written = await Filesystem.writeFile({ path: safe, data: await blobToBase64(blob), directory: Directory.Cache });
+    await Share.share({ title: filename, url: written.uri, dialogTitle: "Ouvrir ou enregistrer" });
+    return;
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     unic_port: int = 8000
     unic_public_url: str = ""
 
+    # Code d'accès unique (app mono-propriétaire exposée sur Internet). Vide = pas de code (usage local).
+    unic_access_code: str = ""
     unic_admin_email: str = "proprietaire@unic.local"
     unic_admin_name: str = "UniC Plaquiste"
 

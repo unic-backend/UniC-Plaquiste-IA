@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Courrier, Memoire, Reseaux } from "./Reseaux";
-import { api, downloadAuth, type ChatMessage, type Conv, type User } from "./api";
+import { api, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -86,13 +86,82 @@ function MessageView({ m }: { m: ChatMessage }) {
   );
 }
 
+type Gate = "loading" | "connect" | "error" | "ok";
+
 function useOwner() {
   const [user, setUser] = useState<User | null>(null);
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    api.me().then(setUser).catch(() => setError(true));
-  }, []);
-  return { user, error };
+  const [gate, setGate] = useState<Gate>(needsServer() ? "connect" : "loading");
+  const [error, setError] = useState("");
+  const check = () => {
+    if (needsServer()) {
+      setGate("connect");
+      return;
+    }
+    setGate("loading");
+    api
+      .me()
+      .then((u) => {
+        setUser(u);
+        setGate("ok");
+      })
+      .catch((e) => {
+        if (e instanceof AuthError) setGate("connect");
+        else {
+          setError(e.message);
+          setGate("error");
+        }
+      });
+  };
+  useEffect(check, []);
+  return { user, gate, error, check };
+}
+
+function Connexion({ onDone }: { onDone: () => void }) {
+  const [server, setServer] = useState(getServer());
+  const [code, setCode] = useState(getCode());
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true);
+    setMsg("");
+    const url = server.trim();
+    if (isNative && !/^https:\/\/[^\s/]+/i.test(url)) {
+      setMsg("Adresse invalide : elle doit commencer par https://");
+      setBusy(false);
+      return;
+    }
+    saveConnection(isNative ? url : "", code);
+    try {
+      await api.me();
+      onDone();
+    } catch (e: any) {
+      setMsg(e instanceof AuthError ? "Code d'accès incorrect." : e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="login">
+      <div className="login-card">
+        <h1>UniC AI</h1>
+        <p className="hint">{isNative ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
+        {isNative && (
+          <>
+            <label>Adresse du serveur</label>
+            <input value={server} placeholder="https://unic.exemple.com" autoCapitalize="none" autoCorrect="off"
+              inputMode="url" onChange={(e) => setServer(e.target.value)} />
+          </>
+        )}
+        <label>Code d'accès</label>
+        <input type="password" value={code} autoComplete="current-password" onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && go()} />
+        {msg && <p className="error">{msg}</p>}
+        <button className="btn btn-copper" disabled={busy || (isNative && !server.trim())} onClick={go}>
+          {busy ? "Connexion…" : "Se connecter"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 const NAV = [
@@ -173,6 +242,12 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
             <Link to="/sante" style={{ color: "#d5ddd8" }}>
               Santé
             </Link>
+            {(isNative || getCode()) && (
+              <button className="btn-ghost" style={{ width: "auto", padding: 0 }}
+                onClick={() => { clearConnection(); window.location.reload(); }}>
+                Se déconnecter
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -998,9 +1073,21 @@ function ChatRoute() {
 }
 
 export default function App() {
-  const { user, error } = useOwner();
-  if (error) return <div className="login">Serveur injoignable. Réessaie.</div>;
-  if (!user) return <div className="login">Chargement…</div>;
+  const { user, gate, error, check } = useOwner();
+  if (gate === "connect") return <Connexion onDone={check} />;
+  if (gate === "error")
+    return (
+      <div className="login">
+        <div className="login-card">
+          <p className="error">{error}</p>
+          <button className="btn btn-copper" onClick={check}>Réessayer</button>
+          {isNative && (
+            <button className="btn btn-line" onClick={() => { clearConnection(); check(); }}>Changer de serveur</button>
+          )}
+        </div>
+      </div>
+    );
+  if (gate === "loading" || !user) return <div className="login">Chargement…</div>;
   return (
     <Shell user={user}>
       <Routes>

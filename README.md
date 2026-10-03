@@ -181,3 +181,15 @@ Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses prop
 - **Devis** : `UC-AAAA-MMJJ-CLI` — CLI = initiales prénom + nom du client (Ousmane Diop → `OD`, Fast Group → `FG`). Même client, même jour : `OD2`.
 - **Documents liés** : numéro du devis + code → `…-OD-BC` (bon de commande), `…-OD-BL` (livraison), `…-OD-F` (facture), `…-OD-AV` (avoir). Plusieurs du même type : `-BC2`.
 - Client inconnu : `XXX` (jamais inventé). Le numéro d'un brouillon se corrige quand une fiche client est rattachée.
+
+## Application Android (vraie app, pas une PWA)
+
+Capacitor emballe l'interface dans une app Android native (`frontend/android`). Elle se connecte à ton serveur UniC.
+
+1. **Serveur** : héberge le backend en **https** et définis `UNIC_ACCESS_CODE` (code d'accès unique).
+2. **APK** : GitHub → *Actions* → « Android APK » → dernier run → artefact `unic-ai-apk`.
+3. **Installer** : télécharge l'APK sur le téléphone, ouvre-le, autorise « sources inconnues » une fois.
+4. **Premier lancement** : saisis l'adresse du serveur (`https://…`) et le code d'accès.
+5. Mises à jour : même clé de signature, la nouvelle version s'installe par-dessus.
+
+Local : `cd frontend && npm run android:debug` (JDK 21 + Android SDK 35). La clé de signature du dépôt est une clé de **debug** : créer une vraie clé de release avant le Play Store.

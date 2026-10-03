@@ -531,3 +531,28 @@ def test_standalone_bon_without_quote_uses_client_root(client):
     out = client.post("/api/chat", json={"conversation_id": r["conversation_id"],
                                          "message": "crée le bon de livraison pour Fatou Sy"}).json()["message"]["content"]
     assert re.search(r"UC-\d{4}-\d{4}-FS-BL", out), out
+
+
+def test_access_code_guard(client, monkeypatch):
+    from app import main
+    from app.config import settings
+    monkeypatch.setattr(settings, "unic_access_code", "s3cret-code")
+    main._fails.clear()
+    assert client.get("/api/ping").status_code == 200                      # santé publique
+    r = client.get("/api/auth/me")
+    assert r.status_code == 401
+    assert client.get("/api/auth/me", headers={"x-access-code": "faux"}).status_code == 401
+    assert client.get("/api/auth/me", headers={"x-access-code": "s3cret-code"}).status_code == 200
+    # le 401 garde les en-têtes CORS (sinon le navigateur/l'app ne lit pas l'erreur)
+    pre = client.get("/api/auth/me", headers={"Origin": "https://localhost"})
+    assert pre.status_code == 401 and pre.headers.get("access-control-allow-origin") in ("*", "https://localhost")
+    # blocage après 10 échecs
+    main._fails.clear()
+    for _ in range(10):
+        client.get("/api/auth/me", headers={"x-access-code": "x"})
+    assert client.get("/api/auth/me", headers={"x-access-code": "s3cret-code"}).status_code == 429
+    main._fails.clear()
+
+
+def test_no_access_code_means_open_local(client):
+    assert client.get("/api/auth/me").status_code == 200
