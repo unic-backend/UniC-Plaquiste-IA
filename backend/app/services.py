@@ -1,0 +1,593 @@
+"""Services métier : numérotation, documents, tarifs, audit."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models import (
+    Artifact,
+    AuditLog,
+    CompanySettings,
+    Customer,
+    DeliveryNote,
+    DeliveryNoteItem,
+    Invoice,
+    InvoiceItem,
+    Material,
+    MaterialPrice,
+    Payment,
+    Project,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Quotation,
+    QuotationItem,
+    Sequence,
+    Supplier,
+    new_id,
+    utcnow,
+)
+from app.pdfs import build_document_pdf, fr_num, money, validate_pdf
+
+
+PREFIX = {
+    "quote": "DEV",
+    "invoice": "FAC",
+    "credit": "AVO",
+    "po": "BC",
+    "dn": "BL",
+    "report": "RAP",
+    "customer": "CLI",
+    "supplier": "FRN",
+    "project": "PRJ",
+}
+
+
+def next_number(db: Session, kind: str) -> str:
+    year = datetime.now(timezone.utc).year
+    seq = db.get(Sequence, (kind, year))
+    if seq is None:
+        seq = Sequence(name=kind, year=year, value=0)
+        db.add(seq)
+        db.flush()
+    seq.value += 1
+    prefix = PREFIX.get(kind, kind.upper()[:3])
+    return f"{prefix}-{year}-{seq.value:04d}"
+
+
+def company_dict(db: Session) -> dict:
+    row = db.query(CompanySettings).first()
+    if row is None:
+        return {"name": "UniC Plaquiste"}
+    return {
+        "name": row.name,
+        "legal_name": row.legal_name,
+        "address": row.address,
+        "city": row.city,
+        "country": row.country,
+        "phone": row.phone,
+        "email": row.email,
+        "tax_id": row.tax_id,
+        "currency": row.currency,
+        "vat_rate": row.vat_rate,
+        "quote_validity_days": row.quote_validity_days,
+        "payment_terms": row.payment_terms,
+        "default_waste": row.default_waste,
+        "default_margin": row.default_margin,
+        "board_width_m": row.board_width_m,
+        "board_height_m": row.board_height_m,
+        "stud_spacing_m": row.stud_spacing_m,
+        "website": row.website,
+        "notes": row.notes,
+    }
+
+
+def audit(db: Session, user_id: str | None, action: str, entity_type: str, entity_id: str, details: str = ""):
+    db.add(AuditLog(
+        user_id=user_id, action=action, entity_type=entity_type,
+        entity_id=entity_id, details=details[:4000],
+    ))
+
+
+def current_price(db: Session, material_id: str, kind: str) -> MaterialPrice | None:
+    now = utcnow()
+    q = (
+        db.query(MaterialPrice)
+        .filter(MaterialPrice.material_id == material_id, MaterialPrice.kind == kind)
+        .filter(MaterialPrice.valid_from <= now)
+        .order_by(MaterialPrice.valid_from.desc())
+    )
+    for p in q.all():
+        if p.valid_to is None or p.valid_to >= now:
+            return p
+    return None
+
+
+def selling_price_for_sku(db: Session, sku: str) -> tuple[float | None, str]:
+    mat = db.query(Material).filter(Material.sku == sku).first()
+    if mat is None:
+        return None, "matériau absent du catalogue UniC"
+    price = current_price(db, mat.id, "selling")
+    if price is None:
+        return None, "prix de vente non renseigné dans la base UniC"
+    return price.amount, "prix UniC"
+
+
+def material_by_sku(db: Session, sku: str) -> Material | None:
+    return db.query(Material).filter(Material.sku == sku).first()
+
+
+def party_text_customer(c: Customer | None) -> str:
+    if c is None:
+        return "Client non renseigné (non inventé)."
+    parts = [c.name]
+    if c.contact_name:
+        parts.append(c.contact_name)
+    if c.address:
+        parts.append(c.address)
+    if c.city:
+        parts.append(c.city)
+    if c.phone:
+        parts.append(f"Tél. {c.phone}")
+    if c.email:
+        parts.append(c.email)
+    return "\n".join(parts)
+
+
+def party_text_supplier(s: Supplier | None) -> str:
+    if s is None:
+        return "Fournisseur non renseigné (non inventé)."
+    parts = [s.name]
+    if s.contact_name:
+        parts.append(s.contact_name)
+    if s.address:
+        parts.append(s.address)
+    if s.phone:
+        parts.append(f"Tél. {s.phone}")
+    if s.email:
+        parts.append(s.email)
+    return "\n".join(parts)
+
+
+def store_artifact(db: Session, path: Path, filename: str, entity_type: str, entity_id: str,
+                   key: str, user_id: str | None, mime: str = "application/pdf") -> Artifact:
+    if not validate_pdf(path) and mime == "application/pdf":
+        raise RuntimeError("PDF invalide après génération")
+    art = Artifact(
+        artifact_key=key,
+        filename=filename,
+        mime_type=mime,
+        path=str(path),
+        size=path.stat().st_size,
+        status="ready",
+        entity_type=entity_type,
+        entity_id=entity_id,
+        created_by=user_id,
+    )
+    db.add(art)
+    db.flush()
+    return art
+
+
+def quotation_from_quantities(
+    db: Session,
+    *,
+    title: str,
+    quantities: list[dict],
+    customer_id: str | None,
+    project_id: str | None,
+    user_id: str | None,
+    notes: str = "",
+    assumptions: list[str] | None = None,
+    missing: list[str] | None = None,
+) -> Quotation:
+    company = company_dict(db)
+    number = next_number(db, "quote")
+    q = Quotation(
+        number=number,
+        customer_id=customer_id,
+        project_id=project_id,
+        title=title or f"Devis {number}",
+        status="draft",
+        currency=company.get("currency") or "",
+        vat_rate=company.get("vat_rate"),
+        validity_days=company.get("quote_validity_days") or 30,
+        payment_terms=company.get("payment_terms") or "",
+        notes=notes,
+        assumptions="\n".join(assumptions or []),
+        missing_info="\n".join(missing or []),
+        created_by=user_id,
+    )
+    db.add(q)
+    db.flush()
+    subtotal = 0.0
+    complete = True
+    any_price = False
+    for i, line in enumerate(quantities, start=1):
+        sku = line.get("sku") or ""
+        mat = material_by_sku(db, sku) if sku else None
+        unit_price, _reason = (None, "")
+        if mat:
+            unit_price, _reason = selling_price_for_sku(db, sku)
+        qty = float(line.get("quantity") or 0)
+        total = None
+        if unit_price is None:
+            complete = False
+        else:
+            total = round(qty * unit_price, 2)
+            subtotal += total
+            any_price = True
+        db.add(QuotationItem(
+            quotation_id=q.id,
+            position=i,
+            description=line.get("name") or line.get("description") or sku,
+            quantity=qty,
+            unit=line.get("unit") or "u",
+            unit_price=unit_price,
+            total=total,
+            material_id=mat.id if mat else None,
+            data_status=line.get("status") or "estimated",
+            formula=line.get("formula") or "",
+            notes=line.get("notes") or "",
+        ))
+    q.prices_complete = complete and any_price
+    if any_price:
+        q.subtotal = round(subtotal, 2)
+        if q.vat_rate is not None:
+            q.vat_amount = round(subtotal * q.vat_rate, 2)
+            q.total = round(subtotal + q.vat_amount, 2)
+        else:
+            q.total = q.subtotal
+    else:
+        q.subtotal = None
+        q.vat_amount = None
+        q.total = None
+        q.prices_complete = False
+    db.flush()
+    generate_quote_pdf(db, q, user_id)
+    audit(db, user_id, "create_quote", "quotation", q.id, q.number)
+    db.commit()
+    db.refresh(q)
+    return q
+
+
+def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifact:
+    company = company_dict(db)
+    customer = db.get(Customer, q.customer_id) if q.customer_id else None
+    project = db.get(Project, q.project_id) if q.project_id else None
+    items = sorted(q.items, key=lambda x: x.position)
+    currency = q.currency or company.get("currency") or ""
+    rows = []
+    for it in items:
+        rows.append([
+            str(it.position),
+            it.description + (f"<br/><font color='#6B645B' size='7'>{it.formula}</font>" if it.formula else ""),
+            fr_num(it.quantity, 2),
+            it.unit,
+            money(it.unit_price, currency),
+            money(it.total, currency),
+        ])
+    totals = []
+    if q.subtotal is not None:
+        totals.append(("Sous-total HT", money(q.subtotal, currency)))
+        if q.vat_rate is not None:
+            totals.append((f"TVA {fr_num(q.vat_rate * 100, 1)} %", money(q.vat_amount, currency)))
+        totals.append(("Total", money(q.total, currency)))
+    else:
+        totals.append(("Total", "incomplet — prix manquants"))
+    warnings = []
+    if not q.prices_complete:
+        warnings.append("Des prix UniC sont manquants. Aucun tarif n'a été inventé. Total incomplet.")
+    if q.assumptions:
+        warnings.append("Des hypothèses de calcul s'appliquent — voir notes.")
+    filename = f"UniC_Devis_{q.number.replace('-', '_')}.pdf"
+    key = f"unic-quote-{q.number.lower()}"
+    dest = settings.artifacts_path / "quotes" / filename
+    meta = [
+        f"N° {q.number}",
+        f"Date {q.created_at.strftime('%d/%m/%Y') if q.created_at else ''}",
+        f"Statut {q.status}",
+        f"Validité {q.validity_days} jours",
+    ]
+    extra = []
+    if q.assumptions:
+        extra.append("<b>Hypothèses</b><br/>" + q.assumptions.replace("\n", "<br/>"))
+    if q.missing_info:
+        extra.append("<b>Informations manquantes</b><br/>" + q.missing_info.replace("\n", "<br/>"))
+    if q.payment_terms:
+        extra.append("<b>Conditions de paiement</b><br/>" + q.payment_terms)
+    build_document_pdf(
+        dest,
+        company=company,
+        doc_label="DEVIS",
+        number=q.number,
+        title=q.title or f"Devis {q.number}",
+        status=q.status,
+        meta_lines=meta,
+        party_left=("Émetteur", party_text_from_company(company)),
+        party_right=("Client", party_text_customer(customer) + (
+            f"\nChantier : {project.name}" if project else ""
+        )),
+        headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
+        rows=rows,
+        col_widths=[18, 210, 50, 40, 80, 80],
+        totals=totals,
+        notes=q.notes,
+        warnings=warnings,
+        extra_paragraphs=extra,
+    )
+    art = store_artifact(db, dest, filename, "quotation", q.id, key, user_id)
+    q.artifact_id = art.id
+    return art
+
+
+def party_text_from_company(company: dict) -> str:
+    parts = [company.get("name") or "UniC Plaquiste"]
+    for k in ("legal_name", "address", "city", "country", "phone", "email", "tax_id"):
+        v = (company.get(k) or "").strip()
+        if v:
+            parts.append(v)
+    if len(parts) == 1:
+        parts.append("Coordonnées à renseigner dans Paramètres.")
+    return "\n".join(parts)
+
+
+def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
+    company = company_dict(db)
+    number = next_number(db, "credit" if kind == "credit" else "invoice")
+    inv = Invoice(
+        number=number,
+        kind=kind,
+        customer_id=quote.customer_id,
+        project_id=quote.project_id,
+        quotation_id=quote.id,
+        title=quote.title,
+        status="draft",
+        currency=quote.currency,
+        subtotal=quote.subtotal,
+        vat_rate=quote.vat_rate,
+        vat_amount=quote.vat_amount,
+        total=quote.total,
+        paid=0,
+        remaining=quote.total,
+        notes=f"Issue du devis {quote.number}",
+        created_by=user_id,
+    )
+    db.add(inv)
+    db.flush()
+    for it in sorted(quote.items, key=lambda x: x.position):
+        db.add(InvoiceItem(
+            invoice_id=inv.id,
+            position=it.position,
+            description=it.description,
+            quantity=it.quantity,
+            unit=it.unit,
+            unit_price=it.unit_price,
+            total=it.total,
+        ))
+    generate_invoice_pdf(db, inv, user_id)
+    audit(db, user_id, "create_invoice", "invoice", inv.id, inv.number)
+    db.commit()
+    db.refresh(inv)
+    return inv
+
+
+def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Artifact:
+    company = company_dict(db)
+    customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    currency = inv.currency or company.get("currency") or ""
+    items = sorted(inv.items, key=lambda x: x.position)
+    rows = [[
+        str(it.position), it.description, fr_num(it.quantity, 2), it.unit,
+        money(it.unit_price, currency), money(it.total, currency),
+    ] for it in items]
+    totals = []
+    if inv.subtotal is not None:
+        totals.append(("Sous-total HT", money(inv.subtotal, currency)))
+        if inv.vat_rate is not None:
+            totals.append((f"TVA", money(inv.vat_amount, currency)))
+        totals.append(("Total", money(inv.total, currency)))
+        totals.append(("Payé", money(inv.paid, currency)))
+        totals.append(("Reste dû", money(inv.remaining if inv.remaining is not None else None, currency)))
+    warnings = []
+    if inv.total is None:
+        warnings.append("Total incomplet : prix manquants dans la base UniC.")
+    kind_label = {
+        "invoice": "FACTURE",
+        "deposit": "FACTURE D'ACOMPTE",
+        "partial": "SITUATION / FACTURE PARTIELLE",
+        "final": "FACTURE DE SOLDE",
+        "credit": "AVOIR",
+    }.get(inv.kind, "FACTURE")
+    filename = f"UniC_Facture_{inv.number.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "invoices" / filename
+    build_document_pdf(
+        dest, company=company, doc_label=kind_label, number=inv.number,
+        title=inv.title or kind_label, status=inv.status,
+        meta_lines=[f"N° {inv.number}", f"Date {inv.created_at.strftime('%d/%m/%Y') if inv.created_at else ''}",
+                    f"Type {inv.kind}"],
+        party_left=("Émetteur", party_text_from_company(company)),
+        party_right=("Client", party_text_customer(customer)),
+        headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
+        rows=rows, col_widths=[18, 210, 50, 40, 80, 80],
+        totals=totals, notes=inv.notes, warnings=warnings,
+    )
+    art = store_artifact(db, dest, filename, "invoice", inv.id, f"unic-invoice-{inv.number.lower()}", user_id)
+    inv.artifact_id = art.id
+    return art
+
+
+def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
+                          supplier_id: str | None, project_id: str | None, user_id: str | None,
+                          notes: str = "") -> PurchaseOrder:
+    company = company_dict(db)
+    number = next_number(db, "po")
+    po = PurchaseOrder(
+        number=number, supplier_id=supplier_id, project_id=project_id,
+        title=title or f"Bon de commande {number}", status="draft",
+        currency=company.get("currency") or "", notes=notes, created_by=user_id,
+    )
+    db.add(po)
+    db.flush()
+    subtotal = 0.0
+    any_price = True
+    for i, line in enumerate(quantities, start=1):
+        sku = line.get("sku") or ""
+        mat = material_by_sku(db, sku) if sku else None
+        unit_price = None
+        if mat:
+            p = current_price(db, mat.id, "purchase")
+            if p:
+                unit_price = p.amount
+        qty = float(line.get("quantity") or 0)
+        total = round(qty * unit_price, 2) if unit_price is not None else None
+        if total is None:
+            any_price = False
+        else:
+            subtotal += total
+        db.add(PurchaseOrderItem(
+            order_id=po.id, position=i,
+            description=line.get("name") or line.get("description") or sku,
+            quantity=qty, unit=line.get("unit") or "u",
+            unit_price=unit_price, total=total,
+            material_id=mat.id if mat else None,
+        ))
+    po.total = round(subtotal, 2) if any_price else None
+    generate_po_pdf(db, po, user_id)
+    audit(db, user_id, "create_po", "purchase_order", po.id, po.number)
+    db.commit()
+    db.refresh(po)
+    return po
+
+
+def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Artifact:
+    company = company_dict(db)
+    supplier = db.get(Supplier, po.supplier_id) if po.supplier_id else None
+    currency = po.currency or ""
+    items = sorted(po.items, key=lambda x: x.position)
+    rows = [[
+        str(it.position), it.description, fr_num(it.quantity, 2), it.unit,
+        money(it.unit_price, currency), money(it.total, currency),
+    ] for it in items]
+    totals = [("Total", money(po.total, currency) if po.total is not None else "incomplet — prix d'achat manquants")]
+    warnings = []
+    if po.total is None:
+        warnings.append("Prix d'achat UniC manquants. Aucun tarif n'a été inventé.")
+    filename = f"UniC_BC_{po.number.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "orders" / filename
+    build_document_pdf(
+        dest, company=company, doc_label="BON DE COMMANDE", number=po.number,
+        title=po.title, status=po.status,
+        meta_lines=[f"N° {po.number}", f"Date {po.created_at.strftime('%d/%m/%Y') if po.created_at else ''}"],
+        party_left=("Acheteur", party_text_from_company(company)),
+        party_right=("Fournisseur", party_text_supplier(supplier)),
+        headers=["#", "Désignation", "Qté", "Unité", "P.U. achat", "Total"],
+        rows=rows, col_widths=[18, 210, 50, 40, 80, 80],
+        totals=totals, notes=po.notes, warnings=warnings,
+    )
+    art = store_artifact(db, dest, filename, "purchase_order", po.id, f"unic-po-{po.number.lower()}", user_id)
+    po.artifact_id = art.id
+    return art
+
+
+def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
+                         customer_id: str | None, project_id: str | None, user_id: str | None,
+                         notes: str = "") -> DeliveryNote:
+    number = next_number(db, "dn")
+    dn = DeliveryNote(
+        number=number, customer_id=customer_id, project_id=project_id,
+        title=title or f"Bon de livraison {number}", status="draft",
+        notes=notes, created_by=user_id,
+    )
+    db.add(dn)
+    db.flush()
+    for i, line in enumerate(quantities, start=1):
+        db.add(DeliveryNoteItem(
+            note_id=dn.id, position=i,
+            description=line.get("name") or line.get("description") or "",
+            quantity=float(line.get("quantity") or 0),
+            unit=line.get("unit") or "u",
+        ))
+    generate_dn_pdf(db, dn, user_id)
+    audit(db, user_id, "create_dn", "delivery_note", dn.id, dn.number)
+    db.commit()
+    db.refresh(dn)
+    return dn
+
+
+def generate_dn_pdf(db: Session, dn: DeliveryNote, user_id: str | None) -> Artifact:
+    company = company_dict(db)
+    customer = db.get(Customer, dn.customer_id) if dn.customer_id else None
+    items = sorted(dn.items, key=lambda x: x.position)
+    rows = [[str(it.position), it.description, fr_num(it.quantity, 2), it.unit] for it in items]
+    filename = f"UniC_BL_{dn.number.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "deliveries" / filename
+    build_document_pdf(
+        dest, company=company, doc_label="BON DE LIVRAISON", number=dn.number,
+        title=dn.title, status=dn.status,
+        meta_lines=[f"N° {dn.number}", f"Date {dn.created_at.strftime('%d/%m/%Y') if dn.created_at else ''}"],
+        party_left=("Expéditeur", party_text_from_company(company)),
+        party_right=("Destinataire", party_text_customer(customer)),
+        headers=["#", "Désignation", "Qté", "Unité"],
+        rows=rows, col_widths=[24, 340, 70, 70],
+        notes=dn.notes,
+        extra_paragraphs=["Réception : date ________    signature / cachet ________"],
+    )
+    art = store_artifact(db, dest, filename, "delivery_note", dn.id, f"unic-dn-{dn.number.lower()}", user_id)
+    dn.artifact_id = art.id
+    return art
+
+
+def generate_site_report_pdf(db: Session, *, title: str, body_lines: list[str],
+                             project_name: str, user_id: str | None, photos_note: str = "") -> Artifact:
+    company = company_dict(db)
+    number = next_number(db, "report")
+    filename = f"UniC_Rapport_{number.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "reports" / filename
+    rows = [[str(i), line, ""] for i, line in enumerate(body_lines, start=1)] or [["—", "Aucun point saisi.", ""]]
+    extra = []
+    if photos_note:
+        extra.append(photos_note)
+    extra.append("Les observations visuelles ne constituent pas un diagnostic structurel ou de sécurité.")
+    build_document_pdf(
+        dest, company=company, doc_label="RAPPORT DE CHANTIER", number=number,
+        title=title or f"Rapport {number}", status="draft",
+        meta_lines=[f"N° {number}", datetime.now().strftime("%d/%m/%Y")],
+        party_left=("Rédacteur", party_text_from_company(company)),
+        party_right=("Chantier", project_name or "Chantier non renseigné"),
+        headers=["#", "Observation", ""],
+        rows=rows, col_widths=[24, 410, 0.1],
+        extra_paragraphs=extra,
+    )
+    art = store_artifact(db, dest, filename, "site_report", number, f"unic-report-{number.lower()}", user_id)
+    db.commit()
+    return art
+
+
+def apply_payment(db: Session, invoice: Invoice, amount: float, method: str, reference: str, user_id: str | None) -> Payment:
+    if amount <= 0:
+        raise ValueError("Montant invalide")
+    pay = Payment(invoice_id=invoice.id, amount=amount, method=method, reference=reference, created_by=user_id)
+    db.add(pay)
+    invoice.paid = round((invoice.paid or 0) + amount, 2)
+    if invoice.total is not None:
+        invoice.remaining = round(invoice.total - invoice.paid, 2)
+        if invoice.remaining <= 0:
+            invoice.status = "paid"
+            invoice.remaining = 0
+        else:
+            invoice.status = "partial"
+    audit(db, user_id, "payment", "invoice", invoice.id, f"{amount} {method}")
+    db.commit()
+    db.refresh(invoice)
+    return pay
+
+
+def approve_entity(db, entity, user_id: str) -> None:
+    entity.status = "approved"
+    entity.approved_by = user_id
+    entity.approved_at = utcnow()
