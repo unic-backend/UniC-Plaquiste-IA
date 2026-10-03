@@ -501,3 +501,33 @@ def test_customer_assignment_renumbers_draft(client):
     cust = client.post("/api/customers", json={"name": "Awa Fall"}).json()
     out = client.patch(f"/api/quotes/{q['id']}", json={"customer_id": cust["id"]}).json()
     assert re.fullmatch(r"UC-\d{4}-\d{4}-AF\d*", out["number"]), out["number"]
+
+
+def test_document_family_numbers_resemble_but_never_collide(client):
+    import re
+    r = client.post("/api/chat", json={"message": "cloison 8 m x 2,5 m deux faces, fais le devis pour Moussa Ba"}).json()
+    cid = r["conversation_id"]
+    devis = re.search(r"UC-\d{4}-\d{4}-MB\d*", r["message"]["content"]).group(0)
+
+    def ask(msg):
+        return client.post("/api/chat", json={"conversation_id": cid, "message": msg}).json()["message"]["content"]
+
+    bc = re.search(r"UC-\d{4}-\d{4}-MB\d*-BC\d*", ask("crée le bon de commande")).group(0)
+    bl = re.search(r"UC-\d{4}-\d{4}-MB\d*-BL\d*", ask("crée le bon de livraison")).group(0)
+    fa = re.search(r"UC-\d{4}-\d{4}-MB\d*-F\d*", ask("prépare la facture")).group(0)
+    assert bc == f"{devis}-BC" and bl == f"{devis}-BL" and fa == f"{devis}-F"
+    assert len({devis, bc, bl, fa}) == 4                               # tous différents
+    assert re.search(r"-BC2", ask("crée le bon de commande")) is not None  # 2e BC : jamais le même numéro
+    # chaque numéro cible bien son propre document
+    assert "approuvé" in ask(f"approuve {bc}") and "approuvé" in ask(f"approuve {devis}")
+    nums = [q["number"] for q in client.get("/api/quotes").json()]
+    assert devis in nums and bc not in nums
+    assert [p["number"] for p in client.get("/api/purchase-orders").json() if p["number"] == bc]
+
+
+def test_standalone_bon_without_quote_uses_client_root(client):
+    import re
+    r = client.post("/api/chat", json={"message": "cloison 3 m x 2,5 m une face"}).json()
+    out = client.post("/api/chat", json={"conversation_id": r["conversation_id"],
+                                         "message": "crée le bon de livraison pour Fatou Sy"}).json()["message"]["content"]
+    assert re.search(r"UC-\d{4}-\d{4}-FS-BL", out), out

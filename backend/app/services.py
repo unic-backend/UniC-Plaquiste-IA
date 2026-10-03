@@ -105,6 +105,28 @@ def document_number(db: Session, party_name: str | None, on: date | None = None)
     return number
 
 
+DOC_CODES = {"invoice": "F", "credit": "AV", "po": "BC", "dn": "BL"}
+
+
+def linked_number(db: Session, code: str, *, quote_number: str | None = None,
+                  party_name: str | None = None, on: date | None = None) -> str:
+    """Numéro d'un document lié à un devis : « numéro du devis » + « -BC / -BL / -F / -AV ».
+
+    UC-2026-0714-OD (devis) → UC-2026-0714-OD-BC, -BL, -F. Ressemble au devis, ne s'y confond jamais.
+    Plusieurs du même type : -BC2, -BC3. Sans devis : racine date + initiales du client."""
+    if quote_number:
+        root = quote_number
+    else:
+        day = on or datetime.now(timezone.utc).date()
+        root = f"UC-{day.year}-{day.month:02d}{day.day:02d}-{client_initials(party_name)}"
+    taken = _taken_numbers(db, root)
+    number, i = f"{root}-{code}", 2
+    while number in taken:
+        number = f"{root}-{code}{i}"
+        i += 1
+    return number
+
+
 def company_dict(db: Session) -> dict:
     row = db.query(CompanySettings).first()
     if row is None:
@@ -388,8 +410,7 @@ def party_text_from_company(company: dict) -> str:
 
 def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
     company = company_dict(db)
-    owner = db.get(Customer, quote.customer_id) if quote.customer_id else None
-    number = document_number(db, owner.name if owner else quote.client_label)
+    number = linked_number(db, DOC_CODES["credit" if kind == "credit" else "invoice"], quote_number=quote.number)
     inv = Invoice(
         number=number,
         kind=kind,
@@ -474,10 +495,10 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
 
 def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
                           supplier_id: str | None, project_id: str | None, user_id: str | None,
-                          notes: str = "") -> PurchaseOrder:
+                          notes: str = "", quote_number: str | None = None,
+                          client_name: str | None = None) -> PurchaseOrder:
     company = company_dict(db)
-    seller = db.get(Supplier, supplier_id) if supplier_id else None
-    number = document_number(db, seller.name if seller else None)
+    number = linked_number(db, DOC_CODES["po"], quote_number=quote_number, party_name=client_name)
     po = PurchaseOrder(
         number=number, supplier_id=supplier_id, project_id=project_id,
         title=title or f"Bon de commande {number}", status="draft",
@@ -548,9 +569,11 @@ def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Arti
 
 def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
                          customer_id: str | None, project_id: str | None, user_id: str | None,
-                         notes: str = "") -> DeliveryNote:
+                         notes: str = "", quote_number: str | None = None,
+                         client_name: str | None = None) -> DeliveryNote:
     buyer = db.get(Customer, customer_id) if customer_id else None
-    number = document_number(db, buyer.name if buyer else None)
+    number = linked_number(db, DOC_CODES["dn"], quote_number=quote_number,
+                           party_name=buyer.name if buyer else client_name)
     dn = DeliveryNote(
         number=number, customer_id=customer_id, project_id=project_id,
         title=title or f"Bon de livraison {number}", status="draft",

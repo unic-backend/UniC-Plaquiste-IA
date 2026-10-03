@@ -187,7 +187,21 @@ def _match_project(db: Session, text: str) -> Project | None:
 
 
 # UC-2026-0714-OD, UC-2026-0804-FG2 ; anciens numéros DEV-/FAC-/AVO- encore reconnus
-DOC_NUMBER_RE = r"(UC-\d{4}-\d{4}-[A-Z0-9]{2,5}|DEV-\d{4}-\d+|FAC-\d{4}-\d+|AVO-\d{4}-\d+)"
+DOC_NUMBER_RE = (r"(UC-\d{4}-\d{4}-[A-Z0-9]{2,5}(?:-(?:BC|BL|AV|F)\d*)?"
+                 r"|DEV-\d{4}-\d+|FAC-\d{4}-\d+|AVO-\d{4}-\d+)")
+
+
+def _match_any(db: Session, text: str):
+    """Le document (devis, facture, bon de commande, bon de livraison) dont le numéro est cité."""
+    m = re.search(DOC_NUMBER_RE, text, re.I)
+    if not m:
+        return None
+    number = m.group(1).upper()
+    for model in (Quotation, Invoice, PurchaseOrder, DeliveryNote):
+        row = db.query(model).filter(model.number == number).first()
+        if row:
+            return row
+    return None
 _CLIENT_NAME_RE = re.compile(
     r"\b(?:pour|client|cliente|au nom de|chez)\s+(?:(?:M\.|Mme|Mr|Monsieur|Madame)\s+)?"
     r"([A-ZÀ-Ý][\wÀ-ÿ'’\-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’\-]+){0,3})")
@@ -200,17 +214,21 @@ def _client_name_in(text: str) -> str | None:
 
 
 def _match_quote(db: Session, text: str) -> Quotation | None:
-    m = re.search(DOC_NUMBER_RE, text, re.I)
-    if m:
-        return db.query(Quotation).filter(Quotation.number == m.group(1).upper()).first()
-    return None
+    found = _match_any(db, text)
+    return found if isinstance(found, Quotation) else None
 
 
 def _match_invoice(db: Session, text: str) -> Invoice | None:
-    m = re.search(DOC_NUMBER_RE, text, re.I)
-    if m:
-        return db.query(Invoice).filter(Invoice.number == m.group(1).upper()).first()
-    return None
+    found = _match_any(db, text)
+    return found if isinstance(found, Invoice) else None
+
+
+def _linked_quote(db: Session, text: str, state: dict):
+    """Devis auquel se rattache un bon : celui cité, sinon le dernier de la conversation."""
+    quote = _match_quote(db, text)
+    if quote is None and state.get("last_quote_id"):
+        quote = db.get(Quotation, state["last_quote_id"])
+    return quote, (_client_name_in(text) if quote is None else None)
 
 
 def _last_quantities(state: dict) -> list[dict]:
@@ -626,18 +644,19 @@ def handle_turn(
             reply_text = "Aucun métré en mémoire. Calculez d'abord les quantités, puis « crée le bon de commande »."
         else:
             supplier = _match_supplier(db, text)
+            linked, who = _linked_quote(db, text, state)
             po = create_purchase_order(
                 db, title="Bon de commande matériaux", quantities=qtys,
                 supplier_id=supplier.id if supplier else None,
                 project_id=state.get("project_id") or conv.project_id,
-                user_id=user.id,
+                user_id=user.id, quote_number=linked.number if linked else None, client_name=who,
             )
             art = _art_payload(db, po.artifact_id)
             if art:
                 artifacts.append(art)
             reply_text = f"Bon de commande **{po.number}** créé en brouillon." + (
-                "" if supplier else " Fournisseur non renseigné (non inventé)."
-            )
+                f" Rattaché au devis {linked.number}." if linked else ""
+            ) + ("" if supplier else " Fournisseur non renseigné (non inventé).")
             caps.append("create_purchase_order")
     elif intent == "create_dn":
         qtys = _last_quantities(state)
@@ -645,16 +664,18 @@ def handle_turn(
             reply_text = "Aucun métré en mémoire. Calculez d'abord, puis « crée le bon de livraison »."
         else:
             customer = _match_customer(db, text)
+            linked, who = _linked_quote(db, text, state)
             dn = create_delivery_note(
                 db, title="Bon de livraison", quantities=qtys,
                 customer_id=customer.id if customer else state.get("customer_id"),
                 project_id=state.get("project_id") or conv.project_id,
-                user_id=user.id,
+                user_id=user.id, quote_number=linked.number if linked else None, client_name=who,
             )
             art = _art_payload(db, dn.artifact_id)
             if art:
                 artifacts.append(art)
-            reply_text = f"Bon de livraison **{dn.number}** créé en brouillon."
+            reply_text = f"Bon de livraison **{dn.number}** créé en brouillon." + (
+                f" Rattaché au devis {linked.number}." if linked else "")
             caps.append("create_delivery_note")
     elif intent == "site_report":
         notes = [text]
@@ -677,7 +698,7 @@ def handle_turn(
         )
         caps.append("create_site_report")
     elif intent == "approve":
-        target = _match_quote(db, text) or _match_invoice(db, text)
+        target = _match_any(db, text)
         if target is None:
             reply_text = "Précisez le document, ex. « approuve UC-2026-0714-OD »."
         else:

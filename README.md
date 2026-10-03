@@ -175,3 +175,9 @@ Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses prop
 - **Raisonnement profond : Claude** (`ANTHROPIC_API_KEY`). Jamais automatique : bouton ✦ dans le chat, ou « réfléchis en profondeur ». Facturé à l'usage.
 - **Claude seul** (sans modèle local) : usage courant = `ANTHROPIC_FAST_MODEL` (Sonnet), ✦ = `ANTHROPIC_MODEL` (Opus). Chaque message IA est facturé.
 - Claude absent ou en panne → réponse du moteur local, signalée dans le message.
+
+## Numérotation des documents
+
+- **Devis** : `UC-AAAA-MMJJ-CLI` — CLI = initiales prénom + nom du client (Ousmane Diop → `OD`, Fast Group → `FG`). Même client, même jour : `OD2`.
+- **Documents liés** : numéro du devis + code → `…-OD-BC` (bon de commande), `…-OD-BL` (livraison), `…-OD-F` (facture), `…-OD-AV` (avoir). Plusieurs du même type : `-BC2`.
+- Client inconnu : `XXX` (jamais inventé). Le numéro d'un brouillon se corrige quand une fiche client est rattachée.
