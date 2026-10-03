@@ -136,7 +136,7 @@ def test_price_not_invented_in_quote_when_missing(client, token):
 def test_quote_in_one_message(client):
     r = client.post("/api/chat", json={"message": "Cloison 320 m × 2,50 m, deux faces. Fais le devis."})
     assert r.status_code == 200
-    assert "DEV-" in r.json()["message"]["content"]
+    assert "UC-" in r.json()["message"]["content"]
 
 
 def test_greeting_and_price_question(client):
@@ -444,7 +444,60 @@ def test_metier_import_prices_and_unic_method(client):
 
 def test_unic_method_quote_is_fully_priced_and_unit_safe(client):
     r = client.post("/api/chat", json={"message": "méthode UniC cloison 5,40 m x 2,50 m, 18 parois, fais le devis"}).json()
-    assert "DEV-" in r["message"]["content"] and "prix UniC manquent" not in r["message"]["content"]
+    assert "UC-" in r["message"]["content"] and "prix UniC manquent" not in r["message"]["content"]
     # un prix de pièce ne doit jamais s'appliquer au mètre : RAIL-R48 (ml) reste sans prix
     mats = {m["sku"]: m for m in client.get("/api/materials").json()}
     assert not mats["RAIL-R48"].get("selling_price")
+
+
+def test_client_initials_rule():
+    from app.services import client_initials as ci
+    assert ci("Ousmane Diop") == "OD" and ci("Fast Group") == "FG"
+    assert ci("Jean-Pierre Ndiaye") == "JPN" and ci("Sonatel") == "SON"
+    assert ci("Entreprise Générale de Bâtiment du Sénégal") == "EGB"
+    assert ci("Aïssatou Sow") == "AS" and ci("") == "XXX" and ci(None) == "XXX"
+
+
+def test_document_number_format_and_same_day_suffix(client):
+    import re
+    from datetime import date
+    from app.database import SessionLocal
+    from app.services import document_number
+    from app.models import Quotation
+    db = SessionLocal()
+    day = date(2026, 7, 14)
+    n1 = document_number(db, "Fast Group", day)
+    assert n1 == "UC-2026-0714-FG"
+    db.add(Quotation(number=n1, title="t", status="draft"))
+    db.commit()
+    n2 = document_number(db, "Fast Group", day)
+    assert n2 == "UC-2026-0714-FG2"          # même client, même jour
+    assert document_number(db, "Ousmane Diop", day) == "UC-2026-0714-OD"
+    assert re.fullmatch(r"UC-\d{4}-\d{4}-[A-Z0-9]+", document_number(db, "Ousmane Diop"))
+    db.query(Quotation).filter(Quotation.number == n1).delete()
+    db.commit()
+    db.close()
+
+
+def test_quote_number_carries_client_initials(client):
+    r = client.post("/api/chat", json={"message": "cloison 6 m x 2,5 m une face, fais le devis pour Ousmane Diop"}).json()
+    txt = r["message"]["content"]
+    import re
+    num = re.search(r"UC-\d{4}-\d{4}-OD\d*", txt)
+    assert num, txt
+    assert "Ousmane Diop" in txt                       # client cité, fiche à créer
+    # sans client : trou visible XXX, jamais une initiale inventée
+    r2 = client.post("/api/chat", json={"message": "cloison 6 m x 2,5 m une face, fais le devis"}).json()
+    assert re.search(r"UC-\d{4}-\d{4}-XXX", r2["message"]["content"])
+    # approuver par le nouveau numéro
+    r3 = client.post("/api/chat", json={"message": f"approuve {num.group(0)}"}).json()
+    assert "approuvé" in r3["message"]["content"]
+
+
+def test_customer_assignment_renumbers_draft(client):
+    import re
+    client.post("/api/chat", json={"message": "cloison 4 m x 2,5 m une face, fais le devis"})
+    q = [x for x in client.get("/api/quotes").json() if x["number"].endswith("XXX") or "-XXX" in x["number"]][0]
+    cust = client.post("/api/customers", json={"name": "Awa Fall"}).json()
+    out = client.patch(f"/api/quotes/{q['id']}", json={"customer_id": cust["id"]}).json()
+    assert re.fullmatch(r"UC-\d{4}-\d{4}-AF\d*", out["number"]), out["number"]

@@ -186,15 +186,28 @@ def _match_project(db: Session, text: str) -> Project | None:
     return None
 
 
+# UC-2026-0714-OD, UC-2026-0804-FG2 ; anciens numéros DEV-/FAC-/AVO- encore reconnus
+DOC_NUMBER_RE = r"(UC-\d{4}-\d{4}-[A-Z0-9]{2,5}|DEV-\d{4}-\d+|FAC-\d{4}-\d+|AVO-\d{4}-\d+)"
+_CLIENT_NAME_RE = re.compile(
+    r"\b(?:pour|client|cliente|au nom de|chez)\s+(?:(?:M\.|Mme|Mr|Monsieur|Madame)\s+)?"
+    r"([A-ZÀ-Ý][\wÀ-ÿ'’\-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’\-]+){0,3})")
+
+
+def _client_name_in(text: str) -> str | None:
+    """Nom de client cité (« devis pour Ousmane Diop »). Majuscules obligatoires : jamais deviné."""
+    m = _CLIENT_NAME_RE.search(text)
+    return m.group(1).strip() if m else None
+
+
 def _match_quote(db: Session, text: str) -> Quotation | None:
-    m = re.search(r"(DEV-\d{4}-\d+)", text, re.I)
+    m = re.search(DOC_NUMBER_RE, text, re.I)
     if m:
         return db.query(Quotation).filter(Quotation.number == m.group(1).upper()).first()
     return None
 
 
 def _match_invoice(db: Session, text: str) -> Invoice | None:
-    m = re.search(r"(FAC-\d{4}-\d+|AVO-\d{4}-\d+)", text, re.I)
+    m = re.search(DOC_NUMBER_RE, text, re.I)
     if m:
         return db.query(Invoice).filter(Invoice.number == m.group(1).upper()).first()
     return None
@@ -283,7 +296,7 @@ Exemples :
 - « Calcule une cloison de 12 m × 2,50 m, deux faces, 2 portes »
 - « Combien de plaques pour 320 m de cloison, hauteur 2,50 m, deux faces ? »
 - « Fais le devis »  (à partir du dernier calcul)
-- « Prépare la facture à partir du devis DEV-2026-0001 »
+- « Prépare la facture à partir du devis UC-2026-0714-OD »
 - « Crée le bon de commande »
 - « Crée le bon de livraison »
 - « Analyse ce plan » (après avoir joint un PDF)
@@ -552,6 +565,7 @@ def handle_turn(
                 project_id=state.get("project_id") or conv.project_id,
                 user_id=user.id,
                 notes="Devis généré par UniC AI à partir du métré conversationnel.",
+                client_name=None if state.get("customer_id") else _client_name_in(text),
                 assumptions=(state.get("last_calc") or {}).get("assumptions"),
                 missing=(state.get("last_calc") or {}).get("missing"),
             )
@@ -568,7 +582,10 @@ def handle_turn(
                     "Saisissez les tarifs dans Matériaux puis régénérez."
                 )
             if not q.customer_id:
-                extra += "\nClient non renseigné (non inventé)."
+                extra += (
+                    f"\nClient cité : **{q.client_label}** (fiche client à créer)." if q.client_label
+                    else "\nClient non renseigné : le numéro finit par XXX. Dites « devis pour Prénom Nom »."
+                )
             reply_text = (
                 f"Devis **{q.number}** créé au statut **brouillon** (version {q.version}). "
                 f"PDF réel généré : {art['filename'] if art else '—'}."
@@ -582,7 +599,7 @@ def handle_turn(
         if quote is None and state.get("last_quote_id"):
             quote = db.get(Quotation, state["last_quote_id"])
         if quote is None:
-            reply_text = "Indiquez le n° de devis, par exemple : « prépare la facture du devis DEV-2026-0001 »."
+            reply_text = "Indiquez le n° de devis, par exemple : « prépare la facture du devis UC-2026-0714-OD »."
         else:
             kind = "invoice"
             if re.search(r"acompte|deposit", text, re.I):
@@ -662,7 +679,7 @@ def handle_turn(
     elif intent == "approve":
         target = _match_quote(db, text) or _match_invoice(db, text)
         if target is None:
-            reply_text = "Précisez le document, ex. « approuve DEV-2026-0001 »."
+            reply_text = "Précisez le document, ex. « approuve UC-2026-0714-OD »."
         else:
             approve_entity(db, target, user.id)
             db.commit()

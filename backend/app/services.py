@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -57,6 +58,51 @@ def next_number(db: Session, kind: str) -> str:
     seq.value += 1
     prefix = PREFIX.get(kind, kind.upper()[:3])
     return f"{prefix}-{year}-{seq.value:04d}"
+
+
+# ---------- numérotation maison : UC-AAAA-MMJJ-CLI ----------
+# CLI = initiales (prénom + nom) du client. Règle du propriétaire : « Ousmane Diop » → OD,
+# « Fast Group » → FG. Jamais un code fixe. XXX = client inconnu (trou visible, pas un identifiant).
+
+UNKNOWN_SUFFIX = "XXX"
+MAX_INITIALS = 3
+SINGLE_WORD_LETTERS = 3
+_SEPARATORS = re.compile(r"[\s\-_'’.]+")
+_LINK_WORDS = frozenset({"de", "du", "des", "la", "le", "les", "et", "d", "l", "au", "aux", "a"})
+_ACCENTS = str.maketrans("àâäáãåçéèêëíìîïñóòôöõúùûüýÿ", "aaaaaaceeeeiiiinooooouuuuyy")
+
+
+def client_initials(name: str | None) -> str:
+    """« Ousmane Diop » → OD ; « Jean-Pierre Ndiaye » → JPN ; « Sonatel » → SON ; vide → XXX."""
+    clean = str(name or "").strip().lower().translate(_ACCENTS)
+    words = [w for w in _SEPARATORS.split(clean) if w.isalnum()]
+    if not words:
+        return UNKNOWN_SUFFIX
+    carriers = [w for w in words if w not in _LINK_WORDS]
+    if len(carriers) >= 2:
+        words = carriers
+    if len(words) == 1:
+        return words[0][:SINGLE_WORD_LETTERS].upper()
+    return "".join(w[0] for w in words[:MAX_INITIALS]).upper()
+
+
+def _taken_numbers(db: Session, prefix: str) -> set[str]:
+    out: set[str] = set()
+    for model in (Quotation, Invoice, PurchaseOrder, DeliveryNote):
+        out.update(n for (n,) in db.query(model.number).filter(model.number.like(f"{prefix}%")).all())
+    return out
+
+
+def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
+    """UC-AAAA-MMJJ-CLI. Même client, même jour : le suivant prend 2, 3… (comme UC-2026-0804-FG2)."""
+    day = on or datetime.now(timezone.utc).date()
+    base = f"UC-{day.year}-{day.month:02d}{day.day:02d}-{client_initials(party_name)}"
+    taken = _taken_numbers(db, base)
+    number, i = base, 2
+    while number in taken:
+        number = f"{base}{i}"
+        i += 1
+    return number
 
 
 def company_dict(db: Session) -> dict:
@@ -121,9 +167,9 @@ def material_by_sku(db: Session, sku: str) -> Material | None:
     return db.query(Material).filter(Material.sku == sku).first()
 
 
-def party_text_customer(c: Customer | None) -> str:
+def party_text_customer(c: Customer | None, label: str = "") -> str:
     if c is None:
-        return "Client non renseigné (non inventé)."
+        return f"{label}\n(coordonnées à renseigner)" if label else "Client non renseigné (non inventé)."
     parts = [c.name]
     if c.contact_name:
         parts.append(c.contact_name)
@@ -184,11 +230,15 @@ def quotation_from_quantities(
     notes: str = "",
     assumptions: list[str] | None = None,
     missing: list[str] | None = None,
+    client_name: str | None = None,
 ) -> Quotation:
     company = company_dict(db)
-    number = next_number(db, "quote")
+    known = db.get(Customer, customer_id) if customer_id else None
+    label = (known.name if known else (client_name or "")).strip()
+    number = document_number(db, label)
     q = Quotation(
         number=number,
+        client_label="" if known else label,
         customer_id=customer_id,
         project_id=project_id,
         title=title or f"Devis {number}",
@@ -309,7 +359,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         status=q.status,
         meta_lines=meta,
         party_left=("Émetteur", party_text_from_company(company)),
-        party_right=("Client", party_text_customer(customer) + (
+        party_right=("Client", party_text_customer(customer, q.client_label) + (
             f"\nChantier : {project.name}" if project else ""
         )),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
@@ -338,7 +388,8 @@ def party_text_from_company(company: dict) -> str:
 
 def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
     company = company_dict(db)
-    number = next_number(db, "credit" if kind == "credit" else "invoice")
+    owner = db.get(Customer, quote.customer_id) if quote.customer_id else None
+    number = document_number(db, owner.name if owner else quote.client_label)
     inv = Invoice(
         number=number,
         kind=kind,
@@ -425,7 +476,8 @@ def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
                           supplier_id: str | None, project_id: str | None, user_id: str | None,
                           notes: str = "") -> PurchaseOrder:
     company = company_dict(db)
-    number = next_number(db, "po")
+    seller = db.get(Supplier, supplier_id) if supplier_id else None
+    number = document_number(db, seller.name if seller else None)
     po = PurchaseOrder(
         number=number, supplier_id=supplier_id, project_id=project_id,
         title=title or f"Bon de commande {number}", status="draft",
@@ -497,7 +549,8 @@ def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Arti
 def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
                          customer_id: str | None, project_id: str | None, user_id: str | None,
                          notes: str = "") -> DeliveryNote:
-    number = next_number(db, "dn")
+    buyer = db.get(Customer, customer_id) if customer_id else None
+    number = document_number(db, buyer.name if buyer else None)
     dn = DeliveryNote(
         number=number, customer_id=customer_id, project_id=project_id,
         title=title or f"Bon de livraison {number}", status="draft",

@@ -54,6 +54,8 @@ from app.services import (
     generate_po_pdf,
     generate_quote_pdf,
     invoice_from_quote,
+    client_initials,
+    document_number,
     next_number,
     quotation_from_quantities,
 )
@@ -581,6 +583,13 @@ def patch_quote(qid: str, body: QuotePatch, db: Session = Depends(get_db), user:
         q.notes = body.notes
     if body.customer_id is not None:
         q.customer_id = body.customer_id
+        owner = db.get(Customer, body.customer_id)
+        if owner is not None and q.status == "draft":
+            # le numéro porte les initiales du client : il suit le client tant que le devis est un brouillon
+            current = document_number(db, owner.name, q.created_at.date() if q.created_at else None)
+            if not q.number.startswith(current.rsplit("-", 1)[0] + "-" + client_initials(owner.name)):
+                q.number = current
+            q.client_label = ""
     if body.items is not None:
         db.query(QuotationItem).filter(QuotationItem.quotation_id == q.id).delete()
         subtotal = 0.0

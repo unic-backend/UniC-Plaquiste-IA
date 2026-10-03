@@ -212,6 +212,7 @@ class Quotation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    client_label: Mapped[str] = mapped_column(String(255), default="")  # nom du client cité, sans fiche client
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), default="")
