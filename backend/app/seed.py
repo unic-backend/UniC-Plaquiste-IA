@@ -157,3 +157,5 @@ def seed_if_empty(db: Session) -> None:
         for slug, title, cat, body in ARTICLES:
             db.add(KnowledgeArticle(slug=slug, title=title, category=cat, body=body))
     db.commit()
+    from app.metier import import_metier
+    import_metier(db)

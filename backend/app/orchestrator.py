@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app import calc
-from app import memory as mem
+from app import memory as mem, metier
 from app.ai import chat_complete, deep_available, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
@@ -358,6 +358,25 @@ def _create_project(db: Session, text: str, user_id: str | None) -> str:
     return f"Projet **{p.name}** créé (`{p.code}`) avec un chantier.{extra}"
 
 
+def _calc_defaults(db: Session) -> dict:
+    company = company_dict(db)
+    return {
+        "waste": company.get("default_waste") or 0.08,
+        "board_width_m": company.get("board_width_m") or 1.2,
+        "board_height_m": company.get("board_height_m") or 2.5,
+        "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
+    }
+
+
+def _calc_for(db: Session, text: str):
+    """Méthode UniC (ratios du propriétaire) si demandée, sinon calcul générique."""
+    if metier.UNIC_METHOD_RE.search(text):
+        res = metier.calculate_unic_from_text(text)
+        if res is not None:
+            return res
+    return calc.calculate_from_text(text, _calc_defaults(db))
+
+
 def handle_turn(
     db: Session,
     conv: Conversation,
@@ -487,14 +506,7 @@ def handle_turn(
             reply_text = _render_missing_prices(db, text)
         caps.append("calculate_price")
     elif intent == "calculate":
-        company = company_dict(db)
-        defaults = {
-            "waste": company.get("default_waste") or 0.08,
-            "board_width_m": company.get("board_width_m") or 1.2,
-            "board_height_m": company.get("board_height_m") or 2.5,
-            "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
-        }
-        result = calc.calculate_from_text(text, defaults)
+        result = _calc_for(db, text)
         if result is None:
             reply_text = "Je n'ai pas pu interpréter le calcul. Donnez longueur, hauteur, et le type (cloison, plafond, peinture)."
         else:
@@ -513,13 +525,7 @@ def handle_turn(
     elif intent in ("create_quote", "continue_pending") and (intent == "create_quote" or state.get("pending") == "create_quote"):
         qtys = _last_quantities(state)
         if not qtys:
-            company = company_dict(db)
-            fresh = calc.calculate_from_text(text, {
-                "waste": company.get("default_waste") or 0.08,
-                "board_width_m": company.get("board_width_m") or 1.2,
-                "board_height_m": company.get("board_height_m") or 2.5,
-                "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
-            })
+            fresh = _calc_for(db, text)
             if fresh is not None and fresh.quantities:
                 state["last_calc"] = fresh.to_dict()
                 qtys = _last_quantities(state)
@@ -804,12 +810,7 @@ def handle_turn(
         # general: knowledge + optional LLM polish. Never invent.
         arts = _search_knowledge(db, text)
         deep = deep or bool(DEEP_RE.search(text))
-        calc_try = calc.calculate_from_text(text, {
-            "waste": company_dict(db).get("default_waste") or 0.08,
-            "board_width_m": company_dict(db).get("board_width_m") or 1.2,
-            "board_height_m": company_dict(db).get("board_height_m") or 2.5,
-            "stud_spacing_m": company_dict(db).get("stud_spacing_m") or 0.6,
-        })
+        calc_try = _calc_for(db, text)
         if calc_try and calc_try.quantities:
             reply_text = _fmt_calc(calc_try)
             structured = calc_try.to_dict()

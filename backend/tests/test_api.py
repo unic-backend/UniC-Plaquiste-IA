@@ -53,9 +53,13 @@ def test_materials_have_no_invented_prices(client, token):
     assert r.status_code == 200
     rows = r.json()
     assert len(rows) >= 5
+    from app import metier
+    grid = {metier.sku_for(a) for a in {**metier.load()["prix_materiaux"], **metier.load()["prix_portes"]}}
+    grid.add(metier.LABOR_SKU)
     for m in rows:
-        assert m["selling_price"] is None
+        # un prix n'existe que s'il vient de la grille du propriétaire ; jamais d'achat inventé
         assert m["purchase_price"] is None
+        assert (m["selling_price"] is not None) == (m["sku"] in grid), m["sku"]
 
 
 def test_chat_partition_and_quote_pdf(client, token):
@@ -121,9 +125,12 @@ def test_price_not_invented_in_quote_when_missing(client, token):
     assert quotes
     q = quotes[0]
     assert q["prices_complete"] is False
-    assert q["total"] is None
     for it in q["items"]:
-        assert it["unit_price"] is None
+        # unités incompatibles avec la grille (rail au ml, vis à l'unité, bande, enduit au kg) : jamais de prix deviné
+        if it["description"].startswith(("Rail", "Vis", "Bande", "Enduit")):
+            assert it["unit_price"] is None, it
+        if it["description"].startswith(("Plaque", "Montant")):
+            assert it["unit_price"] is not None, it
 
 
 def test_quote_in_one_message(client):
@@ -420,3 +427,24 @@ def test_note_alone_is_not_a_memory_command():
 def test_question_without_numbers_never_crashes(client):
     for q in ("Quel type de plaque pour une salle de bain", "cloison", "faux plafond", "peinture"):
         assert client.post("/api/chat", json={"message": q}).status_code == 200
+
+
+def test_metier_import_prices_and_unic_method(client):
+    from app import metier
+    mats = {m["sku"]: m for m in client.get("/api/materials").json()}
+    assert "UC-SEAU-KATEX" in mats and "BA13-2500x1200" in mats
+    c = client.get("/api/settings").json()
+    assert c["phone"] == "+221 77 708 50 92" and c["currency"] == "FCFA"
+    # reproduit le chantier de référence : 18 parois, 486 m² développés
+    r = metier.calculate_unic(486, faces=1, parois=18, already_developed=True)
+    got = {q.sku: q.quantity for q in r.quantities}
+    assert got["BA13-2500x1200"] == 234 and got["MONTANT-M70"] == 288 and got["UC-SEAU-ENDUIT"] == 10
+    assert got["UC-SAC-ENDUIT"] == 18 and got["UC-MAIN-OEUVRE-M2"] == 486.0
+
+
+def test_unic_method_quote_is_fully_priced_and_unit_safe(client):
+    r = client.post("/api/chat", json={"message": "méthode UniC cloison 5,40 m x 2,50 m, 18 parois, fais le devis"}).json()
+    assert "DEV-" in r["message"]["content"] and "prix UniC manquent" not in r["message"]["content"]
+    # un prix de pièce ne doit jamais s'appliquer au mètre : RAIL-R48 (ml) reste sans prix
+    mats = {m["sku"]: m for m in client.get("/api/materials").json()}
+    assert not mats["RAIL-R48"].get("selling_price")
