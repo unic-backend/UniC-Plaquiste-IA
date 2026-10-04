@@ -349,6 +349,22 @@ function Chat({ initialId }: { initialId?: string }) {
   const [pending, setPending] = useState<File[]>([]);
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
+  const canVoice = typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  useEffect(() => {
+    if (!isNative) return;
+    let off: (() => void) | undefined;
+    (async () => {
+      const { Keyboard } = await import("@capacitor/keyboard");
+      const root = document.documentElement;
+      const show = await Keyboard.addListener("keyboardWillShow", (i) => {
+        root.style.setProperty("--kb", `${i.keyboardHeight}px`);
+        setTimeout(() => end.current?.scrollIntoView({ block: "end" }), 60);
+      });
+      const hide = await Keyboard.addListener("keyboardWillHide", () => root.style.setProperty("--kb", "0px"));
+      off = () => { show.remove(); hide.remove(); root.style.setProperty("--kb", "0px"); };
+    })().catch(() => {});
+    return () => off?.();
+  }, []);
   const end = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
@@ -491,38 +507,42 @@ function Chat({ initialId }: { initialId?: string }) {
             }}
           />
           <div className="composer-bar">
-            <button className="tool" title="Joindre" onClick={() => fileRef.current?.click()}>
+            <label className="tool" title="Joindre un fichier" htmlFor="chat-file" role="button" aria-label="Joindre un fichier">
               ＋
-            </button>
-            <button className="tool" title="Photo chantier" onClick={() => camRef.current?.click()}>
-              ⌯
-            </button>
-            <button className={`tool ${rec ? "rec" : ""}`} title="Voix" onClick={voice}>
-              ●
-            </button>
-            <button className={`tool ${deep ? "rec" : ""}`} title="Réflexion profonde (Claude), pour cette question" aria-pressed={deep} onClick={() => setDeep((d) => !d)}>
+            </label>
+            <label className="tool" title="Photo chantier" htmlFor="chat-cam" role="button" aria-label="Prendre une photo">
+              📷
+            </label>
+            {canVoice && (
+              <button className={`tool ${rec ? "rec" : ""}`} title="Dicter" aria-label="Dicter" onClick={voice}>
+                🎤
+              </button>
+            )}
+            <button className={`tool ${deep ? "on" : ""}`} title="Réflexion profonde (Claude), pour cette question" aria-pressed={deep} onClick={() => setDeep((d) => !d)}>
               ✦
             </button>
-            <div className="grow">{deep ? "Réflexion profonde (Claude)" : pending.length ? `${pending.length} fichier(s)` : "Entrée pour envoyer"}</div>
+            <div className="grow">{deep ? "✦ Réflexion profonde activée" : pending.length ? `${pending.length} fichier(s) joint(s)` : ""}</div>
             <button className="send" onClick={() => send()} disabled={busy}>
               ↑
             </button>
           </div>
           <input
+            id="chat-file"
             ref={fileRef}
-            hidden
+            className="sr-only"
             type="file"
             multiple
             accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp"
-            onChange={(e) => setPending((p) => [...p, ...Array.from(e.target.files || [])])}
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
           <input
+            id="chat-cam"
             ref={camRef}
-            hidden
+            className="sr-only"
             type="file"
             accept="image/*"
             capture="environment"
-            onChange={(e) => setPending((p) => [...p, ...Array.from(e.target.files || [])])}
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
         </div>
       </div>

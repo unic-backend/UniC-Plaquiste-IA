@@ -34,6 +34,9 @@ button, input, textarea, select { font-family: inherit; }
 a { color: var(--copper-d); }
 
 .app {
+  box-sizing: border-box;
+  padding-bottom: var(--kb, 0px);
+  transition: padding-bottom .18s ease;
   display: flex;
   height: 100%;
   min-height: 100dvh;
@@ -350,7 +353,10 @@ a { color: var(--copper-d); }
   color: var(--green);
   font-size: 16px;
 }
-.tool:hover { background: var(--paper); }
+.tool { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; -webkit-tap-highlight-color: transparent; }
+.tool:hover, .tool:active { background: var(--paper); }
+.tool.on { background: rgba(180,115,63,.16); color: var(--copper-d, #8a4f22); }
+.sr-only { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 .tool.rec { color: #b42318; }
 .send {
   background: var(--green);

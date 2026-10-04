@@ -9,6 +9,7 @@ const config: CapacitorConfig = {
     allowMixedContent: false, // https uniquement
   },
   plugins: {
+    Keyboard: { resize: "none" }, // la page est remontée par --kb (voir App.tsx), fiable en plein écran
     SplashScreen: { launchShowDuration: 0 },
     StatusBar: { style: "DARK", backgroundColor: "#1A2320" },
   },
