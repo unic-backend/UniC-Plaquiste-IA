@@ -613,6 +613,7 @@ function Chat({ initialId }: { initialId?: string }) {
     setCid(initialId);
     if (!initialId) {
       setMessages([]);
+      setPending([]);   // les fichiers en attente appartiennent à la discussion quittée
       return;
     }
     // conversation créée à l'instant : l'écran est déjà à jour (et garde ses animations), on ne recharge pas
@@ -620,6 +621,7 @@ function Chat({ initialId }: { initialId?: string }) {
       justCreated.current = undefined;
       return;
     }
+    setPending([]);
     api.getConversation(initialId).then((c) => setMessages(c.messages || []));
   }, [initialId]);
 
