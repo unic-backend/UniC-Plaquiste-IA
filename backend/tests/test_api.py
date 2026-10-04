@@ -1917,3 +1917,111 @@ def test_instagram_photo_is_cropped_to_allowed_ratio_and_served_publicly(client)
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     assert instagram.photo_path("../../etc/passwd") is None and instagram.photo_path("a/b") is None
     instagram.photo_path(tok).unlink()
+
+
+_HOME = """<!DOCTYPE html><html><head><link rel="icon" href="/favicon.ico" sizes="any" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk&display=swap" rel="stylesheet">
+<style>:root{--ink:#0C1B33}body{margin:0}</style><style>:root{--ink:#0C1B33;--serif:serif}header.scrolled{background:#fff}.wrap{max-width:1200px}</style></head><body>
+<header id="header"><div class="wrap nav"><a href="#top" class="logo">UniC</a><nav class="nav-links"><a href="#services">Services</a></nav>
+<button class="nav-toggle"></button></div><div class="menu-backdrop"></div></header><section class="hero" id="top"></section>
+<footer><a href="#contact">Contact</a><span id="year"></span></footer></body></html>"""
+
+_PAGE_TEXT = """slug: faux-plafond-ba13-almadies
+description: Faux plafond BA13 aux Almadies : pose soignée par UniC Plaquiste, plaquiste à Dakar. Demandez votre devis gratuit sur WhatsApp.
+---
+Vous cherchez un plaquiste aux Almadies pour un faux plafond en BA13 ? UniC Plaquiste intervient à Dakar et dans ses quartiers pour poser des plafonds droits, propres et durables, avec des finitions soignées.
+
+## Pourquoi choisir un faux plafond BA13
+Le faux plafond en plaque de plâtre BA13 permet de cacher les gaines, d'intégrer des spots et d'obtenir une surface parfaitement lisse prête à peindre. Il améliore aussi l'aspect de la pièce et facilite l'entretien.
+
+## Notre façon de travailler
+- Visite et prise de mesures sur place
+- Devis clair, sans surprise
+- Pose de l'ossature, des plaques puis bandes et enduits
+- Finition prête à peindre, chantier laissé propre
+
+## Zones d'intervention
+Nous travaillons aux Almadies, à Ngor, à Ouakam, à Mermoz et dans tout Dakar. Pour un projet de décoration, de moulures ou de cloisons sèches, contactez-nous : le devis est gratuit et nous répondons rapidement par appel ou par WhatsApp. UniC Plaquiste vous accompagne de la visite jusqu'à la livraison, avec un travail propre et des matériaux adaptés à votre pièce."""
+
+
+class _SiteFake:
+    def __init__(self):
+        self.calls, self.files = [], {"sitemap.xml": "<urlset>\n  <url><loc>https://www.unicplaquiste.com/</loc></url>\n</urlset>", "index.html": "<html>home</html>"}
+
+    def __call__(self, method, url, **kw):
+        import base64
+        import httpx
+        self.calls.append((method, url, kw))
+        req = httpx.Request(method, url)
+        if url == "https://www.unicplaquiste.com/":
+            return httpx.Response(200, request=req, text=_HOME)
+        if url.endswith("/repos/unic-backend/site-unic-plaquiste"):
+            return httpx.Response(200, request=req, json={"permissions": {"push": True}})
+        if "/contents/" in url:
+            path = url.split("/contents/", 1)[1]
+            if method == "GET":
+                if path in self.files:
+                    return httpx.Response(200, request=req, json={"sha": "sha-" + path, "content": base64.b64encode(self.files[path].encode()).decode()})
+                return httpx.Response(404, request=req, json={"message": "Not Found"})
+            self.files[path] = base64.b64decode(kw["json"]["content"]).decode()
+            return httpx.Response(201, request=req, json={"commit": {"html_url": "https://github.com/x/commit/abc"}})
+        return httpx.Response(404, request=req)
+
+
+def test_website_page_is_built_previewed_and_published_safely(client, monkeypatch):
+    from app import website
+    fake = _SiteFake()
+    monkeypatch.setattr(website, "_http", fake)
+    website._TPL_CACHE.update(t=0.0, data=None)
+    assert client.get("/api/website").json()["connected"] is False
+    p = client.post("/api/reseaux/posts", json={"platform": "website", "title": "Faux plafond BA13 aux Almadies | Dakar", "body": _PAGE_TEXT}).json()
+    prev = client.get(f"/api/website/preview/{p['id']}")
+    assert prev.status_code == 200
+    html = prev.json()["html"]
+    assert '<link rel="canonical" href="https://www.unicplaquiste.com/faux-plafond-ba13-almadies/"' in html
+    assert 'id="header" class="scrolled"' in html and 'href="/#services"' in html and 'href="/"' in html   # liens réécrits pour une sous-page
+    assert "application/ld+json" in html and "<h2>Zones d&#x27;intervention</h2>" in html and "<script>" in html
+    assert client.post(f"/api/website/publish/{p['id']}").status_code == 409                    # pas approuvée
+    client.post(f"/api/reseaux/posts/{p['id']}/advance")
+    client.post(f"/api/reseaux/posts/{p['id']}/advance")
+    assert client.post(f"/api/website/publish/{p['id']}").status_code == 409                    # site non connecté
+    assert client.put("/api/website/connect", json={"token": "court"}).status_code == 400
+    ok = client.put("/api/website/connect", json={"token": "github_pat_" + "x" * 30})
+    assert ok.status_code == 200 and ok.json()["connected"] is True and "github_pat" not in ok.text
+    r = client.post(f"/api/website/publish/{p['id']}")
+    assert r.status_code == 200 and r.json()["url"] == "https://www.unicplaquiste.com/faux-plafond-ba13-almadies/"
+    assert "faux-plafond-ba13-almadies/index.html" in fake.files and 'content="unic-ai"' in fake.files["faux-plafond-ba13-almadies/index.html"]
+    assert "<loc>https://www.unicplaquiste.com/faux-plafond-ba13-almadies/</loc>" in fake.files["sitemap.xml"]
+    assert fake.files["index.html"] == "<html>home</html>"                                       # l'accueil n'est jamais touché
+    written = [c[1].split("/contents/")[1] for c in fake.calls if c[0] == "PUT" and "/contents/" in c[1]]
+    assert set(written) == {"faux-plafond-ba13-almadies/index.html", "sitemap.xml"}
+
+
+def test_website_refuses_reserved_bad_and_foreign_pages(client, monkeypatch):
+    from app import website
+    fake = _SiteFake()
+    monkeypatch.setattr(website, "_http", fake)
+    short = "slug: faux-plafond\ndescription: " + "d" * 80 + "\n---\ncourt"
+    for bad in ("slug: index", "slug: ../etc", "slug: Faux Plafond"):
+        body = _PAGE_TEXT.replace("slug: faux-plafond-ba13-almadies", bad)
+        try:
+            website.parse(body)
+            assert False, bad
+        except website.WebsiteError:
+            pass
+    try:
+        website.parse(short)
+        assert False
+    except website.WebsiteError as e:
+        assert "courte" in str(e)
+    fake.files["faux-plafond-ba13-almadies/index.html"] = "<html>page faite à la main</html>"
+    from app.database import SessionLocal
+    db = SessionLocal()
+    website.connect(db, "github_pat_" + "y" * 30)
+    try:
+        website.publish(db, "Titre de test pour la page", _PAGE_TEXT)
+        assert False
+    except website.WebsiteError as e:
+        assert e.status == 409
+    assert fake.files["faux-plafond-ba13-almadies/index.html"] == "<html>page faite à la main</html>"   # jamais écrasée
+    db.close()

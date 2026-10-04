@@ -14,6 +14,7 @@ from app import __version__
 from app.api import router
 from app.api_reseaux import router as reseaux_router
 from app.api_voice import router as voice_router
+from app.api_website import router as website_router
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_columns
 from app.seed import seed_if_empty
@@ -58,6 +59,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 app.include_router(reseaux_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
+app.include_router(website_router, prefix="/api")
 
 
 @app.on_event("startup")

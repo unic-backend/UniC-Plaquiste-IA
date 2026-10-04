@@ -149,6 +149,13 @@ export const net = {
   createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
   advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
   deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  siteStatus: () => request<{ connected: boolean; repo: string; branch: string; site_url: string }>("/api/website"),
+  siteConnect: (token: string) => request("/api/website/connect", { method: "PUT", body: JSON.stringify({ token }) }),
+  siteDisconnect: () => request("/api/website", { method: "DELETE" }),
+  siteDraft: (topic: string, details: string) =>
+    request<{ id: string; title: string }>("/api/website/draft", { method: "POST", body: JSON.stringify({ topic, details }) }),
+  sitePreview: (id: string) => request<{ html: string; words: number; url: string }>(`/api/website/preview/${id}`),
+  sitePublish: (id: string) => request<{ url: string; commit: string }>(`/api/website/publish/${id}`, { method: "POST" }),
   instagramStatus: () => request<InstagramStatus>("/api/instagram"),
   instagramSaveApp: (app_id: string, app_secret: string) =>
     request<InstagramStatus>("/api/instagram/app", { method: "PUT", body: JSON.stringify({ app_id, app_secret }) }),

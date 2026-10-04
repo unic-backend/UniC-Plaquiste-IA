@@ -1,6 +1,7 @@
 import * as I from "./Icons";
 import { LinkedInConnect, LinkedInPublish } from "./LinkedIn";
 import { InstagramConnect, InstagramPublish } from "./Instagram";
+import { SiteConnect, SitePageActions } from "./Site";
 import { sharePhoto } from "./Google";
 import { useEffect, useState } from "react";
 import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
@@ -120,6 +121,7 @@ export function Reseaux() {
   const [busy, setBusy] = useState(false);
   const [li, setLi] = useState<{ connected: boolean; pageReady: boolean }>({ connected: false, pageReady: false });
   const [ig, setIg] = useState(false);
+  const [siteOk, setSiteOk] = useState(false);
   const { msg, say } = useToast();
   const refreshLi = () => net.linkedinStatus().then((s) => setLi({ connected: s.connected, pageReady: s.connected && s.page_scope && !!s.page_id })).catch(() => {});
   const refreshIg = () => net.instagramStatus().then((s) => setIg(s.connected)).catch(() => {});
@@ -232,6 +234,7 @@ export function Reseaux() {
         {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
         {sel === "linkedin" && <LinkedInConnect say={say} onChange={refreshLi} />}
         {sel === "instagram" && <InstagramConnect say={say} onChange={refreshIg} />}
+        {sel === "website" && <SiteConnect say={say} onChange={setSiteOk} onDraft={load} />}
 
         <section className="card-box">
           <h3>Booster ({p.label})</h3>
@@ -256,6 +259,9 @@ export function Reseaux() {
             {d.hashtags && <p className="hint">{d.hashtags}</p>}
             {d.platform === "linkedin" && d.status === "approved" && (
               <LinkedInPublish post={d} connected={li.connected} pageReady={li.pageReady} say={say} onDone={load} />
+            )}
+            {d.platform === "website" && d.kind === "post" && d.status !== "published" && (
+              <SitePageActions post={d} connected={siteOk} say={say} onDone={load} />
             )}
             {d.platform === "instagram" && d.status === "approved" && (
               <InstagramPublish post={d} connected={ig} say={say} onDone={load} />
