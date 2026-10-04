@@ -269,6 +269,12 @@ export function Reseaux() {
   );
 }
 
+/** Lien Google qui demande de se connecter AU compte indiqué (utile quand le téléphone est connecté à un autre compte). */
+const googleLink = (email: string, target: string) =>
+  email.includes("@")
+    ? `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(email.trim())}&continue=${encodeURIComponent(target)}`
+    : target;
+
 export function Courrier() {
   const [status, setStatus] = useState<{ read: boolean; send: boolean; ai: boolean; note: string } | null>(null);
   const [mails, setMails] = useState<Mail[]>([]);
@@ -327,12 +333,13 @@ export function Courrier() {
           ) : (
             <section className="card-box">
               <label>Connecter Gmail</label>
-              <ol className="steps">
-                <li>Active la <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener noreferrer">validation en 2 étapes</a> de ton compte Google.</li>
-                <li>Crée un <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">mot de passe d'application</a> (nom : UniC AI). Google affiche 16 lettres.</li>
-                <li>Colle-les ici avec ton adresse Gmail.</li>
-              </ol>
+              <p className="hint">Étape 1 : écris l'adresse du compte à connecter (ton Gmail d'entreprise).</p>
               <input type="email" inputMode="email" autoComplete="off" placeholder="ton.adresse@gmail.com" value={gAddr} onChange={(e) => setGAddr(e.target.value)} />
+              <ol className="steps" start={2}>
+                <li>Touche <a href={googleLink(gAddr, "https://myaccount.google.com/signinoptions/twosv")} target="_blank" rel="noopener noreferrer">activer la validation en 2 étapes</a>. Google te demandera de te connecter à CE compte (pas ton compte perso). Tes autres comptes ne sont pas touchés.</li>
+                <li>Touche <a href={googleLink(gAddr, "https://myaccount.google.com/apppasswords")} target="_blank" rel="noopener noreferrer">créer le mot de passe d'application</a> (nom : UniC AI). Google affiche 16 lettres : copie-les.</li>
+                <li>Reviens ici et colle-les.</li>
+              </ol>
               <input type="password" autoComplete="off" placeholder="Mot de passe d'application (16 lettres)" value={gPwd} onChange={(e) => setGPwd(e.target.value)} />
               <button className="btn btn-copper" disabled={busy || !gAddr.includes("@") || gPwd.replace(/\s/g, "").length < 16}
                 onClick={() => run(async () => { await net.connectGmail(gAddr, gPwd); setGPwd(""); refresh(); load(); }, "Gmail connecté.")}>
