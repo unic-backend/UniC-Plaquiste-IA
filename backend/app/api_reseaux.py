@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -423,28 +423,82 @@ def google_reply_draft(review_id: str, body: ReviewReplyIn, db: Session = Depend
 
 class MemoryIn(BaseModel):
     text: str = Field(..., min_length=5, max_length=mem.MAX_TEXT)
-    kind: str = Field("fact", pattern="^(fact|preference|correction)$")
+    kind: str = Field("fact", pattern="^(fact|preference|correction|task)$")
     pinned: bool = False
 
 
+class MemoryDecision(BaseModel):
+    action: str = Field(..., pattern="^(confirm|reject|archive|restore|pin|unpin)$")
+
+
 def _mem_out(m) -> dict:
-    return {"id": m.id, "text": m.text, "kind": m.kind, "source": m.source, "pinned": m.pinned,
+    return {"id": m.id, "text": m.text, "kind": m.kind, "source": m.source, "pinned": m.pinned, "nature": m.nature,
+            "state": m.state, "importance": m.importance, "occurrences": m.occurrences,
+            "expires_at": m.expires_at.isoformat() if m.expires_at else None,
             "created_at": m.created_at.isoformat() if m.created_at else None}
 
 
 @router.get("/memory")
-def memory_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def memory_list(state: str = "active", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app.models import Memory
-    return [_mem_out(m) for m in db.query(Memory).order_by(Memory.pinned.desc(), Memory.created_at.desc()).all()]
+    q = db.query(Memory)
+    if state != "all":
+        q = q.filter(Memory.state == state)
+    return [_mem_out(m) for m in q.order_by(Memory.pinned.desc(), Memory.created_at.desc()).all()]
+
+
+@router.get("/memory/conflicts")
+def memory_conflicts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return mem.conflicts(db)
+
+
+@router.get("/memory/state")
+def memory_state(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return mem.state_report(db)
+
+
+@router.get("/memory/search")
+def memory_search(q: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Ce que l'IA retrouverait pour cette question, et pourquoi."""
+    return [{**_mem_out(h.memory), "pourquoi": h.why()} for h in mem.retrieve(db, q)]
 
 
 @router.post("/memory")
 def memory_add(body: MemoryIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    m = mem.add(db, body.text, kind=body.kind, source="user", pinned=body.pinned)
+    try:
+        m = mem.add(db, body.text, kind=body.kind, source="user", pinned=body.pinned)
+    except mem.MemoryRefused as refus:
+        raise HTTPException(422, str(refus))
+    db.commit()   # garde le compteur d'occurrences d'un doublon
     if m is None:
-        raise HTTPException(409, "Déjà en mémoire ou trop court")
+        raise HTTPException(409, "Déjà en mémoire (compté une fois de plus) ou trop court")
+    return _mem_out(m)
+
+
+@router.patch("/memory/{mid}")
+def memory_decide(mid: str, body: MemoryDecision, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    m = mem.decide(db, mid, body.action)
+    if m is None:
+        raise HTTPException(404, "Souvenir introuvable")
+    audit(db, user.id, f"memory_{body.action}", "memory", mid)
     db.commit()
     return _mem_out(m)
+
+
+@router.post("/memory/import")
+async def memory_import(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Importe un export ChatGPT / Claude (json, zip) ou un texte : suppositions à confirmer, jamais des faits."""
+    raw = await file.read()
+    if len(raw) > 60 * 1024 * 1024:
+        raise HTTPException(413, "Fichier trop volumineux (60 Mo max)")
+    try:
+        texts = mem.candidates_from_export(raw, file.filename or "")
+    except mem.UnknownImport as exc:
+        raise HTTPException(400, str(exc))
+    result = mem.import_candidates(db, texts)
+    audit(db, user.id, "memory_import", "memory", file.filename or "", str(result))
+    db.commit()
+    return {**result, "candidats": len(texts)}
 
 
 @router.delete("/memory/{mid}")

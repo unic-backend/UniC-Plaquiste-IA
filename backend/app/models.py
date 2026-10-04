@@ -615,13 +615,24 @@ class InboxMessage(Base):
 
 
 class Memory(Base):
-    """Mémoire durable de l'assistant : faits, préférences, corrections. Persiste entre conversations."""
+    """Mémoire durable de l'assistant : faits, préférences, tâches. Persiste entre conversations.
+
+    `nature` dit D'OÙ vient ce qu'on croit savoir : fact / preference = dit par le patron ;
+    inference = déduit par l'IA ou importé, jamais un fait tant que le patron ne l'a pas confirmé ;
+    temporary = vrai maintenant, expiré bientôt. `state` dit ce que le patron en a décidé.
+    """
 
     __tablename__ = "memories"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     text: Mapped[str] = mapped_column(String(600))
-    kind: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | correction
-    source: Mapped[str] = mapped_column(String(16), default="user")  # user (explicite) | auto
+    kind: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | correction | task
+    source: Mapped[str] = mapped_column(String(16), default="user")  # user | auto | import
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    nature: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | inference | temporary
+    state: Mapped[str] = mapped_column(String(12), default="active")  # active | rejected | archived
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)  # même chose dite plusieurs fois : comptée, pas dupliquée
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
