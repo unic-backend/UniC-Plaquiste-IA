@@ -13,7 +13,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import object_session, Session
 
 from app import learned
-from app.capabilities import health_dashboard, registry_snapshot
+from app.capabilities import health_dashboard, registry_snapshot, release_memory
 from app.config import settings
 from app.database import get_db
 from app.documents import process_file, save_upload, search_pages
@@ -220,7 +220,10 @@ def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
     db.flush()
     if conv.title == "Nouvelle conversation" and text:
         conv.title = text[:80]
-    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
+    try:
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
+    finally:
+        release_memory()
     meta = {
         "structured": reply.structured,
         "artifacts": reply.artifacts,
@@ -333,6 +336,8 @@ async def upload_file(
     info = process_file(rec, db)
     audit(db, user.id, "upload", "file", rec.id, rec.filename)
     db.commit()
+    del data
+    release_memory()
     return {
         "id": rec.id,
         "filename": rec.filename,

@@ -141,6 +141,18 @@ def memory_mb() -> dict:
     return out
 
 
+def release_memory() -> None:
+    """Rend au système la mémoire libérée après un gros travail (fichier, réponse longue) : le serveur ne gonfle pas au fil des envois."""
+    import ctypes
+    import gc
+
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:   # hors Linux/glibc : sans effet
+        pass
+
+
 def health_dashboard(db=None) -> dict:
     from app.database import engine
     db_ok = True
