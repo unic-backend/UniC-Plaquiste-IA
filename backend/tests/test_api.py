@@ -2313,3 +2313,11 @@ def test_round_table_experts_then_arbiter(monkeypatch):
     monkeypatch.setattr(roundtable, "_ask", lambda s, u: "")
     assert "error" in roundtable.run("x", "y")
     assert "error" in roundtable.run("", "y")
+
+
+def test_availability_note_reports_real_connectors(client):
+    from app import agent, linkedin
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        n = agent.availability_note(db)
+        assert "LinkedIn NON CONNECTÉ" in n and "site web NON CONNECTÉ" in n and n.startswith("\nÉTAT RÉEL")

@@ -737,7 +737,12 @@ class AgentSession:
                 "note": "Chaque document a son propre numéro (initiales du client + date). Donne-les tous, sans les mélanger."}
 
 
-def availability_note() -> str:
-    """Quels connecteurs sont réellement configurés (pour que l'IA ne promette rien d'impossible)."""
-    return (f"\\nÉTAT : courrier {'actif' if mailbox.imap_configured() else 'NON DISPONIBLE'} ; "
-            f"fiche Google {'active' if gbp.configured() else 'NON DISPONIBLE'} ; publication automatique : jamais (brouillons seulement).")
+def availability_note(db=None) -> str:
+    """État RÉEL des connecteurs (pour que l'IA ne promette rien d'impossible ni ne nie ce qui marche)."""
+    from app.capabilities import _connectors
+    c = _connectors(db)
+    on = lambda k: "ACTIF" if c.get(k) else "NON CONNECTÉ"
+    return (f"\nÉTAT RÉEL DES CONNECTEURS : courrier {on('email')} ; fiche Google {on('gbp')} ; site web {on('website')} ; "
+            f"LinkedIn {on('linkedin')} ; Instagram {on('instagram')} ; voix ElevenLabs {on('voice')} ; OCR {on('ocr')} ; vision (photos, plans) {on('vision')}. "
+            "Publication : jamais sans le clic d'approbation du patron (LinkedIn publie seulement après son accord) ; TikTok, WhatsApp et les autres réseaux : "
+            "texte ou script préparé, le patron envoie lui-même. Pour « l'état des connecteurs » : donne CETTE liste telle quelle, sans dire que tu n'as pas testé.")

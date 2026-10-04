@@ -939,7 +939,7 @@ def handle_turn(
                 tools_on = bool(chain) and chain[0].id == "claude"
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 if tools_on:
-                    msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note()
+                    msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note(db)
                 with live_stream():
                     ai = chat_complete(msgs, deep=deep, web=can_search,
                                        tools=agent.TOOLS if tools_on else None, tool_handler=session)
