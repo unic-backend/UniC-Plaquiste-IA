@@ -33,6 +33,15 @@ def disponible() -> bool:
     return langues() is not None
 
 
+def scale_for(page, wanted: float, max_side: int) -> float:
+    """Échelle de rendu bornée : un plan A1/A0 à 300 DPI ferait 200 Mo en mémoire et planterait le serveur (512 Mo)."""
+    try:
+        w, h = page.get_size()
+        return max(0.2, min(wanted, max_side / max(w, h, 1)))
+    except Exception:
+        return min(wanted, 1.5)
+
+
 def ocr_pdf_page(path: Path, index: int) -> str:
     """Texte d'une page PDF sans calque texte. Vide si OCR impossible."""
     lang = langues()
@@ -44,7 +53,8 @@ def ocr_pdf_page(path: Path, index: int) -> str:
         import pytesseract
 
         doc = pdfium.PdfDocument(str(path))
-        image = doc[index].render(scale=ECHELLE_RENDU).to_pil()
+        page = doc[index]
+        image = page.render(scale=scale_for(page, ECHELLE_RENDU, 5000)).to_pil()
         return pytesseract.image_to_string(image, lang=lang).strip()
     except Exception as exc:
         logger.debug("OCR page %s impossible : %s", index + 1, exc)

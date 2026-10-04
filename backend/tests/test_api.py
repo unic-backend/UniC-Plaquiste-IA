@@ -2344,3 +2344,18 @@ def test_claude_is_told_about_attached_file(client, monkeypatch):
     r = client.post("/api/chat", json={"message": "Lit le plan", "file_ids": [fid]})
     assert r.status_code == 200, r.text
     assert "FICHIER(S) JOINT(S)" in seen["system"] and fid in seen["system"] and "read_plan" in seen["system"]
+
+
+def test_huge_plan_pdf_is_rendered_within_memory_bounds(client):
+    import io
+    from reportlab.pdfgen import canvas
+    import pypdfium2 as pdfium
+    from app import ocr
+    b = io.BytesIO(); c = canvas.Canvas(b, pagesize=(2384, 3370)); c.rect(100, 100, 2000, 3000); c.save()   # A0
+    p = "/tmp/_a0_test.pdf"
+    open(p, "wb").write(b.getvalue())
+    pg = pdfium.PdfDocument(p)[0]
+    w, h = pg.render(scale=ocr.scale_for(pg, 300 / 72, 5000)).to_pil().size
+    assert max(w, h) <= 5001 and w * h < 30_000_000          # sans borne : 139 millions de pixels (≈ 420 Mo)
+    r = client.post("/api/files", files={"file": ("a0.pdf", b.getvalue(), "application/pdf")})
+    assert r.status_code == 200 and r.json()["processing"]["status"] in ("completed", "completed_no_ocr")

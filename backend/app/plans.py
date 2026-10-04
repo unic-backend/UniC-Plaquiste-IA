@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app import vision
+from app import ocr, vision
 from app.config import settings
 from app.models import AppSetting, ExtractedPage, StoredFile
 
@@ -69,7 +69,7 @@ def _images(rec: StoredFile, pages: list[ExtractedPage]) -> list[str]:
             wanted = [p.page_number - 1 for p in pages if p.classification == "plan"] or [p.page_number - 1 for p in pages]
             pdf = pdfium.PdfDocument(str(path))
             try:
-                return [vision._jpeg_b64(pdf[i].render(scale=2).to_pil()) for i in wanted[:MAX_IMAGES]]
+                return [vision._jpeg_b64(pdf[i].render(scale=ocr.scale_for(pdf[i], 2, 2400)).to_pil()) for i in wanted[:MAX_IMAGES]]
             finally:
                 pdf.close()
         with Image.open(path) as img:

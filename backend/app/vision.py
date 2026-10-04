@@ -6,6 +6,7 @@ import io
 import logging
 from pathlib import Path
 
+from app import ocr
 from app.config import settings
 
 logger = logging.getLogger("unic.vision")
@@ -72,7 +73,8 @@ def describe_pdf_page(path: Path, index: int) -> str:
 
         pdf = pdfium.PdfDocument(str(path))
         try:
-            return _ask(_jpeg_b64(pdf[index].render(scale=2).to_pil()))
+            page = pdf[index]
+            return _ask(_jpeg_b64(page.render(scale=ocr.scale_for(page, 2, 2400)).to_pil()))
         finally:
             pdf.close()
     except Exception as exc:

@@ -70,6 +70,9 @@ def classify_page(text: str) -> str:
     return "document"
 
 
+MAX_OCR_PAGES = 15
+
+
 def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dict:
     path = Path(file_rec.path)
     reader = PdfReader(str(path))
@@ -88,7 +91,7 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
         except Exception:
             text = ""
         text = text.replace("\x00", " ").strip()
-        if len(text) < 20:
+        if len(text) < 20 and i < MAX_OCR_PAGES:   # borne le temps de lecture d'un gros scan
             text = ocr.ocr_pdf_page(path, i) or text
         if len(text) < 20 and vision_pages < vision.MAX_PDF_PAGES:
             vision_pages += 1
