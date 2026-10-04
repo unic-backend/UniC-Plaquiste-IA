@@ -11,6 +11,8 @@ Principes (repris de l'expérience du projet ARENA du même propriétaire, réé
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import io
 import json
 import logging
@@ -404,6 +406,31 @@ def state_report(db: Session) -> dict:
 
 
 # ---------- apprentissage automatique (suppositions) ----------
+
+# Textes à analyser APRÈS l'envoi de la réponse (l'extraction est un second appel à l'IA : il ne doit pas faire attendre le patron).
+AFTER_REPLY: ContextVar = ContextVar("unic_after_reply", default=None)
+
+
+def defer_extract(db: Session, user_text: str) -> None:
+    pending = AFTER_REPLY.get()
+    if pending is None:
+        extract_and_store(db, user_text)  # pas d'envoi différé possible (appel direct) : tout de suite
+    else:
+        pending.append(user_text)
+
+
+def extract_in_background(user_text: str) -> None:
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        extract_and_store(db, user_text)
+        db.commit()
+    except Exception as exc:  # jamais bloquer ni faire échouer quoi que ce soit
+        logger.debug("extraction mémoire différée impossible : %s", exc)
+    finally:
+        db.close()
+
 
 def extract_and_store(db: Session, user_text: str) -> list[str]:
     """Extraction depuis un message du patron : des SUPPOSITIONS à confirmer, jamais des faits. Silencieuse en cas d'échec."""

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
@@ -218,8 +218,18 @@ def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
 
 
 @router.post("/chat")
-def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return _chat_turn(db, user, body)
+def chat(body: ChatIn, background: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import memory as mem
+
+    pending: list[str] = []
+    tok = mem.AFTER_REPLY.set(pending)
+    try:
+        out = _chat_turn(db, user, body)
+    finally:
+        mem.AFTER_REPLY.reset(tok)
+    for t in pending:
+        background.add_task(mem.extract_in_background, t)   # après l'envoi de la réponse
+    return out
 
 
 @router.post("/chat/stream")
@@ -234,15 +244,22 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
     from app import ai
     from app.database import SessionLocal
 
+    from app import memory as mem
+
     q: queue.Queue = queue.Queue()
     uid = user.id
+    pending: list[str] = []
 
     def worker():
         db = SessionLocal()
         tok = ai.STREAM_SINK.set(q.put)
+        mtok = mem.AFTER_REPLY.set(pending)
         try:
             q.put({"t": "status", "text": "Je réfléchis…"})
             q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body)})
+            q.put(None)   # flux fermé : l'écran n'attend plus
+            for t in pending:
+                mem.extract_in_background(t)   # la mémoire se met à jour ensuite
         except HTTPException as exc:
             q.put({"t": "error", "message": str(exc.detail)})
         except Exception:
@@ -250,6 +267,7 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
             q.put({"t": "error", "message": "Erreur interne. Réessaie dans un instant."})
         finally:
             ai.STREAM_SINK.reset(tok)
+            mem.AFTER_REPLY.reset(mtok)
             db.close()
             q.put(None)
 

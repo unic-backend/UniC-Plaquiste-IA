@@ -952,7 +952,7 @@ def handle_turn(
                     if session is not None and session.alerts:
                         reply_text += ("\n\n⚠️ Tentative de manipulation détectée dans : "
                                        + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")
-                    mem.extract_and_store(db, text)
+                    mem.defer_extract(db, text)
                     if deep and ai.provider != "claude":
                         reply_text += (
                             "\n\n_Raisonnement profond Claude NON DISPONIBLE"
