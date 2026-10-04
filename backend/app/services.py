@@ -366,8 +366,6 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     warnings = []
     if not q.prices_complete:
         warnings.append("Des prix UniC sont manquants. Aucun tarif n'a été inventé. Total incomplet.")
-    if q.assumptions:
-        warnings.append("Des hypothèses de calcul s'appliquent — voir notes.")
     filename = f"UniC_Devis_{q.number.replace('-', '_')}.pdf"
     key = f"unic-quote-{q.number.lower()}"
     dest = settings.artifacts_path / "quotes" / filename
@@ -377,13 +375,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         f"Statut {q.status}",
         f"Validité {q.validity_days} jours",
     ]
-    extra = []
-    if q.assumptions:
-        extra.append("<b>Hypothèses</b><br/>" + q.assumptions.replace("\n", "<br/>"))
-    if q.missing_info:
-        extra.append("<b>Informations manquantes</b><br/>" + q.missing_info.replace("\n", "<br/>"))
-    if q.payment_terms:
-        extra.append("<b>Conditions de paiement</b><br/>" + q.payment_terms)
+    extra = []   # hypothèses et infos manquantes restent dans la conversation, pas sur le devis du client
     build_document_pdf(
         dest,
         company=company,

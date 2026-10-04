@@ -352,17 +352,26 @@ def _render(
     for p in extra_paragraphs or []:
         story += [Paragraph(p, txt), Spacer(1, P(5))]
 
-    # --- conditions et exclusions (devis)
+    # --- conditions et exclusions (devis), comme sur le devis de référence
     if is_quote:
-        bullets = [b for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
-        bullets.append("Les quantités pourront être ajustées selon la surface réelle constatée sur site.")
-        story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, P(2))]
-        story += [Paragraph(f"• {b.strip()}", txt) for b in bullets]
+        labour = any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
+        important = [b.strip() for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
+        important += [
+            "Les prix indiqués dans la colonne « Prix Unitaire » sont des prix à l'unité, et non des montants totaux.",
+            *([] if labour else ["Ce devis porte uniquement sur les fournitures et matériaux. La main-d'œuvre fait l'objet d'un devis distinct."]),
+            "UniC Plaquiste se charge de la commande, de la réception et de la vérification qualitative des matériaux.",
+            "Les quantités pourront être ajustées selon la surface réelle constatée sur site.",
+        ]
         try:
             from app import metier
             excl = list(metier.load().get("exclusions_habituelles") or [])
         except Exception:
             excl = []
+        if not labour:
+            excl.insert(0, "La main-d'œuvre et l'exécution des travaux.")
+        story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, P(2)),
+                  Paragraph("Conditions importantes :", _st("ci", textColor=BLUE, leading=12))]
+        story += [Paragraph(f"• {b}", txt) for b in important]
         if excl:
             story += [Spacer(1, P(4)), Paragraph("Ne sont pas inclus :", _st("ex", textColor=BLUE, leading=12))]
             story += [Paragraph(f"• {x}", txt) for x in excl]
@@ -383,7 +392,7 @@ def _render(
     return doc.page
 
 
-SOUS_ACCROCHE = "Fournisseur et pose"
+SOUS_ACCROCHE = "Fourniture et pose"
 MIN_SCALE = 0.72   # en dessous, le texte devient illisible : le document passe sur plusieurs pages (exception)
 
 

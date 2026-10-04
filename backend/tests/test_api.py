@@ -1233,7 +1233,7 @@ def test_every_document_pdf_lists_its_lines(client):
         text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
         assert "Plaque standard BA13" in text, url
         assert len(pdf) == 1, f"{url} : {len(pdf)} pages"   # un document = une page, sauf exception
-        assert "Fournisseur et pose" in text
+        assert "Fourniture et pose" in text
         assert "UniC Plaquiste" in text and "NINEA" in text
 
 
