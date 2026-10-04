@@ -11,7 +11,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, revise, trust, google_business as gbp, mailbox, metier
+from app import calc, connectors, pricecheck, revise, trust, google_business as gbp, mailbox, metier
 from app.connectors import ConnectorError
 from app.models import Customer, DeliveryNote, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
 from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
@@ -101,9 +101,10 @@ TOOLS: list[dict] = [
         "description": ("Crée un DEVIS (brouillon + PDF) à partir du dernier calcul. À n'appeler que si le patron demande le devis. "
                         "vat_rate : 0 = pas de TVA ; ex. 0.18 = 18 % ; omis = réglage de l'entreprise."),
         "input_schema": {"type": "object", "properties": {
-            "client_name": {"type": "string", "description": "Prénom et nom (ou raison sociale) du client"},
-            "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1}},
-            "additionalProperties": False},
+            "client_name": {"type": "string", "description": "Prénom et nom (ou raison sociale) du client, donnés par le patron"},
+            "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "checks": {"type": "string", "description": "Ce que tu as VÉRIFIÉ avant de créer : client, dimensions, TVA, prix, hypothèses"}},
+            "required": ["client_name", "checks"], "additionalProperties": False},
     },
     {
         "name": "create_invoice",
@@ -183,6 +184,11 @@ AGENT_PROMPT = (
     "Ne redemande jamais une information déjà donnée ; demande seulement ce qui manque vraiment (ex. dimensions). "
     "Les prix viennent UNIQUEMENT de get_prices et des documents : n'invente jamais un prix, et ne dis pas qu'« aucun tarif n'existe » "
     "sans avoir appelé get_prices. « Pas de TVA » = vat_rate 0. Un calcul n'est pas un devis : ne crée un document que s'il est demandé."
+    "\nRÈGLES DE TRAVAIL : tu es une IA universelle, pas un automate de devis : tu ne fais que ce que le patron demande. "
+    "Chaque document se construit à partir des informations données dans CETTE demande, de calculate_materials et de get_prices. "
+    "N'utilise JAMAIS un ancien devis ou document comme modèle (ni lignes, ni quantités, ni prix, ni client) : list_documents sert à "
+    "retrouver un document, pas à le copier. Avant de créer un document : comprends la demande, calcule, vérifie (client, dimensions, "
+    "TVA, prix, cohérence), puis crée ; signale les hypothèses, les lignes sans prix et les doutes AVANT de présenter le PDF."
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
@@ -348,6 +354,7 @@ class AgentSession:
             raise ConnectorError(str(exc), 400)
         data = res.to_dict()
         self.state["last_calc"] = data   # utilisé par create_quote / bons
+        self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible
         return {"titre": data.get("title"), "compris": data.get("understanding"), "etapes": data.get("steps", [])[:12],
                 "quantites": data.get("quantities", []), "hypotheses": data.get("assumptions", []),
                 "manquant": data.get("missing", []),
@@ -371,8 +378,18 @@ class AgentSession:
     def _doc(self, kind: str, row) -> None:
         self.documents.append({"kind": kind, "id": row.id})
 
-    def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None) -> dict:
+    def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
+                        checks: str = "") -> dict:
         qty = self._quantities()
+        if not client_name.strip():
+            raise ConnectorError("Nom du client manquant : demande-le au patron (il fait partie du numéro du devis).", 400)
+        if len(checks.strip()) < 10:
+            raise ConnectorError("Vérifie d'abord (client, dimensions, TVA, prix) puis décris ce que tu as vérifié dans `checks`.", 400)
+        prev = self.state.get("calc_quote_id")
+        if prev and self.db.get(Quotation, prev) is not None:
+            raise ConnectorError(
+                "Ce calcul a déjà servi à un devis. Pour le corriger : revise_document. Pour un AUTRE devis : "
+                "refais calculate_materials avec les données de la nouvelle demande (jamais de copie d'un ancien devis).", 400)
         cust = self._customer(client_name)
         kwargs = {} if vat_rate is None else {"vat_rate": vat_rate}
         q = quotation_from_quantities(
@@ -381,12 +398,21 @@ class AgentSession:
             notes="Devis préparé par JARVIS à partir du métré de la conversation.",
             assumptions=(self.state.get("last_calc") or {}).get("assumptions"),
             missing=(self.state.get("last_calc") or {}).get("missing"), **kwargs)
+        anomalies = pricecheck.check_quote(q)
+        if anomalies:   # un devis faux n'entre pas dans la bibliothèque
+            revise.discard(self.db, "quote", q, self.user_id)
+            raise ConnectorError(f"Contrôle des prix échoué, devis NON créé : {anomalies[:5]}", 500)
+        audit(self.db, self.user_id, "quote_checks", "quotation", q.id, checks[:300])
+        self.db.commit()
         self.state["last_quote_id"] = q.id
+        self.state["calc_quote_id"] = q.id
         self._doc("quote", q)
         manquants = [i.description for i in q.items if i.unit_price is None]
         return {"numero": q.number, "statut": q.status, "total": q.total, "devise": q.currency,
                 "prix_complets": q.prices_complete, "lignes": len(q.items), "lignes_sans_prix": manquants,
-                "tva": q.vat_rate, "note": "Brouillon : le patron relit et approuve. Le devis s'affiche dans la conversation."}
+                "tva": q.vat_rate, "controle_prix": "conforme à la grille UniC",
+                "note": "Brouillon : le patron relit et approuve. Le devis s'affiche dans la conversation. "
+                        "Signale-lui les lignes sans prix et les hypothèses AVANT de parler du PDF."}
 
     def _t_create_invoice(self, quote_number: str = "", kind: str = "invoice") -> dict:
         quote = None

@@ -786,7 +786,7 @@ def test_ai_builds_quote_from_context_without_canned_question(client, claude):
     out = _chat(client, claude, [
         ("tool", "get_prices", {"query": "BA13"}),
         ("tool", "calculate_materials", {"kind": "partition", "length_m": 23, "height_m": 4, "sides": 2}),
-        ("tool", "create_quote", {"client_name": "Fast Mbaye", "vat_rate": 0}),
+        ("tool", "create_quote", {"client_name": "Fast Mbaye", "vat_rate": 0, "checks": "client, dimensions et TVA 0 donnés"}),
         ("text", "Devis prêt, sans TVA."),
     ], "Fais moi un devis pdf")
     msg = out["message"]
@@ -815,7 +815,7 @@ def test_ai_get_prices_exposes_the_real_grid(client):
 def test_ai_follow_up_turn_reuses_state_and_links_documents(client, claude):
     first = _chat(client, claude, [
         ("tool", "calculate_materials", {"kind": "partition", "length_m": 10, "height_m": 2.5}),
-        ("tool", "create_quote", {"client_name": "Moussa Ba"}), ("text", "Devis prêt."),
+        ("tool", "create_quote", {"client_name": "Moussa Ba", "checks": "client et métré vérifiés"}), ("text", "Devis prêt."),
     ], "Fais le devis de 10 m par 2,5 m pour Moussa Ba")
     cid, devis = first["conversation_id"], client.get(f"/api/quotes/{first['message']['meta']['structured']['documents'][0]['id']}").json()["number"]
     second = _chat(client, claude, [("tool", "create_purchase_order", {}), ("tool", "create_invoice", {}), ("text", "Bon et facture créés.")],
@@ -1178,3 +1178,29 @@ def test_agent_list_documents_searches_by_client_and_amount(client):
     assert s("list_documents", {"kind": "quote", "query": "zzzintrouvable"})["trouves"] == 0
     assert s("list_documents", {"kind": "quote", "query": q.number, "min_total": 10**9})["trouves"] == 0
     db.close()
+
+
+def test_quote_gates_client_checks_and_no_reuse_of_a_calculation(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    s("calculate_materials", {"kind": "partition", "length_m": 6, "height_m": 2.5, "sides": 2})
+    assert "client" in s("create_quote", {"client_name": "", "checks": "tout est vérifié ici"})["error"].lower()
+    assert "error" in s("create_quote", {"client_name": "Awa Fall", "checks": "ok"})        # vérification non décrite
+    ok = s("create_quote", {"client_name": "Awa Fall", "checks": "client, dimensions 6x2,5, TVA, prix vérifiés"})
+    assert ok["numero"].endswith("AF") or "AF" in ok["numero"]
+    again = s("create_quote", {"client_name": "Autre Client", "checks": "client et métré vérifiés ici"})
+    assert "revise_document" in again["error"] and "calculate_materials" in again["error"]   # pas de copie d'un devis
+    s("calculate_materials", {"kind": "partition", "length_m": 3, "height_m": 2.5, "sides": 1})
+    other = s("create_quote", {"client_name": "Autre Client", "checks": "nouvelles dimensions vérifiées"})
+    assert other["numero"] != ok["numero"]
+    db.close()
+
+
+def test_with_claude_documents_go_through_the_agent_not_the_automaton(client, claude):
+    fake = claude(_scripted([("text", "Quelles sont les dimensions ?")]))
+    client.post("/api/chat", json={"message": "cloison 8 m x 2,5 m une face"})
+    out = client.post("/api/chat", json={"message": "fais le devis pour Awa Fall"}).json()["message"]
+    assert "documents" not in (out.get("meta", {}).get("structured") or {})
+    assert fake.calls

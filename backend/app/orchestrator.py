@@ -465,15 +465,8 @@ def handle_turn(
     # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
     # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
     chain0 = provider_chain(deep)
-    if chain0 and chain0[0].id == "claude":
-        if intent == "create_quote" and not _last_quantities(state):
-            fresh = _calc_for(db, text)
-            if not (fresh is not None and fresh.quantities):
-                intent = "chat"
-        elif intent in ("create_po", "create_dn") and not _last_quantities(state):
-            intent = "chat"
-        elif intent == "create_invoice" and not (_match_quote(db, text) or state.get("last_quote_id")):
-            intent = "chat"
+    if chain0 and chain0[0].id == "claude" and intent in ("create_quote", "create_po", "create_dn", "create_invoice"):
+        intent = "chat"   # l'IA lit, calcule, vérifie puis crée avec ses outils ; l'automate ne sert que sans Claude
 
     if intent == "cancel_pending":
         state.pop("pending", None)
