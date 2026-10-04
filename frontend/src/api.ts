@@ -103,7 +103,11 @@ export type GOptimize = {
 export type Post = {
   photo_brief?: string;
   id: string; platform: string; kind: string; title: string; body: string; hashtags: string;
-  in_reply_to: string; status: string; created_at: string | null;
+  in_reply_to: string; status: string; created_at: string | null; external_url?: string;
+};
+export type LinkedInStatus = {
+  app_saved: boolean; client_id: string; connected: boolean; name: string; days_left: number | null;
+  page_id: string; page_scope: boolean; redirect_uri: string;
 };
 export type Mail = {
   suspect?: boolean;
@@ -142,6 +146,17 @@ export const net = {
   createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
   advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
   deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  linkedinStatus: () => request<LinkedInStatus>("/api/linkedin"),
+  linkedinSaveApp: (client_id: string, client_secret: string, page_id: string) =>
+    request<LinkedInStatus>("/api/linkedin/app", { method: "PUT", body: JSON.stringify({ client_id, client_secret, page_id }) }),
+  linkedinAuthUrl: (page: boolean) => request<{ url: string }>(`/api/linkedin/auth-url?page=${page}`),
+  linkedinDisconnect: () => request("/api/linkedin", { method: "DELETE" }),
+  linkedinPublish: (id: string, target: "profile" | "page", photo: File | null) => {
+    const fd = new FormData();
+    fd.append("target", target);
+    if (photo) fd.append("photo", photo, photo.name);
+    return request<Post>(`/api/reseaux/posts/${id}/publish-linkedin`, { method: "POST", body: fd });
+  },
   generate: (b: { platform: string; topic?: string; details?: string; comment?: string }) =>
     request<{ text: string; warning: string | null }>("/api/reseaux/generate", { method: "POST", ...json(b) }),
   boost: (b: { target: string; facts?: string }) =>

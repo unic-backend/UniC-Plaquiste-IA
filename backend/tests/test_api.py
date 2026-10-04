@@ -1772,3 +1772,62 @@ def test_hydrofuge_2m_price_and_default_plate_rule(client):
     texts = " ".join(m.text for m in db.query(Memory).filter(Memory.state == "active").all())
     assert "sans préciser la taille" in texts.lower() and "hydrofuge 2 m = 6 000" in texts
     db.close()
+
+
+class _LinkedInFake:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, method, url, **kw):
+        import httpx
+        self.calls.append((method, url, kw))
+        req = httpx.Request(method, url)
+        if url.endswith("/oauth/v2/accessToken"):
+            return httpx.Response(200, request=req, json={"access_token": "AQ-secret-token", "expires_in": 5184000})
+        if url.endswith("/v2/userinfo"):
+            return httpx.Response(200, request=req, json={"sub": "abc123", "name": "Ousmane Diop"})
+        if "registerUpload" in url:
+            return httpx.Response(200, request=req, json={"value": {"asset": "urn:li:digitalmediaAsset:A1", "uploadMechanism": {
+                "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {"uploadUrl": "https://upload.example/x"}}}})
+        if method == "PUT":
+            return httpx.Response(201, request=req)
+        if url.endswith("/v2/ugcPosts"):
+            return httpx.Response(201, request=req, headers={"x-restli-id": "urn:li:share:777"}, json={})
+        return httpx.Response(404, request=req)
+
+
+def test_linkedin_connect_and_publish_flow(client, monkeypatch):
+    from urllib.parse import parse_qs, urlparse
+    from app import linkedin
+    fake = _LinkedInFake()
+    monkeypatch.setattr(linkedin, "_http", fake)
+    st = client.get("/api/linkedin").json()
+    assert st["connected"] is False and st["redirect_uri"].endswith("/api/linkedin/callback")
+    assert client.get("/api/linkedin/auth-url").status_code == 409                      # pas d'appli enregistrée
+    saved = client.put("/api/linkedin/app", json={"client_id": "77abcdefgh", "client_secret": "WPL_secret_value", "page_id": "123456"})
+    assert saved.status_code == 200 and "WPL_secret" not in saved.text and saved.json()["app_saved"] is True
+    url = client.get("/api/linkedin/auth-url").json()["url"]
+    q = parse_qs(urlparse(url).query)
+    assert q["client_id"] == ["77abcdefgh"] and "w_member_social" in q["scope"][0] and "w_organization" not in q["scope"][0]
+    bad = client.get("/api/linkedin/callback", params={"code": "c", "state": "FAUX"})
+    assert bad.status_code == 400 and client.get("/api/linkedin").json()["connected"] is False   # state falsifié refusé
+    url = client.get("/api/linkedin/auth-url").json()["url"]
+    state = parse_qs(urlparse(url).query)["state"][0]
+    ok = client.get("/api/linkedin/callback", params={"code": "code123", "state": state})
+    assert ok.status_code == 200 and "AQ-secret" not in ok.text
+    assert client.get("/api/linkedin/callback", params={"code": "code123", "state": state}).status_code == 400   # état à usage unique
+    st = client.get("/api/linkedin").json()
+    assert st["connected"] is True and st["name"] == "Ousmane Diop" and st["days_left"] >= 59 and "AQ-secret" not in str(st)
+    # publication : brouillon refusé, approuvé accepté
+    p = client.post("/api/reseaux/posts", json={"platform": "linkedin", "title": "Chantier", "body": "Un beau plafond à Dakar.", "hashtags": "#plaquiste"})
+    assert p.status_code == 200
+    pid = p.json()["id"]
+    assert client.post(f"/api/reseaux/posts/{pid}/publish-linkedin", data={"target": "profile"}).status_code == 409
+    client.post(f"/api/reseaux/posts/{pid}/advance")
+    client.post(f"/api/reseaux/posts/{pid}/advance")
+    r = client.post(f"/api/reseaux/posts/{pid}/publish-linkedin", data={"target": "profile"}, files={"photo": ("c.jpg", b"\xff\xd8photo", "image/jpeg")})
+    assert r.status_code == 200 and r.json()["status"] == "published" and "urn:li:share:777" in r.json()["external_url"]
+    post_call = [c for c in fake.calls if c[1].endswith("/v2/ugcPosts")][-1]
+    assert post_call[2]["json"]["author"] == "urn:li:person:abc123"
+    assert post_call[2]["json"]["specificContent"]["com.linkedin.ugc.ShareContent"]["shareMediaCategory"] == "IMAGE"
+    assert client.delete("/api/linkedin").status_code == 200 and client.get("/api/linkedin").json()["connected"] is False

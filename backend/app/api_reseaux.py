@@ -9,7 +9,7 @@ import logging
 
 from app import trust
 from app.config import settings
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -691,3 +691,100 @@ def google_optimize(db: Session = Depends(get_db), user: User = Depends(get_curr
     audit(db, user.id, "google_optimize", "google", "")
     db.commit()
     return data
+
+
+# ---------- LinkedIn ----------
+
+def _redirect_uri(request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/api/linkedin/callback"
+
+
+def _li(fn, *a, **k):
+    from app import linkedin
+    try:
+        return fn(*a, **k)
+    except linkedin.LinkedInError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+class LinkedInAppIn(BaseModel):
+    client_id: str
+    client_secret: str = ""
+    page_id: str = ""
+
+
+@router.get("/linkedin")
+def linkedin_status(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    return linkedin.status(db, _redirect_uri(request))
+
+
+@router.put("/linkedin/app")
+def linkedin_app(body: LinkedInAppIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    _li(linkedin.save_app, db, body.client_id, body.client_secret, body.page_id)
+    audit(db, user.id, "linkedin_app", "linkedin", "")
+    db.commit()
+    return linkedin.status(db, _redirect_uri(request))
+
+
+@router.get("/linkedin/auth-url")
+def linkedin_auth_url(request: Request, page: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    url = _li(linkedin.auth_url, db, _redirect_uri(request), page)
+    db.commit()
+    return {"url": url}
+
+
+@router.get("/linkedin/callback", include_in_schema=False)
+def linkedin_callback(request: Request, code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+    """Retour de LinkedIn (navigateur, sans en-tête d'accès) : protégé par le `state` à usage unique."""
+    from fastapi.responses import HTMLResponse
+    from app import linkedin
+    page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='font-family:system-ui;padding:32px;text-align:center'><h2>{t}</h2><p>{m}</p></body>")
+    if error or not code:
+        return HTMLResponse(page.format(t="Connexion annulée", m="Retourne dans l'appli UniC AI et recommence."), status_code=400)
+    try:
+        name = linkedin.finish(db, code, state, _redirect_uri(request))
+        db.commit()
+    except linkedin.LinkedInError as exc:
+        db.commit()
+        return HTMLResponse(page.format(t="Connexion impossible", m=str(exc).replace("<", "")), status_code=400)
+    return HTMLResponse(page.format(t="LinkedIn connecté ✓", m=f"{name or 'Compte'} est relié. Retourne dans l'appli UniC AI."))
+
+
+@router.delete("/linkedin")
+def linkedin_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    linkedin.disconnect(db)
+    audit(db, user.id, "linkedin_disconnect", "linkedin", "")
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/reseaux/posts/{pid}/publish-linkedin")
+async def publish_linkedin(pid: str, target: str = Form("profile"), photo: UploadFile | None = File(None),
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publication réelle sur LinkedIn : texte approuvé uniquement, photo facultative, cible = profil ou Page."""
+    from app import linkedin
+    p = _get_post(db, pid)
+    if p.platform != "linkedin" or p.kind != "post":
+        raise HTTPException(400, "Ce n'est pas une publication LinkedIn.")
+    if p.status != "approved":
+        raise HTTPException(409, "Approuve le texte avant la publication.")
+    err = check_post(p.platform, p.body, p.hashtags)
+    if err:
+        raise HTTPException(400, err)
+    data = await photo.read() if photo is not None else None
+    if data is not None and len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Photo trop lourde (8 Mo maximum).")
+    out = _li(linkedin.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), data or None,
+              "page" if target == "page" else "profile")
+    p.status, p.published_at = "published", utcnow()
+    p.external_id, p.external_url = out["id"][:500], out["url"][:500]
+    audit(db, user.id, "linkedin_publish", "social_post", p.id, target)
+    db.commit()
+    return _post_out(p)

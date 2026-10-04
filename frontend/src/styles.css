@@ -848,3 +848,10 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sample { width: 100%; margin: 8px 0; }
 .rec-on { background: #c4342a !important; animation: pulse 1.2s ease-in-out infinite; }
 .speak-btn.on { color: var(--copper); }
+
+/* ---- LinkedIn ---- */
+.copy-line { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.copy-line code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; background: var(--shade); padding: 8px; border-radius: 10px; }
+.open-link { display: block; text-align: center; text-decoration: none; margin: 10px 0 6px; padding: 12px; border-radius: 14px; }
+.li-publish { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.card-box input + input, .card-box input + button { margin-top: 8px; }

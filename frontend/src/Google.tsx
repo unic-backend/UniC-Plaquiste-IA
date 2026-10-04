@@ -24,9 +24,9 @@ async function scheduleReminders(on: boolean): Promise<string> {
 }
 
 /** Photo + texte vers l'appli de partage (Google Maps / Profil d'établissement, WhatsApp…). */
-async function sharePhoto(photo: File | null, text: string): Promise<string> {
+export async function sharePhoto(photo: File | null, text: string, app = "Google Maps / Profil d'établissement", title = "Publication fiche Google"): Promise<string> {
   await cp(text);   // beaucoup d'applis ignorent le texte quand une image est jointe : il est déjà copié
-  if (!isNative) return "Texte copié. Ajoute la photo dans Google.";
+  if (!isNative) return "Texte copié. Ajoute la photo dans l'appli.";
   const { Share } = await import("@capacitor/share");
   let files: string[] | undefined;
   if (photo) {
@@ -37,12 +37,12 @@ async function sharePhoto(photo: File | null, text: string): Promise<string> {
       fr.onerror = () => rej(new Error("Photo illisible"));
       fr.readAsDataURL(photo);
     });
-    const path = `fiche-google-${Date.now()}.jpg`;
+    const path = `publication-${Date.now()}.jpg`;
     await Filesystem.writeFile({ path, data, directory: Directory.Cache });
     files = [(await Filesystem.getUri({ path, directory: Directory.Cache })).uri];
   }
-  await Share.share({ title: "Publication fiche Google", text, files, dialogTitle: "Publier sur…" });
-  return "Partage ouvert. Choisis Google Maps / Profil d'établissement ; le texte est déjà copié.";
+  await Share.share({ title, text, files, dialogTitle: "Publier sur…" });
+  return `Partage ouvert. Choisis ${app} ; le texte est déjà copié.`;
 }
 
 const API_REQUEST = `Business: UniC Plaquiste - drywall, false ceilings, partitions, painting and interior finishing, Dakar, Senegal

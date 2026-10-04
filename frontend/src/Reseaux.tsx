@@ -1,4 +1,6 @@
 import * as I from "./Icons";
+import { LinkedInConnect, LinkedInPublish } from "./LinkedIn";
+import { sharePhoto } from "./Google";
 import { useEffect, useState } from "react";
 import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
@@ -115,7 +117,10 @@ export function Reseaux() {
   const [comment, setComment] = useState("");
   const [plan, setPlan] = useState("");
   const [busy, setBusy] = useState(false);
+  const [li, setLi] = useState<{ connected: boolean; pageReady: boolean }>({ connected: false, pageReady: false });
   const { msg, say } = useToast();
+  const refreshLi = () => net.linkedinStatus().then((s) => setLi({ connected: s.connected, pageReady: s.connected && s.page_scope && !!s.page_id })).catch(() => {});
+  useEffect(() => { refreshLi(); }, []);
 
   const load = () => {
     net.platforms().then((r) => {
@@ -222,6 +227,7 @@ export function Reseaux() {
         </div>
 
         {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
+        {sel === "linkedin" && <LinkedInConnect say={say} onChange={refreshLi} />}
 
         <section className="card-box">
           <h3>Booster ({p.label})</h3>
@@ -244,6 +250,10 @@ export function Reseaux() {
             {d.title && <p className="hint">{d.title}</p>}
             <p className="post-body">{d.body}</p>
             {d.hashtags && <p className="hint">{d.hashtags}</p>}
+            {d.platform === "linkedin" && d.status === "approved" && (
+              <LinkedInPublish post={d} connected={li.connected} pageReady={li.pageReady} say={say} onDone={load} />
+            )}
+            {d.external_url && <p className="hint"><a href={d.external_url} target="_blank" rel="noopener noreferrer">Voir la publication</a></p>}
             <div className="toolbar">
               {NEXT[d.status] && (
                 <button className="btn btn-copper btn-small" disabled={busy}
@@ -255,6 +265,11 @@ export function Reseaux() {
                 <button className="btn btn-copper btn-small" disabled={busy}
                   onClick={() => run(async () => { await net.publish(d.id); load(); }, "Publié sur la fiche Google.")}>
                   Publier sur Google
+                </button>
+              )}
+              {d.platform === "linkedin" && d.status !== "published" && (
+                <button className="btn btn-line btn-small" onClick={async () => { try { say(await sharePhoto(null, `${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, "LinkedIn", "Publication LinkedIn")); } catch { say("Partage annulé."); } }}>
+                  Partager
                 </button>
               )}
               <button className="btn btn-line btn-small" onClick={() => copy(`${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, say)}>Copier</button>
