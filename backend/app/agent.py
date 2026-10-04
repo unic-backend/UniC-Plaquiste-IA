@@ -372,7 +372,8 @@ class AgentSession:
     def _t_save_social_post_draft(self, platform: str, body: str, hashtags: str = "", title: str = "") -> dict:
         if not connectors.valid_platform(platform):
             raise ConnectorError("Plateforme inconnue.", 400)
-        p = connectors.save_social_draft(self.db, platform, body, hashtags, title)
+        from app.assistant import plain_post
+        p = connectors.save_social_draft(self.db, platform, plain_post(body) or body, hashtags, title)
         self.cards.append({"kind": "social", "id": p.id})
         return {"draft_id": p.id, "statut": "brouillon : publication manuelle après approbation"}
 

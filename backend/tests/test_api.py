@@ -1831,3 +1831,10 @@ def test_linkedin_connect_and_publish_flow(client, monkeypatch):
     assert post_call[2]["json"]["author"] == "urn:li:person:abc123"
     assert post_call[2]["json"]["specificContent"]["com.linkedin.ugc.ShareContent"]["shareMediaCategory"] == "IMAGE"
     assert client.delete("/api/linkedin").status_code == 200 and client.get("/api/linkedin").json()["connected"] is False
+
+
+def test_plain_post_strips_markdown_and_draft_title():
+    from app.assistant import plain_post
+    t = plain_post("**Post LinkedIn : Cloison terminée**\n\nUne **belle** cloison.\n\n\n\n- point un\n- point deux")
+    assert "*" not in t and "Post LinkedIn" not in t and t.startswith("Une belle cloison.") and "• point un" in t
+    assert plain_post(None) is None

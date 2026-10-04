@@ -67,25 +67,42 @@ def propose_reply(sender: str, subject: str, body: str, instruction: str = "", d
     )
 
 
+def plain_post(text: str | None) -> str | None:
+    """Texte publiable tel quel : les réseaux n'affichent pas le Markdown, et un titre de brouillon n'a rien à faire dans le post."""
+    if not text:
+        return text
+    t = re.sub(r"^\s*\**\s*(?:post|publication|texte|brouillon)\s+(?:linkedin|facebook|instagram|tiktok|x|google|pinterest|whatsapp)[^\n]*\n+", "", text, flags=re.I)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"^\s{0,3}#{1,6}\s*", "", t, flags=re.M)
+    t = re.sub(r"^\s*[-*]\s+", "• ", t, flags=re.M)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 def draft_post(platform: str, topic: str, details: str = "", memory: str = "") -> str | None:
     spec = PLATFORMS[platform]
-    return _ask(
-        f"{_BASE} Rédige un texte pour {spec['label']} (maximum {spec['max']} caractères). "
-        f"Conseil plateforme : {spec['tip']} N'invente aucun chiffre, prix ni référence chantier : "
-        "utilise seulement les faits donnés. Termine par un appel à l'action.",
+    size = min(spec["max"], 900) if platform in ("linkedin", "facebook", "google_business") else spec["max"]
+    return plain_post(_ask(
+        f"{_BASE} Rédige un texte prêt à publier pour {spec['label']}, de 350 à {size} caractères maximum. "
+        f"Conseil plateforme : {spec['tip']} N'invente aucun fait, chiffre, prix, lieu ni référence chantier : "
+        "utilise seulement les faits donnés ; sans détails, reste simple et général. "
+        "FORMAT : texte brut uniquement, sans Markdown (aucun astérisque, aucun # ni titre), "
+        "sans phrase d'introduction du type « Voici le post », sans titre. Phrases courtes, 1 à 3 émojis maximum, "
+        "premier paragraphe = l'accroche. Termine par un appel à l'action (contacter UniC Plaquiste). Pas de hashtags : ils sont ajoutés à part.",
         f"Sujet : {topic}\nFaits fournis : {details or 'aucun'}",
         memory=memory,
-    )
+    ))
 
 
 def reply_to_comment(platform: str, comment: str, instruction: str = "", memory: str = "") -> str | None:
     spec = PLATFORMS[platform]
-    return _ask(
+    return plain_post(_ask(
         f"{_BASE} {_UNTRUSTED} Rédige une réponse courte et polie à ce commentaire/avis sur {spec['label']} "
-        f"(maximum {min(spec['max'], 600)} caractères). Avis négatif : excuses sobres, proposition de contact.",
+        f"(maximum {min(spec['max'], 600)} caractères), en texte brut sans Markdown. Avis négatif : excuses sobres, proposition de contact.",
         f"Consigne : {instruction or 'aucune'}\n<donnee>{comment[:3000]}</donnee>",
         memory=memory,
-    )
+    ))
 
 
 def boost_plan(target: str, facts: str = "", deep: bool = False, memory: str = "") -> str | None:
