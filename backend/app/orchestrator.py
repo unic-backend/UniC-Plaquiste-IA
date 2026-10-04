@@ -266,10 +266,10 @@ def _intent(text: str, state: dict) -> str:
         return "briefing"
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
-    if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t) or re.fullmatch(
-        r"(bonjour|salut|bonsoir|coucou|hello|hi|salam)[\s!.]*", t
-    ):
+    if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t):
         return "help"
+    if re.fullmatch(r"\s*(bonjour|salut|bonsoir|coucou|hello|hi|salam|salaam|salam aleykum|salam maleekum|nanga def|nanga def\s*\?)[\s!.?]*", t):
+        return "greeting"
     if _QUESTION.match(t) and not has_doc_number:
         return "chat"
     if re.search(r"sant[eé] du syst[eè]me|\bhealth\b|statut (du )?serveur", t):
@@ -465,6 +465,8 @@ def handle_turn(
     # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
     # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
     chain0 = provider_chain(deep)
+    if chain0 and chain0[0].id == "claude" and intent == "greeting":
+        intent = "chat"   # un bonjour appelle un bonjour, pas le mode d'emploi
     if chain0 and chain0[0].id == "claude" and intent in ("create_quote", "create_po", "create_dn", "create_invoice"):
         intent = "chat"   # l'IA lit, calcule, vérifie puis crée avec ses outils ; l'automate ne sert que sans Claude
 
@@ -485,6 +487,8 @@ def handle_turn(
         reply_text = data["text"]
         structured = {"briefing": data}
         caps.append("briefing")
+    elif intent == "greeting":
+        reply_text = "Bonjour ! Je vous écoute."
     elif intent == "help":
         reply_text = _help_text()
     elif intent == "health":

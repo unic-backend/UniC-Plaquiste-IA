@@ -140,7 +140,7 @@ def test_quote_in_one_message(client):
 
 
 def test_greeting_and_price_question(client):
-    assert "UniC AI" in client.post("/api/chat", json={"message": "bonjour"}).json()["message"]["content"]
+    assert "Bonjour" in client.post("/api/chat", json={"message": "bonjour"}).json()["message"]["content"]
     r = client.post("/api/chat", json={"message": "quel est le prix du BA13 ?"}).json()
     assert "BA13" in r["message"]["content"]
 
@@ -671,7 +671,7 @@ def test_general_questions_go_to_the_ai_not_to_business_actions(phrase):
     ("cloison 12 m x 2,5 m deux faces", "calculate"), ("peinture 80 m2", "calculate"),
     ("quel est le prix du BA13 ?", "prices"), ("montre mes devis", "list_quotes"),
     ("approuve UC-2026-0714-OD", "approve"), ("Retiens que le BA13 coûte 4500", "remember"),
-    ("bonjour", "help"),
+    ("bonjour", "greeting"),
 ])
 def test_business_commands_still_act(phrase, expected):
     from app.orchestrator import _intent
@@ -1204,3 +1204,16 @@ def test_with_claude_documents_go_through_the_agent_not_the_automaton(client, cl
     out = client.post("/api/chat", json={"message": "fais le devis pour Awa Fall"}).json()["message"]
     assert "documents" not in (out.get("meta", {}).get("structured") or {})
     assert fake.calls
+
+
+def test_hello_gets_a_greeting_not_the_manual(client):
+    out = client.post("/api/chat", json={"message": "bonjour"}).json()["message"]["content"]
+    assert "Exemples" not in out and "NON DISPONIBLES" not in out
+    out2 = client.post("/api/chat", json={"message": "aide"}).json()["message"]["content"]
+    assert "Exemples" in out2
+
+
+def test_hello_goes_to_claude_when_available(client, claude):
+    fake = claude(_scripted([("text", "Bonjour patron, que puis-je faire pour vous ?")]))
+    out = client.post("/api/chat", json={"message": "salut"}).json()["message"]["content"]
+    assert "Bonjour patron" in out and "Exemples" not in out and fake.calls

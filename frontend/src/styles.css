@@ -699,3 +699,5 @@ h1, h2, h3, b, strong, th { font-weight: 800; }
 .greet-fr.show { opacity: 1; transform: none; }
 .greet { animation: none; min-height: 84px; }
 .bubble.fresh { cursor: default; }
+
+.bubble.typing .md > :last-child::after { content: ""; display: inline-block; width: 3px; height: 1em; margin-left: 3px; background: var(--green); border-radius: 2px; vertical-align: -0.15em; animation: caretBlink .8s steps(2, start) infinite; }

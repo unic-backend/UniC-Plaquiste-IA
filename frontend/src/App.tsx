@@ -125,17 +125,19 @@ function useTypewriter(full: string, active: boolean) {
   const [n, setN] = useState(active ? 0 : full.length);
   useEffect(() => {
     if (!active) { setN(full.length); return; }
+    // fins de mots : l'écriture avance mot par mot (~3,5 s au plus, quelle que soit la longueur)
+    const ends: number[] = [];
+    for (const m of full.matchAll(/\S+\s*/g)) ends.push(m.index! + m[0].length);
+    const perTick = Math.max(1, Math.ceil(ends.length / 90));
+    let w = 0;
     setN(0);
-    const step = Math.max(2, Math.ceil(full.length / 110));
     const id = setInterval(() => {
-      setN((c) => {
-        const next = Math.min(full.length, c + step);
-        if (next >= full.length) clearInterval(id);
-        return next;
-      });
+      w = Math.min(ends.length, w + perTick);
+      setN(w >= ends.length ? full.length : ends[w - 1]);
+      if (w >= ends.length) clearInterval(id);
       const chat = document.querySelector(".chat");
-      if (chat && chat.scrollHeight - chat.scrollTop - chat.clientHeight < 140) chat.scrollTo({ top: chat.scrollHeight });
-    }, 18);
+      if (chat && chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160) chat.scrollTo({ top: chat.scrollHeight });
+    }, 40);
     return () => clearInterval(id);
   }, [full, active]);
   return { text: full.slice(0, n), done: n >= full.length, skip: () => setN(full.length) };
@@ -167,7 +169,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
   return (
     <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
-      <div className={`bubble ${m.fresh ? "fresh" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
+      <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
         <div className="md" dangerouslySetInnerHTML={{ __html: md(shown) }} />
         {m.role === "user" && (
           <div className="msg-actions">
