@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app import calc
-from app import agent, context as ctx, memory as mem, metier
+from app import agent, briefing as brief, context as ctx, memory as mem, metier, pricecheck
 from app.ai import chat_complete, deep_available, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
@@ -262,6 +262,8 @@ def _intent(text: str, state: dict) -> str:
 
     if mem.parse_remember(text):
         return "remember"
+    if re.search(r"\bbriefing\b|\bbrief du (jour|matin)\b|r[eé]sum[eé] de ma journ[eé]e|qu'est[- ]ce que j'ai (aujourd'hui|[aà] faire)", t):
+        return "briefing"
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
     if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t) or re.fullmatch(
@@ -485,6 +487,11 @@ def handle_turn(
             )
         except mem.MemoryRefused as refus:
             reply_text = str(refus)
+    elif intent == "briefing":
+        data = brief.compose(db)
+        reply_text = data["text"]
+        structured = {"briefing": data}
+        caps.append("briefing")
     elif intent == "help":
         reply_text = _help_text()
     elif intent == "health":
@@ -935,7 +942,7 @@ def handle_turn(
                 if ai.error == "refusal":
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:
-                    reply_text = ai.text
+                    reply_text = ai.text + pricecheck.review_reply(db, ai.text)
                     mem.extract_and_store(db, text)
                     if deep and ai.provider != "claude":
                         reply_text += (

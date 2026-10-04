@@ -40,6 +40,7 @@ from app.models import (
     User,
     utcnow,
 )
+from app import pricecheck
 from app.orchestrator import handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
@@ -532,6 +533,7 @@ def _quote_out(q: Quotation) -> dict:
         "total": q.total, "prices_complete": q.prices_complete,
         "notes": q.notes, "assumptions": q.assumptions, "missing_info": q.missing_info,
         "artifact_id": q.artifact_id, "version": q.version,
+        "price_check": pricecheck.check_quote(q),
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "items": [
             {

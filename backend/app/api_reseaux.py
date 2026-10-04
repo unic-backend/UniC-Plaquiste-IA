@@ -510,3 +510,34 @@ def memory_delete(mid: str, db: Session = Depends(get_db), user: User = Depends(
     db.delete(m)
     db.commit()
     return {"ok": True}
+
+
+# ---------- briefing & journal ----------
+
+@router.get("/briefing")
+def get_briefing(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import briefing
+    return briefing.compose(db)
+
+
+JOURNAL_LABELS = {
+    "agent_tool": "Outil appelé par l'IA", "mail_reply_draft": "Réponse e-mail préparée", "mail_approve": "E-mail approuvé",
+    "mail_sent": "E-mail envoyé", "social_draft": "Brouillon de publication", "social_review": "Publication en revue",
+    "social_approved": "Publication approuvée", "social_published": "Publication marquée publiée",
+    "google_publish": "Publié sur Google", "google_reply_draft": "Réponse à un avis préparée",
+    "create_quote": "Devis créé", "upload": "Fichier reçu", "memory_import": "Mémoire importée",
+    "memory_confirm": "Souvenir confirmé", "memory_reject": "Souvenir rejeté", "social_account": "Profil enregistré",
+}
+
+
+@router.get("/journal")
+def journal(limit: int = 100, action: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Chronologie de ce que l'IA et le patron ont fait : heure, action, cible, détail. Rien n'est calculé ni deviné."""
+    from app.models import AuditLog
+    q = db.query(AuditLog)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    rows = q.order_by(AuditLog.created_at.desc()).limit(max(1, min(limit, 300))).all()
+    return [{"id": r.id, "at": r.created_at.isoformat() if r.created_at else None, "action": r.action,
+             "label": JOURNAL_LABELS.get(r.action, r.action), "target": f"{r.entity_type} {r.entity_id}".strip(),
+             "details": (r.details or "")[:300]} for r in rows]

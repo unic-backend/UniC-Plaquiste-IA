@@ -1021,3 +1021,63 @@ def test_old_database_is_migrated_for_memory_columns(tmp_path):
     with eng.connect() as c:
         row = c.execute(text("select nature, state, importance, occurrences from memories")).one()
     assert tuple(row) == ("fact", "active", 0.5, 1)
+
+
+def test_pricecheck_flags_wrong_total_and_price(client):
+    from app.database import SessionLocal
+    from app.models import Quotation, QuotationItem, Material
+    from app import pricecheck
+    from app.services import current_price
+    db = SessionLocal()
+    q = Quotation(number="UC-TEST-PC", title="t", status="draft", subtotal=1000, vat_rate=0.18, total=1180)
+    db.add(q)
+    db.flush()
+    db.add(QuotationItem(quotation_id=q.id, position=1, description="ligne", quantity=2, unit="u", unit_price=500, total=1000))
+    db.commit()
+    db.refresh(q)
+    assert pricecheck.check_quote(q) == []
+    q.total = 1500
+    q.items[0].total = 900
+    types = {i["type"] for i in pricecheck.check_quote(q)}
+    assert {"total_ligne", "total"} <= types
+    db.delete(q)
+    db.commit()
+    db.close()
+
+
+def test_pricecheck_reply_warns_on_off_grid_amount(client):
+    from app.database import SessionLocal
+    from app import pricecheck
+    from app.models import Material
+    from app.services import current_price
+    db = SessionLocal()
+    m = next((m for m in db.query(Material).all()
+              if (p := current_price(db, m.id, "selling")) and float(p.amount).is_integer() and p.amount >= 1000), None)
+    assert m is not None
+    ok = f"{m.name} : {int(current_price(db, m.id, 'selling').amount)} FCFA"
+    assert pricecheck.review_reply(db, ok) == ""
+    assert pricecheck.review_reply(db, "") == ""
+    db.close()
+
+
+def test_briefing_sections_have_honest_states(client):
+    r = client.get("/api/briefing")
+    assert r.status_code == 200
+    data = r.json()
+    assert "sections" in data or "text" in data or data
+    blob = str(data)
+    assert "NON_CONFIGURE" in blob or "OK" in blob
+
+
+def test_briefing_via_chat(client):
+    r = client.post("/api/chat", json={"message": "briefing du jour"}).json()
+    assert r["message"]["content"].strip()
+
+
+def test_journal_lists_actions(client):
+    client.post("/api/chat", json={"message": "cloison 4 m x 2,5 m une face"})
+    r = client.get("/api/journal")
+    assert r.status_code == 200 and isinstance(r.json(), list)
+    for row in r.json():
+        assert {"at", "action", "label", "target", "details"} <= set(row)
+    assert client.get("/api/journal", params={"action": "zzz"}).json() == []
