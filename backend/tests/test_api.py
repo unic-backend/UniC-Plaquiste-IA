@@ -1167,3 +1167,14 @@ def test_agent_revise_tool_fixes_instead_of_duplicating(client, claude):
     bad = s("revise_document", {"kind": "quote", "remove": ["zzz"]})
     assert "error" in bad
     db.close()
+
+
+def test_agent_list_documents_searches_by_client_and_amount(client):
+    from app.agent import AgentSession
+    db, q = _mk_quote(client)
+    s = AgentSession(db, None)
+    hit = s("list_documents", {"kind": "quote", "query": q.number.lower()})
+    assert hit["trouves"] == 1 and hit["documents"][0]["numero"] == q.number
+    assert s("list_documents", {"kind": "quote", "query": "zzzintrouvable"})["trouves"] == 0
+    assert s("list_documents", {"kind": "quote", "query": q.number, "min_total": 10**9})["trouves"] == 0
+    db.close()

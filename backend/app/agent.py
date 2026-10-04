@@ -153,9 +153,11 @@ TOOLS: list[dict] = [
     },
     {
         "name": "list_documents",
-        "description": "Liste les derniers devis, factures, bons de commande ou bons de livraison (numéro, statut, total).",
+        "description": ("Cherche / liste les devis, factures, bons de commande ou bons de livraison (numéro, client, statut, total). "
+                        "query : morceau du nom du client, du numéro ou du titre ; min_total / max_total : montant."),
         "input_schema": {"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]}}, "required": ["kind"], "additionalProperties": False},
+            "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]}, "query": {"type": "string"},
+            "min_total": {"type": "number"}, "max_total": {"type": "number"}}, "required": ["kind"], "additionalProperties": False},
     },
 ]
 
@@ -446,12 +448,27 @@ class AgentSession:
             self.state.pop("last_quote_id", None)
         return {"retire": gone, "note": "Brouillon retiré de la bibliothèque."}
 
-    def _t_list_documents(self, kind: str) -> dict:
+    def _t_list_documents(self, kind: str, query: str = "", min_total: float | None = None,
+                          max_total: float | None = None) -> dict:
         model = {"quote": Quotation, "invoice": Invoice, "po": PurchaseOrder, "dn": DeliveryNote}.get(kind)
         if model is None:
             raise ConnectorError("Type de document inconnu.", 400)
-        rows = self.db.query(model).order_by(model.created_at.desc()).limit(10).all()
-        return {"documents": [{"numero": r.number, "statut": r.status, "total": getattr(r, "total", None)} for r in rows]}
+        words = (query or "").lower().split()
+        out = []
+        for r in self.db.query(model).order_by(model.created_at.desc()).all():
+            who = getattr(getattr(r, "customer", None), "name", None) or getattr(r, "client_label", "") or \
+                getattr(getattr(r, "supplier", None), "name", "") or ""
+            hay = f"{r.number} {r.title} {who}".lower()
+            total = getattr(r, "total", None)
+            if not all(w in hay for w in words):
+                continue
+            if min_total is not None and not (total is not None and total >= min_total):
+                continue
+            if max_total is not None and not (total is not None and total <= max_total):
+                continue
+            out.append({"numero": r.number, "client": who, "statut": r.status, "total": total,
+                        "date": r.created_at.date().isoformat() if r.created_at else None})
+        return {"documents": out[:15], "trouves": len(out)}
 
 
 def availability_note() -> str:

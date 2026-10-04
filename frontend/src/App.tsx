@@ -531,6 +531,60 @@ function Chat({ initialId }: { initialId?: string }) {
 }
 
 
+type DocFilter = { q: string; from: string; to: string; min: string; max: string };
+const NO_FILTER: DocFilter = { q: "", from: "", to: "", min: "", max: "" };
+
+function applyDocFilter(rows: any[], f: DocFilter): any[] {
+  const q = f.q.trim().toLowerCase();
+  const min = f.min === "" ? null : Number(f.min);
+  const max = f.max === "" ? null : Number(f.max);
+  return rows.filter((r) => {
+    if (q) {
+      const hay = [r.number, r.title, r.customer_name, r.client_label, r.supplier_name, r.kind, r.status].join(" ").toLowerCase();
+      if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+    }
+    const day = (r.created_at || "").slice(0, 10);
+    if (f.from && (!day || day < f.from)) return false;
+    if (f.to && (!day || day > f.to)) return false;
+    if (min !== null && !(typeof r.total === "number" && r.total >= min)) return false;
+    if (max !== null && !(typeof r.total === "number" && r.total <= max)) return false;
+    return true;
+  });
+}
+
+/** Recherche dans une bibliothèque : texte (client, numéro, titre), dates, montants. */
+function DocFilters({ value, onChange, count, total, money = true }: {
+  value: DocFilter; onChange: (f: DocFilter) => void; count: number; total: number; money?: boolean;
+}) {
+  const set = (k: keyof DocFilter) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value });
+  const active = JSON.stringify(value) !== JSON.stringify(NO_FILTER);
+  return (
+    <div className="doc-filters">
+      <input type="search" placeholder="Rechercher : client, numéro, titre…" value={value.q} onChange={set("q")} aria-label="Rechercher" />
+      <div className="doc-filters-row">
+        <label>Du <input type="date" value={value.from} onChange={set("from")} /></label>
+        <label>Au <input type="date" value={value.to} onChange={set("to")} /></label>
+        {money && <label>Min <input type="number" inputMode="numeric" value={value.min} onChange={set("min")} /></label>}
+        {money && <label>Max <input type="number" inputMode="numeric" value={value.max} onChange={set("max")} /></label>}
+      </div>
+      <p className="hint">
+        {count} sur {total} document(s)
+        {active && <> · <button className="link-btn" onClick={() => onChange(NO_FILTER)}>Effacer</button></>}
+      </p>
+    </div>
+  );
+}
+
+function useDocLibrary(load: () => Promise<any[]>) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState<DocFilter>(NO_FILTER);
+  useEffect(() => {
+    load().then(setRows);
+  }, []);
+  const shown = applyDocFilter(rows, f);
+  return { rows, shown, f, setF };
+}
+
 function TablePage({
   title,
   lede,
@@ -810,17 +864,15 @@ function ChantierDetail() {
 
 function DevisList() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.quotes().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.quotes);
   return (
     <TablePage
       title="Devis"
-      lede="PDF réels, éditables tant qu'ils sont en brouillon."
+      lede="Tous les devis de l'IA. Une correction modifie le même devis."
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={rows.map((q) => [q.number, q.title, q.customer_name, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
-      onRow={(i) => nav(`/devis/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.title, q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
 }
@@ -945,46 +997,40 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
 
 function Factures() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.invoices().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.invoices);
   return (
     <TablePage
       title="Factures"
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={rows.map((q) => [q.number, q.kind, q.customer_name, q.status, q.total, q.paid, q.remaining])}
-      onRow={(i) => nav(`/factures/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.kind, q.customer_name, q.status, q.total, q.paid, q.remaining])}
+      onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
 }
 function Commandes() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.pos().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.pos);
   return (
     <TablePage
       title="Bons de commande"
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Fournisseur", "Statut", "Total"]}
-      rows={rows.map((q) => [q.number, q.title, q.supplier_name, q.status, q.total ?? "incomplet"])}
-      onRow={(i) => nav(`/commandes/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.title, q.supplier_name, q.status, q.total ?? "incomplet"])}
+      onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
 }
 function Livraisons() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.dns().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.dns);
   return (
     <TablePage
       title="Bons de livraison"
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
-      rows={rows.map((q) => [q.number, q.title, q.customer_name, q.status])}
-      onRow={(i) => nav(`/livraisons/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.title, q.customer_name, q.status])}
+      onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );
 }
