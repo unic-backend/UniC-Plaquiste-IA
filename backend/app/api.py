@@ -12,11 +12,13 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import object_session, Session
 
+from app import learned
 from app.capabilities import health_dashboard, registry_snapshot
 from app.config import settings
 from app.database import get_db
 from app.documents import process_file, save_upload, search_pages
 from app.models import (
+    LearnedAnswer,
     Artifact,
     AuditLog,
     CompanySettings,
@@ -152,6 +154,7 @@ def get_conversation(cid: str, db: Session = Depends(get_db), user: User = Depen
         .order_by(Message.created_at.asc())
         .all()
     )
+    ok_ids = learned.validated_ids(db, [m.id for m in msgs if m.role == "assistant"])
     return {
         "id": c.id,
         "title": c.title,
@@ -161,12 +164,31 @@ def get_conversation(cid: str, db: Session = Depends(get_db), user: User = Depen
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
+                "validated": m.id in ok_ids,
                 "meta": json.loads(m.meta_json or "{}"),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in msgs
         ],
     }
+
+
+@router.post("/messages/{mid}/validate")
+def validate_message(mid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """👍 : la réponse devient du savoir validé, réutilisable quand Claude est indisponible."""
+    try:
+        learned.validate(db, mid)
+    except learned.LearnError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"validated": True, "total": db.query(LearnedAnswer).count()}
+
+
+@router.delete("/messages/{mid}/validate")
+def unvalidate_message(mid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    learned.forget(db, mid)
+    db.commit()
+    return {"validated": False, "total": db.query(LearnedAnswer).count()}
 
 
 @router.delete("/conversations/{cid}")

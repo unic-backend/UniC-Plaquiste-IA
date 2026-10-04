@@ -321,6 +321,7 @@ export const api = {
   quotes: () => request<any[]>("/api/quotes"),
   getQuote: (id: string) => request<any>(`/api/quotes/${id}`),
   preview: (artifactId: string) => request<{ pages: number; images: string[]; filename: string }>(`/api/artifacts/${artifactId}/preview`),
+  validateMessage: (id: string, on: boolean) => request<{ validated: boolean; total: number }>(`/api/messages/${id}/validate`, { method: on ? "POST" : "DELETE" }),
   regenerateCoverLetter: (id: string) => request<{ cover_letter: string }>(`/api/quotes/${id}/cover-letter`, { method: "POST" }),
   saveCoverLetter: (id: string, text: string) => request<{ cover_letter: string }>(`/api/quotes/${id}/cover-letter`, { method: "PUT", body: JSON.stringify({ text }) }),
   approveQuote: (id: string) => request(`/api/quotes/${id}/approve`, { method: "POST" }),
@@ -350,6 +351,7 @@ export type ChatMessage = {
   content: string;
   meta?: any;
   created_at?: string;
+  validated?: boolean;
   fresh?: boolean;
 };
 export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[] };

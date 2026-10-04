@@ -2266,3 +2266,33 @@ def test_logo_guide_and_audit():
         a = s("audit_logo", {"svg": svg})
         assert isinstance(a.get("score"), int), a
         assert "error" in s("audit_logo", {"svg": "<html/>"})
+
+
+def test_validated_knowledge_serves_when_claude_down(client):
+    from app import learned
+    from app.database import SessionLocal
+    from app.models import Conversation, Message, User
+    with SessionLocal() as db:
+        u = db.query(User).first()
+        c = Conversation(user_id=u.id, title="t")
+        db.add(c); db.flush()
+        q = Message(conversation_id=c.id, role="user", content="Quelle épaisseur de rail pour une cloison BA13 ?")
+        db.add(q); db.flush()
+        a = Message(conversation_id=c.id, role="assistant", content="Rails R48 en général, montants M48 entraxe 60 cm.")
+        db.add(a); db.flush()
+        bad = Message(conversation_id=c.id, role="assistant", content="Devis créé", meta_json='{"structured": {"documents": [{"id": "x"}]}}')
+        db.add(bad); db.flush()
+        try:
+            learned.validate(db, bad.id); raise AssertionError("document refusé attendu")
+        except learned.LearnError:
+            pass
+        learned.validate(db, a.id)
+        db.commit()
+        assert "R48" in learned.local_reply(db, "quelle épaisseur de rail pour une cloison BA13")
+        assert learned.local_reply(db, "quelle est la couleur du ciel au Sénégal") is None      # hors savoir : on ne devine pas
+        assert learned.local_reply(db, "crée un devis cloison BA13 rail épaisseur") is None      # action : jamais rejouée
+        assert client.post(f"/api/messages/{a.id}/validate").json()["total"] == 1
+        d = client.get(f"/api/conversations/{c.id}").json()
+        assert [m["validated"] for m in d["messages"] if m["role"] == "assistant"][0] is True
+        assert client.delete(f"/api/messages/{a.id}/validate").json()["total"] == 0
+        assert learned.local_reply(db, "quelle épaisseur de rail pour une cloison BA13") is None

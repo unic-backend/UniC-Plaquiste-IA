@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import usage
 from app import calc
-from app import agent, briefing as brief, context as ctx, memory as mem, metier, pricecheck
+from app import agent, briefing as brief, context as ctx, learned, memory as mem, metier, pricecheck
 from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
@@ -966,14 +966,15 @@ def handle_turn(
                         )
                 elif chain[0].id == "claude":
                     reason = (ai.error or "").removeprefix("claude: ") or "aucune réponse"
-                    reply_text = f"Claude n'a pas pu répondre : {reason}. Rien n'a été inventé à sa place. Réessaie."
+                    reply_text = learned.local_reply(db, text) or (
+                        f"Claude n'a pas pu répondre : {reason}. Rien n'a été inventé à sa place. Réessaie.")
                 else:
-                    reply_text = (
+                    reply_text = learned.local_reply(db, text) or (
                         "Je n'ai pas cette information dans la base UniC, et le moteur IA ne répond pas "
                         "(modèle local éteint ?). Précisez un calcul, un document, ou réessayez."
                     )
             else:
-                reply_text = (
+                reply_text = learned.local_reply(db, text) or (
                     "Je n'ai pas cette information dans la base UniC, et aucun fournisseur LLM n'est configuré. "
                     "Je peux néanmoins calculer, lire un PDF, et produire devis / facture / BC / BL / rapport.\n\n"
                     "Essayez : « cloison 12×2,5 m deux faces » ou « aide »."

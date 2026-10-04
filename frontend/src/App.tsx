@@ -273,6 +273,8 @@ function GreetingTyper({ g }: { g: Greeting }) {
 function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
   const [copied, setCopied] = useState(false);
   const [speakErr, setSpeakErr] = useState("");
+  const [kept, setKept] = useState(!!m.validated);
+  const [keepErr, setKeepErr] = useState("");
   const speech = useSpeech(m.id);
   const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
   const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
@@ -303,6 +305,13 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
               </button>
             )}
             {onRegenerate && tw.done && <button onClick={onRegenerate}><I.Refresh size={15} /> Régénérer</button>}
+            {tw.done && (
+              <button aria-pressed={kept} className={kept ? "on" : ""} title="Bonne réponse : l'IA la retient et la réutilise si Claude est indisponible"
+                onClick={async () => { setKeepErr(""); try { await api.validateMessage(m.id, !kept); setKept(!kept); } catch (e: any) { setKeepErr(e?.message || "Impossible"); } }}>
+                <I.Check size={15} /> {kept ? "Retenu" : "Retenir"}
+              </button>
+            )}
+            {keepErr && <span className="error">{keepErr}</span>}
             {speakErr && <span className="error">{speakErr}</span>}
           </div>
         )}
