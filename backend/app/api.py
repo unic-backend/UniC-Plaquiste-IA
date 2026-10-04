@@ -526,6 +526,7 @@ def _quote_out(q: Quotation) -> dict:
     return {
         "id": q.id, "number": q.number, "title": q.title, "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
+        "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
         "subtotal": q.subtotal, "vat_rate": q.vat_rate, "vat_amount": q.vat_amount,
         "total": q.total, "prices_complete": q.prices_complete,

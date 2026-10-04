@@ -588,3 +588,32 @@ def test_remember_strips_copied_quotes():
     assert p('"Retiens que le BA13 est à 4500"') == "le BA13 est à 4500"
     assert p("Retiens que l'acompte est de 30 % ; ") == "l'acompte est de 30 %"
     assert p("Retiens :  ") is None
+
+
+import pytest
+
+
+@pytest.mark.parametrize("phrase", [
+    "Quel est le prix de l'or aujourd'hui ?", "Explique-moi les réseaux de neurones",
+    "Comment créer un devis ?", "C'est quoi un bon de commande ?", "J'ai besoin d'aide pour écrire mon CV",
+    "Le montant de la TVA au Sénégal, c'est combien ?", "Raconte-moi une blague", "Traduis 'bonjour' en wolof",
+    "Où en est la guerre des prix du pétrole ?", "Écris un mail à mon propriétaire pour le loyer",
+    "Combien de temps pour aller de Dakar à Saint-Louis en voiture ?", "Résume l'histoire de l'Empire du Mali",
+    "Le rail de 300 km Dakar-Bamako, c'est quand ?", "Quelle est la capitale de 12 pays africains ?",
+])
+def test_general_questions_go_to_the_ai_not_to_business_actions(phrase):
+    from app.orchestrator import _intent
+    assert _intent(phrase, {}) == "chat", phrase
+
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("Fais le devis pour Ousmane Diop", "create_quote"), ("crée le bon de commande", "create_po"),
+    ("prépare la facture", "create_invoice"), ("crée le bon de livraison", "create_dn"),
+    ("cloison 12 m x 2,5 m deux faces", "calculate"), ("peinture 80 m2", "calculate"),
+    ("quel est le prix du BA13 ?", "prices"), ("montre mes devis", "list_quotes"),
+    ("approuve UC-2026-0714-OD", "approve"), ("Retiens que le BA13 coûte 4500", "remember"),
+    ("bonjour", "help"),
+])
+def test_business_commands_still_act(phrase, expected):
+    from app.orchestrator import _intent
+    assert _intent(phrase, {}) == expected, phrase

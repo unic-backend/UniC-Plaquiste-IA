@@ -32,6 +32,77 @@ function Badge({ s }: { s?: string }) {
   return <span className={`badge ${v}`}>{v || "—"}</span>;
 }
 
+function fmt(n: number | null | undefined, cur = ""): string {
+  if (n === null || n === undefined) return "—";
+  return `${new Intl.NumberFormat("fr-FR").format(n)}${cur ? ` ${cur}` : ""}`;
+}
+
+const DOC_LABEL: Record<string, string> = { quote: "Devis", invoice: "Facture", po: "Bon de commande", dn: "Bon de livraison" };
+
+/** Document affiché directement dans la conversation (lignes, total, actions). */
+function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: string }) {
+  const [d, setD] = useState<any>(null);
+  const [err, setErr] = useState("");
+  const load = () => {
+    const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
+    fn(id).then(setD).catch((e: Error) => setErr(e.message));
+  };
+  useEffect(load, [kind, id]);
+  if (err) return <div className="doc-card"><p className="error">{err}</p></div>;
+  if (!d) return <div className="doc-card">Chargement du document…</div>;
+  const cur = d.currency || "";
+  const priced = kind !== "dn";
+  const dl = d.download_url
+    ? () => downloadAuth(d.download_url, d.filename || `${d.number}.pdf`)
+    : d.artifact_id
+      ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
+      : null;
+  return (
+    <div className="doc-card">
+      <div className="doc-card-head">
+        <div>
+          <b>{DOC_LABEL[kind]} {d.number}</b>
+          <div className="hint">{d.customer_name || d.client_label ? `Client : ${d.customer_name || d.client_label} · ` : ""}{d.title}</div>
+        </div>
+        <Badge s={d.status} />
+      </div>
+      <div className="doc-lines">
+        {(d.items || []).map((it: any) => (
+          <div className="doc-line" key={it.id || it.position}>
+            <div className="doc-line-main">
+              <span>{it.description}</span>
+              <span className="doc-qty">{it.quantity} {it.unit}</span>
+            </div>
+            {priced && (
+              <div className="doc-line-price">
+                <span>{it.unit_price === null || it.unit_price === undefined ? "prix non renseigné" : `${fmt(it.unit_price)} / u.`}</span>
+                <b>{fmt(it.total)}</b>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {priced && (
+        <div className="doc-totals">
+          {d.subtotal !== null && d.subtotal !== undefined && d.vat_amount ? <div><span>Sous-total</span><span>{fmt(d.subtotal, cur)}</span></div> : null}
+          {d.vat_amount ? <div><span>TVA</span><span>{fmt(d.vat_amount, cur)}</span></div> : null}
+          <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
+          {kind === "quote" && d.prices_complete === false && (
+            <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
+          )}
+        </div>
+      )}
+      <div className="toolbar">
+        {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
+        {kind === "quote" && d.status !== "approved" && (
+          <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
+        )}
+        <Link className="btn btn-ghost btn-small" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}>Détail</Link>
+      </div>
+    </div>
+  );
+}
+
 function MessageView({ m }: { m: ChatMessage }) {
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
@@ -64,7 +135,8 @@ function MessageView({ m }: { m: ChatMessage }) {
             ))}
           </div>
         ) : null}
-        {arts.length ? (
+        {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
+        {arts.length && !structured?.document ? (
           <div className="arts">
             {arts.map((a: any) => (
               <div className="art" key={a.id || a.artifact_id}>
@@ -309,10 +381,10 @@ function Chat({ initialId }: { initialId?: string }) {
   }
 
   const suggestions = [
-    "Cloison 12 m × 2,50 m, deux faces, 2 portes",
-    "Combien de plaques pour 320 m × 2,50 m deux faces ?",
+    "Cloison 12 m × 2,50 m, deux faces",
     "Fais le devis",
-    "Prépare le rapport de chantier",
+    "Explique-moi la différence entre BA13 et BA18",
+    "Aide-moi à répondre à un client mécontent",
   ];
 
   return (
@@ -321,10 +393,10 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
-              <h1>UniC AI, à votre service.</h1>
+              <h1>Que puis-je faire pour vous ?</h1>
               <p>
-                Employé digital d'UniC Plaquiste. Décrivez le besoin, joignez un plan ou une photo de chantier.
-                Je calcule, je prépare les documents — je n'invente jamais un prix.
+                Posez n'importe quelle question, ou donnez un ordre : je calcule, je rédige, j'explique, et je prépare
+                vos devis, bons et factures quand vous me le demandez. Joignez un plan ou une photo si besoin.
               </p>
               <div className="chips">
                 {suggestions.map((s) => (

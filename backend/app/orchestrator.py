@@ -55,16 +55,18 @@ from app.services import (
 
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
-SYSTEM_RULES = """Tu es JARVIS, l'assistant personnel du patron d'UniC Plaquiste. Tu l'aides en conversation ET sur ses travaux (plaquisterie, cloisons, faux plafonds, plâtre, peinture, portes, finitions, métrés, chantiers, clients, e-mails, réseaux).
-Tu es direct, court, utile. Tu parles comme un collègue de chantier, pas comme un robot.
+SYSTEM_RULES = """Tu es JARVIS, l'assistant personnel du patron d'UniC Plaquiste. Tu es une intelligence universelle : tu réponds à TOUTE question, sur n'importe quel sujet (sciences, droit, santé générale, informatique, cuisine, voyage, langues, histoire, actualité générale, maths, rédaction, conseils, discussion libre). Rien n'est « hors sujet ».
+Le BTP, la plaquisterie, les devis, factures, chantiers, e-mails et réseaux d'UniC sont ta spécialité, mais ils ne limitent jamais ce dont tu peux parler.
+Tu es direct, clair, chaleureux. Tu parles comme un collègue compétent, pas comme un robot. Phrases courtes, réponse complète, structurée seulement si cela aide.
 
 RÈGLES ABSOLUES
-1. Tu n'inventes jamais : prix, clients, quantités, cotes, dates, paiements, contrats. Si tu ne sais pas : « Je ne sais pas » puis tu demandes la donnée.
-2. Un calcul n'est PAS un devis. « Combien fait 10 m sur 3 » = tu réponds par le chiffre. Tu ne crées un devis, une facture, un bon ou un e-mail QUE si on te le demande clairement.
-3. Tu montres la formule de chaque calcul. Tu dis ce que tu as supposé.
-4. Tu ne dis jamais qu'une action est faite si elle ne l'est pas. Connecteur absent = « NON DISPONIBLE ».
-5. Les actions sensibles (devis, facture, envoi, publication) restent en brouillon jusqu'à l'approbation du patron.
-6. Tu réponds dans la langue du patron (français par défaut), en phrases courtes.
+1. Honnêteté : si tu ne sais pas ou si tu n'es pas sûr, dis-le. Distingue ce que tu sais de ce que tu supposes. N'invente ni faits, ni chiffres, ni sources, ni citations.
+2. Tu n'as pas accès à Internet ni aux données en temps réel (cours, météo, actualité du jour) : dis-le quand la question en dépend, et donne ce que tu sais avec sa date approximative.
+3. Pour l'ENTREPRISE (prix UniC, clients, fournisseurs, quantités, paiements, contrats) : utilise uniquement la MÉMOIRE et la BASE UNIC fournies ci-dessous. Jamais d'invention : sinon dis « Je n'ai pas cette information » et demande-la.
+4. Un calcul n'est PAS un devis. Tu ne crées un devis, une facture, un bon ou un e-mail QUE si le patron le demande clairement. Montre la formule des calculs et tes hypothèses.
+5. Tu ne dis jamais qu'une action est faite si elle ne l'est pas. Connecteur absent = « NON DISPONIBLE ».
+6. Santé, droit, finance : donne des informations utiles et prudentes, rappelle de consulter un professionnel quand l'enjeu est réel.
+7. Tu réponds dans la langue du patron (français par défaut).
 """
 
 
@@ -236,10 +238,24 @@ def _last_quantities(state: dict) -> list[dict]:
     return calc_d.get("quantities") or state.get("quantities") or []
 
 
+# Verbes d'ordre : un document n'est créé que si le patron le DEMANDE (jamais sur une simple mention).
+_ACTION = r"cr[eé]e|cr[eé]er|pr[eé]pare|fais|fait-moi|make|g[eé]n[eè]re|[eé]tabli|[eé]mets|r[eé]dige|chiffre"
+# Questions de culture / « comment » : réponse de l'IA, jamais une action.
+_QUESTION = re.compile(
+    r"^\s*(comment|c'est quoi|qu'est[- ]ce|que signifie|quelle? est|quels? sont|pourquoi|explique|à quoi sert|"
+    r"peux-tu m'expliquer|dis-moi (ce que|comment|pourquoi)|what is|how (do|to|does)|why)\b", re.I)
+_MATERIAL = re.compile(
+    r"ba ?13|placo|plaque|rails?\b|montants?\b|enduit|laine de verre|peinture|cloison|plafond|mat[eé]riau|"
+    r"prix de (vente|achat)|grille|\bsku\b|fourrure|chevilles?|bande [aà] joint", re.I)
+_DIMENSION = re.compile(r"\d\s*(?:m\b|ml\b|m2|m²|m[eè]tres?|x\s*\d)|\d\s*[x×]\s*\d", re.I)
+
+
 def _intent(text: str, state: dict) -> str:
+    """Route une phrase. Doute = « chat » : l'IA répond, elle n'agit pas."""
     t = text.lower().strip()
+    has_doc_number = bool(re.search(DOC_NUMBER_RE, text, re.I))
     if state.get("pending") and not re.search(r"annule|cancel|stop", t):
-        if len(t) < 80 and calc.detect_calc_kind(t) and re.search(r"\d", t) and not re.search(
+        if len(t) < 80 and calc.detect_calc_kind(t) and _DIMENSION.search(t) and not re.search(
             r"devis|facture|commande|livraison|calcule|analyse|rapport", t
         ):
             return "continue_pending"
@@ -248,13 +264,15 @@ def _intent(text: str, state: dict) -> str:
         return "remember"
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
-    if re.search(r"aide|help|que peux-tu|what can you", t) or re.fullmatch(
+    if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t) or re.fullmatch(
         r"(bonjour|salut|bonsoir|coucou|hello|hi|salam)[\s!.]*", t
     ):
         return "help"
-    if re.search(r"sant[eé] du syst[eè]me|health|statut (du )?serveur", t):
+    if _QUESTION.match(t) and not has_doc_number:
+        return "chat"
+    if re.search(r"sant[eé] du syst[eè]me|\bhealth\b|statut (du )?serveur", t):
         return "health"
-    if re.search(r"base de connaissance|knowledge|procédure|services unic", t):
+    if re.search(r"base de connaissance|knowledge base|proc[eé]dure unic|services unic", t):
         return "knowledge"
     if re.search(r"liste des clients|mes clients|show customers", t):
         return "list_customers"
@@ -262,9 +280,9 @@ def _intent(text: str, state: dict) -> str:
         return "list_suppliers"
     if re.search(r"liste des (chantiers|projets)|mes chantiers", t):
         return "list_projects"
-    if re.search(r"liste des devis|mes devis", t):
+    if re.search(r"liste des devis|mes devis|montre.{0,12}devis", t):
         return "list_quotes"
-    if re.search(r"liste des factures|mes factures", t):
+    if re.search(r"liste des factures|mes factures|montre.{0,12}factures", t):
         return "list_invoices"
     if re.search(r"nouveau client|cr[eé]e?r? un client|add customer", t):
         return "create_customer"
@@ -272,33 +290,32 @@ def _intent(text: str, state: dict) -> str:
         return "create_supplier"
     if re.search(r"nouveau (projet|chantier)|cr[eé]e?r? (un )?(projet|chantier)", t):
         return "create_project"
-    if re.search(r"statut .{0,40}(chantier|projet|site)|où en est|avancement", t):
+    if re.search(r"statut .{0,40}(chantier|projet|site)|o[uù] en est .{0,30}(chantier|projet)|avancement .{0,30}(chantier|projet)", t):
         return "site_status"
-    if re.search(r"approuve|approve", t):
+    if re.search(r"\bapprouve|\bapprove\b", t) and (has_doc_number or re.search(r"devis|facture|bon d[ee]", t)):
         return "approve"
-    if re.search(r"facture|invoice|acompte|avoir", t) and re.search(r"cr[eé]e|pr[eé]pare|fais|make|génère|etabl", t):
+    if re.search(r"\bfacture\b|\binvoice\b|\bacompte\b|note de cr[eé]dit", t) and re.search(_ACTION, t):
         return "create_invoice"
-    if re.search(r"bon de commande|purchase order|\bbc\b", t):
+    if re.search(r"bon de commande|purchase order|\bbc\b", t) and re.search(_ACTION, t):
         return "create_po"
-    if re.search(r"bon de livraison|delivery note|\bbl\b", t):
+    if re.search(r"bon de livraison|delivery note|\bbl\b", t) and re.search(_ACTION, t):
         return "create_dn"
-    if re.search(r"devis|quotation|quote", t) and re.search(
-        r"cr[eé]e|pr[eé]pare|fais|make|g[eé]n[eè]re|chiffre", t
-    ):
+    if re.search(r"\bdevis\b|quotation", t) and re.search(_ACTION, t):
         return "create_quote"
-    if re.search(r"e-?mail|courriel|mail", t):
-        if re.search(r"envoie|send|publie", t):
+    if re.search(r"e-?mail|courriel|\bmail\b", t):
+        if re.search(r"\benvoie|\bsend\b", t):
             return "send_email"
-        return "draft_email"
+        if has_doc_number:
+            return "draft_email"
     if re.search(r"rapport de chantier|site report|pr[eé]pare (le )?rapport", t):
         return "site_report"
-    if re.search(r"r[eé]seaux|social|google business|site web|seo", t):
+    if re.search(r"\bpublie\b|\bpublier\b|google business", t) and re.search(r"r[eé]seaux|instagram|facebook|tiktok|linkedin|fiche google|google business", t):
         return "connector_na"
-    if re.search(r"prix|tarif|rate", t):
+    if re.search(r"\bprix\b|\btarif", t) and (_MATERIAL.search(t) or re.search(r"base unic|grille", t)):
         return "prices"
     if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
         return "search_doc"
-    if calc.detect_calc_kind(t) and re.search(r"\d", t):
+    if calc.detect_calc_kind(t) and _DIMENSION.search(t):
         return "calculate"
     if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
         return "analyze_doc"
@@ -609,7 +626,8 @@ def handle_turn(
                 f"PDF réel généré : {art['filename'] if art else '—'}."
                 f"{extra}\n\nDites « approuve {q.number} » après relecture."
             )
-            structured = {"quotation_id": q.id, "number": q.number, "prices_complete": q.prices_complete}
+            structured = {"quotation_id": q.id, "number": q.number, "prices_complete": q.prices_complete,
+                          "document": {"kind": "quote", "id": q.id}}
             caps.append("create_quote")
             caps.append("generate_quote_pdf")
     elif intent == "create_invoice":
@@ -637,6 +655,7 @@ def handle_turn(
                 f"Facture **{inv.number}** ({kind}) créée en brouillon à partir de {quote.number}. "
                 f"Payé {inv.paid} / reste {inv.remaining if inv.remaining is not None else 'inconnu'}."
             )
+            structured = {"document": {"kind": "invoice", "id": inv.id}}
             caps += ["create_invoice", "generate_invoice_pdf"]
     elif intent == "create_po":
         qtys = _last_quantities(state)
@@ -657,6 +676,7 @@ def handle_turn(
             reply_text = f"Bon de commande **{po.number}** créé en brouillon." + (
                 f" Rattaché au devis {linked.number}." if linked else ""
             ) + ("" if supplier else " Fournisseur non renseigné (non inventé).")
+            structured = {"document": {"kind": "po", "id": po.id}}
             caps.append("create_purchase_order")
     elif intent == "create_dn":
         qtys = _last_quantities(state)
@@ -676,6 +696,7 @@ def handle_turn(
                 artifacts.append(art)
             reply_text = f"Bon de livraison **{dn.number}** créé en brouillon." + (
                 f" Rattaché au devis {linked.number}." if linked else "")
+            structured = {"document": {"kind": "dn", "id": dn.id}}
             caps.append("create_delivery_note")
     elif intent == "site_report":
         notes = [text]
