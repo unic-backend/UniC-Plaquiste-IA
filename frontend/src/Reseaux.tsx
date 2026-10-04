@@ -139,6 +139,8 @@ export function Reseaux() {
   useEffect(load, []);
 
   const p = plats.find((x) => x.id === sel);
+  const mine = posts.filter((x) => x.platform === sel);   // chaque réseau a sa propre liste
+  const others = posts.length - mine.length;
   useEffect(() => {
     setHandle(p?.handle ?? "");
     setUrl(p?.page_url ?? "");
@@ -248,9 +250,10 @@ export function Reseaux() {
           {plan && <pre className="plan">{plan}</pre>}
         </section>
 
-        <h2>Brouillons & file d'attente</h2>
-        {posts.length === 0 && <div className="empty">Aucun brouillon.</div>}
-        {posts.map((d) => (
+        <h2>Brouillons : {label(sel)}</h2>
+        {mine.length === 0 && <div className="empty">Aucun brouillon pour {label(sel)}.</div>}
+        {others > 0 && <p className="hint">{others} brouillon(s) d'autres réseaux : choisis le réseau en haut pour les voir.</p>}
+        {mine.map((d) => (
           <article key={d.id} className="card-box">
             <div className="toolbar">
               <b>{label(d.platform)} · {d.kind === "reply" ? "Réponse" : "Post"} · {STATUS[d.status] ?? d.status}</b>
