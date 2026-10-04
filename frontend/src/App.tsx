@@ -218,6 +218,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
         {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
         {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
         {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} />}
+        {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reste_a_payer_${d.number}.pdf`} text={d.balance_message || ""} label="Reste à payer" />}
         {kind === "quote" && d.status !== "approved" && (
           <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
         )}
@@ -1224,6 +1225,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
               </button>
             )}
             {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="btn btn-line" />}
+            {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reste_a_payer_${d.number}.pdf`} text={d.balance_message || ""} className="btn btn-copper" label="Partager le reste à payer" />}
             {kind === "quote" && d.status !== "approved" && (
               <button
                 className="btn btn-line"

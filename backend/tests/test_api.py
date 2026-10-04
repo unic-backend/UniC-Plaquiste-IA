@@ -2108,3 +2108,26 @@ def test_cover_letter_ai_over_limit_falls_back(monkeypatch):
     assert len(t.split()) <= 250 and t.startswith("Bonjour Awa") and "250 000 FCFA" in t and "30 jours" in t
     monkeypatch.setattr(assistant, "_ask", lambda *a, **k: "**Bonjour Awa**, voici le devis joint. UniC Plaquiste")
     assert assistant.draft_cover_letter("Awa", "UC-1", "", "", [], None, "FCFA", 30, "", "").startswith("Bonjour Awa")
+
+
+def test_invoice_balance_pdf_and_message(client):
+    r = client.post("/api/chat", json={"message": "Cloison 320 m × 2,50 m, deux faces. Fais le devis."}).json()
+    qid = r["message"]["meta"]["structured"]["quotation_id"]
+    client.post(f"/api/quotes/{qid}/approve")
+    inv = client.post(f"/api/quotes/{qid}/invoice").json()
+    iid = inv["id"]
+    # facture en brouillon, rien à rappeler
+    d = client.get(f"/api/invoices/{iid}").json()
+    assert "balance_url" not in d
+    client.post(f"/api/invoices/{iid}/approve")
+    d = client.get(f"/api/invoices/{iid}").json()
+    total = d["total"]
+    if not total:
+        import pytest
+        pytest.skip("total incomplet : pas de reste à payer calculable")
+    assert d["balance_url"].endswith("/balance") and f"{d['number']}" in d["balance_message"] and "Il reste" in d["balance_message"]
+    pdf = client.get(d["balance_url"])
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content[:5] == b"%PDF-"
+    client.post(f"/api/invoices/{iid}/payments", json={"amount": total, "method": "Wave"})
+    assert client.get(f"/api/invoices/{iid}/balance").status_code == 409          # soldée
+    assert "balance_url" not in client.get(f"/api/invoices/{iid}").json()

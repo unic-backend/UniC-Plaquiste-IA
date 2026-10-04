@@ -48,6 +48,8 @@ from app.services import (
     client_name_of,
     apply_payment,
     approve_entity,
+    balance_message,
+    build_balance_pdf,
     audit,
     company_dict,
     create_delivery_note,
@@ -814,7 +816,23 @@ def get_invoice(iid: str, db: Session = Depends(get_db), user: User = Depends(ge
     data = _invoice(i)
     if i.artifact_id:
         data["download_url"] = f"/api/artifacts/{i.artifact_id}/download"
+    if (i.remaining or 0) > 0 and i.status != "draft":   # reste à payer : relevé PDF + message de rappel
+        co = company_dict(db)
+        cust = db.get(Customer, i.customer_id) if i.customer_id else None
+        data["balance_url"] = f"/api/invoices/{i.id}/balance"
+        data["balance_message"] = balance_message(i, (cust.contact_name or cust.name) if cust else "", i.currency or co.get("currency") or "", co.get("phone") or "")
     return data
+
+
+@router.get("/invoices/{iid}/balance")
+def invoice_balance_pdf(iid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    i = db.get(Invoice, iid)
+    if not i:
+        raise HTTPException(404, "Facture introuvable")
+    if (i.remaining or 0) <= 0:
+        raise HTTPException(409, "Cette facture est entièrement payée : pas de reste à payer.")
+    path = build_balance_pdf(db, i)
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 class PaymentIn(BaseModel):

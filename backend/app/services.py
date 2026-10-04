@@ -586,6 +586,44 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     return art
 
 
+def balance_message(inv: Invoice, client: str, currency: str, phone: str = "") -> str:
+    """Message court de rappel du reste à payer (aucune IA : uniquement les chiffres de la facture)."""
+    first = (client or "").strip()
+    def amt(v: float | None) -> str:
+        return f"{(v or 0):,.0f} {currency or 'FCFA'}".replace(",", " ")
+    lines = [f"Bonjour{(' ' + first) if first else ''},", "",
+             f"Il reste {amt(inv.remaining)} à régler sur la facture {inv.number}"
+             + (f" (total {amt(inv.total)}, déjà payé {amt(inv.paid)})." if inv.total is not None else "."),
+             "Le relevé est joint à ce message.", "Merci d'avance et bonne journée.", "", "UniC Plaquiste"]
+    if phone:
+        lines.append(phone)
+    return "\n".join(lines)
+
+
+def build_balance_pdf(db: Session, inv: Invoice) -> Path:
+    """Relevé « Reste à payer » d'une facture : total, paiements reçus, reste dû. Toujours recalculé (pas stocké)."""
+    company = company_dict(db)
+    customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    currency = inv.currency or company.get("currency") or ""
+    pays = sorted(inv.payments, key=lambda p: p.paid_at or utcnow())
+    rows = [[str(i), p.paid_at.strftime("%d/%m/%Y") if p.paid_at else "", p.method or "—", p.reference or "—", money(p.amount, currency)]
+            for i, p in enumerate(pays, 1)]
+    if not rows:
+        rows = [["", "", "Aucun paiement enregistré", "", ""]]
+    totals = [("Total facture", money(inv.total, currency)), ("Déjà payé", money(inv.paid, currency)),
+              ("RESTE À PAYER", money(inv.remaining if inv.remaining is not None else inv.total, currency))]
+    filename = f"UniC_Reste_a_payer_{inv.number.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "balances" / filename
+    build_document_pdf(
+        dest, company=company, doc_label="RESTE À PAYER", number=inv.number, title=f"Relevé de solde — facture {inv.number}", status="",
+        meta_lines=[f"Facture {inv.number}", f"Édité le {utcnow().strftime('%d/%m/%Y')}"],
+        party_left=("Émetteur", party_text_from_company(company)), party_right=("Client", party_text_customer(customer)),
+        headers=["#", "Date", "Mode", "Référence", "Montant"], rows=rows, col_widths=[22, 70, 90, 120, 100],
+        totals=totals, notes="", warnings=[],
+    )
+    return dest
+
+
 def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
                           supplier_id: str | None, project_id: str | None, user_id: str | None,
                           notes: str = "", quote_number: str | None = None,
