@@ -1081,6 +1081,53 @@ def put_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = D
     return company_dict(db)
 
 
+@router.get("/settings/signature")
+def get_signature(user: User = Depends(get_current_user)):
+    from app.pdfs import owner_signature_path
+    p = owner_signature_path()
+    if not p.exists():
+        raise HTTPException(404, "Aucune signature enregistrée")
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/settings/signature")
+async def put_signature(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
+                        db: Session = Depends(get_db)):
+    """Signature du gérant (photo sur papier blanc ou dessin) : fond blanc rendu transparent, recadrée, en PNG."""
+    import io as _io
+    from PIL import Image, ImageOps
+    from app.pdfs import owner_signature_path
+
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "Image trop lourde (15 Mo maximum).")
+    try:
+        img = ImageOps.exif_transpose(Image.open(_io.BytesIO(data))).convert("RGBA")
+    except Exception:
+        raise HTTPException(400, "Image illisible : envoie une photo ou une capture de ta signature.")
+    img.thumbnail((1600, 1600))
+    gray = img.convert("L")
+    alpha = gray.point(lambda v: 0 if v > 200 else 255)   # papier blanc → transparent, trait → opaque
+    if alpha.getbbox() is None:
+        raise HTTPException(400, "Aucun trait trouvé : signe en foncé sur fond blanc.")
+    ink = Image.new("RGBA", img.size, (20, 40, 120, 255))   # encre bleu foncé, nette à l'impression
+    ink.putalpha(alpha)
+    ink = ink.crop(alpha.getbbox())
+    dest = owner_signature_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ink.save(dest, "PNG")
+    audit(db, user.id, "update", "signature", "owner")
+    db.commit()
+    return {"ok": True, "width": ink.width, "height": ink.height}
+
+
+@router.delete("/settings/signature")
+def delete_signature(user: User = Depends(require_roles("admin", "manager"))):
+    from app.pdfs import owner_signature_path
+    owner_signature_path().unlink(missing_ok=True)
+    return {"ok": True}
+
+
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     return health_dashboard(db)

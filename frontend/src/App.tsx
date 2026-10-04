@@ -13,7 +13,7 @@ import * as I from "./Icons";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, clearConnection, downloadAuth, fetchBlobUrl, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -1585,8 +1585,40 @@ function CompanyPage() {
         >
           Enregistrer
         </button>
+        <SignatureCard />
       </div>
     </div>
+  );
+}
+
+/** Signature du gérant : posée automatiquement dans le cadre UniC de chaque devis, facture, bon et reliquat. */
+function SignatureCard() {
+  const [src, setSrc] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const load = () => fetchBlobUrl(`/api/settings/signature?t=${Date.now()}`).then(setSrc).catch(() => setSrc(null));
+  useEffect(() => { load(); }, []);
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true); setMsg("");
+    try { await fn(); setMsg(ok); await load(); } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card-box sig-card">
+      <h2>Ma signature</h2>
+      <p className="hint">Signe en foncé sur une feuille blanche, puis prends-la en photo. Le fond blanc est retiré.
+        Elle apparaît dans le cadre « UniC Plaquiste » des nouveaux devis, factures, bons et reliquats.</p>
+      <div className="sig-preview">{src ? <img src={src} alt="Ma signature" /> : <span className="hint">Aucune signature enregistrée.</span>}</div>
+      <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (f) run(() => api.uploadSignature(f), "Signature enregistrée.");
+      }} />
+      <div className="row-actions">
+        <button className="btn btn-copper" disabled={busy} onClick={() => ref.current?.click()}>{src ? "Remplacer" : "Ajouter ma signature"}</button>
+        {src && <button className="btn btn-line" disabled={busy} onClick={() => run(() => api.deleteSignature(), "Signature retirée.")}>Retirer</button>}
+      </div>
+      {msg && <p className="hint">{msg}</p>}
+    </section>
   );
 }
 

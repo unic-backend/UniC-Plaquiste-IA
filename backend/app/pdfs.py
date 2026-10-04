@@ -13,6 +13,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Image as RLImage
+from reportlab.platypus import Flowable
 from reportlab.platypus import (
     Paragraph,
     SimpleDocTemplate,
@@ -130,6 +131,80 @@ def _entreprise(company: dict) -> dict:
 
 
 _SCALE: ContextVar[float] = ContextVar("pdf_scale", default=1.0)
+
+
+# Cadres de signature posés pendant le rendu : (page, x1, y1, x2, y2, nom du champ). Servent à créer les champs Adobe.
+_SIGN_BOXES: ContextVar[list | None] = ContextVar("pdf_sign_boxes", default=None)
+
+
+def owner_signature_path() -> Path:
+    """Signature manuscrite du gérant (PNG transparent), posée dans le cadre UniC de chaque document."""
+    from app.config import settings
+    return settings.storage_path / "brand" / "signature.png"
+
+
+class SignBox(Flowable):
+    """Cadre de signature : bordure fine, libellé discret, signature du gérant éventuelle.
+    Un champ de signature PDF invisible y est ajouté ensuite (Adobe : signer à la main ou placer sa signature)."""
+
+    def __init__(self, width: float, height: float, field: str, image: Path | None = None):
+        super().__init__()
+        self.width, self.height, self.field, self.image = width, height, field, image
+
+    def wrap(self, aw, ah):
+        return self.width, self.height
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        c.setStrokeColor(colors.HexColor("#1F3A93"))
+        c.setLineWidth(0.8)
+        c.roundRect(0, 0, self.width, self.height, 3, stroke=1, fill=0)
+        c.setFont("Helvetica", 7)
+        c.setFillColor(MUTED)
+        c.drawString(4, self.height - 9, "Signature et cachet")
+        if self.image and self.image.exists():
+            try:
+                from reportlab.lib.utils import ImageReader
+                img = ImageReader(str(self.image))
+                iw, ih = img.getSize()
+                k = min(self.width * 0.6 / iw, (self.height - 18) * 0.85 / ih)   # signature lisible, sans remplir tout le cadre
+                w, h = iw * k, ih * k
+                c.drawImage(img, (self.width - w) / 2, (self.height - 12 - h) / 2 + 2, w, h, mask="auto")
+            except Exception:
+                pass
+        c.restoreState()
+        boxes = _SIGN_BOXES.get()
+        if boxes is not None:
+            x, y = c.absolutePosition(0, 0)
+            boxes.append((c.getPageNumber(), x, y, x + self.width, y + self.height, self.field))
+
+
+def add_signature_fields(path: Path, boxes: list) -> None:
+    """Champs de signature PDF (/Sig) invisibles posés sur les cadres : Acrobat propose « Signer » dans chaque cadre."""
+    if not boxes:
+        return
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, NumberObject, TextStringObject
+
+    writer = PdfWriter(clone_from=PdfReader(str(path)))
+    fields = ArrayObject()
+    for page_no, x1, y1, x2, y2, name in boxes:
+        page = writer.pages[page_no - 1]
+        widget = DictionaryObject({
+            NameObject("/Type"): NameObject("/Annot"), NameObject("/Subtype"): NameObject("/Widget"),
+            NameObject("/FT"): NameObject("/Sig"), NameObject("/T"): TextStringObject(name),
+            NameObject("/Rect"): ArrayObject([FloatObject(round(v, 2)) for v in (x1, y1, x2, y2)]),
+            NameObject("/F"): NumberObject(4), NameObject("/P"): page.indirect_reference,
+        })
+        ref = writer._add_object(widget)
+        if "/Annots" not in page:
+            page[NameObject("/Annots")] = ArrayObject()
+        page["/Annots"].append(ref)
+        fields.append(ref)
+    writer._root_object[NameObject("/AcroForm")] = DictionaryObject({NameObject("/Fields"): fields})
+    with open(path, "wb") as fh:
+        writer.write(fh)
 
 
 def P(x: float) -> float:
@@ -376,12 +451,17 @@ def _render(
             story += [Paragraph(f"• {x}", txt) for x in excl]
         story.append(Spacer(1, P(14)))
 
-    # --- signatures
+    # --- signatures : un cadre par partie (signature à la main, ou champ de signature Adobe invisible dans le cadre)
     who = party_lines[0] if party_lines else party_right[0]
-    sig = Table([[Paragraph(e["nom"], txt), Paragraph(f"{party_right[0].capitalize()} ({who})", txt)],
-                 [Paragraph("Signature : ______________________", txt), Paragraph("Signature : ______________________", txt)],
-                 [Paragraph("Date : ____________", txt), Paragraph("Date : ____________", txt)]], colWidths=[90 * mm, 90 * mm])
-    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(6)), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    other = f"{party_right[0].capitalize()} ({who})"
+    box_w, box_h = 82 * mm, P(26) * mm
+    head = _st("sh", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
+    sig = Table([[Paragraph(e["nom"], head), Paragraph(other, head)],
+                 [Paragraph("Date : ____ / ____ / ________", txt), Paragraph("Date : ____ / ____ / ________", txt)],
+                 [SignBox(box_w, box_h, "Signature_UniC", owner_signature_path()), SignBox(box_w, box_h, "Signature_Client")]],
+                colWidths=[90 * mm, 90 * mm])
+    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2)),
+                             ("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(KeepTogether(sig))
 
     doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=P(9) * mm,
@@ -398,21 +478,31 @@ MIN_SCALE = 0.72   # en dessous, le texte devient illisible : le document passe 
 def build_document_pdf(path: Path, **kw) -> Path:
     """Un document tient sur UNE page : on resserre par paliers ; au-delà du minimum lisible, il s'étale (exception)."""
     scale = 1.0
+    boxes: list = []
     while True:
-        token = _SCALE.set(scale)
+        token, btoken = _SCALE.set(scale), _SIGN_BOXES.set(boxes)
+        boxes.clear()
         try:
             pages = _render(path, **kw)
         finally:
             _SCALE.reset(token)
+            _SIGN_BOXES.reset(btoken)
         if pages <= 1 or scale <= MIN_SCALE + 1e-9:
             break
         scale = round(max(MIN_SCALE, scale - 0.04), 2)
     if pages > 1:   # trop long même resserré : rendu lisible sur plusieurs pages
-        token = _SCALE.set(0.9)
+        token, btoken = _SCALE.set(0.9), _SIGN_BOXES.set(boxes)
+        boxes.clear()
         try:
             _render(path, **kw)
         finally:
             _SCALE.reset(token)
+            _SIGN_BOXES.reset(btoken)
+    try:
+        add_signature_fields(path, boxes)
+    except Exception:   # le document reste valable sans champ Adobe (cadres dessinés quand même)
+        import logging
+        logging.getLogger("unic.pdfs").exception("Champs de signature non ajoutés")
     return path
 
 

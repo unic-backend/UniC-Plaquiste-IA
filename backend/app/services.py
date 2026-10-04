@@ -782,7 +782,7 @@ def generate_dn_pdf(db: Session, dn: DeliveryNote, user_id: str | None) -> Artif
         headers=["#", "Désignation", "Qté", "Unité"],
         rows=rows, col_widths=[24, 340, 70, 70],
         notes=dn.notes,
-        extra_paragraphs=["Réception : date ________    signature / cachet ________"],
+        extra_paragraphs=["Réception des matériaux : date et signature du destinataire dans le cadre ci-dessous."],
     )
     art = store_artifact(db, dest, filename, "delivery_note", dn.id, f"unic-dn-{dn.number.lower()}", user_id)
     dn.artifact_id = art.id

@@ -334,6 +334,8 @@ export const api = {
   dns: () => request<any[]>("/api/delivery-notes"),
   getDn: (id: string) => request<any>(`/api/delivery-notes/${id}`),
   settings: () => request<any>("/api/settings"),
+  uploadSignature: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/signature", { method: "PUT", body: fd }); },
+  deleteSignature: () => request<{ ok: boolean }>("/api/settings/signature", { method: "DELETE" }),
   saveSettings: (body: any) =>
     request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   health: () => request<any>("/api/health"),

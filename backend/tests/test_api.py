@@ -2439,3 +2439,36 @@ def test_file_thumb_for_pdf_and_image(client):
     r = client.get(f"/api/files/{iid}/thumb")
     assert r.status_code == 200 and max(Image.open(io.BytesIO(r.content)).size) <= 600
     assert client.get("/api/files/nope/thumb").status_code == 404
+
+
+def test_signature_boxes_adobe_fields_and_owner_signature(client):
+    import io
+    from PIL import Image, ImageDraw
+    from pypdf import PdfReader
+    from app.database import SessionLocal
+    from app.models import Quotation
+    im = Image.new("RGB", (800, 300), "white")
+    ImageDraw.Draw(im).line([(50, 200), (300, 60), (500, 220), (750, 80)], fill="black", width=8)
+    buf = io.BytesIO(); im.save(buf, format="JPEG")
+    assert client.put("/api/settings/signature", files={"file": ("sig.jpg", buf.getvalue(), "image/jpeg")}).status_code == 200
+    png = client.get("/api/settings/signature")
+    assert png.status_code == 200 and Image.open(io.BytesIO(png.content)).mode == "RGBA"
+    blank = io.BytesIO(); Image.new("RGB", (100, 100), "white").save(blank, format="PNG")
+    assert client.put("/api/settings/signature", files={"file": ("b.png", blank.getvalue(), "image/png")}).status_code == 400
+    q = client.post("/api/calculate", json={"text": "cloison 5 m x 2.5 m"})
+    r = client.post("/api/chat", json={"message": "Calcule une cloison de 5 m × 2,5 m une face"})
+    r = client.post("/api/chat", json={"message": "fais le devis", "conversation_id": r.json()["conversation_id"]})
+    with SessionLocal() as db:
+        quote = db.query(Quotation).order_by(Quotation.created_at.desc()).first()
+        assert quote is not None
+        from app.models import Artifact
+        art = db.get(Artifact, quote.artifact_id)
+        reader = PdfReader(art.path)
+    fields = reader.get_fields() or {}
+    assert {"Signature_UniC", "Signature_Client"} <= set(fields)
+    assert all(fields[n].get("/FT") == "/Sig" for n in ("Signature_UniC", "Signature_Client"))
+    page = reader.pages[-1]
+    xobjects = page["/Resources"].get("/XObject") or {}
+    assert len(xobjects) >= 2   # logo + signature du gérant
+    assert client.delete("/api/settings/signature").status_code == 200
+    assert client.get("/api/settings/signature").status_code == 404
