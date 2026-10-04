@@ -120,28 +120,37 @@ def boost_plan(target: str, facts: str = "", deep: bool = False, memory: str = "
 def draft_site_page(topic: str, details: str = "", memory: str = "") -> dict | None:
     """Page de contenu pour unicplaquiste.com : {title, text} où text suit le format lu par website.parse()."""
     from app.gbp_plan import KEYWORDS
-    out = _ask(
-        f"{_BASE} Rédige une page de site web (SEO local, Dakar) pour UniC Plaquiste, de 300 à 450 mots, en français. "
+    system = (
+        f"{_BASE} Rédige une page de site web (SEO local) pour UniC Plaquiste, de 300 à 450 mots, en français naturel, "
+        "comme le ferait un artisan qui explique son métier à un client. "
         "N'invente AUCUN fait : ni prix, ni chiffre, ni délai, ni nom de client, ni référence chantier, ni garantie ; "
-        "utilise seulement les faits donnés et des généralités vraies sur le métier. Mots-clés à placer naturellement : "
-        f"{', '.join(KEYWORDS['recherches'][:6])} ; zones possibles : {', '.join(KEYWORDS['zones'][:8])}. "
+        "utilise seulement les faits donnés et des généralités vraies sur le métier. "
+        f"Mots-clés utiles (sans les répéter mécaniquement) : {', '.join(KEYWORDS['recherches'][:6])}. "
+        "RÈGLE ANTI-BOURRAGE : le mot « Dakar » 5 fois au plus dans tout le texte, « plaquiste » 3 fois au plus ; "
+        "varie avec « ici », « chez vous », « votre intérieur », « la capitale », « le Sénégal ». "
+        "STRUCTURE : une introduction de 2 à 3 phrases, puis 3 à 4 sections. "
+        "CHAQUE sous-titre est sur sa propre ligne et COMMENCE PAR « ## » (obligatoire). Les listes : une ligne par élément, commençant par « - ». "
         "Réponds UNIQUEMENT en JSON : "
-        '{"title":"titre H1 de 40 à 65 caractères avec le mot-clé principal et Dakar","slug":"minuscules-sans-accents-avec-tirets (max 6 mots)",'
-        '"description":"description Google de 110 à 160 caractères","content":"texte brut : paragraphes séparés par une ligne vide, '
-        'sous-titres sur une ligne commençant par « ## », listes en lignes commençant par « - ». Aucun HTML, aucun astérisque."}',
-        f"Sujet : {topic}\nFaits fournis : {details or 'aucun'}",
-        memory=memory,
+        '{"title":"titre H1 de 40 à 65 caractères avec le mot-clé principal","slug":"minuscules-sans-accents-avec-tirets (max 6 mots)",'
+        '"description":"description Google de 110 à 160 caractères","content":"texte brut : paragraphes séparés par une ligne vide ; '
+        'sous-titres « ## … » ; listes « - … ». Aucun HTML, aucun astérisque."}'
     )
-    if not out:
-        return None
-    m = re.search(r"\{.*\}", out, re.S)
-    try:
-        d = json.loads(m.group(0)) if m else {}
-    except json.JSONDecodeError:
-        return None
-    if not all(d.get(k) for k in ("title", "slug", "description", "content")):
-        return None
-    content = plain_post(str(d["content"])) or ""
-    content = re.sub(r"^•\s+", "- ", content, flags=re.M)
-    text = f"slug: {str(d['slug']).strip()}\ndescription: {' '.join(str(d['description']).split())}\n---\n{content}"
-    return {"title": " ".join(str(d["title"]).split()), "text": text}
+    user = f"Sujet : {topic}\nFaits fournis : {details or 'aucun'}"
+    for attempt in range(2):
+        out = _ask(system if attempt == 0 else system + " ATTENTION : ta réponse précédente n'avait pas de sous-titres « ## » : ajoute-les.", user, memory=memory)
+        if not out:
+            return None
+        m = re.search(r"\{.*\}", out, re.S)
+        try:
+            d = json.loads(m.group(0)) if m else {}
+        except json.JSONDecodeError:
+            d = {}
+        if not all(d.get(k) for k in ("title", "slug", "description", "content")):
+            continue
+        content = plain_post(str(d["content"])) or ""
+        content = re.sub(r"^•\s+", "- ", content, flags=re.M)
+        if "\n## " not in "\n" + content and attempt == 0:
+            continue   # pas de sous-titres : on redemande une fois
+        text = f"slug: {str(d['slug']).strip()}\ndescription: {' '.join(str(d['description']).split())}\n---\n{content}"
+        return {"title": " ".join(str(d["title"]).split()), "text": text}
+    return None

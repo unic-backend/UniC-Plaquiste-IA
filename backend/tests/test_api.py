@@ -2025,3 +2025,15 @@ def test_website_refuses_reserved_bad_and_foreign_pages(client, monkeypatch):
         assert e.status == 409
     assert fake.files["faux-plafond-ba13-almadies/index.html"] == "<html>page faite à la main</html>"   # jamais écrasée
     db.close()
+
+
+def test_draft_site_page_retries_when_subtitles_are_missing(monkeypatch):
+    import json as _json
+    from app import assistant
+    answers = iter([
+        _json.dumps({"title": "Faux plafond BA13", "slug": "faux-plafond-ba13", "description": "d" * 120, "content": "Intro simple.\n\nUn titre sans marque\n\nTexte."}),
+        _json.dumps({"title": "Faux plafond BA13", "slug": "faux-plafond-ba13", "description": "d" * 120, "content": "Intro.\n\n## Pourquoi le BA13\n\nTexte utile.\n- point"}),
+    ])
+    monkeypatch.setattr(assistant, "_ask", lambda *a, **k: next(answers))
+    d = assistant.draft_site_page("Faux plafond BA13")
+    assert d and "\n## Pourquoi le BA13" in d["text"] and d["text"].startswith("slug: faux-plafond-ba13")
