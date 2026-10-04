@@ -526,14 +526,14 @@ def test_document_number_format_and_same_day_suffix(client):
     from app.services import document_number
     from app.models import Quotation
     db = SessionLocal()
-    day = date(2026, 7, 14)
+    day = date(2032, 7, 14)
     n1 = document_number(db, "Fast Group", day)
-    assert n1 == "UC-2026-0714-FG"
-    db.add(Quotation(number=n1, title="t", status="draft"))
+    assert n1 == "UC-2032-0714-FG"
+    db.add(Quotation(number=n1, title="t", client_label="Fast Group", status="draft"))
     db.commit()
     n2 = document_number(db, "Fast Group", day)
-    assert n2 == "UC-2026-0714-FG2"          # même client, même jour
-    assert document_number(db, "Ousmane Diop", day) == "UC-2026-0714-OD"
+    assert n2 == "UC-2032-0714-FG2"          # même client : même bloc, devis suivant = 2
+    assert document_number(db, "Ousmane Diop", day) == "UC-2032-0715-OD"   # autre client : bloc suivant
     assert re.fullmatch(r"UC-\d{4}-\d{4}-[A-Z0-9]+", document_number(db, "Ousmane Diop"))
     db.query(Quotation).filter(Quotation.number == n1).delete()
     db.commit()
@@ -1387,41 +1387,6 @@ def test_pdf_has_site_under_client_no_status_and_preview_endpoint(client):
     db.close()
 
 
-def test_quote_number_rule_date_plus_client_initials(client):
-    from datetime import date
-    from app.database import SessionLocal
-    from app.services import document_number
-    db = SessionLocal()
-    d = date(2026, 10, 4)
-    assert document_number(db, "Qazim Wolde", d).endswith("-1004-QW")      # 1004 = jour (MMJJ), PD = client
-    assert document_number(db, "Xavi Zola", d).endswith("-1004-XZ")       # autre client, même jour : seules les initiales changent
-    assert document_number(db, "Qazim Wolde", date(2026, 10, 5)).endswith("-1005-QW")   # autre jour : MMJJ change
-    db.close()
-
-
-def test_each_client_gets_their_own_number_even_with_same_initials(client):
-    from datetime import date
-    from app.database import SessionLocal
-    from app.models import Quotation
-    from app.services import document_number
-    db = SessionLocal()
-    d = date(2026, 11, 20)
-    made = {}
-    for who in ("Pape Diop", "Paul Dieng", "Pape Diop", "Awa Fall", "Paul Dieng"):
-        n = document_number(db, who, d)
-        assert n not in made.values(), (who, n)
-        db.add(Quotation(number=n, title="t", client_label=who, status="draft"))
-        db.commit()
-        made.setdefault(who, n)
-        made[f"{who}#{n}"] = n
-    nums = [v for k, v in made.items() if "#" in k]
-    assert len(set(nums)) == 5
-    assert made["Pape Diop"].endswith("-PD") and made["Paul Dieng"].endswith("-PDI") and made["Awa Fall"].endswith("-AF")
-    assert [n for k, n in made.items() if k.startswith("Pape Diop#")][1].endswith("-PD2")   # même client : 2
-    assert [n for k, n in made.items() if k.startswith("Paul Dieng#")][1].endswith("-PDI2")
-    db.close()
-
-
 def test_search_by_client_name_finds_every_document_without_date(client):
     from app.agent import AgentSession
     from app.database import SessionLocal
@@ -1440,4 +1405,23 @@ def test_search_by_client_name_finds_every_document_without_date(client):
         assert len(mine) == 2 and len({d["numero"] for d in mine}) == 2, q
     api = client.get("/api/quotes").json()
     assert any(x["client_name"] == "Mamadou Séne" for x in api)
+    db.close()
+
+
+def test_each_client_owns_a_block_in_order_of_arrival(client):
+    """Règle du patron : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006 (même jour) ; le lendemain on continue."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from app.services import document_number
+    db = SessionLocal()
+    plan = [("Pape Diop", date(2031, 10, 4), "UC-2031-1004-PD"), ("Awa Fall", date(2031, 10, 4), "UC-2031-1005-AF"),
+            ("Fallou Ndiaye", date(2031, 10, 4), "UC-2031-1006-FN"), ("Pape Diop", date(2031, 10, 4), "UC-2031-1004-PD2"),
+            ("Moussa Ba", date(2031, 10, 5), "UC-2031-1007-MB"), ("Awa Fall", date(2031, 10, 5), "UC-2031-1005-AF2"),
+            ("Paul Dieng", date(2031, 10, 5), "UC-2031-1008-PD")]
+    for who, day, expected in plan:
+        n = document_number(db, who, day)
+        assert n == expected, (who, n)
+        db.add(Quotation(number=n, title="t", client_label=who, status="draft"))
+        db.commit()
     db.close()

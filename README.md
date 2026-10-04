@@ -178,7 +178,7 @@ Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses prop
 
 ## Numérotation des documents
 
-- **Devis** : `UC-AAAA-MMJJ-CLI` — CLI = initiales prénom + nom du client (Ousmane Diop → `OD`, Fast Group → `FG`). Même client, même jour : `OD2`.
+- **Devis** : `UC-AAAA-BLOC-CLI` — CLI = initiales prénom + nom du client (Ousmane Diop → `OD`). Le BLOC à 4 chiffres part de la date du jour (4 oct. = `1004`) puis appartient au client : Pape Diop `1004`, Awa Fall `1005`, Fallou Ndiaye `1006`, même le même jour ; le lendemain on continue. Un client qui revient garde son bloc : `UC-2026-1004-PD2`.
 - **Documents liés** : numéro du devis + code → `…-OD-BC` (bon de commande), `…-OD-BL` (livraison), `…-OD-F` (facture), `…-OD-AV` (avoir). Plusieurs du même type : `-BC2`.
 - Client inconnu : `XXX` (jamais inventé). Le numéro d'un brouillon se corrige quand une fiche client est rattachée.
 

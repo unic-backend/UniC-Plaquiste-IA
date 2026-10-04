@@ -101,37 +101,51 @@ def _quote_client(q: Quotation) -> str:
     return _norm_name(q.customer.name if q.customer else q.client_label)
 
 
-def _suffix_candidates(name: str | None) -> list[str]:
-    """OD, puis ODI, ODIO… : de quoi distinguer deux clients qui ont les mêmes initiales."""
-    first = client_initials(name)
-    clean = str(name or "").strip().lower().translate(_ACCENTS)
-    words = [w for w in _SEPARATORS.split(clean) if w.isalnum() and w not in _LINK_WORDS] or [""]
-    last = words[-1]
-    return [first] + [first + last[1:1 + k].upper() for k in range(1, 5) if last[1:1 + k]]
+_NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
+
+
+def _client_block(db: Session, party_name: str | None, day: date) -> int:
+    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006, même le
+    même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…)."""
+    me, init = _norm_name(party_name), client_initials(party_name)
+    owners: dict[int, set[str]] = {}
+    for (number, label, cust_name) in (
+        (q.number, q.client_label, q.customer.name if q.customer else None)
+        for q in db.query(Quotation).filter(Quotation.number.like(f"UC-{day.year}-%")).all()
+    ):
+        m = _NUMBER_RE.match(number)
+        if not m:
+            continue
+        block = int(m.group(2))
+        owner = _norm_name(cust_name or label)
+        if not owner and m.group(3) == init:
+            owner = me   # devis ancien sans nom de client, mêmes initiales : on le rattache à ce client
+        owners.setdefault(block, set()).add(owner)
+    if me:
+        mine = [b for b, o in owners.items() if me in o]
+        if mine:
+            return min(mine)
+    block = int(f"{day.month:02d}{day.day:02d}")
+    while block in owners:
+        block += 1
+    return block
+
+
+def _client_root(db: Session, party_name: str | None, day: date) -> str:
+    return f"UC-{day.year}-{_client_block(db, party_name, day):04d}-{client_initials(party_name)}"
 
 
 def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
-    """UC-AAAA-MMJJ-CLI. Chaque client a SON numéro : même client, même jour → 2, 3… (UC-2026-0804-FG2) ;
-    autre client aux mêmes initiales le même jour → initiales allongées (PD → PDI), jamais un numéro partagé."""
+    """UC-AAAA-BLOC-CLI. Chaque client a SON bloc (1004, 1005, 1006… dans l'ordre d'arrivée) ; son devis suivant
+    garde le même bloc et prend 2, 3… (UC-2026-1004-PD2). Deux clients ne partagent jamais un numéro."""
     day = on or datetime.now(timezone.utc).date()
-    root = f"UC-{day.year}-{day.month:02d}{day.day:02d}-"
-    me = _norm_name(party_name)
-    for suffix in _suffix_candidates(party_name):
-        base = root + suffix
-        owners = {
-            _quote_client(q) for q in db.query(Quotation).filter(Quotation.number.like(f"{base}%")).all()
-            if re.fullmatch(re.escape(base) + r"\d*", q.number)
-        }
-        owners.discard("")   # devis ancien sans nom de client : on ne peut pas affirmer qu'il est d'un autre client
-        if owners and owners != {me}:
-            continue   # ce suffixe appartient déjà à un autre client ce jour-là
-        taken = _taken_numbers(db, base)
-        number, i = base, 2
-        while number in taken:
-            number = f"{base}{i}"
-            i += 1
-        return number
-    return f"{root}{client_initials(party_name)}{len(_taken_numbers(db, root)) + 2}"   # dernier recours, toujours unique
+    base = _client_root(db, party_name, day)
+    taken = _taken_numbers(db, base)
+    number, i = base, 2
+    while number in taken:
+        number = f"{base}{i}"
+        i += 1
+    return number
 
 
 def client_name_of(db: Session, doc) -> str:
@@ -189,7 +203,7 @@ def linked_number(db: Session, code: str, *, quote_number: str | None = None,
         root = quote_number
     else:
         day = on or datetime.now(timezone.utc).date()
-        root = f"UC-{day.year}-{day.month:02d}{day.day:02d}-{client_initials(party_name)}"
+        root = _client_root(db, party_name, day)
     taken = _taken_numbers(db, root)
     number, i = f"{root}-{code}", 2
     while number in taken:
