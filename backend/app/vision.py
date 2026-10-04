@@ -44,7 +44,8 @@ def _ask(b64: str) -> str:
         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
         {"type": "text", "text": PROMPT},
     ]
-    res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=2000)
+    res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=2000,
+                                      model=settings.anthropic_fast_model)
     return res.text.strip() if res.available else ""
 
 
