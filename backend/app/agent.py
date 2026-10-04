@@ -218,6 +218,15 @@ TOOLS: list[dict] = [
             "svg": {"type": "string", "description": "Le SVG complet"}}, "required": ["title", "svg"], "additionalProperties": False},
     },
     {
+        "name": "round_table",
+        "description": ("TABLE RONDE : 3 experts (métreur, contrôleur, commercial) examinent le même dossier, puis un arbitre synthétise accords, "
+                        "désaccords et actions. À utiliser pour un devis important, un plan ambigu ou une décision à enjeu, ou quand le patron "
+                        "demande de vérifier à plusieurs. Mets dans `context` tout le dossier (chiffres, lignes, hypothèses). Coûte 4 appels : pas pour les questions simples."),
+        "input_schema": {"type": "object", "properties": {
+            "topic": {"type": "string"}, "context": {"type": "string", "description": "Dossier complet à examiner"}},
+            "required": ["topic", "context"], "additionalProperties": False},
+    },
+    {
         "name": "logo_guide",
         "description": ("Guide de métier pour CRÉER UN LOGO (méthode d'un designer d'identité). À lire AVANT de dessiner un logo, "
                         "un favicon ou une icône. Sujets : processus, brief, principes, types_de_marques, construction_svg, "
@@ -259,7 +268,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -288,6 +297,8 @@ AGENT_PROMPT = (
     "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
     "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
     "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."
+    "\nTABLE RONDE : pour un devis important, un plan ambigu ou une décision à enjeu (ou si le patron demande de vérifier à plusieurs), appelle round_table avec tout le dossier, "
+    "puis résume la synthèse et les désaccords en 5 lignes. Pas pour les questions simples (coût : 4 appels)."
     "\nLOGOS : demande de logo, favicon ou icône → lis logo_guide (processus, principes, types_de_marques, construction_svg), pose au plus 5 questions "
     "(nom exact, activité, 3 adjectifs, couleurs imposées) ou annonce tes hypothèses, imagine 3 concepts différents d'une phrase chacun, dessine-les "
     "avec draw_diagram (viewBox 0 0 256 256, formes simples, noir d'abord), passe audit_logo et corrige, puis montre les 3 et ATTENDS le choix du patron "
@@ -349,6 +360,10 @@ class AgentSession:
             return {"error": str(exc)}
         self.images.append({"id": art.id, "filename": art.filename, "title": title[:80]})
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
+
+    def _t_round_table(self, topic: str, context: str) -> dict:
+        from app import roundtable
+        return roundtable.run(topic, context)
 
     def _t_logo_guide(self, topic: str) -> dict:
         from app import logo

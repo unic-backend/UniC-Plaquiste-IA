@@ -498,7 +498,7 @@ def handle_turn(
         reply_text = _help_text()
     elif intent == "health":
         from app.capabilities import health_dashboard
-        h = health_dashboard()
+        h = health_dashboard(db)
         reply_text = (
             f"Système **{h['status']}**. Base : {h['database']['status']}. "
             f"Stockage : {h['storage']['status']}.\n\n"

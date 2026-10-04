@@ -1038,13 +1038,13 @@ def put_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = D
 
 
 @router.get("/health")
-def health():
-    return health_dashboard()
+def health(db: Session = Depends(get_db)):
+    return health_dashboard(db)
 
 
 @router.get("/capabilities")
-def capabilities(user: User = Depends(get_current_user)):
-    return registry_snapshot()
+def capabilities(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return registry_snapshot(db)
 
 
 @router.get("/audit")

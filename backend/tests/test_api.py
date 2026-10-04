@@ -2296,3 +2296,20 @@ def test_validated_knowledge_serves_when_claude_down(client):
         assert [m["validated"] for m in d["messages"] if m["role"] == "assistant"][0] is True
         assert client.delete(f"/api/messages/{a.id}/validate").json()["total"] == 0
         assert learned.local_reply(db, "quelle épaisseur de rail pour une cloison BA13") is None
+
+
+def test_round_table_experts_then_arbiter(monkeypatch):
+    from app import roundtable
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    seen = []
+    def fake(system, user):
+        seen.append(system.split(".")[0])
+        return "Synthèse OK" if "arbitre" in system else ("avis " + system.split(",")[0])
+    monkeypatch.setattr(roundtable, "_ask", fake)
+    with SessionLocal() as db:
+        out = AgentSession(db, None, {})("round_table", {"topic": "Devis plafond", "context": "20 m2 BA13"})
+    assert set(out["experts"]) == {"Métreur", "Contrôleur", "Commercial"} and out["synthese"] == "Synthèse OK" and len(seen) == 4
+    monkeypatch.setattr(roundtable, "_ask", lambda s, u: "")
+    assert "error" in roundtable.run("x", "y")
+    assert "error" in roundtable.run("", "y")
