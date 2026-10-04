@@ -23,6 +23,10 @@ MAX_TEXT = 24000
 CEILING = {"oui", "non", "a_confirmer"}
 
 PROMPT = """Tu analyses un plan de bâtiment pour un plaquiste (faux plafonds, cloisons, BA13) à Dakar.
+Le plan peut être en français, en anglais ou mixte. Équivalences : ceiling/false ceiling/suspended ceiling/RCP (reflected ceiling plan) = faux plafond ;
+partition/stud wall/drywall/gypsum board/plasterboard/GWB = cloison ou placo ; living room = séjour ; bedroom = chambre ; kitchen = cuisine ;
+bathroom/toilet/WC/laundry = pièce humide ; corridor/hall = couloir ; "FFL/FCL/CH/ceiling height" = hauteur ; "sqm/m2/sq.ft" = surface (sq.ft ÷ 10,76 = m²) ;
+feet/inches (ft, ") = convertis en mètres. Les noms de pièces : garde l'original et ajoute la traduction française entre parenthèses.
 Tu reçois le texte extrait du fichier et, si possible, les pages en image. Réponds par UN SEUL objet JSON, sans autre texte :
 {
  "unite_plan": "m|cm|mm|inconnue", "echelle": "texte ou null",

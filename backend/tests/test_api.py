@@ -2215,3 +2215,10 @@ def test_cad_dxf_and_ifc_and_dwg(client, tmp_path):
     assert "Chambre 1" in t and "12.50 m²" in t
     r = client.post("/api/files", files={"file": ("x.dwg", b"AC1027junk", "application/octet-stream")}).json()
     assert r["processing"]["status"] == "unsupported" and "DXF" in r["processing"]["error"]
+
+
+def test_plan_prompts_handle_english():
+    from app import plans, vision
+    for w in ("false ceiling", "partition", "bedroom", "sq.ft"):
+        assert w in plans.PROMPT
+    assert "anglais" in vision.PROMPT

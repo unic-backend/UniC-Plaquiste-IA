@@ -14,6 +14,7 @@ MAX_SIDE = 1568  # au-delà, Claude réduit l'image lui-même : on économise l'
 MAX_PDF_PAGES = 6  # pages scannées lues par vision par PDF (coût borné)
 
 PROMPT = (
+    "Le document peut être en français ou en anglais (ceiling, partition, drywall, bedroom…) : transcris dans la langue d'origine et traduis en français.\n"
     "Tu lis un document ou une photo pour un plaquiste (faux plafonds, cloisons, BA13) à Dakar.\n"
     "Transcris fidèlement, en français, sans rien inventer :\n"
     "1. Type : plan, croquis, photo de chantier, devis, facture, autre.\n"

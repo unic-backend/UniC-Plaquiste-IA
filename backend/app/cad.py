@@ -19,7 +19,7 @@ CAD_EXT = {".dxf", ".ifc"}
 # $INSUNITS → mètres
 UNITS = {1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1.0, 7: 1000.0}
 UNIT_NAMES = {1: "pouces", 2: "pieds", 4: "mm", 5: "cm", 6: "m", 7: "km"}
-WALL_LAYER = re.compile(r"mur|wall|cloison|partition|doublage|a-wall", re.I)
+WALL_LAYER = re.compile(r"mur|wall|cloison|partition|doublage|stud|drywall|gypsum|a-wall", re.I)
 MAX_ROOMS, MAX_TEXTS = 80, 150
 
 
