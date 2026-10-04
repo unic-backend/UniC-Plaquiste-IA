@@ -1560,3 +1560,15 @@ def test_agent_google_post_plan_tool(client):
     r = AgentSession(db, None, {})("google_post_plan", {})
     assert "theme_conseille" in r and "plaquiste Dakar" in r["mots_cles"] and "aucun prix" in r["consigne"]
     db.close()
+
+
+def test_mail_purge_clears_local_copy(client, monkeypatch):
+    from app import mailbox
+    monkeypatch.setattr(mailbox, "imap_configured", lambda: True)
+    monkeypatch.setattr(mailbox, "fetch_recent", lambda n: [
+        {"uid": "<p1@x>", "from_addr": "a@b.sn", "subject": "Test", "date": "", "body": "x"}])
+    client.post("/api/mail/purge")
+    assert client.post("/api/mail/sync").json()["new"] == 1
+    assert len(client.get("/api/mail").json()) == 1
+    assert client.post("/api/mail/purge").json()["purged"] == 1
+    assert client.get("/api/mail").json() == []

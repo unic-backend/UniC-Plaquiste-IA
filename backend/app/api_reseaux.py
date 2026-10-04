@@ -287,6 +287,14 @@ def mail_sync(limit: int = 20, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(exc.status, str(exc))
 
 
+@router.post("/mail/purge")
+def mail_purge(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Efface les mails relevés (copie locale) : appelé à chaque ouverture de l'appli. Gmail, lui, n'est pas touché."""
+    n = db.query(InboxMessage).delete()
+    db.commit()
+    return {"purged": n}
+
+
 @router.get("/mail")
 def mail_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return [_mail_out(m) for m in db.query(InboxMessage).order_by(InboxMessage.fetched_at.desc()).limit(100).all()]

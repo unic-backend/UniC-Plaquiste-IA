@@ -184,6 +184,7 @@ export const net = {
   disconnectGmail: () => request<{ connected: boolean }>("/api/mail/account", { method: "DELETE" }),
   mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
   mails: () => request<Mail[]>("/api/mail"),
+  mailPurge: () => request<{ purged: number }>("/api/mail/purge", { method: "POST" }),
   analyze: (id: string) => request<Mail & { priority: string; action: string }>(`/api/mail/${id}/analyze`, { method: "POST" }),
   replyDraft: (id: string, instruction: string) =>
     request<MailDraft>(`/api/mail/${id}/reply-draft`, { method: "POST", ...json({ instruction }) }),

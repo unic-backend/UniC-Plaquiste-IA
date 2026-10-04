@@ -34,3 +34,6 @@ export const Eye = mk(<><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12
 export const More = mk(<><circle cx="5.5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="18.5" cy="12" r="1.4" fill="currentColor" /></>);
 export const Pin = mk(<><path d="M9 4h6l-1 5.5 3 3H7l3-3z" /><path d="M12 12.5V20" /></>);
 export const Trash = mk(<><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /><path d="M10 11v5M14 11v5" /></>);
+export const Sun = mk(<><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>);
+export const Moon = mk(<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />);
+export const Bell = mk(<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9zM10 20a2 2 0 0 0 4 0" />);

@@ -5,6 +5,8 @@ import { FicheGoogle } from "./Google";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
+import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
+import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
 import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
@@ -471,6 +473,11 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
     api.conversations(q).then(setConvs).catch(() => setConvs([]));
   }, [q, loc.pathname]);
   useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    listenBriefingTap(() => nav("/")).then((f) => { off = f; }).catch(() => {});
+    return () => off?.();
+  }, []);
   return (
     <div className="app">
       <div className={`overlay ${open ? "show" : ""}`} onClick={() => setOpen(false)} />
@@ -561,6 +568,7 @@ function Chat({ initialId }: { initialId?: string }) {
     })().catch(() => {});
     return () => off?.();
   }, []);
+  const sendRef = useRef<(m?: string) => void>();
   const end = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
@@ -584,6 +592,13 @@ function Chat({ initialId }: { initialId?: string }) {
     end.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  sendRef.current = (m) => { void send(m); };
+  useEffect(() => {
+    if (initialId) return;
+    let go: string | null = null;
+    try { go = sessionStorage.getItem(AUTO_KEY); sessionStorage.removeItem(AUTO_KEY); } catch { /* ignoré */ }
+    if (go) setTimeout(() => sendRef.current?.(go!), 300);
+  }, [initialId]);
   async function send(override?: string) {
     const msg = (override ?? text).trim();
     if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
@@ -1390,6 +1405,37 @@ function CreditBadge() {
   );
 }
 
+/** Apparence (jour / nuit / auto) et briefing quotidien. */
+function PrefsCard() {
+  const [mode, setMode] = useTheme();
+  const [time, setTime] = useState(getBriefingTime() ?? "");
+  const [note, setNote] = useState("");
+  const opts: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
+    { id: "light", label: "Jour", icon: <I.Sun size={16} /> },
+    { id: "dark", label: "Nuit", icon: <I.Moon size={16} /> },
+    { id: "auto", label: "Auto", icon: null },
+  ];
+  const plan = async (t: string | null) => { setTime(t ?? ""); setNote(await scheduleBriefing(t)); };
+  return (
+    <section className="card-box prefs">
+      <label>Apparence</label>
+      <div className="seg" role="group" aria-label="Apparence">
+        {opts.map((o) => (
+          <button key={o.id} className={mode === o.id ? "on" : ""} aria-pressed={mode === o.id} onClick={() => setMode(o.id)}>
+            {o.icon}{o.label}
+          </button>
+        ))}
+      </div>
+      <label><I.Bell size={14} /> Briefing chaque jour</label>
+      <div className="row">
+        <input type="time" value={time} onChange={(e) => e.target.value && plan(e.target.value)} aria-label="Heure du briefing" />
+        {time && <button className="btn btn-line btn-small" onClick={() => plan(null)}>Désactiver</button>}
+      </div>
+      <p className="hint">{note || (time ? `Actif chaque jour à ${time.replace(":", " h ")}.` : "Choisis une heure : une notification t'ouvre le briefing.")}</p>
+    </section>
+  );
+}
+
 function SettingsHub() {
   return (
     <div className="page">
@@ -1400,6 +1446,7 @@ function SettingsHub() {
           (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
         </p>
         <CreditBadge />
+        <PrefsCard />
         {HUB.map((g) => (
           <section key={g.title}>
             <h3>{g.title}</h3>
@@ -1568,6 +1615,12 @@ export default function App() {
   const chatMatch = useMatch("/c/:id");
   // la conversation reste montée entre « / » et « /c/:id » : pas de rechargement, animations conservées
   const isChat = loc.pathname === "/" || !!chatMatch;
+  // les mails relevés ne survivent pas à la fermeture complète de l'appli (une fois par lancement)
+  useEffect(() => {
+    if (!user) return;
+    try { if (sessionStorage.getItem("unic.boot")) return; sessionStorage.setItem("unic.boot", "1"); } catch { /* ignoré */ }
+    net.mailPurge().catch(() => {});
+  }, [user]);
   if (gate === "connect") return <Connexion onDone={check} />;
   if (gate === "error")
     return (
