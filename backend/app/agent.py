@@ -98,6 +98,7 @@ TOOLS: list[dict] = [
             "length_m": {"type": "number"}, "height_m": {"type": "number"}, "width_m": {"type": "number"},
             "area_m2": {"type": "number"}, "sides": {"type": "integer", "enum": [1, 2]},
             "parois": {"type": "integer"}, "already_developed": {"type": "boolean"}, "coats": {"type": "integer"},
+            "board_length_m": {"type": "number", "description": "Longueur d'une plaque : 2 par défaut ; 2.5 seulement si le patron dit « 2,50 »."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}}},
@@ -411,10 +412,11 @@ class AgentSession:
     def _t_calculate_materials(self, kind: str, method: str = "generic", length_m: float | None = None,
                                height_m: float | None = None, width_m: float | None = None,
                                area_m2: float | None = None, sides: int = 2, parois: int | None = None,
-                               already_developed: bool = False, coats: int = 2, openings: list | None = None) -> dict:
+                               already_developed: bool = False, coats: int = 2, openings: list | None = None,
+                               board_length_m: float | None = None) -> dict:
         co = company_dict(self.db)
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
-               "board_height": co.get("board_height_m") or 2.5, "stud_spacing": co.get("stud_spacing_m") or 0.6}
+               "board_height": board_length_m or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6}
         try:
             if method == "unic":
                 surface = area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None

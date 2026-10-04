@@ -405,6 +405,35 @@ def state_report(db: Session) -> dict:
     }
 
 
+# ---------- règles du patron enregistrées une fois pour toutes ----------
+
+OWNER_RULES_V1 = (
+    "Une barre (fourrure, montant, rail, cornière) mesure 2,90 m. Une barre n'est pas un paquet : ne jamais confondre ni convertir l'un en l'autre.",
+    "Une barre de fourrure coûte 1 200 FCFA (c'est le prix d'une barre, pas d'un paquet).",
+    "Plaques de plâtre : par défaut 2 m de long sur 1,20 m de large. Seulement si le patron précise « 2,50 » : 2,50 m de long sur 1,20 m de large.",
+    "Vis : 25 mm par défaut ; 35 mm uniquement si le patron le dit.",
+    "Médina est un lieu (quartier de Dakar), pas un client ni un article.",
+)
+
+
+def seed_owner_rules(db: Session) -> int:
+    """Pose une seule fois les règles énoncées par le patron. Supprimées ensuite, elles ne reviennent pas."""
+    from app.models import AppSetting
+
+    if db.get(AppSetting, "seed_owner_rules_v1"):
+        return 0
+    n = 0
+    for text in OWNER_RULES_V1:
+        try:
+            if add(db, text, kind="preference", source="user", pinned=True):
+                n += 1
+        except MemoryRefused:
+            continue
+    db.add(AppSetting(key="seed_owner_rules_v1", value="1"))
+    db.commit()
+    return n
+
+
 # ---------- apprentissage automatique (suppositions) ----------
 
 # Textes à analyser APRÈS l'envoi de la réponse (l'extraction est un second appel à l'IA : il ne doit pas faire attendre le patron).

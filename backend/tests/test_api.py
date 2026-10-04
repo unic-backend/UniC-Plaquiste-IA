@@ -924,7 +924,10 @@ def test_memory_conflicts_are_reported_never_arbitrated(client):
 def test_memory_budget_is_a_hard_limit_and_temporary_context_expires(client):
     from datetime import datetime, timedelta, timezone
     from app import memory as mem
+    from app.models import Memory
     db = _mem_db()
+    db.query(Memory).delete()   # base vide : les règles du patron posées au démarrage ne comptent pas dans ce test de budget
+    db.commit()
     for i in range(60):
         mem.add(db, f"Règle numéro {i} : toujours vérifier le chantier numéro {i} avec le chef d'équipe Mamadou", pinned=False)
     db.commit()
@@ -1703,3 +1706,21 @@ def test_agent_memory_refuses_secrets_and_can_forget(client, claude):
     mem = client.get("/api/memory").json()
     items = mem["items"] if isinstance(mem, dict) else mem
     assert not any("sk-ant" in (m.get("text") or "") for m in items)
+
+
+def test_owner_rules_are_seeded_once_and_stay_deleted(client):
+    from app import memory as mem
+    from app.models import AppSetting, Memory
+    db = _mem_db()
+    db.query(Memory).delete()
+    row = db.get(AppSetting, "seed_owner_rules_v1")
+    if row:
+        db.delete(row)
+    db.commit()
+    assert mem.seed_owner_rules(db) == len(mem.OWNER_RULES_V1)
+    texts = " ".join(m.text for m in db.query(Memory).all())
+    assert "2,90 m" in texts and "1 200 FCFA" in texts and "25 mm" in texts and "Médina" in texts
+    db.query(Memory).delete()
+    db.commit()
+    assert mem.seed_owner_rules(db) == 0 and db.query(Memory).count() == 0   # supprimées : elles ne reviennent pas
+    db.close()
