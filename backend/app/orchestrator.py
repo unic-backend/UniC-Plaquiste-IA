@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, memory as mem, metier, pricecheck
-from app.ai import chat_complete, deep_available, provider_chain
+from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
@@ -936,8 +936,9 @@ def handle_turn(
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note()
-                ai = chat_complete(msgs, deep=deep, web=can_search,
-                                   tools=agent.TOOLS if tools_on else None, tool_handler=session)
+                with live_stream():
+                    ai = chat_complete(msgs, deep=deep, web=can_search,
+                                       tools=agent.TOOLS if tools_on else None, tool_handler=session)
                 if ai.provider == "claude" and ai.raw:
                     usage.record(db, ai.raw.get("usage"), ai.model)
                 if session is not None and session.used:

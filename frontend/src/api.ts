@@ -206,6 +206,42 @@ export const api = {
     request(`/api/conversations/${id}`, { method: "DELETE" }),
   chat: (body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean }) =>
     request<ChatOut>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
+  /** Réponse en flux : statut + texte au fil de l'eau. Si le flux ne démarre pas, repli sur la réponse d'un bloc. */
+  chatStream: async (
+    body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean },
+    on: (ev: { t: "status" | "delta" | "reset"; text?: string }) => void,
+  ): Promise<ChatOut & { streamed: boolean }> => {
+    const headers = authHeaders(new Headers({ "Content-Type": "application/json" }));
+    let res: Response | undefined;
+    try { res = await fetch(apiUrl("/api/chat/stream"), { method: "POST", headers, body: JSON.stringify(body) }); } catch { /* repli ci-dessous */ }
+    if (res?.status === 401) throw new AuthError("Code d'accès requis");
+    if (!res || !res.ok) return { ...(await api.chat(body)), streamed: false };   // le flux n'a rien traité : on peut renvoyer sans doublon
+    let streamed = false, out: (ChatOut & { streamed: boolean }) | null = null;
+    const handle = (line: string) => {
+      if (!line.trim()) return;
+      const ev = JSON.parse(line);
+      if (ev.t === "done") out = { conversation_id: ev.conversation_id, title: ev.title, message: ev.message, streamed };
+      else if (ev.t === "error") throw new Error(ev.message || "Erreur");
+      else { if (ev.t === "delta") streamed = true; on(ev); }
+    };
+    if (res.body && typeof res.body.getReader === "function") {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) { handle(buf.slice(0, nl)); buf = buf.slice(nl + 1); }
+      }
+      handle(buf);
+    } else {
+      (await res.text()).split("\n").forEach(handle);   // pas de lecture en flux : tout arrive d'un coup
+    }
+    if (!out) throw new Error("Réponse interrompue. Réessaie.");
+    return out;
+  },
   upload: async (file: File, projectId?: string) => {
     const fd = new FormData();
     fd.append("file", file);

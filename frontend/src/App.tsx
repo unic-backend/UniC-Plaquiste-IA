@@ -543,6 +543,7 @@ function Chat({ initialId }: { initialId?: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<{ status: string; text: string }>({ status: "", text: "" });
   const [pending, setPending] = useState<File[]>([]);
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
@@ -615,14 +616,19 @@ function Chat({ initialId }: { initialId?: string }) {
         file_ids.push(up.id);
       }
       setPending([]);
-      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep });
+      setLive({ status: "", text: "" });
+      const out = await api.chatStream({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep }, (ev) => {
+        if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "" }));
+        else if (ev.t === "delta") setLive((l) => ({ ...l, text: l.text + (ev.text || "") }));
+        else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
+      });
       setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
         justCreated.current = out.conversation_id;
         nav(`/c/${out.conversation_id}`, { replace: true });
       }
-      setMessages((m) => [...m, { ...out.message, fresh: true }]);   // le message de l'utilisateur est déjà affiché
+      setMessages((m) => [...m, { ...out.message, fresh: !out.streamed }]);   // déjà lu en direct : pas de seconde animation   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
       setMessages((m) => [
         ...m,
@@ -719,7 +725,7 @@ function Chat({ initialId }: { initialId?: string }) {
               }
             />
           ))}
-          {busy && <Typing deep={deep} web />}
+          {busy && <Typing deep={deep} web status={live.status} liveHtml={live.text ? md(live.text) : undefined} />}
           <div ref={end} />
         </div>
       </div>

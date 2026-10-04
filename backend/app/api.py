@@ -175,8 +175,7 @@ def delete_conversation(cid: str, db: Session = Depends(get_db), user: User = De
     return {"ok": True}
 
 
-@router.post("/chat")
-def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
     if body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if conv is None or conv.user_id != user.id:
@@ -216,6 +215,59 @@ def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_c
             "meta": meta,
         },
     }
+
+
+@router.post("/chat")
+def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return _chat_turn(db, user, body)
+
+
+@router.post("/chat/stream")
+def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
+    """Même réponse que /chat, mais en flux (une ligne JSON par événement) : statut, texte au fil de l'eau, puis « done »."""
+    import logging
+    import queue
+    import threading
+
+    from fastapi.responses import StreamingResponse
+
+    from app import ai
+    from app.database import SessionLocal
+
+    q: queue.Queue = queue.Queue()
+    uid = user.id
+
+    def worker():
+        db = SessionLocal()
+        tok = ai.STREAM_SINK.set(q.put)
+        try:
+            q.put({"t": "status", "text": "Je réfléchis…"})
+            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body)})
+        except HTTPException as exc:
+            q.put({"t": "error", "message": str(exc.detail)})
+        except Exception:
+            logging.getLogger("unic.chat").exception("chat stream")
+            q.put({"t": "error", "message": "Erreur interne. Réessaie dans un instant."})
+        finally:
+            ai.STREAM_SINK.reset(tok)
+            db.close()
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def gen():
+        while True:
+            try:
+                ev = q.get(timeout=10)
+            except queue.Empty:
+                yield "\n"  # signal de vie : garde la connexion ouverte pendant les longues recherches
+                continue
+            if ev is None:
+                return
+            yield json.dumps(ev, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ---------- files ----------

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -127,6 +130,32 @@ class LocalAIProvider(AIProvider):
             return AIResult("", self.id, settings.local_ai_model, False, str(exc))
 
 
+# Rappel de progression pour l'écran (flux en direct) : {"t": "status"|"delta"|"reset", ...}. Absent = réponse d'un bloc.
+STREAM_CB: ContextVar = ContextVar("unic_stream_cb", default=None)
+
+STREAM_SINK: ContextVar = ContextVar("unic_stream_sink", default=None)  # où vont les événements (posé par l'API)
+
+
+@contextmanager
+def live():
+    """Active le flux en direct pour UN appel (la réponse principale), pas pour les appels annexes (mémoire…)."""
+    tok = STREAM_CB.set(STREAM_SINK.get())
+    try:
+        yield
+    finally:
+        STREAM_CB.reset(tok)
+
+
+TOOL_LABELS = {
+    "get_prices": "Je regarde les prix…", "calculate_materials": "Je calcule les quantités…",
+    "create_quote": "Je prépare le devis…", "create_invoice": "Je prépare la facture…",
+    "create_purchase_order": "Je prépare le bon de commande…", "create_delivery_note": "Je prépare le bon de livraison…",
+    "revise_document": "Je corrige le document…", "list_documents": "Je cherche dans tes documents…",
+    "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "read_email": "Je lis le mail…",
+    "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
+}
+
+
 class ClaudeAIProvider(AIProvider):
     """API Claude via le SDK officiel `anthropic`. Raisonnement profond à la demande, recherche Internet intégrée."""
 
@@ -160,12 +189,42 @@ class ClaudeAIProvider(AIProvider):
 
         from app import usage
 
-        try:
-            resp = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
-        except anthropic.BadRequestError:
-            resp = client.messages.create(**params)
+        cb = STREAM_CB.get()
+        resp = None
+        if cb is not None:
+            try:
+                resp = ClaudeAIProvider._send_stream(client, params, cb)
+            except Exception:  # flux impossible : on retombe sur l'appel classique (le texte déjà affiché est effacé)
+                cb({"t": "reset"})
+        if resp is None:
+            try:
+                resp = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+            except anthropic.BadRequestError:
+                resp = client.messages.create(**params)
         usage.tally(resp)
         return resp
+
+    @staticmethod
+    def _send_stream(client, params: dict, cb):
+        """Même requête en flux : le texte arrive mot à mot, les recherches Internet sont annoncées."""
+        import anthropic
+
+        def attempt(manager):
+            with manager as stream:
+                for ev in stream:
+                    kind = getattr(ev, "type", "")
+                    if kind == "content_block_start" and getattr(ev.content_block, "type", "") == "server_tool_use":
+                        cb({"t": "status", "text": "Je cherche sur Internet…"})
+                    elif kind == "content_block_delta" and getattr(ev.delta, "type", "") == "text_delta":
+                        cb({"t": "delta", "text": ev.delta.text})
+                return stream.get_final_message()
+
+        cb({"t": "reset"})
+        try:
+            return attempt(client.beta.messages.stream(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params))
+        except anthropic.BadRequestError:
+            cb({"t": "reset"})
+            return attempt(client.messages.stream(**params))
 
     @staticmethod
     def _text_and_sources(resp) -> tuple[str, list[dict]]:
@@ -196,6 +255,9 @@ class ClaudeAIProvider(AIProvider):
                     if getattr(block, "type", "") != "tool_use":
                         continue
                     used.append(block.name)
+                    cb = STREAM_CB.get()
+                    if cb is not None:
+                        cb({"t": "status", "text": TOOL_LABELS.get(block.name, "Je travaille…")})
                     out = handler(block.name, dict(block.input or {}))
                     item = {"type": "tool_result", "tool_use_id": block.id,
                             "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]}

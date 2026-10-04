@@ -1580,3 +1580,52 @@ def test_calc_ignores_product_refs_and_absurd_sizes():
     assert r.kind == "ceiling" and abs(r.steps[0].result - 750) < 1
     r = calc.calculate_from_text("cloison ba13 longueur 12 hauteur 30")
     assert r.missing and not r.steps
+
+
+class _FakeStream:
+    def __init__(self, final, words):
+        self.final, self.words = final, words
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def __iter__(self):
+        for w in self.words:
+            yield _NS(type="content_block_delta", delta=_NS(type="text_delta", text=w))
+
+    def get_final_message(self):
+        return self.final
+
+
+def _ndjson(resp):
+    import json as _json
+    return [_json.loads(line) for line in resp.text.splitlines() if line.strip()]
+
+
+def test_chat_stream_sends_words_then_done(client, claude):
+    fake = claude(lambda kind, kw: _resp("Bonjour patron"))
+    fake.beta.messages.stream = lambda **kw: _FakeStream(_resp("Bonjour patron"), ["Bonjour ", "patron"])
+    r = client.post("/api/chat/stream", json={"message": "Quelle est la capitale du Sénégal ?"})
+    assert r.status_code == 200
+    ev = _ndjson(r)
+    assert [e["text"] for e in ev if e["t"] == "delta"] == ["Bonjour ", "patron"]
+    done = ev[-1]
+    assert done["t"] == "done" and done["message"]["content"] == "Bonjour patron" and done["conversation_id"]
+
+
+def test_chat_stream_falls_back_when_streaming_breaks(client, claude):
+    fake = claude(lambda kind, kw: _resp("Réponse complète"))
+
+    def boom(**kw):
+        raise RuntimeError("flux indisponible")
+    fake.beta.messages.stream = boom
+    ev = _ndjson(client.post("/api/chat/stream", json={"message": "Explique-moi le BA13."}))
+    assert ev[-1]["t"] == "done" and ev[-1]["message"]["content"] == "Réponse complète"
+
+
+def test_chat_stream_reports_errors_cleanly(client):
+    ev = _ndjson(client.post("/api/chat/stream", json={"message": "   ", "file_ids": []}))
+    assert ev[-1]["t"] == "error" and "vide" in ev[-1]["message"].lower()
