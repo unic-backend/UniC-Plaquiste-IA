@@ -701,3 +701,16 @@ h1, h2, h3, b, strong, th { font-weight: 800; }
 .bubble.fresh { cursor: default; }
 
 .bubble.typing .md > :last-child::after { content: ""; display: inline-block; width: 3px; height: 1em; margin-left: 3px; background: var(--green); border-radius: 2px; vertical-align: -0.15em; animation: caretBlink .8s steps(2, start) infinite; }
+
+/* Réponses de l'IA : texte libre, sans cadre ni avatar (comme Claude) ; ta question garde sa bulle */
+.msg.assistant { display: block; }
+.msg.assistant .avatar { display: none; }
+.msg.assistant .bubble { background: transparent; border: 0; box-shadow: none; padding: 2px 2px 0; max-width: 100%; border-radius: 0; }
+.msg.assistant .bubble.fresh { animation: none; }
+.md p { margin: 0 0 12px; }
+.md ul, .md ol { margin: 0 0 12px; padding-left: 22px; }
+.md li { margin: 0 0 6px; }
+.md > :last-child { margin-bottom: 0; }
+.w { opacity: 0; animation: wordIn .35s ease forwards; }
+@keyframes wordIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.bubble.typing .md > :last-child::after { content: none; }

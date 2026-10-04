@@ -19,15 +19,64 @@ function Logo({ size = 28 }: { size?: number }) {
 
 function md(text: string) {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let html = esc(text);
-  html = html.replace(/^### (.*)$/gm, "<h3>$1</h3>");
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/^\- (.*)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
-  html = html.replace(/\n\n/g, "</p><p>");
-  html = html.replace(/\n/g, "<br/>");
-  return `<p>${html}</p>`;
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*(?!\s)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  const out: string[] = [];
+  let list: "ul" | "ol" | null = null;
+  let para: string[] = [];
+  const flushPara = () => { if (para.length) { out.push(`<p>${para.join("<br/>")}</p>`); para = []; } };
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const head = /^#{1,4}\s+(.*)$/.exec(line);
+    if (bullet || num) {
+      flushPara();
+      const kind = bullet ? "ul" : "ol";
+      if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${inline((bullet || num)![1])}</li>`);
+    } else if (head) {
+      flushPara(); closeList();
+      out.push(`<h3>${inline(head[1])}</h3>`);
+    } else if (!line.trim()) {
+      flushPara(); closeList();
+    } else {
+      closeList();
+      para.push(inline(line));
+    }
+  }
+  flushPara(); closeList();
+  return out.join("");
+}
+
+/** Chaque mot apparaît à son tour (fondu) : mise en page stable, pas de Markdown cassé en cours de route. */
+function revealHtml(html: string, totalMs = 3200): string {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const words: Text[] = [];
+  const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n.textContent || "").trim()) words.push(n as Text);
+  const count = words.reduce((s, t) => s + (t.textContent || "").split(/\s+/).filter(Boolean).length, 0);
+  const step = Math.min(45, totalMs / Math.max(1, count));
+  let k = 0;
+  for (const t of words) {
+    const frag = document.createDocumentFragment();
+    for (const part of (t.textContent || "").split(/(\s+)/)) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) { frag.append(part); continue; }
+      const s = document.createElement("span");
+      s.className = "w";
+      s.style.animationDelay = `${Math.round(k++ * step)}ms`;
+      s.textContent = part;
+      frag.append(s);
+    }
+    t.replaceWith(frag);
+  }
+  return tpl.innerHTML;
 }
 
 function Badge({ s }: { s?: string }) {
@@ -120,27 +169,18 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
   );
 }
 
-/** Révélation progressive d'une réponse reçue (le serveur répond d'un bloc) : rapide, ~2 s max, un toucher la termine. */
-function useTypewriter(full: string, active: boolean) {
-  const [n, setN] = useState(active ? 0 : full.length);
+/** Réponse qui vient d'arriver : ses mots apparaissent un à un ; un toucher affiche tout. */
+function useReveal(len: number, active: boolean) {
+  const [done, setDone] = useState(!active);
   useEffect(() => {
-    if (!active) { setN(full.length); return; }
-    // fins de mots : l'écriture avance mot par mot (~3,5 s au plus, quelle que soit la longueur)
-    const ends: number[] = [];
-    for (const m of full.matchAll(/\S+\s*/g)) ends.push(m.index! + m[0].length);
-    const perTick = Math.max(1, Math.ceil(ends.length / 90));
-    let w = 0;
-    setN(0);
-    const id = setInterval(() => {
-      w = Math.min(ends.length, w + perTick);
-      setN(w >= ends.length ? full.length : ends[w - 1]);
-      if (w >= ends.length) clearInterval(id);
-      const chat = document.querySelector(".chat");
-      if (chat && chat.scrollHeight - chat.scrollTop - chat.clientHeight < 160) chat.scrollTo({ top: chat.scrollHeight });
-    }, 40);
-    return () => clearInterval(id);
-  }, [full, active]);
-  return { text: full.slice(0, n), done: n >= full.length, skip: () => setN(full.length) };
+    if (!active) { setDone(true); return; }
+    setDone(false);
+    const id = setTimeout(() => setDone(true), 3600);
+    const chat = document.querySelector(".chat");
+    if (chat) chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
+    return () => clearTimeout(id);
+  }, [len, active]);
+  return { done, skip: () => setDone(true) };
 }
 
 /** Salutation écrite lettre par lettre, à vitesse moyenne. */
@@ -162,15 +202,15 @@ function GreetingTyper({ g }: { g: Greeting }) {
 
 function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
   const [copied, setCopied] = useState(false);
-  const tw = useTypewriter(m.content, !!m.fresh && m.role === "assistant");
-  const shown = m.role === "assistant" && m.fresh ? tw.text : m.content;
+  const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
+  const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   return (
     <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
       <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
-        <div className="md" dangerouslySetInnerHTML={{ __html: md(shown) }} />
+        <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
         {m.role === "user" && (
           <div className="msg-actions">
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
