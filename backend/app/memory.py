@@ -51,9 +51,15 @@ def add(db: Session, text: str, kind: str = "fact", source: str = "user", pinned
     return m
 
 
+_QUOTES = " \t\r\n«»\"“”„‘’'"
+
+
 def parse_remember(text: str) -> str | None:
-    m = REMEMBER_RE.match(text or "")
-    return m.group(1).strip() if m else None
+    """« Retiens que X » → X, sans guillemets ni ponctuation de bord copiés avec la phrase."""
+    m = REMEMBER_RE.match((text or "").lstrip(_QUOTES))
+    if not m:
+        return None
+    return m.group(1).strip(_QUOTES + ".!;,") or None
 
 
 def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS) -> str:

@@ -579,3 +579,12 @@ def test_startup_survives_missing_metier_file(monkeypatch, tmp_path):
     finally:
         db.close()
         metier.load.cache_clear()
+
+
+def test_remember_strips_copied_quotes():
+    from app import memory
+    p = memory.parse_remember
+    assert p("« Retiens que mon test disque fonctionne ».") == "mon test disque fonctionne"
+    assert p('"Retiens que le BA13 est à 4500"') == "le BA13 est à 4500"
+    assert p("Retiens que l'acompte est de 30 % ; ") == "l'acompte est de 30 %"
+    assert p("Retiens :  ") is None
