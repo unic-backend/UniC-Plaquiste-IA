@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -128,10 +129,19 @@ def _entreprise(company: dict) -> dict:
     return out
 
 
+_SCALE: ContextVar[float] = ContextVar("pdf_scale", default=1.0)
+
+
+def P(x: float) -> float:
+    """Dimension mise à l'échelle : le document se resserre pour tenir sur une page."""
+    return x * _SCALE.get()
+
+
 def _st(name: str, **kw) -> ParagraphStyle:
     kw.setdefault("fontName", "Helvetica-Bold")
-    kw.setdefault("fontSize", 9)
-    kw.setdefault("leading", kw["fontSize"] * 1.3)
+    size = kw.get("fontSize", 9)
+    lead = kw.get("leading", size * 1.3)
+    kw["fontSize"], kw["leading"] = P(size), P(lead)
     return ParagraphStyle(name, **kw)
 
 
@@ -200,7 +210,7 @@ def _columns(headers: list[str], rows: list[list[str]]):
     return heads, out, pu is not None
 
 
-def build_document_pdf(
+def _render(
     path: Path,
     *,
     company: dict,
@@ -218,7 +228,7 @@ def build_document_pdf(
     notes: str = "",
     warnings: list[str] | None = None,
     extra_paragraphs: list[str] | None = None,
-) -> Path:
+) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     e = _entreprise(company)
     is_quote = doc_label.upper() == "DEVIS"
@@ -233,20 +243,21 @@ def build_document_pdf(
         " | ".join(x for x in ((f"NINEA : {e['ninea']}" if e["ninea"] else ""), (f"RCCM : {e['rccm']}" if e["rccm"] else "")) if x)) if x)
     ident = [Paragraph(e["nom"], _st("nom", fontSize=17, textColor=BLUE, leading=20)),
              Paragraph(e["accroche"], _st("accr", fontSize=10, textColor=YELLOW, leading=12)),
+             Paragraph(SOUS_ACCROCHE, _st("accr2", fontSize=10, textColor=YELLOW, leading=12)),
              Paragraph(infos, _st("info", fontSize=8.5, leading=10.5))]
     tsize = _fit_title(doc_label)
     titre = [Paragraph(doc_label, _st("titre", fontSize=tsize, textColor=BLUE, alignment=TA_RIGHT, leading=tsize + 2)),
              Paragraph(f"N° {number}", _st("num", fontSize=10, alignment=TA_RIGHT, leading=14))]
     if LOGO.exists():
-        head = Table([[RLImage(str(LOGO), width=30 * mm, height=30 * mm), ident, titre]], colWidths=[33 * mm, 96 * mm, 51 * mm])
+        head = Table([[RLImage(str(LOGO), width=P(30) * mm, height=P(30) * mm), ident, titre]], colWidths=[P(33) * mm, (129 - P(33)) * mm, 51 * mm])
     else:
         head = Table([[ident, titre]], colWidths=[129 * mm, 51 * mm])
     head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                              ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
-                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), P(0)),
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), P(0))]))
     rule = Table([[""]], colWidths=[180 * mm], rowHeights=[2])
     rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), YELLOW)]))
-    story: list = [head, Spacer(1, 3), rule, Spacer(1, 6)]
+    story: list = [head, Spacer(1, P(3)), rule, Spacer(1, P(6))]
 
     # --- destinataire + références
     party_lines = [l for l in (party_right[1] or "").split("\n") if l.strip()]
@@ -265,15 +276,15 @@ def build_document_pdf(
         metas.append(Paragraph(m, txt))
     bloc = Table([[left, metas]], colWidths=[90 * mm, 90 * mm])
     bloc.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [bloc, Spacer(1, 6)]
+    story += [bloc, Spacer(1, P(6))]
 
     # --- objet
     low = doc_label.lower()
     objet = "Objet de la facture" if low.startswith("facture") or low.startswith("situation") else \
             "Objet de l'avoir" if low == "avoir" else f"Objet du {low}"
-    story += [_bar(objet), Spacer(1, 4),
+    story += [_bar(objet), Spacer(1, P(4)),
               Paragraph((title or doc_label) + (("<br/>" + notes.replace("\n", "<br/>")) if notes and not is_quote else ""),
-                        _st("just", leading=12.5, alignment=TA_JUSTIFY)), Spacer(1, 8)]
+                        _st("just", leading=12.5, alignment=TA_JUSTIFY)), Spacer(1, P(8))]
 
     # --- tableau
     mapped = _columns(headers, rows)
@@ -281,8 +292,8 @@ def build_document_pdf(
         heads, body, has_pu = mapped
         if has_pu:
             story += [Paragraph("Important — Prix unitaires :", _st("imp", textColor=BLUE, leading=12)),
-                      Paragraph(MENTION_PU, txt), Spacer(1, 8)]
-        story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, 3)]
+                      Paragraph(MENTION_PU, txt), Spacer(1, P(8))]
+        story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3))]
         ncol = len(heads)
         widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in heads else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
         cellr = _st("cellr", fontSize=8.5, leading=11, alignment=TA_RIGHT)
@@ -296,22 +307,22 @@ def build_document_pdf(
         t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
         style = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
                  ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                 ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]
+                 ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
         if first_total and heads[-1] == "Prix Total":
             style += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
         for r in range(1, len(data) - (1 if first_total and heads[-1] == "Prix Total" else 0)):
             if r % 2 == 0:
                 style.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
         t.setStyle(TableStyle(style))
-        story += [t, Spacer(1, 8)]
+        story += [t, Spacer(1, P(8))]
     else:
-        story += [_bar("Détail"), Spacer(1, 3)]
+        story += [_bar("Détail"), Spacer(1, P(3))]
         data = [[Paragraph(h, cellw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
         t = Table(data, colWidths=[w * mm * 180 / sum(col_widths) for w in col_widths], repeatRows=1)
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
-                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 3),
-                               ("BOTTOMPADDING", (0, 0), (-1, -1), 3), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA])]))
-        story += [t, Spacer(1, 8)]
+                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), P(3)),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), P(3)), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA])]))
+        story += [t, Spacer(1, P(8))]
 
     # --- totaux : lignes intermédiaires, puis bandeau jaune sur le total
     if totals:
@@ -322,30 +333,30 @@ def build_document_pdf(
         if middle:
             mt = Table([[Paragraph(a, _st("ml", alignment=TA_RIGHT)), Paragraph(_clean(b), _st("mv", alignment=TA_RIGHT))] for a, b in middle],
                        colWidths=[130 * mm, 50 * mm])
-            mt.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
-            story += [mt, Spacer(1, 4)]
+            mt.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(2)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2))]))
+            story += [mt, Spacer(1, P(4))]
         if final:
             has_vat = any(l.upper().startswith("TVA") for l in labels)
             lab = "MONTANT TOTAL TTC" if has_vat else "MONTANT TOTAL"
             ttc = Table([[Paragraph(lab, _st("t1", fontSize=12, textColor=BLUE)),
                           Paragraph(_clean(final[1]), _st("t2", fontSize=12, textColor=BLUE, alignment=TA_RIGHT))]],
                         colWidths=[110 * mm, 70 * mm])
-            ttc.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), YELLOW), ("TOPPADDING", (0, 0), (-1, -1), 6),
-                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-            story += [ttc, Spacer(1, 10)]
+            ttc.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), YELLOW), ("TOPPADDING", (0, 0), (-1, -1), P(6)),
+                                     ("BOTTOMPADDING", (0, 0), (-1, -1), P(6)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+            story += [ttc, Spacer(1, P(10))]
 
     if warnings:
         for w in warnings:
             story.append(Paragraph("Attention : " + w, _st("w", textColor=colors.HexColor("#B42318"))))
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, P(8)))
     for p in extra_paragraphs or []:
-        story += [Paragraph(p, txt), Spacer(1, 5)]
+        story += [Paragraph(p, txt), Spacer(1, P(5))]
 
     # --- conditions et exclusions (devis)
     if is_quote:
         bullets = [b for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
         bullets.append("Les quantités pourront être ajustées selon la surface réelle constatée sur site.")
-        story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, 2)]
+        story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, P(2))]
         story += [Paragraph(f"• {b.strip()}", txt) for b in bullets]
         try:
             from app import metier
@@ -353,22 +364,47 @@ def build_document_pdf(
         except Exception:
             excl = []
         if excl:
-            story += [Spacer(1, 4), Paragraph("Ne sont pas inclus :", _st("ex", textColor=BLUE, leading=12))]
+            story += [Spacer(1, P(4)), Paragraph("Ne sont pas inclus :", _st("ex", textColor=BLUE, leading=12))]
             story += [Paragraph(f"• {x}", txt) for x in excl]
-        story.append(Spacer(1, 14))
+        story.append(Spacer(1, P(14)))
 
     # --- signatures
     who = party_lines[0] if party_lines else party_right[0]
     sig = Table([[Paragraph(e["nom"], txt), Paragraph(f"{party_right[0].capitalize()} ({who})", txt)],
                  [Paragraph("Signature : ______________________", txt), Paragraph("Signature : ______________________", txt)],
                  [Paragraph("Date : ____________", txt), Paragraph("Date : ____________", txt)]], colWidths=[90 * mm, 90 * mm])
-    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 6), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(6)), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     story.append(KeepTogether(sig))
 
-    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=9 * mm,
-                            bottomMargin=14 * mm, title=f"{doc_label} {number}", author=e["nom"])
+    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=P(9) * mm,
+                            bottomMargin=P(14) * mm, title=f"{doc_label} {number}", author=e["nom"])
     foot = _footer(e["nom"], doc_label, number)
     doc.build(story, onFirstPage=foot, onLaterPages=foot)
+    return doc.page
+
+
+SOUS_ACCROCHE = "Fournisseur et pose"
+MIN_SCALE = 0.72   # en dessous, le texte devient illisible : le document passe sur plusieurs pages (exception)
+
+
+def build_document_pdf(path: Path, **kw) -> Path:
+    """Un document tient sur UNE page : on resserre par paliers ; au-delà du minimum lisible, il s'étale (exception)."""
+    scale = 1.0
+    while True:
+        token = _SCALE.set(scale)
+        try:
+            pages = _render(path, **kw)
+        finally:
+            _SCALE.reset(token)
+        if pages <= 1 or scale <= MIN_SCALE + 1e-9:
+            break
+        scale = round(max(MIN_SCALE, scale - 0.04), 2)
+    if pages > 1:   # trop long même resserré : rendu lisible sur plusieurs pages
+        token = _SCALE.set(0.9)
+        try:
+            _render(path, **kw)
+        finally:
+            _SCALE.reset(token)
     return path
 
 

@@ -1232,4 +1232,18 @@ def test_every_document_pdf_lists_its_lines(client):
         pdf = pdfium.PdfDocument(client.get(det["download_url"]).content)
         text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
         assert "Plaque standard BA13" in text, url
+        assert len(pdf) == 1, f"{url} : {len(pdf)} pages"   # un document = une page, sauf exception
+        assert "Fournisseur et pose" in text
         assert "UniC Plaquiste" in text and "NINEA" in text
+
+
+def test_very_long_document_may_spill_over_pages_but_stays_readable(tmp_path):
+    import pypdfium2 as pdfium
+    from app.pdfs import build_document_pdf
+    rows = [[str(i), f"Article {i}", "1", "u", "1 000 FCFA", "1 000 FCFA"] for i in range(1, 90)]
+    out = build_document_pdf(tmp_path / "long.pdf", company={"name": "UniC Plaquiste"}, doc_label="DEVIS", number="UC-T", title="t",
+                             status="draft", meta_lines=["N° UC-T"], party_left=("É", "x"), party_right=("Client", "Y"),
+                             headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"], rows=rows, col_widths=[1] * 6,
+                             totals=[("Sous-total HT", "89 000 FCFA"), ("Total", "89 000 FCFA")])
+    pdf = pdfium.PdfDocument(str(out))
+    assert len(pdf) >= 2
