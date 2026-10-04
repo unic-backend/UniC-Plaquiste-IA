@@ -772,3 +772,7 @@ h1, h2, h3, b, strong, th { font-weight: 800; }
   .table-wrap td:first-child { font-weight: 800; }
 }
 select, input, textarea { max-width: 100%; box-sizing: border-box; }
+
+.steps { margin: 4px 0 12px; padding-left: 20px; line-height: 1.5; }
+.steps li { margin-bottom: 6px; }
+.card-box input[type=email], .card-box input[type=password] { display: block; width: 100%; margin-bottom: 8px; }

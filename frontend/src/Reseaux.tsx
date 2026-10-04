@@ -277,11 +277,18 @@ export function Courrier() {
   const [draft, setDraft] = useState<MailDraft | null>(null);
   const [instr, setInstr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [acct, setAcct] = useState<{ connected: boolean; address: string; env_override: boolean } | null>(null);
+  const [gAddr, setGAddr] = useState("");
+  const [gPwd, setGPwd] = useState("");
   const { msg, say } = useToast();
+  const refresh = () => {
+    net.mailStatus().then(setStatus).catch((e) => say(e.message));
+    net.mailAccount().then(setAcct).catch(() => {});
+  };
 
   const load = () => net.mails().then(setMails).catch((e) => say(e.message));
   useEffect(() => {
-    net.mailStatus().then(setStatus).catch((e) => say(e.message));
+    refresh();
     load();
   }, []);
 
@@ -306,6 +313,35 @@ export function Courrier() {
           {status.read ? "Lecture seule : vos mails ne sont ni modifiés ni marqués lus." : status.note}
           {" "}Rien ne part sans votre approbation.
         </p>
+        {acct && !acct.env_override && (
+          acct.connected ? (
+            <section className="card-box">
+              <label>Gmail connecté</label>
+              <p className="post-body"><I.Check size={16} /> {acct.address}</p>
+              <p className="hint">Lecture seule. Chaque réponse reste un brouillon : rien ne part sans ton approbation.</p>
+              <button className="btn btn-ghost btn-small" disabled={busy}
+                onClick={() => { if (window.confirm("Déconnecter Gmail ? Le mot de passe d'application sera effacé du serveur.")) run(async () => { await net.disconnectGmail(); refresh(); setMails([]); }, "Gmail déconnecté."); }}>
+                Déconnecter
+              </button>
+            </section>
+          ) : (
+            <section className="card-box">
+              <label>Connecter Gmail</label>
+              <ol className="steps">
+                <li>Active la <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener noreferrer">validation en 2 étapes</a> de ton compte Google.</li>
+                <li>Crée un <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">mot de passe d'application</a> (nom : UniC AI). Google affiche 16 lettres.</li>
+                <li>Colle-les ici avec ton adresse Gmail.</li>
+              </ol>
+              <input type="email" inputMode="email" autoComplete="off" placeholder="ton.adresse@gmail.com" value={gAddr} onChange={(e) => setGAddr(e.target.value)} />
+              <input type="password" autoComplete="off" placeholder="Mot de passe d'application (16 lettres)" value={gPwd} onChange={(e) => setGPwd(e.target.value)} />
+              <button className="btn btn-copper" disabled={busy || !gAddr.includes("@") || gPwd.replace(/\s/g, "").length < 16}
+                onClick={() => run(async () => { await net.connectGmail(gAddr, gPwd); setGPwd(""); refresh(); load(); }, "Gmail connecté.")}>
+                Connecter Gmail
+              </button>
+              <p className="hint">Ce mot de passe ne donne accès qu'à ta messagerie, il est chiffré sur ton serveur et tu peux le révoquer chez Google à tout moment.</p>
+            </section>
+          )
+        )}
         <div className="toolbar">
           <button className="btn btn-copper" disabled={busy || !status.read}
             onClick={() => run(async () => { const r = await net.mailSync(); await load(); say(`${r.new} nouveau(x) mail(s).`); })}>

@@ -11,12 +11,36 @@ from email.utils import parseaddr
 from app.config import settings
 
 
+#: compte Gmail connecté depuis l'appli (mémoire du serveur, rechargé au démarrage) ; les variables d'environnement gagnent
+_RT = {"user": "", "password": ""}
+
+
+def set_runtime(user: str, password: str) -> None:
+    _RT["user"], _RT["password"] = user, password
+
+
+def _imap() -> tuple[str, int, str, str]:
+    if settings.imap_host:
+        return (settings.imap_host, settings.imap_port, settings.imap_user or settings.smtp_user,
+                settings.imap_password or settings.smtp_password)
+    return "imap.gmail.com", 993, _RT["user"], _RT["password"]
+
+
+def _smtp() -> tuple[str, int, str, str, str]:
+    if settings.smtp_host:
+        return (settings.smtp_host, settings.smtp_port, settings.smtp_user, settings.smtp_password,
+                settings.smtp_from or settings.smtp_user)
+    return "smtp.gmail.com", 587, _RT["user"], _RT["password"], _RT["user"]
+
+
 def imap_configured() -> bool:
-    return bool(settings.imap_host and (settings.imap_user or settings.smtp_user))
+    host, _port, user, pwd = _imap()
+    return bool(host and user and (pwd or settings.imap_host))
 
 
 def smtp_configured() -> bool:
-    return bool(settings.smtp_host and settings.smtp_user and settings.smtp_password)
+    host, _port, user, pwd, _from = _smtp()
+    return bool(host and user and pwd)
 
 
 def _dec(value: str | None) -> str:
@@ -41,10 +65,9 @@ def _text_of(msg: email.message.Message) -> str:
 
 def fetch_recent(limit: int = 20) -> list[dict]:
     """Derniers e-mails de la boîte de réception, sans les marquer lus (BODY.PEEK)."""
-    user = settings.imap_user or settings.smtp_user
-    pwd = settings.imap_password or settings.smtp_password
+    host, port, user, pwd = _imap()
     out: list[dict] = []
-    with imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port) as box:
+    with imaplib.IMAP4_SSL(host, port) as box:
         box.login(user, pwd)
         box.select("INBOX", readonly=True)
         _, data = box.search(None, "ALL")
@@ -66,12 +89,13 @@ def fetch_recent(limit: int = 20) -> list[dict]:
 
 
 def send(to_addr: str, subject: str, body: str) -> None:
+    host, port, user, pwd, sender = _smtp()
     msg = EmailMessage()
-    msg["From"] = settings.smtp_from or settings.smtp_user
+    msg["From"] = sender
     msg["To"] = to_addr
     msg["Subject"] = subject
     msg.set_content(body)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
+    with smtplib.SMTP(host, port, timeout=30) as smtp:
         smtp.starttls()
-        smtp.login(settings.smtp_user, settings.smtp_password)
+        smtp.login(user, pwd)
         smtp.send_message(msg)

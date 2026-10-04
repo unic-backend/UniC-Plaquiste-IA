@@ -66,6 +66,11 @@ def startup():
     db = SessionLocal()
     try:
         seed_if_empty(db)
+        try:
+            from app import mail_account
+            mail_account.load_into_runtime(db)   # compte Gmail connecté depuis l'appli
+        except Exception:   # un secret illisible ne doit jamais empêcher le démarrage
+            pass
     finally:
         db.close()
 

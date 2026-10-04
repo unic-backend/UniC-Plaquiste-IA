@@ -78,7 +78,7 @@ def registry_snapshot() -> list[dict]:
                    {"to": "str", "subject": "str"}, {"draft": "object"}, ["user"], True),
         Capability("read_email", "Lire la boîte mail (IMAP), résumer, proposer des réponses",
                    {}, {}, ["user"], conn["email"],
-                   "" if conn["email"] else "NON DISPONIBLE — IMAP non configuré (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)."),
+                   "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),
         Capability("create_social_post", "Préparer posts et réponses (11 plateformes, brouillon → revue → approbation)",
                    {"text": "str"}, {"draft": "object"}, ["manager"], True),
         Capability("publish_social_post", "Publier automatiquement sur les réseaux (API)",

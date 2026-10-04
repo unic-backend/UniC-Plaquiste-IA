@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 from app import trust
+from app.config import settings
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -241,8 +242,41 @@ def mail_status(user: User = Depends(get_current_user)):
     return {
         "read": mailbox.imap_configured(), "send": mailbox.smtp_configured(),
         "ai": assistant.ai_available(),
-        "note": "" if mailbox.imap_configured() else "Lecture NON DISPONIBLE : IMAP_HOST / SMTP_USER non configurés.",
+        "note": "" if mailbox.imap_configured() else "Lecture NON DISPONIBLE : connecte ton compte Gmail ci-dessous.",
     }
+
+
+class GmailIn(BaseModel):
+    address: str = Field(max_length=255)
+    password: str = Field(max_length=64)
+
+
+@router.get("/mail/account")
+def mail_account_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import mail_account
+    return {**mail_account.status(db), "env_override": bool(settings.imap_host)}
+
+
+@router.put("/mail/account")
+def mail_account_connect(body: GmailIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Connecte Gmail : l'identifiant est testé AVANT d'être gardé (chiffré)."""
+    from app import mail_account
+    try:
+        out = mail_account.connect(db, body.address, body.password)
+    except mail_account.MailAccountError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "mail_connect", "mail", out["address"])
+    db.commit()
+    return out
+
+
+@router.delete("/mail/account")
+def mail_account_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import mail_account
+    out = mail_account.disconnect(db)
+    audit(db, user.id, "mail_disconnect", "mail", "")
+    db.commit()
+    return out
 
 
 @router.post("/mail/sync")

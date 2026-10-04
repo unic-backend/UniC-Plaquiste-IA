@@ -1438,3 +1438,78 @@ def test_conversation_pin_rename_delete(client):
     assert client.patch(f"/api/conversations/{b}", json={"title": "   "}).status_code == 422
     assert client.patch("/api/conversations/inconnu", json={"pinned": True}).status_code == 404
     assert client.delete(f"/api/conversations/{a}").json() == {"ok": True}
+
+
+class _FakeImap:
+    ok_password = "abcdefghijklmnop"
+    logins = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host = host
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def login(self, user, pwd):
+        import imaplib
+        _FakeImap.logins.append((self.host, user))
+        if pwd != self.ok_password:
+            raise imaplib.IMAP4.error("[AUTHENTICATIONFAILED] Invalid credentials")
+
+    def select(self, *a, **k):
+        return "OK", [b"1"]
+
+    def search(self, *a):
+        return "OK", [b"1"]
+
+    def fetch(self, num, spec):
+        raw = b"From: Client <client@mail.test>\r\nSubject: Devis plafond\r\nMessage-ID: <m1@test>\r\nDate: Mon, 4 Oct 2026 10:00:00 +0000\r\n\r\nBonjour, pouvez-vous passer lundi ?"
+        return "OK", [(b"1 (BODY[] {99}", raw), b")"]
+
+
+def test_gmail_connect_from_the_app_encrypted_and_used_for_sync(client, monkeypatch):
+    import imaplib
+    from app import mailbox
+    from app.database import SessionLocal
+    from app.models import AppSetting
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", _FakeImap)
+    assert client.get("/api/mail/account").json()["connected"] is False
+    bad = client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "mauvaismotdepasse"})
+    assert bad.status_code == 400                                              # 16 lettres exigées
+    refused = client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "zzzzzzzzzzzzzzzz"})
+    assert refused.status_code == 400 and "refusé" in refused.json()["detail"]
+    assert client.get("/api/mail/account").json()["connected"] is False       # un identifiant refusé n'est jamais gardé
+    ok = client.put("/api/mail/account", json={"address": "Patron@Gmail.com", "password": "abcd efgh ijkl mnop"})   # espaces tolérés
+    assert ok.status_code == 200 and ok.json()["connected"] and "•" in ok.json()["address"]
+    assert "abcdefghijklmnop" not in str(ok.json())
+    db = SessionLocal()
+    stored = db.get(AppSetting, "mail_secret").value
+    assert "abcdefghijklmnop" not in stored and stored.startswith("gAAAA")   # chiffré au repos
+    db.close()
+    st = client.get("/api/mail/status").json()
+    assert st["read"] is True and st["send"] is True
+    sync = client.post("/api/mail/sync").json()
+    assert sync["new"] >= 1 and ("imap.gmail.com", "patron@gmail.com") in _FakeImap.logins
+    assert any(m["subject"] == "Devis plafond" for m in client.get("/api/mail").json())
+    gone = client.delete("/api/mail/account").json()
+    assert gone["connected"] is False and mailbox.imap_configured() is False
+    assert client.get("/api/mail/status").json()["read"] is False
+
+
+def test_gmail_secret_survives_restart_and_bad_key_is_harmless(client, monkeypatch):
+    import imaplib
+    from app import mail_account, mailbox, secrets_box
+    from app.database import SessionLocal
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", _FakeImap)
+    client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "abcdefghijklmnop"})
+    mailbox.set_runtime("", "")
+    db = SessionLocal()
+    mail_account.load_into_runtime(db)                                         # redémarrage simulé
+    assert mailbox.imap_configured() is True
+    monkeypatch.setenv("UNIC_SECRET_KEY", "cle-invalide")                      # clé changée : secret illisible
+    assert secrets_box.decrypt("gAAAAABx") is None
+    db.close()
+    client.delete("/api/mail/account")
