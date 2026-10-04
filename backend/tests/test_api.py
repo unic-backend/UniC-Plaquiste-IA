@@ -2125,7 +2125,7 @@ def test_invoice_balance_pdf_and_message(client):
     if not total:
         import pytest
         pytest.skip("total incomplet : pas de reste à payer calculable")
-    assert d["balance_url"].endswith("/balance") and f"{d['number']}" in d["balance_message"] and "Il reste" in d["balance_message"]
+    assert d["balance_url"].endswith("/balance") and "montant convenu" in d["balance_message"] and "Il reste" in d["balance_message"] and "déjà versé" in d["balance_message"]
     pdf = client.get(d["balance_url"])
     assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf" and pdf.content[:5] == b"%PDF-"
     client.post(f"/api/invoices/{iid}/payments", json={"amount": total, "method": "Wave"})

@@ -586,39 +586,75 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     return art
 
 
-def balance_message(inv: Invoice, client: str, currency: str, phone: str = "") -> str:
-    """Message court de rappel du reste à payer (aucune IA : uniquement les chiffres de la facture)."""
-    first = (client or "").strip()
+def reliquat_data(db: Session, inv: Invoice) -> dict:
+    """Le reliquat d'une affaire : ce qui a été convenu (devis), ce que le client a versé (tous les paiements des factures du devis),
+    ce qui reste à payer. Sans devis lié, la facture elle-même fait foi."""
+    quote = db.get(Quotation, inv.quotation_id) if inv.quotation_id else None
+    invoices = [inv]
+    if quote is not None:
+        invoices = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind != "credit").all() or [inv]
+    credits = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind == "credit").all() if quote is not None else []
+    agreed = quote.total if quote is not None and quote.total is not None else inv.total
+    if agreed is not None and credits:
+        agreed -= sum((c.total or 0) for c in credits)
+    pays = sorted((p for i in invoices for p in i.payments), key=lambda p: p.paid_at or utcnow())
+    paid = sum(p.amount or 0 for p in pays)
+    return {"quote": quote, "invoices": invoices, "payments": pays, "agreed": agreed, "paid": paid,
+            "remaining": None if agreed is None else max(0.0, agreed - paid), "credits": sum((c.total or 0) for c in credits)}
+
+
+def balance_message(db: Session, inv: Invoice, client: str, currency: str, phone: str = "") -> str:
+    """Message de rappel : convenu, versé, reste à payer (aucune IA : uniquement les chiffres du dossier)."""
+    d = reliquat_data(db, inv)
+
     def amt(v: float | None) -> str:
         return f"{(v or 0):,.0f} {currency or 'FCFA'}".replace(",", " ")
+    first = (client or "").strip()
+    ref = d["quote"].number if d["quote"] is not None else inv.number
     lines = [f"Bonjour{(' ' + first) if first else ''},", "",
-             f"Il reste {amt(inv.remaining)} à régler sur la facture {inv.number}"
-             + (f" (total {amt(inv.total)}, déjà payé {amt(inv.paid)})." if inv.total is not None else "."),
-             "Le relevé est joint à ce message.", "Merci d'avance et bonne journée.", "", "UniC Plaquiste"]
+             f"Voici le point sur votre dossier {ref} : montant convenu {amt(d['agreed'])}, déjà versé {amt(d['paid'])}.",
+             f"Il reste {amt(d['remaining'])} à régler.", "Le reliquat détaillé est joint à ce message.",
+             "Merci d'avance et bonne journée.", "", "UniC Plaquiste"]
     if phone:
         lines.append(phone)
     return "\n".join(lines)
 
 
 def build_balance_pdf(db: Session, inv: Invoice) -> Path:
-    """Relevé « Reste à payer » d'une facture : total, paiements reçus, reste dû. Toujours recalculé (pas stocké)."""
+    """RELIQUAT : 1) ce qui a été convenu, 2) ce que le client a versé, 3) ce qui reste à payer. Recalculé à chaque demande."""
     company = company_dict(db)
     customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
     currency = inv.currency or company.get("currency") or ""
-    pays = sorted(inv.payments, key=lambda p: p.paid_at or utcnow())
-    rows = [[str(i), p.paid_at.strftime("%d/%m/%Y") if p.paid_at else "", p.method or "—", p.reference or "—", money(p.amount, currency)]
-            for i, p in enumerate(pays, 1)]
-    if not rows:
-        rows = [["", "", "Aucun paiement enregistré", "", ""]]
-    totals = [("Total facture", money(inv.total, currency)), ("Déjà payé", money(inv.paid, currency)),
-              ("RESTE À PAYER", money(inv.remaining if inv.remaining is not None else inv.total, currency))]
-    filename = f"UniC_Reste_a_payer_{inv.number.replace('-', '_')}.pdf"
+    d = reliquat_data(db, inv)
+    quote = d["quote"]
+    sec = lambda t: ["", f"<b>{t}</b>", "", "", "", ""]
+    rows = [sec("1. CE QUI A ÉTÉ CONVENU" + (f" — devis {quote.number}" if quote is not None else f" — facture {inv.number}"))]
+    src = sorted(quote.items, key=lambda x: x.position) if quote is not None else sorted(inv.items, key=lambda x: x.position)
+    for it in src:
+        rows.append([str(it.position), it.description, fr_num(it.quantity, 2), it.unit, money(it.unit_price, currency), money(it.total, currency)])
+    if d["credits"]:
+        rows.append(["", "Avoirs accordés", "", "", "", "- " + money(d["credits"], currency)])
+    rows.append(["", "<b>MONTANT CONVENU</b>", "", "", "", f"<b>{money(d['agreed'], currency)}</b>"])
+    rows.append(sec("2. CE QUE LE CLIENT A VERSÉ"))
+    if d["payments"]:
+        for p in d["payments"]:
+            inv_no = next((i.number for i in d["invoices"] if p.invoice_id == i.id), "")
+            how = " — ".join(x for x in ((p.method or "").strip(), (p.reference or "").strip(), f"facture {inv_no}" if len(d["invoices"]) > 1 else "") if x)
+            rows.append(["", f"Versement du {p.paid_at.strftime('%d/%m/%Y') if p.paid_at else ''}" + (f" ({how})" if how else ""), "", "", "", money(p.amount, currency)])
+    else:
+        rows.append(["", "Aucun versement enregistré", "", "", "", ""])
+    rows.append(["", "<b>TOTAL VERSÉ</b>", "", "", "", f"<b>{money(d['paid'], currency)}</b>"])
+    totals = [("Montant convenu", money(d["agreed"], currency)), ("Déjà versé", money(d["paid"], currency)),
+              ("RESTE À PAYER", money(d["remaining"], currency))]
+    ref = quote.number if quote is not None else inv.number
+    filename = f"UniC_Reliquat_{ref.replace('-', '_')}.pdf"
     dest = settings.artifacts_path / "balances" / filename
     build_document_pdf(
-        dest, company=company, doc_label="RESTE À PAYER", number=inv.number, title=f"Relevé de solde — facture {inv.number}", status="",
-        meta_lines=[f"Facture {inv.number}", f"Édité le {utcnow().strftime('%d/%m/%Y')}"],
+        dest, company=company, doc_label="RELIQUAT", number=ref, title=(quote.object_text or quote.title) if quote is not None and (quote.object_text or quote.title) else f"Reliquat — {ref}",
+        status="",
+        meta_lines=[f"Dossier {ref}", f"Édité le {utcnow().strftime('%d/%m/%Y')}"] + ([f"Chantier : {quote.site_location}"] if quote is not None and quote.site_location else []),
         party_left=("Émetteur", party_text_from_company(company)), party_right=("Client", party_text_customer(customer)),
-        headers=["#", "Date", "Mode", "Référence", "Montant"], rows=rows, col_widths=[22, 70, 90, 120, 100],
+        headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"], rows=rows, col_widths=[18, 210, 50, 40, 80, 80],
         totals=totals, notes="", warnings=[],
     )
     return dest
