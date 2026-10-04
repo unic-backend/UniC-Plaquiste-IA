@@ -349,7 +349,13 @@ function Chat({ initialId }: { initialId?: string }) {
   const [pending, setPending] = useState<File[]>([]);
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
-  const canVoice = typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  const [sheet, setSheet] = useState(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
   useEffect(() => {
     if (!isNative) return;
     let off: (() => void) | undefined;
@@ -420,21 +426,43 @@ function Chat({ initialId }: { initialId?: string }) {
     }
   }
 
-  function voice() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert("Saisie vocale non disponible sur ce navigateur.");
+  async function voice() {
+    if (rec) {
+      try { const { SpeechRecognition } = await import("@capacitor-community/speech-recognition"); await SpeechRecognition.stop(); } catch { /* déjà arrêté */ }
+      setRec(false);
       return;
     }
-    const recg = new SR();
-    recg.lang = "fr-FR";
-    recg.onstart = () => setRec(true);
-    recg.onend = () => setRec(false);
-    recg.onresult = (ev: any) => {
-      const t = ev.results[0][0].transcript;
-      setText((x) => (x ? x + " " + t : t));
-    };
-    recg.start();
+    try {
+      if (isNative) {
+        const { SpeechRecognition } = await import("@capacitor-community/speech-recognition");
+        const { available } = await SpeechRecognition.available();
+        if (!available) { setNotice("Reconnaissance vocale absente sur ce téléphone. Utilisez le micro du clavier."); return; }
+        const perm = await SpeechRecognition.requestPermissions();
+        if (perm.speechRecognition !== "granted") { setNotice("Micro refusé : autorisez-le dans Réglages › Applis › UniC AI › Autorisations."); return; }
+        const base = text ? text.trimEnd() + " " : "";
+        await SpeechRecognition.removeAllListeners();
+        await SpeechRecognition.addListener("partialResults", (d: { matches: string[] }) => {
+          if (d.matches?.[0]) setText(base + d.matches[0]);
+        });
+        await SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => setRec(d.status === "started"));
+        setRec(true);
+        const res = await SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 });
+        if (res?.matches?.[0]) setText(base + res.matches[0]);
+        setRec(false);
+        return;
+      }
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SR) { setNotice("Dictée indisponible sur ce navigateur."); return; }
+      const recg = new SR();
+      recg.lang = "fr-FR";
+      recg.onstart = () => setRec(true);
+      recg.onend = () => setRec(false);
+      recg.onresult = (ev: any) => setText((x) => (x ? x + " " : "") + ev.results[0][0].transcript);
+      recg.start();
+    } catch (e: any) {
+      setRec(false);
+      setNotice("Dictée impossible : " + (e?.message || "erreur micro"));
+    }
   }
 
   const suggestions = [
@@ -507,22 +535,17 @@ function Chat({ initialId }: { initialId?: string }) {
             }}
           />
           <div className="composer-bar">
-            <label className="tool" title="Joindre un fichier" htmlFor="chat-file" role="button" aria-label="Joindre un fichier">
-              ＋
-            </label>
-            <label className="tool" title="Photo chantier" htmlFor="chat-cam" role="button" aria-label="Prendre une photo">
-              📷
-            </label>
-            {canVoice && (
-              <button className={`tool ${rec ? "rec" : ""}`} title="Dicter" aria-label="Dicter" onClick={voice}>
-                🎤
-              </button>
-            )}
-            <button className={`tool ${deep ? "on" : ""}`} title="Réflexion profonde (Claude), pour cette question" aria-pressed={deep} onClick={() => setDeep((d) => !d)}>
-              ✦
+            <button className="tool round" aria-label="Ajouter du contexte" onClick={() => setSheet(true)}>＋</button>
+            <button className={`mode-chip ${deep ? "on" : ""}`} aria-pressed={deep} onClick={() => setDeep((d) => !d)}
+              title="Réflexion profonde (Claude Opus), pour cette question">
+              {deep ? "✦ Profond" : "Normal"}
             </button>
-            <div className="grow">{deep ? "✦ Réflexion profonde activée" : pending.length ? `${pending.length} fichier(s) joint(s)` : ""}</div>
-            <button className="send" onClick={() => send()} disabled={busy}>
+            {pending.length > 0 && <span className="grow">{pending.length} fichier(s)</span>}
+            {pending.length === 0 && <span className="grow" />}
+            <button className={`tool round ${rec ? "rec-on" : ""}`} aria-label={rec ? "Arrêter la dictée" : "Dicter"} onClick={voice}>
+              {rec ? "■" : "🎤"}
+            </button>
+            <button className="send round" aria-label="Envoyer" onClick={() => send()} disabled={busy}>
               ↑
             </button>
           </div>
@@ -536,6 +559,14 @@ function Chat({ initialId }: { initialId?: string }) {
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
           <input
+            id="chat-photo"
+            className="sr-only"
+            type="file"
+            multiple
+            accept="image/*"
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
+          />
+          <input
             id="chat-cam"
             ref={camRef}
             className="sr-only"
@@ -545,7 +576,22 @@ function Chat({ initialId }: { initialId?: string }) {
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
         </div>
+        {notice && <div className="toast" role="status">{notice}</div>}
       </div>
+      {sheet && (
+        <div className="sheet-back" onClick={() => setSheet(false)}>
+          <div className="sheet" role="dialog" aria-label="Ajouter du contexte" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-grip" />
+            <div className="sheet-head"><button className="tool" aria-label="Fermer" onClick={() => setSheet(false)}>✕</button><b>Ajouter du contexte</b><span /></div>
+            <div className="sheet-grid">
+              <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span>📷</span>Caméra</label>
+              <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span>🖼️</span>Photos</label>
+              <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span>📄</span>Fichiers</label>
+            </div>
+            <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }

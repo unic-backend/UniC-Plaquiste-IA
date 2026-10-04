@@ -599,3 +599,22 @@ input, textarea, select {
 .doc-filters-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .doc-filters-row label { display: flex; flex-direction: column; font-size: 11px; gap: 2px; flex: 1 1 120px; opacity: .85; }
 .link-btn { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; font: inherit; cursor: pointer; }
+
+.composer-bar { gap: 8px; }
+.tool.round, .send.round { width: 40px; height: 40px; border-radius: 50%; font-size: 18px; background: var(--paper); }
+.send.round { background: var(--green); color: #fff; }
+.send.round:disabled { opacity: .5; }
+.tool.rec-on { background: #b42318; color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(180,35,24,.18); } }
+.mode-chip { border: 0; background: var(--paper); color: var(--ink); height: 40px; padding: 0 16px; border-radius: 20px; font-size: 14px; cursor: pointer; }
+.mode-chip.on { background: rgba(180,115,63,.18); color: var(--copper-d, #8a4f22); font-weight: 600; }
+.sheet-back { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; display: flex; align-items: flex-end; animation: fadeIn .18s ease both; }
+.sheet { width: 100%; background: var(--card, #fff); border-radius: 22px 22px 0 0; padding: 8px 16px calc(20px + var(--safe-b)); animation: sheetUp .22s var(--ease, ease) both; }
+.sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 10px; }
+.sheet-head { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; text-align: center; margin-bottom: 14px; }
+.sheet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sheet-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 6px; border: 1px solid var(--line); border-radius: 16px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sheet-btn span { font-size: 26px; }
+.sheet-btn:active { background: var(--paper); }
+@keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } }
+@keyframes fadeIn { from { opacity: 0; } }
