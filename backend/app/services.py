@@ -263,6 +263,7 @@ def quotation_from_quantities(
     missing: list[str] | None = None,
     client_name: str | None = None,
     vat_rate: float | None | object = _UNSET,
+    objet: str = "",
 ) -> Quotation:
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
@@ -274,6 +275,7 @@ def quotation_from_quantities(
         customer_id=customer_id,
         project_id=project_id,
         title=title or f"Devis {number}",
+        object_text=(objet or "").strip()[:900],
         status="draft",
         currency=company.get("currency") or "",
         vat_rate=company.get("vat_rate") if vat_rate is _UNSET else vat_rate,
@@ -381,7 +383,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         company=company,
         doc_label="DEVIS",
         number=q.number,
-        title=q.title or f"Devis {q.number}",
+        title=q.object_text or q.title or f"Devis {q.number}",
         status=q.status,
         meta_lines=meta,
         party_left=("Émetteur", party_text_from_company(company)),

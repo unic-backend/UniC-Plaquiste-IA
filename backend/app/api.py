@@ -525,7 +525,7 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,

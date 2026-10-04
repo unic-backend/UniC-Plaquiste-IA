@@ -118,6 +118,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
         </div>
         <Badge s={d.status} />
       </div>
+      {d.object_text && <p className="hint">{d.object_text}</p>}
       <div className="doc-lines">
         {(d.items || []).map((it: any) => (
           <div className="doc-line" key={it.id || it.position}>

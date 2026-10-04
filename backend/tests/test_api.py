@@ -786,7 +786,7 @@ def test_ai_builds_quote_from_context_without_canned_question(client, claude):
     out = _chat(client, claude, [
         ("tool", "get_prices", {"query": "BA13"}),
         ("tool", "calculate_materials", {"kind": "partition", "length_m": 23, "height_m": 4, "sides": 2}),
-        ("tool", "create_quote", {"client_name": "Fast Mbaye", "vat_rate": 0, "checks": "client, dimensions et TVA 0 donnés"}),
+        ("tool", "create_quote", {"client_name": "Fast Mbaye", "vat_rate": 0, "checks": "client, dimensions et TVA 0 donnés", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."}),
         ("text", "Devis prêt, sans TVA."),
     ], "Fais moi un devis pdf")
     msg = out["message"]
@@ -815,7 +815,7 @@ def test_ai_get_prices_exposes_the_real_grid(client):
 def test_ai_follow_up_turn_reuses_state_and_links_documents(client, claude):
     first = _chat(client, claude, [
         ("tool", "calculate_materials", {"kind": "partition", "length_m": 10, "height_m": 2.5}),
-        ("tool", "create_quote", {"client_name": "Moussa Ba", "checks": "client et métré vérifiés"}), ("text", "Devis prêt."),
+        ("tool", "create_quote", {"client_name": "Moussa Ba", "checks": "client et métré vérifiés", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."}), ("text", "Devis prêt."),
     ], "Fais le devis de 10 m par 2,5 m pour Moussa Ba")
     cid, devis = first["conversation_id"], client.get(f"/api/quotes/{first['message']['meta']['structured']['documents'][0]['id']}").json()["number"]
     second = _chat(client, claude, [("tool", "create_purchase_order", {}), ("tool", "create_invoice", {}), ("text", "Bon et facture créés.")],
@@ -1186,14 +1186,14 @@ def test_quote_gates_client_checks_and_no_reuse_of_a_calculation(client):
     db = SessionLocal()
     s = AgentSession(db, None, {})
     s("calculate_materials", {"kind": "partition", "length_m": 6, "height_m": 2.5, "sides": 2})
-    assert "client" in s("create_quote", {"client_name": "", "checks": "tout est vérifié ici"})["error"].lower()
-    assert "error" in s("create_quote", {"client_name": "Awa Fall", "checks": "ok"})        # vérification non décrite
-    ok = s("create_quote", {"client_name": "Awa Fall", "checks": "client, dimensions 6x2,5, TVA, prix vérifiés"})
+    assert "client" in s("create_quote", {"client_name": "", "checks": "tout est vérifié ici", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."})["error"].lower()
+    assert "error" in s("create_quote", {"client_name": "Awa Fall", "checks": "ok", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."})        # vérification non décrite
+    ok = s("create_quote", {"client_name": "Awa Fall", "checks": "client, dimensions 6x2,5, TVA, prix vérifiés", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."})
     assert ok["numero"].endswith("AF") or "AF" in ok["numero"]
-    again = s("create_quote", {"client_name": "Autre Client", "checks": "client et métré vérifiés ici"})
+    again = s("create_quote", {"client_name": "Autre Client", "checks": "client et métré vérifiés ici", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."})
     assert "revise_document" in again["error"] and "calculate_materials" in again["error"]   # pas de copie d'un devis
     s("calculate_materials", {"kind": "partition", "length_m": 3, "height_m": 2.5, "sides": 1})
-    other = s("create_quote", {"client_name": "Autre Client", "checks": "nouvelles dimensions vérifiées"})
+    other = s("create_quote", {"client_name": "Autre Client", "checks": "nouvelles dimensions vérifiées", "objet": "Fourniture et pose de faux plafonds BA13 et de cloisons sèches, avec moulures."})
     assert other["numero"] != ok["numero"]
     db.close()
 
@@ -1247,3 +1247,28 @@ def test_very_long_document_may_spill_over_pages_but_stays_readable(tmp_path):
                              totals=[("Sous-total HT", "89 000 FCFA"), ("Total", "89 000 FCFA")])
     pdf = pdfium.PdfDocument(str(out))
     assert len(pdf) >= 2
+
+
+def test_quote_object_is_written_by_the_ai_and_printed_on_the_pdf(client):
+    import pypdfium2 as pdfium
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    s("calculate_materials", {"kind": "ceiling", "length_m": 5, "width_m": 4})
+    no_obj = s("create_quote", {"client_name": "Ibou Sy", "checks": "client et dimensions vérifiés"})
+    assert "objet" in no_obj["error"].lower()
+    objet = "Fourniture et pose d'un faux plafond BA13 avec moulures de finition dans le salon, à Mermoz."
+    ok = s("create_quote", {"client_name": "Ibou Sy", "checks": "client et dimensions vérifiés", "objet": objet})
+    q = db.query(Quotation).filter(Quotation.number == ok["numero"]).first()
+    assert q.object_text == objet
+    row = next(r for r in client.get("/api/quotes").json() if r["number"] == q.number)
+    det = client.get(f"/api/quotes/{row['id']}").json()
+    assert det["object_text"] == objet
+    text = "".join(pdfium.PdfDocument(client.get(det["download_url"]).content)[0].get_textpage().get_text_range() for _ in [0])
+    assert "faux plafond BA13 avec moulures" in text
+    s("revise_document", {"kind": "quote", "objet": "Fourniture et pose de plafonds et de cloisons à Mermoz."})
+    db.refresh(q)
+    assert q.object_text.startswith("Fourniture et pose de plafonds")
+    db.close()

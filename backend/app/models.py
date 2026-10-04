@@ -216,6 +216,7 @@ class Quotation(Base):
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), default="")
+    object_text: Mapped[str] = mapped_column(Text, default="")   # « Objet du devis » rédigé par l'IA (nature des travaux)
     status: Mapped[str] = mapped_column(String(32), default="draft")
     currency: Mapped[str] = mapped_column(String(8), default="")
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -103,8 +103,11 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {
             "client_name": {"type": "string", "description": "Prénom et nom (ou raison sociale) du client, donnés par le patron"},
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
-            "checks": {"type": "string", "description": "Ce que tu as VÉRIFIÉ avant de créer : client, dimensions, TVA, prix, hypothèses"}},
-            "required": ["client_name", "checks"], "additionalProperties": False},
+            "checks": {"type": "string", "description": "Ce que tu as VÉRIFIÉ avant de créer : client, dimensions, TVA, prix, hypothèses"},
+            "objet": {"type": "string", "description": ("« Objet du devis » : 1 à 3 phrases claires pour le client, rédigées par toi : nature "
+                                                      "des travaux (faux plafonds, cloisons sèches, moulures, peinture…), lieu si connu, ce qui est "
+                                                      "fourni et/ou posé. Pas de jargon, pas de chiffres inventés.")}},
+            "required": ["client_name", "checks", "objet"], "additionalProperties": False},
     },
     {
         "name": "create_invoice",
@@ -142,6 +145,7 @@ TOOLS: list[dict] = [
                 "unit_price": {"type": "number", "description": "Prix du patron ou de get_prices ; absent = « prix non renseigné »"}},
                 "required": ["description", "quantity"]}},
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "objet": {"type": "string", "description": "Nouvel « Objet du devis » (devis seulement)"},
             "client_name": {"type": "string"}}, "required": ["kind"], "additionalProperties": False},
     },
     {
@@ -187,7 +191,7 @@ AGENT_PROMPT = (
     "\nRÈGLES DE TRAVAIL : tu es une IA universelle, pas un automate de devis : tu ne fais que ce que le patron demande. "
     "Chaque document se construit à partir des informations données dans CETTE demande, de calculate_materials et de get_prices. "
     "N'utilise JAMAIS un ancien devis ou document comme modèle (ni lignes, ni quantités, ni prix, ni client) : list_documents sert à "
-    "retrouver un document, pas à le copier. Avant de créer un document : comprends la demande, calcule, vérifie (client, dimensions, "
+    "retrouver un document, pas à le copier. Pour un devis, tu rédiges toi-même l'« Objet du devis » (nature des travaux : plafonds, cloisons, moulures, peinture…, lieu, fourni/posé), compréhensible par le client. Avant de créer un document : comprends la demande, calcule, vérifie (client, dimensions, "
     "TVA, prix, cohérence), puis crée ; signale les hypothèses, les lignes sans prix et les doutes AVANT de présenter le PDF."
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
@@ -379,8 +383,10 @@ class AgentSession:
         self.documents.append({"kind": kind, "id": row.id})
 
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
-                        checks: str = "") -> dict:
+                        checks: str = "", objet: str = "") -> dict:
         qty = self._quantities()
+        if len(objet.strip()) < 25:
+            raise ConnectorError("Rédige l'« Objet du devis » (1 à 3 phrases claires : nature des travaux, lieu, fourni/posé) dans `objet`.", 400)
         if not client_name.strip():
             raise ConnectorError("Nom du client manquant : demande-le au patron (il fait partie du numéro du devis).", 400)
         if len(checks.strip()) < 10:
@@ -397,7 +403,7 @@ class AgentSession:
             project_id=self.project_id, user_id=self.user_id, client_name=None if cust else client_name or None,
             notes="Devis préparé par JARVIS à partir du métré de la conversation.",
             assumptions=(self.state.get("last_calc") or {}).get("assumptions"),
-            missing=(self.state.get("last_calc") or {}).get("missing"), **kwargs)
+            missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, **kwargs)
         anomalies = pricecheck.check_quote(q)
         if anomalies:   # un devis faux n'entre pas dans la bibliothèque
             revise.discard(self.db, "quote", q, self.user_id)
@@ -445,12 +451,13 @@ class AgentSession:
 
     def _t_revise_document(self, kind: str, number: str = "", remove: list | None = None, update: list | None = None,
                            add: list | None = None, title: str = "", vat_rate: float | None = None,
-                           client_name: str = "") -> dict:
+                           client_name: str = "", objet: str = "") -> dict:
         last = self.state.get("last_quote_id") if kind == "quote" else None
         try:
             doc = revise.find(self.db, kind, number, last)
             changes = revise.revise(self.db, kind, doc, user_id=self.user_id, remove=remove, update=update, add=add,
-                                    title=title or None, vat_rate=vat_rate, client_name=client_name or None)
+                                    title=title or None, vat_rate=vat_rate, client_name=client_name or None,
+                                    objet=objet or None)
         except revise.ReviseError as exc:
             raise ConnectorError(str(exc), 400)
         if kind == "quote":
