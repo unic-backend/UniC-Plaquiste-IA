@@ -37,7 +37,8 @@ export async function sharePhoto(photo: File | null, text: string, app = "Google
       fr.onerror = () => rej(new Error("Photo illisible"));
       fr.readAsDataURL(photo);
     });
-    const path = `publication-${Date.now()}.jpg`;
+    const ext = (photo.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
+    const path = `publication-${Date.now()}.${ext}`;
     await Filesystem.writeFile({ path, data, directory: Directory.Cache });
     files = [(await Filesystem.getUri({ path, directory: Directory.Cache })).uri];
   }

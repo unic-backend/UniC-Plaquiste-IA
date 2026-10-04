@@ -103,7 +103,7 @@ export type GOptimize = {
 export type Post = {
   photo_brief?: string;
   id: string; platform: string; kind: string; title: string; body: string; hashtags: string;
-  in_reply_to: string; status: string; created_at: string | null; external_url?: string;
+  in_reply_to: string; status: string; created_at: string | null; external_url?: string; external_id?: string;
 };
 export type LinkedInStatus = {
   app_saved: boolean; client_id: string; connected: boolean; name: string; days_left: number | null;
@@ -151,6 +151,8 @@ export const net = {
   deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
   tiktokScript: (topic: string, details: string) =>
     request<Post>("/api/tiktok/script", { method: "POST", body: JSON.stringify({ topic, details }) }),
+  whatsappMessage: (kind: string, customer_id: string, phone: string, details: string) =>
+    request<Post>("/api/whatsapp/message", { method: "POST", body: JSON.stringify({ kind, customer_id, phone, details }) }),
   siteStatus: () => request<{ connected: boolean; repo: string; branch: string; site_url: string }>("/api/website"),
   siteConnect: (token: string) => request("/api/website/connect", { method: "PUT", body: JSON.stringify({ token }) }),
   siteDisconnect: () => request("/api/website", { method: "DELETE" }),

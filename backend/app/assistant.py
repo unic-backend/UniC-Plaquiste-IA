@@ -201,3 +201,31 @@ def draft_tiktok_script(topic: str, details: str = "", memory: str = "") -> dict
     script = "\n".join(lines) + (f"\n\nSon : {plain_post(str(d['son']))}" if d.get("son") else "")
     return {"title": " ".join(str(d["title"]).split())[:120], "caption": caption,
             "hashtags": " ".join(str(d.get("hashtags", "")).split())[:300], "script": script}
+
+
+WHATSAPP_KINDS = {
+    "devis": "envoyer un devis qui vient d'être préparé (le PDF sera joint séparément par le patron)",
+    "relance": "relancer poliment un client qui n'a pas répondu à un devis",
+    "merci": "remercier un client à la fin d'un chantier et proposer de revenir en cas de besoin",
+    "avis": "demander gentiment à un client satisfait de laisser un avis sur la fiche Google de UniC Plaquiste",
+    "rdv": "proposer ou confirmer un rendez-vous de visite sur place",
+    "statut": "texte d'un statut WhatsApp pour présenter un chantier ou un service (pas destiné à un client précis)",
+}
+
+
+def draft_whatsapp_message(kind: str, client_name: str = "", details: str = "", memory: str = "") -> str | None:
+    """Message WhatsApp court et prêt à envoyer. Aucun prix, délai ni fait inventé."""
+    goal = WHATSAPP_KINDS.get(kind)
+    if goal is None:
+        return None
+    who = f"Client : {client_name}." if client_name and kind != "statut" else ""
+    text = _ask(
+        f"{_BASE} Rédige un message WhatsApp pour {goal}. {who} "
+        "Ton chaleureux et professionnel, vouvoiement, 2 à 5 phrases courtes, 0 à 2 émojis, signé « UniC Plaquiste ». "
+        "N'invente AUCUN prix, délai, date ni détail de chantier : utilise seulement les faits donnés ; sinon reste général. "
+        "Texte brut uniquement : pas de Markdown, pas de titre, pas d'introduction du type « Voici le message ». "
+        "Commence par « Bonjour » suivi du nom du client s'il est donné.",
+        f"Faits fournis : {details or 'aucun'}",
+        memory=memory,
+    )
+    return plain_post(text) if text else None

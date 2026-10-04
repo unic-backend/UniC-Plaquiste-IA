@@ -6,6 +6,7 @@ absents répondent NON DISPONIBLE.
 from __future__ import annotations
 
 import logging
+import re
 
 from app import trust
 from app.config import settings
@@ -924,5 +925,50 @@ def tiktok_script(body: TikTokScriptIn, db: Session = Depends(get_db), user: Use
     p = SocialPost(platform="tiktok", kind="post", title=d["title"], body=text, hashtags=d["hashtags"], status="draft")
     db.add(p)
     audit(db, user.id, "tiktok_script", "social_post", p.id)
+    db.commit()
+    return _post_out(p)
+
+
+# ---------- WhatsApp : messages clients et statuts (envoi par le patron lui-même) ----------
+
+def whatsapp_number(raw: str) -> str:
+    """Numéro pour wa.me : chiffres seulement, indicatif Sénégal (221) ajouté aux numéros locaux à 9 chiffres. Vide si douteux."""
+    d = re.sub(r"\D", "", raw or "")
+    if d.startswith("00"):
+        d = d[2:]
+    if len(d) == 9 and d[0] == "7":
+        d = "221" + d
+    return d if 10 <= len(d) <= 15 else ""
+
+
+class WhatsAppIn(BaseModel):
+    kind: str = Field(..., max_length=16)
+    customer_id: str = ""
+    phone: str = Field("", max_length=64)
+    details: str = Field("", max_length=2000)
+
+
+@router.post("/whatsapp/message")
+def whatsapp_message(body: WhatsAppIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon de message WhatsApp ; le numéro nettoyé est gardé dans external_id. Rien n'est envoyé : le patron touche « Ouvrir WhatsApp »."""
+    from app import memory as mem
+    from app.models import Customer
+    if body.kind not in assistant.WHATSAPP_KINDS:
+        raise HTTPException(400, "Type de message inconnu.")
+    if not assistant.ai_available():
+        raise HTTPException(503, "IA non disponible : impossible de rédiger le message.")
+    name, phone = "", whatsapp_number(body.phone)
+    if body.customer_id:
+        c = db.get(Customer, body.customer_id)
+        if c is None:
+            raise HTTPException(404, "Client introuvable")
+        name, phone = c.contact_name or c.name, phone or whatsapp_number(c.phone)
+    text = assistant.draft_whatsapp_message(body.kind, name, body.details, memory=mem.block(db, body.details or body.kind))
+    if text is None:
+        raise HTTPException(502, "La rédaction a échoué. Réessaie.")
+    p = SocialPost(platform="whatsapp", kind="post", title=name or ("Statut WhatsApp" if body.kind == "statut" else "Message WhatsApp"),
+                   body=text[:1000], status="draft", external_id=phone)
+    db.add(p)
+    audit(db, user.id, "whatsapp_draft", "social_post", p.id, body.kind)
     db.commit()
     return _post_out(p)

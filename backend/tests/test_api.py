@@ -2061,3 +2061,27 @@ def test_tiktok_script_draft_keeps_caption_before_script(client, monkeypatch):
     caption, _, script = p["body"].partition("\n---\n")
     assert "*" not in caption and "WhatsApp" in caption and script.startswith("SCRIPT À FILMER") and "1. [0-3 s] Filmer : plafond avant travaux" in script
     assert client.post("/api/tiktok/script", json={"topic": "abc"}).status_code == 422
+
+
+def test_whatsapp_message_draft_uses_customer_phone_and_cleans_text(client, monkeypatch):
+    from app import assistant
+    from app.api_reseaux import whatsapp_number
+    assert whatsapp_number("77 708 50 92") == "221777085092" and whatsapp_number("+221 77 708 50 92") == "221777085092"
+    assert whatsapp_number("00221777085092") == "221777085092" and whatsapp_number("123") == "" and whatsapp_number("") == ""
+    monkeypatch.setattr(assistant, "ai_available", lambda: True)
+    seen = {}
+
+    def fake_ask(system, user, *a, **k):
+        seen["system"], seen["user"] = system, user
+        return "**Bonjour Awa**, votre devis est prêt. UniC Plaquiste"
+    monkeypatch.setattr(assistant, "_ask", fake_ask)
+    cid = client.post("/api/customers", json={"name": "Awa Fall", "phone": "77 123 45 67"}).json()["id"]
+    r = client.post("/api/whatsapp/message", json={"kind": "devis", "customer_id": cid, "details": "devis faux plafond salon"})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["platform"] == "whatsapp" and p["status"] == "draft" and p["title"] == "Awa Fall" and p["external_id"] == "221771234567"
+    assert "*" not in p["body"] and p["body"].startswith("Bonjour Awa") and "Awa Fall" in seen["system"]
+    st = client.post("/api/whatsapp/message", json={"kind": "statut", "details": "cloison terminée"}).json()
+    assert st["external_id"] == "" and st["title"] == "Statut WhatsApp"
+    assert client.post("/api/whatsapp/message", json={"kind": "spam"}).status_code == 400
+    assert client.post("/api/whatsapp/message", json={"kind": "merci", "customer_id": "inconnu"}).status_code == 404
