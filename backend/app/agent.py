@@ -250,6 +250,8 @@ AGENT_PROMPT = (
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
+    "\nPLAQUES : le patron choisit la plaque. Nombre de plaques sans taille (« 20 plaques ») = plaque de 2 m, sans rien redemander ; "
+    "plaque de 2,50 m seulement s'il le dit ; « hydrofuge » = variante hydrofuge de la même taille. Prends le prix de CETTE taille dans get_prices."
     "\nVOCABULAIRE : ne dis jamais « brouillon » ni « statut » à propos d'un devis, d'une facture ou d'un bon : dis « le devis est prêt » "
     "et propose l'aperçu ou l'approbation."
     "\nMÉMOIRE : tu AS une mémoire durable, via les outils remember / list_memory / forget_memory. Quand le patron énonce une règle, un prix, "

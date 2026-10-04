@@ -1751,3 +1751,24 @@ def test_plate_sku_follows_its_size():
     r25 = calc.calculate_from_text("cloison 12 x 2,5 m avec plaques 2,50")
     assert r2.quantities[0].sku == "BA13-2000x1200" and r25.quantities[0].sku == "BA13-2500x1200"
     assert r2.quantities[0].quantity > r25.quantities[0].quantity     # plaque plus courte : plus de plaques
+
+
+def test_hydrofuge_2m_price_and_default_plate_rule(client):
+    from app.models import AppSetting, Material, Memory
+    from app.seed import apply_owner_prices_v2, apply_owner_prices_v3
+    from app.services import current_price
+    from app import memory as mem
+    db = _mem_db()
+    for k in ("seed_owner_prices_v3", "seed_owner_rules_v4"):
+        row = db.get(AppSetting, k)
+        if row:
+            db.delete(row)
+    db.commit()
+    apply_owner_prices_v2(db)
+    apply_owner_prices_v3(db)
+    h = db.query(Material).filter(Material.sku == "BA13-2000x1200-H").first()
+    assert current_price(db, h.id, "selling").amount == 6000.0
+    mem.seed_owner_rules(db)
+    texts = " ".join(m.text for m in db.query(Memory).filter(Memory.state == "active").all())
+    assert "sans préciser la taille" in texts.lower() and "hydrofuge 2 m = 6 000" in texts
+    db.close()

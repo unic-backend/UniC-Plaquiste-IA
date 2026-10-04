@@ -232,3 +232,21 @@ def apply_owner_prices_v2(db: Session) -> int:
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n
+
+
+def apply_owner_prices_v3(db: Session) -> int:
+    """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v3"
+    if db.get(AppSetting, flag):
+        return 0
+    m = db.query(Material).filter(Material.sku == "BA13-2000x1200-H").first()
+    n = 0
+    if m is not None:
+        m.notes = "Plaque 2 m × 1,20 m, pièces humides. Prix donné par le patron."
+        _set_price(db, m, 6000.0, "donné par le patron", "Prix de vente de la plaque hydrofuge 2 m")
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n

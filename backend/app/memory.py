@@ -421,7 +421,12 @@ OWNER_RULES_V3 = (
     "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; standard 2,50 m × 1,20 m = 6 500 FCFA ; hydrofuge 2,50 m × 1,20 m = 8 000 FCFA. "
     "Chaque taille de plaque a son prix : ne jamais appliquer le prix de l'une à l'autre.",
 )
-_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3}
+OWNER_RULES_V4 = (
+    "Plaques : si le patron donne un nombre de plaques SANS préciser la taille (« 20 plaques »), c'est la plaque de 2 m (standard 4 500 FCFA, "
+    "hydrofuge 6 000 FCFA) : choix automatique, ne pas redemander la taille. La plaque de 2,50 m (6 500 ; hydrofuge 8 000) seulement s'il dit « 2,50 ». "
+    "C'est le patron qui choisit la plaque : ne jamais en choisir une autre de ton côté.",
+)
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4}
 
 
 def seed_owner_rules(db: Session) -> int:
@@ -433,6 +438,12 @@ def seed_owner_rules(db: Session) -> int:
         flag = f"seed_owner_rules_{version}"
         if db.get(AppSetting, flag):
             continue
+        if version == "v4":   # la règle de prix précédente ignorait l'hydrofuge 2 m : remplacée
+            for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix des plaques BA13 : standard 2 m%")):
+                m.state = "archived"
+            rules = rules + (
+                "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000 FCFA ; standard 2,50 m = 6 500 FCFA ; "
+                "hydrofuge 2,50 m = 8 000 FCFA. Chaque taille a son prix : ne jamais appliquer le prix de l'une à l'autre.",)
         if version == "v3":   # la règle de prix erronée de la version précédente est archivée
             for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix d'une plaque BA13 standard : 6 500%")):
                 m.state = "archived"
