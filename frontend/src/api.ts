@@ -352,7 +352,7 @@ export type ChatMessage = {
   meta?: any;
   created_at?: string;
   validated?: boolean;
-  files?: string[];
+  files?: { name: string; mime?: string; id?: string; file?: File }[];
   fresh?: boolean;
 };
 export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[] };

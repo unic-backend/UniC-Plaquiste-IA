@@ -293,7 +293,7 @@ AGENT_PROMPT = (
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
     "\nPLANS : quand un plan est joint (PDF, scan, photo), appelle read_plan. Présente en court : pièces avec plafond (oui / à confirmer), "
-    "surfaces, références placo et cloisons du plan, doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
+    "surfaces, références placo et cloisons du plan, résultat du contrôle d'emprise (controle_emprise), doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
     "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
     "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
     "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."

@@ -213,7 +213,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
     text = (body.message or "").strip()
     if not text and not body.file_ids:
         raise HTTPException(400, "Message vide")
-    names = [{"id": f.id, "filename": f.filename} for f in (db.get(StoredFile, i) for i in body.file_ids) if f is not None]
+    names = [{"id": f.id, "filename": f.filename, "mime": f.mime_type} for f in (db.get(StoredFile, i) for i in body.file_ids) if f is not None]
     user_msg = Message(conversation_id=conv.id, role="user", content=text or "[fichier]",
                        meta_json=json.dumps({"files": names}, ensure_ascii=False) if names else "{}")
     db.add(user_msg)
@@ -401,6 +401,43 @@ def preview_artifact(aid: str, db: Session = Depends(get_db), user: User = Depen
         return {"pages": len(pdf), "images": images, "filename": a.filename, "version": a.version}
     except Exception as exc:   # aperçu impossible : le téléchargement reste disponible
         raise HTTPException(503, f"Aperçu indisponible ({type(exc).__name__}). Utilisez Télécharger.")
+
+
+@router.get("/files/{fid}/thumb")
+def file_thumb(fid: str, size: int = 600, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Aperçu JPEG d'une photo ou de la 1re page d'un PDF (plan) : affiché en carte dans la conversation. Mis en cache."""
+    import base64
+    from app import pdfjob
+
+    f = db.get(StoredFile, fid)
+    if f is None or not Path(f.path).exists():
+        raise HTTPException(404, "Fichier introuvable")
+    size = 1600 if size > 600 else 600
+    src = Path(f.path)
+    thumb = src.with_name(f"{src.stem}.thumb{size}.jpg")
+    if not thumb.exists():
+        ext = src.suffix.lower()
+        try:
+            if ext == ".pdf":
+                data = pdfjob.run("images", timeout=60, path=str(src), pages=[0], max_side=size, quality=80)["images"]
+                if not data:
+                    raise ValueError("vide")
+                thumb.write_bytes(base64.b64decode(data[0]))
+            elif ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+                from PIL import Image
+                with Image.open(src) as img:
+                    im = img.convert("RGB")
+                    im.thumbnail((size, size))
+                    im.save(thumb, "JPEG", quality=80)
+            else:
+                raise HTTPException(415, "Pas d'aperçu pour ce type de fichier")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(422, "Aperçu impossible")
+        finally:
+            release_memory()
+    return FileResponse(thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/files/{fid}/download")

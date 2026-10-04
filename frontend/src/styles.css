@@ -863,3 +863,25 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .files-sent { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .files-sent .file-chip { background: rgba(255,255,255,.16); color: inherit; border-color: transparent; }
 .chip-x { margin-left: 6px; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+
+/* Fichiers joints : cartes séparées de la question (composer et messages) */
+.msg-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: min(100%, 640px); }
+.msg.user .msg-col { align-items: flex-end; }
+.attach-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.msg.user .attach-row { justify-content: flex-end; }
+.attach-row.pending { padding: 6px 6px 2px; }
+.attach { position: relative; }
+.attach-body { display: block; padding: 0; border: 1px solid var(--line); background: var(--card); border-radius: 16px; overflow: hidden; cursor: pointer; }
+.attach.has-thumb .attach-body img { display: block; width: 132px; height: 132px; object-fit: cover; background: #fff; }
+.attach-row.pending .attach.has-thumb .attach-body img { width: 76px; height: 76px; }
+.attach-doc { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; width: 132px; height: 132px; padding: 12px; text-align: left; color: var(--ink); }
+.attach-row.pending .attach-doc { width: 116px; height: 76px; padding: 8px 10px; gap: 4px; }
+.attach-ext { align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .04em; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.attach-name { font-size: 13px; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.attach-row.pending .attach-name { -webkit-line-clamp: 2; font-size: 12px; }
+.attach-tag { position: absolute; left: 8px; bottom: 8px; font-size: 10px; font-weight: 700; background: rgba(0,0,0,.62); color: #fff; border-radius: 999px; padding: 2px 7px; }
+.attach-x { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--ink); color: var(--card); font-size: 15px; line-height: 22px; text-align: center; cursor: pointer; box-shadow: var(--shadow); }
+.lightbox { position: fixed; inset: 0; z-index: 80; background: rgba(10,14,12,.92); display: grid; place-items: center; padding: 16px; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; background: #fff; }
+.lightbox-x { position: absolute; top: 14px; right: 14px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(255,255,255,.16); color: #fff; font-size: 24px; cursor: pointer; }
+.msg:not(.user) > .msg-col { flex: 1 1 auto; }

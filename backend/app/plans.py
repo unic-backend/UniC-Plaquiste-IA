@@ -34,8 +34,10 @@ Tu reçois le texte extrait du fichier et, si possible, les pages en image. Rép
              "hauteur_m": nombre|null, "plafond": "oui|non|a_confirmer", "raison": "courte, tirée du plan"}],
  "cloisons": [{"texte": "citation ou description du plan", "page": 1, "longueur_m": nombre|null, "reference": "BA13, rails, épaisseur… ou null"}],
  "references": [{"type": "plafond|cloison|doublage|autre", "texte": "citation exacte du plan", "page": 1}],
+ "emprise": [{"description": "bloc principal, aile, annexe…", "longueur_m": nombre, "largeur_m": nombre}],
  "remarques": ["doutes, cotes illisibles, pièces sans surface…"]
 }
+« emprise » = cotes HORS-TOUT du bâtiment (les grandes cotes extérieures, un rectangle par bloc), seulement si elles sont écrites.
 Règles : convertis tout en mètres ; ne devine JAMAIS une cote ou une surface absente (mets null et signale-le dans remarques) ;
 « plafond » = oui seulement si le plan l'indique (faux plafond, plafond BA13, suspendu, hauteur sous plafond, légende) ;
 pièce humide (WC, SDB, cuisine) sans mention = a_confirmer (hydrofuge possible) ; extérieur, terrasse, parking, escalier = non ;
@@ -83,6 +85,33 @@ def _num(v) -> float | None:
     return f if f > 0 else None
 
 
+def _footprint_check(blocks, rooms: list[dict]) -> dict:
+    """Contrôle automatique : somme des pièces comparée aux cotes hors-tout du bâtiment (calcul en code).
+    Écart de quelques % = épaisseur des murs et cloisons ; plus = pièce oubliée, surface lue fausse ou zone non comptée."""
+    rects = []
+    for b in blocks or []:
+        if isinstance(b, dict):
+            L, l = _num(b.get("longueur_m")), _num(b.get("largeur_m"))
+            if L and l and L * l <= 5000:
+                rects.append({"description": str(b.get("description") or "bloc")[:60], "longueur_m": L, "largeur_m": l,
+                              "surface_m2": round(L * l, 2)})
+    rooms_total = round(sum(r["surface_m2"] or 0 for r in rooms), 2)
+    if not rects:
+        return {"statut": "impossible", "note": "Contrôle d'emprise impossible : aucune cote hors-tout lisible."}
+    foot = round(sum(r["surface_m2"] for r in rects), 2)
+    ecart = round((foot - rooms_total) / foot * 100, 1) if foot else None
+    if ecart is None:
+        statut, note = "impossible", ""
+    elif rooms_total > foot * 1.02:
+        statut, note = "incoherent", f"Contrôle : les pièces ({rooms_total} m²) dépassent l'emprise du bâtiment ({foot} m²). Une surface est fausse ou comptée deux fois."
+    elif ecart <= 8:
+        statut, note = "coherent", f"Contrôle : pièces {rooms_total} m² pour une emprise de {foot} m² (écart {ecart} %, murs et cloisons). Cohérent."
+    else:
+        statut, note = "a_verifier", (f"Contrôle : pièces {rooms_total} m² pour une emprise de {foot} m² (écart {ecart} %). "
+                                      "Des zones ne sont pas comptées (couloirs, accueil, sanitaires…) : à vérifier.")
+    return {"statut": statut, "emprise": rects, "emprise_m2": foot, "pieces_m2": rooms_total, "ecart_pct": ecart, "note": note}
+
+
 def _clean(data: dict) -> dict:
     """Valide la sortie de l'IA et fait les calculs en code."""
     rooms, notes = [], [str(x)[:200] for x in (data.get("remarques") or [])][:20]
@@ -109,7 +138,11 @@ def _clean(data: dict) -> dict:
     def total(flag: str) -> float:
         return round(sum(r["surface_m2"] or 0 for r in rooms if r["plafond"] == flag), 2)
 
+    check = _footprint_check(data.get("emprise"), rooms)
+    if check.get("note"):
+        notes.insert(0, check["note"])
     return {
+        "controle_emprise": check,
         "unite_plan": data.get("unite_plan") or "inconnue", "echelle": data.get("echelle"),
         "pieces": rooms,
         "cloisons": [c for c in (data.get("cloisons") or []) if isinstance(c, dict)][:60],

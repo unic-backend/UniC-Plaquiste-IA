@@ -2411,3 +2411,31 @@ def test_heavy_pdf_never_takes_server_down(client, monkeypatch):
         out = plans.analyze(db, r.json()["id"])
     assert "capture" in out.get("error", "")
     assert client.get("/api/ping").status_code == 200
+
+
+def test_plan_footprint_check():
+    from app import plans
+    rooms = [{"surface_m2": s} for s in (77.72, 36.32, 33.19, 21.33, 17.34, 8.05)]
+    ok = plans._footprint_check([{"description": "bloc", "longueur_m": 14.10, "largeur_m": 13.89}], rooms)
+    assert ok["statut"] == "coherent" and ok["emprise_m2"] == 195.85 and ok["pieces_m2"] == 193.95
+    assert plans._footprint_check([{"longueur_m": 10, "largeur_m": 10}], rooms)["statut"] == "incoherent"
+    assert plans._footprint_check([{"longueur_m": 20, "largeur_m": 20}], rooms)["statut"] == "a_verifier"
+    assert plans._footprint_check([], rooms)["statut"] == "impossible"
+    out = plans._clean({"pieces": [{"nom": "RH", "surface_m2": 77.72}], "emprise": [{"longueur_m": 9, "largeur_m": 9}]})
+    assert out["controle_emprise"]["statut"] == "coherent" and out["remarques"][0].startswith("Contrôle")
+
+
+def test_file_thumb_for_pdf_and_image(client):
+    import io
+    from PIL import Image
+    from reportlab.pdfgen import canvas
+    b = io.BytesIO(); c = canvas.Canvas(b, pagesize=(842, 595)); c.rect(50, 50, 700, 450); c.drawString(100, 100, "Plan"); c.save()
+    fid = client.post("/api/files", files={"file": ("plan.pdf", b.getvalue(), "application/pdf")}).json()["id"]
+    r = client.get(f"/api/files/{fid}/thumb")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content[:2] == b"\xff\xd8"
+    assert client.get(f"/api/files/{fid}/thumb?size=1600").status_code == 200
+    buf = io.BytesIO(); Image.new("RGB", (3000, 2000), "white").save(buf, format="PNG")
+    iid = client.post("/api/files", files={"file": ("photo.png", buf.getvalue(), "image/png")}).json()["id"]
+    r = client.get(f"/api/files/{iid}/thumb")
+    assert r.status_code == 200 and max(Image.open(io.BytesIO(r.content)).size) <= 600
+    assert client.get("/api/files/nope/thumb").status_code == 404

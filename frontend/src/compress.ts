@@ -75,3 +75,27 @@ export async function prepareFile(file: File): Promise<Prepared> {
   if (/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type)) return shrinkImage(file);
   return { files: [file], note: "" };
 }
+
+/** Aperçu local de la 1re page d'un PDF (plan) avant l'envoi. null si impossible. */
+export async function pdfThumb(file: File, maxSide = 520): Promise<string | null> {
+  try {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const worker = (await import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url")).default;
+    pdfjs.GlobalWorkerOptions.workerSrc = worker;
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const page = await doc.getPage(1);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: maxSide / Math.max(base.width, base.height) });
+    const c = document.createElement("canvas");
+    c.width = Math.round(viewport.width);
+    c.height = Math.round(viewport.height);
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    await doc.destroy();
+    return URL.createObjectURL(await toJpeg(c));
+  } catch {
+    return null;
+  }
+}
