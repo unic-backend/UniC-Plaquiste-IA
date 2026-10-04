@@ -4,6 +4,7 @@ import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useP
 import { FicheGoogle } from "./Google";
 import { Voix } from "./Voix";
 import { CoverLetterBox, DiagramCard, ShareButton } from "./Share";
+import { prepareFile } from "./compress";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
@@ -648,8 +649,13 @@ function Chat({ initialId }: { initialId?: string }) {
     try {
       const file_ids: string[] = [];
       for (const f of pending) {
-        const up = await api.upload(f);
-        file_ids.push(up.id);
+        setLive({ status: "Préparation du fichier…", text: "" });
+        const prep = await prepareFile(f);   // allège avant l'envoi (photos, gros PDF)
+        for (const p of prep.files) {
+          const up = await api.upload(p);
+          file_ids.push(up.id);
+        }
+        if (prep.note) setNotice("Allégé : " + prep.note);
       }
       setPending([]);
       setLive({ status: "", text: "" });
