@@ -85,6 +85,7 @@ export type Post = {
   in_reply_to: string; status: string; created_at: string | null;
 };
 export type Mail = {
+  suspect?: boolean;
   id: string; from_addr: string; subject: string; date: string; body: string;
   summary: string; category: string; reply_draft_id: string | null;
 };
@@ -92,7 +93,16 @@ export type GReview = { id: string; author: string; stars: number; comment: stri
 export type GProfile = { title: string; website: string; phone: string; description: string; gaps: string[]; complete: boolean };
 export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
 
-export type Memo = { id: string; text: string; kind: string; source: string; pinned: boolean; created_at: string | null };
+export type Memo = {
+  id: string; text: string; kind: string; source: string; pinned: boolean; created_at: string | null;
+  nature?: string; state?: string; importance?: number; occurrences?: number; expires_at?: string | null;
+};
+export type MemState = {
+  actifs: number; a_confirmer: number; rejetes: number; archives: number; taches: number; conflits: number;
+  avertissement: string | null; recherche: string; portee_conflits: string;
+};
+export type MemConflict = { a: { id: string; text: string }; b: { id: string; text: string }; raison: string };
+export type JournalRow = { id: string; at: string | null; action: string; label: string; target: string; details: string };
 
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
@@ -118,6 +128,17 @@ export const net = {
   memories: () => request<Memo[]>("/api/memory"),
   addMemory: (b: { text: string; kind: string; pinned: boolean }) =>
     request<Memo>("/api/memory", { method: "POST", ...json(b) }),
+  memoriesBy: (state: string) => request<Memo[]>(`/api/memory?state=${state}`),
+  memState: () => request<MemState>("/api/memory/state"),
+  memConflicts: () => request<MemConflict[]>("/api/memory/conflicts"),
+  decideMemory: (id: string, action: string) =>
+    request<Memo>(`/api/memory/${id}`, { method: "PATCH", ...json({ action }) }),
+  importMemory: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<{ candidats: number }>("/api/memory/import", { method: "POST", body: fd });
+  },
+  journal: (action = "") => request<JournalRow[]>(`/api/journal${action ? `?action=${encodeURIComponent(action)}` : ""}`),
   deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),
   mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
   mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),

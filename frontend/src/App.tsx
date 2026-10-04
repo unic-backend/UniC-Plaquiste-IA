@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { Courrier, Memoire, Reseaux } from "./Reseaux";
+import { Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import { api, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
@@ -88,6 +88,11 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
           {d.subtotal !== null && d.subtotal !== undefined && d.vat_amount ? <div><span>Sous-total</span><span>{fmt(d.subtotal, cur)}</span></div> : null}
           {d.vat_amount ? <div><span>TVA</span><span>{fmt(d.vat_amount, cur)}</span></div> : null}
           <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
+          {kind === "quote" && Array.isArray(d.price_check) && (
+            d.price_check.length === 0
+              ? <p className="hint">✓ Prix et totaux conformes à la grille</p>
+              : <p className="error">⚠ {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
+          )}
           {kind === "quote" && d.prices_complete === false && (
             <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
           )}
@@ -409,6 +414,7 @@ function Chat({ initialId }: { initialId?: string }) {
 
   const suggestions = [
     "Cloison 12 m × 2,50 m, deux faces",
+    "Briefing du jour",
     "Fais le devis",
     "Explique-moi la différence entre BA13 et BA18",
     "Aide-moi à répondre à un client mécontent",
@@ -1019,6 +1025,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
     title: "Cerveau de l'IA",
     items: [
       { to: "/memoire", title: "Mémoire", text: "Ce que l'IA a appris de vous" },
+      { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
     ],
   },
@@ -1256,6 +1263,7 @@ export default function App() {
         <Route path="/livraisons/:id" element={<DocDetail kind="dn" />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/memoire" element={<Memoire />} />
+        <Route path="/journal" element={<Journal />} />
         <Route path="/courrier" element={<Courrier />} />
         <Route path="/reseaux" element={<Reseaux />} />
         <Route path="/parametres" element={<SettingsHub />} />

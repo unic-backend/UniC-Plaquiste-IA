@@ -943,6 +943,9 @@ def handle_turn(
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:
                     reply_text = ai.text + pricecheck.review_reply(db, ai.text)
+                    if session is not None and session.alerts:
+                        reply_text += ("\n\n⚠️ Tentative de manipulation détectée dans : "
+                                       + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")
                     mem.extract_and_store(db, text)
                     if deep and ai.provider != "claude":
                         reply_text += (

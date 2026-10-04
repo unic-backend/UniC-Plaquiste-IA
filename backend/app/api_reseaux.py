@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 
+from app import trust
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -231,7 +232,8 @@ def boost(body: BoostIn, db: Session = Depends(get_db), user: User = Depends(get
 def _mail_out(m: InboxMessage) -> dict:
     return {"id": m.id, "from_addr": m.from_addr, "subject": m.subject, "date": m.date,
             "body": m.body, "summary": m.summary, "category": m.category,
-            "reply_draft_id": m.reply_draft_id}
+            "reply_draft_id": m.reply_draft_id,
+            "suspect": bool(trust.inspect(f"{m.subject}\n{m.body}"))}
 
 
 @router.get("/mail/status")

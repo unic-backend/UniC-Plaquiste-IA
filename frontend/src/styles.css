@@ -584,3 +584,6 @@ input, textarea, select {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; }
 }
+
+.card-box.warn { border-color: #d9a441; background: rgba(217, 164, 65, 0.08); }
+.conflict { margin-top: 10px; }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { net, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
+import { net, type JournalRow, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
 const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
 const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
@@ -317,7 +317,7 @@ export function Courrier() {
             {mails.map((m) => (
               <button key={m.id} className={`plat mail ${open?.id === m.id ? "on" : ""}`}
                 onClick={() => { setOpen(m); setInfo({}); setDraft(null); }}>
-                <b>{m.subject || "(sans objet)"}</b>
+                <b>{m.subject || "(sans objet)"}</b>{m.suspect && <span className="badge" title="Contient des consignes suspectes : ignorées par l'IA"> ⚠ suspect</span>}
                 <span>{m.from_addr}{m.category ? ` · ${m.category}` : ""}</span>
               </button>
             ))}
@@ -387,25 +387,80 @@ export function Courrier() {
   );
 }
 
-const KIND: Record<string, string> = { fact: "Fait", preference: "Préférence", correction: "Correction" };
+const KIND: Record<string, string> = { fact: "Fait", preference: "Préférence", correction: "Correction", task: "Tâche" };
+const NATURE: Record<string, string> = { fact: "Fait", preference: "Préférence", inference: "À confirmer", temporary: "Temporaire" };
 
 export function Memoire() {
   const [items, setItems] = useState<Memo[]>([]);
+  const [pending, setPending] = useState<Memo[]>([]);
+  const [conflicts, setConflicts] = useState<MemConflict[]>([]);
+  const [state, setState] = useState<MemState | null>(null);
   const [text, setText] = useState("");
   const [kind, setKind] = useState("fact");
   const { msg, say } = useToast();
-  const load = () => net.memories().then(setItems).catch((e) => say(e.message));
+  const load = () => {
+    net.memoriesBy("active").then((all) => {
+      setPending(all.filter((m) => m.nature === "inference"));
+      setItems(all.filter((m) => m.nature !== "inference"));
+    }).catch((e) => say(e.message));
+    net.memState().then(setState).catch(() => {});
+    net.memConflicts().then(setConflicts).catch(() => {});
+  };
   useEffect(() => {
     load();
   }, []);
+  const decide = async (id: string, action: string) => {
+    try {
+      await net.decideMemory(id, action);
+      load();
+    } catch (e: any) {
+      say(e.message);
+    }
+  };
   return (
     <div className="page">
       <div className="page-inner">
         <h1>Mémoire</h1>
         <p className="lede">
           Ce que l'assistant sait de vous, dans toutes les conversations. Dites « Retiens que… » dans le chat, ou ajoutez ici.
-          Il apprend aussi seul de vos messages. Supprimez ce qui est faux.
+          Ce qu'il devine reste à confirmer. Supprimez ce qui est faux.
         </p>
+        {state?.avertissement && <div className="card-box warn" role="alert">⚠️ {state.avertissement}</div>}
+        {state && (
+          <p className="hint">
+            {state.actifs} actifs · {state.a_confirmer} à confirmer · {state.taches} tâches · {state.conflits} conflits ·
+            recherche {state.recherche}
+          </p>
+        )}
+        {conflicts.length > 0 && (
+          <section className="card-box warn">
+            <label>Souvenirs qui se contredisent ({state?.portee_conflits ?? "numériques"})</label>
+            {conflicts.map((c, i) => (
+              <div key={i} className="conflict">
+                <p className="hint">{c.raison}</p>
+                {[c.a, c.b].map((m) => (
+                  <div className="toolbar" key={m.id}>
+                    <span className="post-body">{m.text}</span>
+                    <button className="btn btn-line btn-small" onClick={() => decide(m.id, "pin")}>Garder</button>
+                    <button className="btn btn-ghost btn-small" onClick={() => decide(m.id, "archive")}>Archiver</button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+        {pending.length > 0 && (
+          <section className="card-box">
+            <label>À confirmer — l'IA a deviné, vous tranchez</label>
+            {pending.map((m) => (
+              <div className="toolbar" key={m.id}>
+                <span className="post-body">{m.text}</span>
+                <button className="btn btn-copper btn-small" aria-label="Confirmer" onClick={() => decide(m.id, "confirm")}>✓</button>
+                <button className="btn btn-ghost btn-small" aria-label="Rejeter" onClick={() => decide(m.id, "reject")}>✗</button>
+              </div>
+            ))}
+          </section>
+        )}
         <section className="card-box">
           <label>Nouveau souvenir</label>
           <textarea rows={2} value={text} maxLength={500} onChange={(e) => setText(e.target.value)}
@@ -427,14 +482,35 @@ export function Memoire() {
               Retenir
             </button>
           </div>
+          <div className="toolbar">
+            <label className="btn btn-line btn-small">
+              Importer ChatGPT / Claude
+              <input type="file" hidden accept=".json,.zip,.txt,.md"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  try {
+                    const r = await net.importMemory(f);
+                    say(`${r.candidats} suppositions trouvées : à confirmer ci-dessus`);
+                    load();
+                  } catch (err: any) {
+                    say(err.message);
+                  }
+                }} />
+            </label>
+          </div>
         </section>
-        {items.length === 0 && <div className="empty">Rien en mémoire pour l'instant.</div>}
+        {items.length === 0 && pending.length === 0 && <div className="empty">Rien en mémoire pour l'instant.</div>}
         {items.map((m) => (
           <article key={m.id} className="card-box">
             <p className="post-body">{m.text}</p>
             <div className="toolbar">
-              <span className="badge">{KIND[m.kind] ?? m.kind}</span>
+              <span className="badge">{NATURE[m.nature ?? ""] ?? KIND[m.kind] ?? m.kind}</span>
+              {(m.occurrences ?? 1) > 1 && <span className="hint">vu {m.occurrences} fois</span>}
+              {m.expires_at && <span className="hint">expire le {new Date(m.expires_at).toLocaleDateString("fr-FR")}</span>}
               <span className="hint">{m.source === "auto" ? "appris seul" : "demandé par vous"}</span>
+              <button className="btn btn-ghost btn-small" onClick={() => decide(m.id, "archive")}>Archiver</button>
               <button className="btn btn-ghost btn-small"
                 onClick={async () => {
                   await net.deleteMemory(m.id);
@@ -446,6 +522,33 @@ export function Memoire() {
           </article>
         ))}
         {msg && <div className="toast" role="status">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function Journal() {
+  const [rows, setRows] = useState<JournalRow[]>([]);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    net.journal().then(setRows).catch((e) => setErr(e.message));
+  }, []);
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Journal</h1>
+        <p className="lede">Tout ce que l'IA et vous avez fait : outils appelés, brouillons, validations. Rien n'est envoyé sans vous.</p>
+        {err && <p className="error">{err}</p>}
+        {!err && rows.length === 0 && <div className="empty">Rien d'enregistré pour l'instant.</div>}
+        {rows.map((r) => (
+          <article key={r.id} className="card-box">
+            <div className="toolbar">
+              <b>{r.label}</b>
+              <span className="hint">{r.at ? new Date(r.at).toLocaleString("fr-FR") : ""}</span>
+            </div>
+            {(r.target.trim() || r.details) && <p className="hint">{[r.target.trim(), r.details].filter(Boolean).join(" · ")}</p>}
+          </article>
+        ))}
       </div>
     </div>
   );
