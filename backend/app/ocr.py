@@ -12,6 +12,7 @@ from pathlib import Path
 logger = logging.getLogger("unic.ocr")
 
 LANGUES_VOULUES = ("fra", "eng")
+OCR_MAX_SIDE = 3000   # 5000 px : 66 s et 400 Mo sur un plan A1 ; 3000 px : 1 s et 110 Mo
 ECHELLE_RENDU = 300 / 72  # 300 DPI : en dessous, un A4 scanné devient illisible
 
 
@@ -54,7 +55,7 @@ def ocr_pdf_page(path: Path, index: int) -> str:
 
         doc = pdfium.PdfDocument(str(path))
         page = doc[index]
-        image = page.render(scale=scale_for(page, ECHELLE_RENDU, 5000)).to_pil()
+        image = page.render(scale=scale_for(page, ECHELLE_RENDU, OCR_MAX_SIDE)).to_pil()
         return pytesseract.image_to_string(image, lang=lang).strip()
     except Exception as exc:
         logger.debug("OCR page %s impossible : %s", index + 1, exc)

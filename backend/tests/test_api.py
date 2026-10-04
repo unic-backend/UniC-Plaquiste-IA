@@ -184,8 +184,9 @@ def test_vision_reads_image_and_scanned_pdf(client, monkeypatch):
     buf = io.BytesIO()
     im.save(buf, format="PDF")
     r = client.post("/api/files", files={"file": ("scan.pdf", buf.getvalue(), "application/pdf")})
-    assert r.status_code == 200 and r.json()["processing"]["status"] == "completed"
-    assert len(calls) == 2 and all(isinstance(c, str) and len(c) > 100 for c in calls)
+    assert r.status_code == 200 and r.json()["processing"]["status"] in ("completed", "completed_no_ocr")
+    # la photo est regardée à l'envoi ; un PDF sans texte ne l'est qu'à la demande (read_plan) : l'envoi reste court et sobre
+    assert len(calls) == 1 and isinstance(calls[0], str) and len(calls[0]) > 100
 
 
 def test_social_workflow_and_limits(client):
@@ -2355,7 +2356,25 @@ def test_huge_plan_pdf_is_rendered_within_memory_bounds(client):
     p = "/tmp/_a0_test.pdf"
     open(p, "wb").write(b.getvalue())
     pg = pdfium.PdfDocument(p)[0]
-    w, h = pg.render(scale=ocr.scale_for(pg, 300 / 72, 5000)).to_pil().size
-    assert max(w, h) <= 5001 and w * h < 30_000_000          # sans borne : 139 millions de pixels (≈ 420 Mo)
+    w, h = pg.render(scale=ocr.scale_for(pg, 300 / 72, ocr.OCR_MAX_SIDE)).to_pil().size
+    assert max(w, h) <= 3001 and w * h < 10_000_000          # sans borne : 139 millions de pixels (≈ 420 Mo)
     r = client.post("/api/files", files={"file": ("a0.pdf", b.getvalue(), "application/pdf")})
     assert r.status_code == 200 and r.json()["processing"]["status"] in ("completed", "completed_no_ocr")
+
+
+def test_cad_style_pdf_text_read_fast_and_light(client):
+    import io, random, time
+    from reportlab.pdfgen import canvas
+    random.seed(3)
+    b = io.BytesIO(); c = canvas.Canvas(b, pagesize=(2384, 1684))
+    for _ in range(60000):
+        x, y = random.randint(50, 2300), random.randint(50, 1600)
+        c.line(x, y, x + random.randint(-40, 40), y + random.randint(-40, 40))
+    c.drawString(300, 300, "Salon 5.20 x 4.10 faux plafond BA13")
+    c.save()
+    t = time.time()
+    r = client.post("/api/files", files={"file": ("cad.pdf", b.getvalue(), "application/pdf")})
+    assert r.status_code == 200 and r.json()["processing"]["status"] == "completed"
+    assert time.time() - t < 8
+    d = client.get("/api/files").json()
+    assert d
