@@ -485,11 +485,6 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
-              <h1>Que puis-je faire pour vous ?</h1>
-              <p>
-                Posez n'importe quelle question, ou donnez un ordre : je calcule, je rédige, j'explique, et je prépare
-                vos devis, bons et factures quand vous me le demandez. Joignez un plan ou une photo si besoin.
-              </p>
               <div className="greet" key={greet.text} aria-live="polite">
                 <span className="greet-text">{greet.text}</span>
                 <span className="greet-fr">{greet.fr} · {greet.lang}</span>
