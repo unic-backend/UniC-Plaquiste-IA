@@ -1,0 +1,36 @@
+name: Windows installer
+
+on:
+  push:
+    paths: ["frontend/**", "desktop/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm install --no-audit --no-fund
+        working-directory: desktop
+      - run: npx electron-builder --win nsis --publish never
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unic-ai-windows
+          path: desktop/dist/UniC-AI-Setup-*.exe
+          retention-days: 30

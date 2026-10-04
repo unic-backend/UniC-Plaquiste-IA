@@ -35,3 +35,7 @@ backups/
 # Generated
 *.pdf
 !frontend/public/**
+
+# Desktop
+desktop/node_modules/
+desktop/dist/

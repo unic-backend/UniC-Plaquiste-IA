@@ -11,7 +11,7 @@ import * as I from "./Icons";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -395,12 +395,12 @@ function Connexion({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setMsg("");
     const url = server.trim();
-    if (isNative && !/^https:\/\/[^\s/]+/i.test(url)) {
+    if (hasServerField && !/^https:\/\/[^\s/]+/i.test(url)) {
       setMsg("Adresse invalide : elle doit commencer par https://");
       setBusy(false);
       return;
     }
-    saveConnection(isNative ? url : "", code);
+    saveConnection(hasServerField ? url : "", code);
     try {
       await api.me();
       onDone();
@@ -414,8 +414,8 @@ function Connexion({ onDone }: { onDone: () => void }) {
     <div className="login">
       <div className="login-card">
         <h1>UniC AI</h1>
-        <p className="hint">{isNative ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
-        {isNative && (
+        <p className="hint">{hasServerField ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
+        {hasServerField && (
           <>
             <label>Adresse du serveur</label>
             <input value={server} placeholder="https://unic.exemple.com" autoCapitalize="none" autoCorrect="off"
@@ -426,7 +426,7 @@ function Connexion({ onDone }: { onDone: () => void }) {
         <input type="password" value={code} autoComplete="current-password" onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && go()} />
         {msg && <p className="error">{msg}</p>}
-        <button className="btn btn-copper" disabled={busy || (isNative && !server.trim())} onClick={go}>
+        <button className="btn btn-copper" disabled={busy || (hasServerField && !server.trim())} onClick={go}>
           {busy ? "Connexion…" : "Se connecter"}
         </button>
       </div>

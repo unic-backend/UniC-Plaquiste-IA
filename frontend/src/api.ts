@@ -6,6 +6,10 @@ const SERVER_KEY = "unic_server";
 const CODE_KEY = "unic_code";
 
 export const isNative = Capacitor.isNativePlatform();
+/** Application PC (Electron) : l'interface est embarquée, l'API est sur le serveur UniC. */
+export const isDesktop = typeof window !== "undefined" && !!(window as { unicDesktop?: boolean }).unicDesktop;
+/** Application installée (téléphone ou PC) : adresse du serveur à saisir. */
+export const hasServerField = isNative || isDesktop;
 
 function store(key: string): string {
   try {
@@ -37,7 +41,7 @@ export function clearConnection() {
 export class AuthError extends Error {}
 
 /** Application native : adresse du serveur obligatoire. Web : même origine que l'API. */
-export const needsServer = () => isNative && !getServer();
+export const needsServer = () => hasServerField && !getServer();
 
 export function apiUrl(path: string): string {
   return path.startsWith("http") ? path : getServer() + path;
