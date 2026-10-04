@@ -192,6 +192,7 @@ export type ChatMessage = {
   content: string;
   meta?: any;
   created_at?: string;
+  fresh?: boolean;
 };
 export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[] };
 export type ChatOut = { conversation_id: string; title: string; message: ChatMessage };

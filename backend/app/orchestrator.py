@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app import calc
-from app import memory as mem, metier
+from app import agent, memory as mem, metier
 from app.ai import chat_complete, deep_available, provider_chain
 from app.capabilities import registry_snapshot
 from app.config import settings
@@ -903,7 +903,16 @@ def handle_turn(
                         "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
                     )
-                ai = chat_complete(msgs, deep=deep, web=can_search)
+                tools_on = bool(chain) and chain[0].id == "claude"
+                session = agent.AgentSession(db, user.id) if tools_on else None
+                if tools_on:
+                    msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note()
+                ai = chat_complete(msgs, deep=deep, web=can_search,
+                                   tools=agent.TOOLS if tools_on else None, tool_handler=session)
+                if session is not None and session.used:
+                    caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
+                    if session.cards:
+                        structured = {"drafts": session.cards}
                 if ai.error == "refusal":
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -152,6 +153,36 @@ class ClaudeAIProvider(AIProvider):
                     sources.append({"title": getattr(cit, "title", "") or url, "url": url})
         return "".join(parts).strip(), sources
 
+    MAX_ROUNDS = 8  # tours d'outils maximum par réponse
+
+    def _run(self, client, params: dict, handler, used: list[str]):
+        """Boucle : pause_turn (recherche longue) et tool_use (connecteurs). Rend la dernière réponse."""
+        resp = self._send(client, params)
+        for _ in range(self.MAX_ROUNDS):
+            stop = getattr(resp, "stop_reason", "")
+            if stop == "pause_turn":
+                params["messages"] = params["messages"] + [{"role": "assistant", "content": resp.content}]
+            elif stop == "tool_use" and handler is not None:
+                results = []
+                for block in resp.content:
+                    if getattr(block, "type", "") != "tool_use":
+                        continue
+                    used.append(block.name)
+                    out = handler(block.name, dict(block.input or {}))
+                    item = {"type": "tool_result", "tool_use_id": block.id,
+                            "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]}
+                    if isinstance(out, dict) and out.get("error"):
+                        item["is_error"] = True
+                    results.append(item)
+                params["messages"] = params["messages"] + [
+                    {"role": "assistant", "content": resp.content},
+                    {"role": "user", "content": results},  # tous les résultats dans UN seul message
+                ]
+            else:
+                break
+            resp = self._send(client, params)
+        return resp
+
     def complete(self, messages: list[dict], **kwargs) -> AIResult:
         model = kwargs.get("model") or settings.anthropic_model
         if not settings.anthropic_api_key:
@@ -164,33 +195,34 @@ class ClaudeAIProvider(AIProvider):
         if kwargs.get("effort"):
             params["output_config"] = {"effort": kwargs["effort"]}
         web = bool(kwargs.get("web")) and settings.web_search_enabled
-        if web:
-            params["tools"] = [{**self.WEB_TOOL, "max_uses": settings.web_search_max_uses}]
+        client_tools = list(kwargs.get("tools") or [])
+        handler = kwargs.get("tool_handler")
+        tools = ([{**self.WEB_TOOL, "max_uses": settings.web_search_max_uses}] if web else []) + client_tools
+        if tools:
+            params["tools"] = tools
+        used: list[str] = []
         try:
             client = self._client()
             try:
-                resp = self._send(client, params)
-                # recherche longue : l'API peut demander de reprendre le tour (pause_turn)
-                for _ in range(3):
-                    if getattr(resp, "stop_reason", "") != "pause_turn":
-                        break
-                    params["messages"] = turns + [{"role": "assistant", "content": resp.content}]
-                    resp = self._send(client, params)
+                resp = self._run(client, params, handler, used)
             except Exception:
                 if not web:
                     raise
                 # la recherche Internet est refusée (non activée sur le compte Anthropic ?) : on répond sans elle
-                params.pop("tools", None)
-                web = False
-                resp = self._send(client, params)
+                params["messages"], web, used = turns, False, []
+                if client_tools:
+                    params["tools"] = client_tools
+                else:
+                    params.pop("tools", None)
+                resp = self._run(client, params, handler, used)
             if getattr(resp, "stop_reason", "") == "refusal":
-                return AIResult("", self.id, model, False, "refusal")
+                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used})
             text, sources = self._text_and_sources(resp)
             if web and sources:
                 text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
-            return AIResult(text, self.id, model, bool(text), "" if text else "empty")
+            return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used})
         except Exception as exc:  # la clé n'apparaît jamais dans le message
-            return AIResult("", self.id, model, False, f"claude: {type(exc).__name__}")
+            return AIResult("", self.id, model, False, f"claude: {type(exc).__name__}", raw={"tools_used": used})
 
 
 class VisionAIProvider(AIProvider):
@@ -268,7 +300,8 @@ def pick_chat_provider(deep: bool = False) -> AIProvider:
     return chain[0] if chain else PROVIDERS["local"]
 
 
-def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, **kwargs) -> AIResult:
+def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, tools: list | None = None,
+                  tool_handler=None, **kwargs) -> AIResult:
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
     last = AIResult("", "none", "", False, "not_configured")
     for provider in provider_chain(deep):
@@ -277,6 +310,7 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, *
             opts.setdefault("model", settings.anthropic_model if deep else settings.anthropic_fast_model)
             opts.setdefault("effort", "high" if deep else "medium")
             opts["web"] = web
+            opts["tools"], opts["tool_handler"] = tools, tool_handler
             opts.setdefault("max_tokens", 16000 if deep else 8000)
         res = provider.complete(messages, **opts)
         if res.available and res.text:

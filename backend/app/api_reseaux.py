@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, google_business as gbp, mailbox, memory as mem
+from app import assistant, connectors, google_business as gbp, mailbox, memory as mem
 from app.database import get_db
 from app.models import EmailDraft, InboxMessage, SocialAccount, SocialPost, User, utcnow
 from app.security import get_current_user
@@ -245,22 +245,10 @@ def mail_status(user: User = Depends(get_current_user)):
 
 @router.post("/mail/sync")
 def mail_sync(limit: int = 20, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    if not mailbox.imap_configured():
-        raise HTTPException(503, "Lecture e-mail NON DISPONIBLE : IMAP non configuré.")
     try:
-        rows = mailbox.fetch_recent(max(1, min(limit, 50)))
-    except Exception as exc:
-        logger.warning("IMAP échec : %s", exc)
-        raise HTTPException(502, "Connexion à la boîte mail impossible. Vérifiez hôte, identifiant, mot de passe.")
-    known = {u for (u,) in db.query(InboxMessage.uid).all()}
-    new = 0
-    for r in rows:
-        if r["uid"] in known:
-            continue
-        db.add(InboxMessage(**r))
-        new += 1
-    db.commit()
-    return {"fetched": len(rows), "new": new}
+        return connectors.sync_inbox(db, limit)
+    except connectors.ConnectorError as exc:
+        raise HTTPException(exc.status, str(exc))
 
 
 @router.get("/mail")

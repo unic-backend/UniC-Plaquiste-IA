@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Courrier, Memoire, Reseaux } from "./Reseaux";
+import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import { api, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
@@ -103,14 +104,23 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
   );
 }
 
-function MessageView({ m }: { m: ChatMessage }) {
+function MessageView({ m, onRegenerate }: { m: ChatMessage; onRegenerate?: () => void }) {
+  const [copied, setCopied] = useState(false);
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   return (
-    <div className={`msg ${m.role}`}>
+    <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
-      <div className="bubble">
+      <div className={`bubble ${m.fresh ? "fresh" : ""}`}>
         <div className="md" dangerouslySetInnerHTML={{ __html: md(m.content) }} />
+        {m.role === "assistant" && m.id !== "err" && (
+          <div className="msg-actions">
+            <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
+              {copied ? "✓ Copié" : "Copier"}
+            </button>
+            {onRegenerate && <button onClick={onRegenerate}>↻ Régénérer</button>}
+          </div>
+        )}
         {structured?.steps?.length ? (
           <div className="calc-card">
             <div className="calc-row">
@@ -135,6 +145,8 @@ function MessageView({ m }: { m: ChatMessage }) {
             ))}
           </div>
         ) : null}
+        <ToolChips caps={m.meta?.capabilities} />
+        <DraftCards drafts={structured?.drafts} />
         {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
         {arts.length && !structured?.document ? (
           <div className="arts">
@@ -266,23 +278,27 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           onChange={(e) => setQ(e.target.value)}
           style={{ background: "#24302c", color: "#efeae2", borderColor: "#3d4a45" }}
         />
-        <div className="conv-label">Conversations</div>
         <div className="conv-list">
           {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
-          {convs.map((c) => (
-            <div className="conv-item" key={c.id}>
-              <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
-                {c.title}
-              </Link>
-              <button
-                title="Supprimer"
-                onClick={async () => {
-                  await api.deleteConversation(c.id);
-                  setConvs((x) => x.filter((i) => i.id !== c.id));
-                }}
-              >
-                ×
-              </button>
+          {groupByDate(convs).map((g) => (
+            <div key={g.label}>
+              <div className="conv-label">{g.label}</div>
+              {g.rows.map((c) => (
+                <div className="conv-item" key={c.id}>
+                  <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
+                    {c.title}
+                  </Link>
+                  <button
+                    title="Supprimer"
+                    onClick={async () => {
+                      await api.deleteConversation(c.id);
+                      setConvs((x) => x.filter((i) => i.id !== c.id));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -300,7 +316,10 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           <Logo size={22} />
           <b>UniC AI</b>
         </div>
-        {children}
+        {loc.pathname === "/" || loc.pathname.startsWith("/c/") ? null : <PageBar />}
+        <div className="route-anim" key={loc.pathname.startsWith("/c/") ? "/" : loc.pathname}>
+          {children}
+        </div>
       </section>
     </div>
   );
@@ -319,10 +338,16 @@ function Chat({ initialId }: { initialId?: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
 
+  const justCreated = useRef<string | undefined>(undefined);
   useEffect(() => {
     setCid(initialId);
     if (!initialId) {
       setMessages([]);
+      return;
+    }
+    // conversation créée à l'instant : l'écran est déjà à jour (et garde ses animations), on ne recharge pas
+    if (justCreated.current === initialId) {
+      justCreated.current = undefined;
       return;
     }
     api.getConversation(initialId).then((c) => setMessages(c.messages || []));
@@ -350,9 +375,10 @@ function Chat({ initialId }: { initialId?: string }) {
       setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
+        justCreated.current = out.conversation_id;
         nav(`/c/${out.conversation_id}`, { replace: true });
       }
-      setMessages((m) => [...m.filter((x) => x.id !== "local"), local, out.message]);
+      setMessages((m) => [...m.filter((x) => x.id !== "local"), local, { ...out.message, fresh: true }]);
     } catch (e: any) {
       setMessages((m) => [
         ...m,
@@ -408,14 +434,20 @@ function Chat({ initialId }: { initialId?: string }) {
             </div>
           )}
           {messages.map((m, i) => (
-            <MessageView key={m.id + i} m={m} />
+            <MessageView
+              key={m.id + i}
+              m={m}
+              onRegenerate={
+                !busy && i === messages.length - 1 && m.role === "assistant" && m.id !== "err"
+                  ? () => {
+                      const lastUser = [...messages].reverse().find((x) => x.role === "user");
+                      if (lastUser) send(lastUser.content);
+                    }
+                  : undefined
+              }
+            />
           ))}
-          {busy && (
-            <div className="msg assistant">
-              <div className="avatar">U</div>
-              <div className="bubble">Traitement en cours…</div>
-            </div>
-          )}
+          {busy && <Typing deep={deep} web />}
           <div ref={end} />
         </div>
       </div>
@@ -1182,13 +1214,12 @@ function Sante() {
   );
 }
 
-function ChatRoute() {
-  const { id } = useParams();
-  return <Chat initialId={id} />;
-}
-
 export default function App() {
   const { user, gate, error, check } = useOwner();
+  const loc = useLocation();
+  const chatMatch = useMatch("/c/:id");
+  // la conversation reste montée entre « / » et « /c/:id » : pas de rechargement, animations conservées
+  const isChat = loc.pathname === "/" || !!chatMatch;
   if (gate === "connect") return <Connexion onDone={check} />;
   if (gate === "error")
     return (
@@ -1205,9 +1236,10 @@ export default function App() {
   if (gate === "loading" || !user) return <div className="login">Chargement…</div>;
   return (
     <Shell user={user}>
+      {isChat ? (
+        <Chat initialId={chatMatch?.params.id} />
+      ) : (
       <Routes>
-        <Route path="/" element={<Chat />} />
-        <Route path="/c/:id" element={<ChatRoute />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/fournisseurs" element={<Fournisseurs />} />
         <Route path="/materiaux" element={<Materiaux />} />
@@ -1228,7 +1260,9 @@ export default function App() {
         <Route path="/parametres" element={<SettingsHub />} />
         <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      )}
     </Shell>
   );
 }
