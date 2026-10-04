@@ -228,6 +228,7 @@ def company_dict(db: Session) -> dict:
         "currency": row.currency,
         "vat_rate": row.vat_rate,
         "quote_validity_days": row.quote_validity_days,
+        "invoice_due_days": row.invoice_due_days if row.invoice_due_days is not None else 15,
         "payment_terms": row.payment_terms,
         "default_waste": row.default_waste,
         "default_margin": row.default_margin,
@@ -838,3 +839,6 @@ def approve_entity(db, entity, user_id: str) -> None:
     entity.status = "approved"
     entity.approved_by = user_id
     entity.approved_at = utcnow()
+    if isinstance(entity, Invoice) and entity.due_date is None:   # échéance : approbation + délai de l'entreprise
+        from datetime import timedelta
+        entity.due_date = entity.approved_at + timedelta(days=int(company_dict(db).get("invoice_due_days") or 15))

@@ -335,6 +335,7 @@ export const api = {
   getDn: (id: string) => request<any>(`/api/delivery-notes/${id}`),
   settings: () => request<any>("/api/settings"),
   backups: () => request<any>("/api/backups"),
+  unpaid: () => request<any>("/api/invoices-unpaid"),
   backupNow: () => request<any>("/api/backups", { method: "POST" }),
   restoreBackup: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<any>("/api/backups/restore", { method: "POST", body: fd }); },
   uploadSignature: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/signature", { method: "PUT", body: fd }); },
@@ -374,6 +375,14 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /** Partage direct du PDF (WhatsApp, e-mail…) : feuille de partage Android, avec un texte facultatif (lettre d'accompagnement). */
+/** Partage d'un texte (relance…) par la feuille de partage du téléphone : WhatsApp, SMS, e-mail… */
+export async function shareText(text: string, title = "Message") {
+  if (isNative) { await Share.share({ title, text, dialogTitle: "Envoyer" }); return; }
+  const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+  if (nav.share) { await nav.share({ title, text }); return; }
+  await navigator.clipboard.writeText(text);
+}
+
 export async function shareDocument(url: string, filename: string, text = "") {
   const res = await fetch(apiUrl(url), { headers: authHeaders() });
   if (res.status === 401) throw new AuthError("Code d'accès requis");

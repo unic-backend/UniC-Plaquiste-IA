@@ -1058,6 +1058,7 @@ class SettingsIn(BaseModel):
     currency: str | None = None
     vat_rate: float | None = None
     quote_validity_days: int | None = None
+    invoice_due_days: int | None = Field(default=None, ge=0, le=365)
     payment_terms: str | None = None
     default_waste: float | None = None
     default_margin: float | None = None
@@ -1126,6 +1127,16 @@ def delete_signature(user: User = Depends(require_roles("admin", "manager"))):
     from app.pdfs import owner_signature_path
     owner_signature_path().unlink(missing_ok=True)
     return {"ok": True}
+
+
+@router.get("/invoices-unpaid")
+def invoices_unpaid(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import unpaid
+    u = unpaid.unpaid(db)
+    company = company_dict(db).get("name") or "UniC Plaquiste"
+    for r in u["en_retard"] + u["a_venir"]:
+        r["relance"] = unpaid.reminder_text(r, company)
+    return u
 
 
 @router.get("/backups")

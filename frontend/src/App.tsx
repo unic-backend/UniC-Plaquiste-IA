@@ -13,7 +13,7 @@ import * as I from "./Icons";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, fetchBlobUrl, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, clearConnection, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -1330,13 +1330,43 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
   );
 }
 
+const fcfa = (n: number) => `${Math.round(n).toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ")}`;
+
+/** Impayés : retards d'abord, relance prête à envoyer (WhatsApp, SMS…) par la feuille de partage. */
+function UnpaidPanel() {
+  const [u, setU] = useState<any>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.unpaid().then(setU).catch(() => setU(null)); }, []);
+  if (!u || (!u.en_retard.length && !u.a_venir.length)) return null;
+  const row = (r: any, late: boolean) => (
+    <li key={r.numero} className={late ? "late" : ""}>
+      <div>
+        <b>{r.client}</b> · {r.numero}
+        <span>{fcfa(r.reste)} {r.devise} · {late ? `${r.jours_retard} j de retard` : `échéance ${new Date(r.echeance).toLocaleDateString("fr-FR")}`}</span>
+      </div>
+      <button className="btn btn-line btn-small" onClick={async () => {
+        try { await shareText(r.relance, `Relance ${r.numero}`); setMsg(""); } catch (e: any) { if (!/cancel|abort/i.test(String(e?.message))) setMsg(e?.message || "Partage impossible"); }
+      }}>Relancer</button>
+    </li>
+  );
+  return (
+    <section className="card-box unpaid">
+      {u.en_retard.length > 0 && <h3>⚠️ En retard · {fcfa(u.total_retard)} FCFA</h3>}
+      <ul>{u.en_retard.map((r: any) => row(r, true))}</ul>
+      {u.a_venir.length > 0 && <h3>À venir · {fcfa(u.total_a_venir)} FCFA</h3>}
+      <ul>{u.a_venir.slice(0, 5).map((r: any) => row(r, false))}</ul>
+      {msg && <p className="error">{msg}</p>}
+    </section>
+  );
+}
+
 function Factures() {
   const nav = useNavigate();
   const { rows, shown, f, setF } = useDocLibrary(api.invoices);
   return (
     <TablePage
       title="Factures"
-      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
+      extra={<><UnpaidPanel /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
       rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, statusFr(q.status), q.total, q.paid, q.remaining])}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}
@@ -1570,6 +1600,11 @@ function CompanyPage() {
               value={s.default_waste ?? 0.08}
               onChange={(e) => setS({ ...s, default_waste: Number(e.target.value) })}
             />
+          </label>
+          <label>
+            Échéance des factures (jours après approbation)
+            <input type="number" min={0} max={365} value={s.invoice_due_days ?? 15}
+              onChange={(e) => setS({ ...s, invoice_due_days: e.target.value === "" ? null : Number(e.target.value) })} />
           </label>
           <label>
             Conditions de paiement

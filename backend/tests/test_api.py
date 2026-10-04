@@ -2563,3 +2563,35 @@ def test_plan_to_quote_without_retyping(client, monkeypatch):
                                 "objet": "Fourniture et pose de faux plafonds BA13 dans les bureaux RH et Achats, Dakar."})
         assert "error" not in r, r
         assert r["lignes"] >= 4 and r["numero"]
+
+
+def test_unpaid_due_dates_late_and_reminders(client):
+    from datetime import datetime, timedelta, timezone
+    from app import briefing, unpaid
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Invoice
+    from app.services import approve_entity
+    with SessionLocal() as db:
+        old = Invoice(number="FA-TEST-LATE", status="draft", currency="FCFA", total=500000, paid=200000, remaining=300000)
+        new = Invoice(number="FA-TEST-SOON", status="draft", currency="FCFA", total=100000, paid=0, remaining=100000)
+        avoir = Invoice(number="FA-TEST-AVOIR", kind="credit", status="approved", currency="FCFA", total=50000, remaining=50000)
+        db.add_all([old, new, avoir]); db.flush()
+        approve_entity(db, old, None); approve_entity(db, new, None)
+        assert new.due_date is not None
+        old.due_date = datetime.now(timezone.utc) - timedelta(days=10)   # échue il y a 10 jours
+        db.commit()
+        u = unpaid.unpaid(db)
+        late = {r["numero"]: r for r in u["en_retard"]}
+        soon = {r["numero"]: r for r in u["a_venir"]}
+        assert late["FA-TEST-LATE"]["jours_retard"] == 10 and late["FA-TEST-LATE"]["reste"] == 300000
+        assert "FA-TEST-SOON" in soon and "FA-TEST-AVOIR" not in late and "FA-TEST-AVOIR" not in soon
+        txt = unpaid.reminder_text(late["FA-TEST-LATE"])
+        assert "300 000 FCFA" in txt and "10 jours de retard" in txt
+        b = briefing._invoices(db)
+        assert "en retard" in b.text and "FA-TEST-LATE" in b.text
+        out = AgentSession(db, None, {})("list_unpaid", {"only_late": True})
+        assert out["a_venir"] == [] and out["en_retard"][0]["relance"]
+    r = client.get("/api/invoices-unpaid").json()
+    assert any(x["numero"] == "FA-TEST-LATE" for x in r["en_retard"])
+    assert client.put("/api/settings", json={"invoice_due_days": 30}).json()["invoice_due_days"] == 30

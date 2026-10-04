@@ -42,12 +42,21 @@ def _quotes(db: Session) -> Section:
 
 
 def _invoices(db: Session) -> Section:
-    rows = [i for i in db.query(Invoice).filter(Invoice.status != "draft").all() if (i.remaining or 0) > 0]
-    if not rows:
+    from app import unpaid
+    u = unpaid.unpaid(db)
+    late, soon = u["en_retard"], u["a_venir"]
+    if not late and not soon:
         return Section("Factures à encaisser", OK, "Aucune facture en attente de paiement.")
-    total = sum(i.remaining or 0 for i in rows)
-    lines = [f"- {i.number} — reste {i.remaining:,.0f} {i.currency}".replace(",", " ") for i in rows[:6]]
-    return Section("Factures à encaisser", OK, f"{len(rows)} facture(s), {total:,.0f} à encaisser :\n".replace(",", " ") + "\n".join(lines))
+    lines = []
+    if late:
+        lines.append(f"⚠️ {len(late)} en retard, {unpaid.fmt(u['total_retard'])} :")
+        lines += [f"- {r['numero']} — {r['client']} — {unpaid.fmt(r['reste'])} {r['devise']}, {r['jours_retard']} j de retard" for r in late[:6]]
+    if soon:
+        lines.append(f"À venir : {len(soon)}, {unpaid.fmt(u['total_a_venir'])} :")
+        lines += [f"- {r['numero']} — {r['client']} — {unpaid.fmt(r['reste'])} {r['devise']}, échéance {r['echeance']}" for r in soon[:4]]
+    if late:
+        lines.append("Dis « relance les impayés » : je prépare les messages, tu les envoies.")
+    return Section("Factures à encaisser", OK, "\n".join(lines))
 
 
 def _mail(db: Session) -> Section:

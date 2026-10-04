@@ -55,6 +55,7 @@ class CompanySettings(Base):
     currency: Mapped[str] = mapped_column(String(8), default="")
     vat_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     quote_validity_days: Mapped[int] = mapped_column(Integer, default=30)
+    invoice_due_days: Mapped[int] = mapped_column(Integer, default=15)   # échéance des factures, en jours après approbation
     payment_terms: Mapped[str] = mapped_column(Text, default="")
     default_waste: Mapped[float] = mapped_column(Float, default=0.08)
     default_margin: Mapped[float | None] = mapped_column(Float, nullable=True)

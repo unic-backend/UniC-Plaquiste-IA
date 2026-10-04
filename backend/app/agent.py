@@ -206,6 +206,13 @@ TOOLS: list[dict] = [
             "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "list_unpaid",
+        "description": ("IMPAYÉS : factures approuvées avec un reste à payer, séparées en « en retard » (jours de retard) et « à venir » "
+                        "(échéance). Chaque ligne contient un message de relance poli prêt à envoyer. À utiliser pour « qui me doit », "
+                        "« impayés », « relance les clients ». Tu ne l'envoies jamais : le patron l'envoie (WhatsApp, SMS, e-mail)."),
+        "input_schema": {"type": "object", "properties": {"only_late": {"type": "boolean"}}, "additionalProperties": False},
+    },
+    {
         "name": "calculate_from_plan",
         "description": ("MÉTRÉ DEPUIS LE PLAN lu par read_plan : transforme les pièces et surfaces du plan en quantités (plaques, ossature, "
                         "suspentes), sans redemander les dimensions. rooms = pièces retenues (noms du plan) ; vide = pièces dont le plan "
@@ -286,7 +293,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "list_unpaid": "Impayés consultés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -395,6 +402,19 @@ class AgentSession:
             return logo.audit(svg)
         except diagrams.DiagramError as exc:
             return {"error": str(exc)}
+
+    def _t_list_unpaid(self, only_late: bool = False) -> dict:
+        from app import unpaid
+        u = unpaid.unpaid(self.db)
+        company = company_dict(self.db).get("name") or "UniC Plaquiste"
+        for r in u["en_retard"] + u["a_venir"]:
+            r["relance"] = unpaid.reminder_text(r, company)
+            r.pop("id", None)
+        if only_late:
+            u["a_venir"] = []
+        u["note"] = ("Montants exacts, sans décimales. Présente d'abord les retards. Le patron envoie lui-même les relances "
+                     "(bouton Partager / WhatsApp) : ne dis jamais qu'un message est parti.")
+        return u
 
     def _t_calculate_from_plan(self, file_id: str = "", rooms: list | None = None, include_to_confirm: bool = False,
                                hydrofuge_rooms: list | None = None, partitions: list | None = None,
