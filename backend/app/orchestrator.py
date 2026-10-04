@@ -472,7 +472,7 @@ def handle_turn(
     if chain0 and chain0[0].id == "claude" and intent in (
             "greeting", "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
             "list_customers", "list_suppliers", "list_projects", "list_quotes", "list_invoices",
-            "create_customer", "create_supplier", "create_project"):
+            "create_customer", "create_supplier", "create_project", "analyze_doc", "analyze_photo", "search_doc"):
         intent = "chat"   # avec Claude, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":
@@ -864,7 +864,7 @@ def handle_turn(
     elif intent == "analyze_photo":
         reply_text = (
             "Photo enregistrée et rattachée à la conversation. "
-            "L'interprétation visuelle automatique est **NON DISPONIBLE** sans fournisseur IA vision. "
+            "L'interprétation visuelle automatique est **NON DISPONIBLE** sans clé Claude. "
             "Je ne tire aucune conclusion structurelle ou de sécurité d'une image."
         )
         if file_notes:

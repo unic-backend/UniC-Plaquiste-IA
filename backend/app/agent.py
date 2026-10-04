@@ -198,6 +198,14 @@ TOOLS: list[dict] = [
             "min_total": {"type": "number"}, "max_total": {"type": "number"}}, "additionalProperties": False},
     },
     {
+        "name": "read_plan",
+        "description": ("Analyse le PLAN joint (PDF, scan ou photo) : liste les pièces avec surfaces et cotes, dit lesquelles ont un plafond, "
+                        "relève les références placo/cloisons écrites sur le plan, et totalise les surfaces (calcul fait en code). "
+                        "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture."),
+        "input_schema": {"type": "object", "properties": {
+            "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
+    },
+    {
         "name": "remember",
         "description": ("Enregistre DÉFINITIVEMENT dans la mémoire une règle, un prix, une unité, une habitude ou une correction que le patron "
                         "vient d'énoncer (« toujours… », « quand je dis X c'est Y », « retiens… », « corrige ça pour toujours »). "
@@ -226,7 +234,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -250,6 +258,9 @@ AGENT_PROMPT = (
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
+    "\nPLANS : quand un plan est joint (PDF, scan, photo), appelle read_plan. Présente en court : pièces avec plafond (oui / à confirmer), "
+    "surfaces, références placo et cloisons du plan, doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
+    "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
     "\nPLAQUES : le patron choisit la plaque. Nombre de plaques sans taille (« 20 plaques ») = plaque de 2 m, sans rien redemander ; "
     "plaque de 2,50 m seulement s'il le dit ; « hydrofuge » = variante hydrofuge de la même taille. Prends le prix de CETTE taille dans get_prices."
     "\nVOCABULAIRE : ne dis jamais « brouillon » ni « statut » à propos d'un devis, d'une facture ou d'un bon : dis « le devis est prêt » "
@@ -297,6 +308,13 @@ class AgentSession:
             return {"error": "Erreur interne du connecteur."}
         finally:
             self.db.commit()
+
+    def _t_read_plan(self, file_id: str = "", refresh: bool = False) -> dict:
+        from app import plans
+        fid = file_id or self.state.get("last_file_id")
+        if not fid:
+            return {"error": "Aucun plan joint à la conversation."}
+        return plans.analyze(self.db, fid, refresh=bool(refresh))
 
     # --- mémoire
     def _t_remember(self, text: str, kind: str = "") -> dict:

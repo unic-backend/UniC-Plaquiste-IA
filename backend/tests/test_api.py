@@ -2151,3 +2151,37 @@ def test_invoice_balance_pdf_and_message(client):
     client.post(f"/api/invoices/{iid}/payments", json={"amount": total, "method": "Wave"})
     assert client.get(f"/api/invoices/{iid}/balance").status_code == 409          # soldée
     assert "balance_url" not in client.get(f"/api/invoices/{iid}").json()
+
+
+def test_read_plan_rooms_totals_and_cache(client, monkeypatch):
+    import json
+    from PIL import Image
+    import io
+    from app import plans, vision
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    monkeypatch.setattr(vision.settings, "anthropic_api_key", "test")
+    monkeypatch.setattr(plans.settings, "anthropic_api_key", "test")
+    calls = []
+    fake = {"unite_plan": "m", "echelle": "1:100", "pieces": [
+        {"nom": "Salon", "page": 1, "longueur_m": 5, "largeur_m": 4, "surface_m2": None, "plafond": "oui", "raison": "faux plafond BA13"},
+        {"nom": "WC", "page": 1, "longueur_m": 1.5, "largeur_m": 1, "surface_m2": 3, "plafond": "a_confirmer", "raison": ""},
+        {"nom": "Terrasse", "page": 1, "longueur_m": 90, "largeur_m": 50, "surface_m2": None, "plafond": "non", "raison": ""},
+        {"nom": "Cuisine", "page": 1, "longueur_m": None, "largeur_m": None, "surface_m2": None, "plafond": "bidon", "raison": ""}],
+        "cloisons": [{"texte": "cloison BA13 double face", "page": 1}], "references": [{"type": "plafond", "texte": "FP BA13 sur ossature", "page": 1}],
+        "remarques": []}
+    monkeypatch.setattr(plans, "_call", lambda content: calls.append(content) or json.dumps(fake))
+    monkeypatch.setattr(vision, "_ask", lambda b64: "plan")
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 600), "white").save(buf, format="PNG")
+    fid = client.post("/api/files", files={"file": ("plan.png", buf.getvalue(), "image/png")}).json()["id"]
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {"last_file_id": fid})
+        out = s("read_plan", {})
+        assert out["total_plafond_confirme_m2"] == 20.0
+        assert out["total_plafond_a_confirmer_m2"] == 3.0 + 0   # WC ; Cuisine sans surface ; Terrasse exclue
+        by = {p["nom"]: p for p in out["pieces"]}
+        assert by["Terrasse"]["surface_m2"] is None and by["Cuisine"]["plafond"] == "a_confirmer"
+        assert any("absurde" in r for r in out["remarques"]) and any("Cuisine" in r for r in out["remarques"])
+        assert s("read_plan", {}) == out and len(calls) == 1   # cache
+        assert "error" in AgentSession(db, None, {})("read_plan", {})
