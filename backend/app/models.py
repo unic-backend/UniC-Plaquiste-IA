@@ -59,7 +59,7 @@ class CompanySettings(Base):
     default_waste: Mapped[float] = mapped_column(Float, default=0.08)
     default_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     board_width_m: Mapped[float] = mapped_column(Float, default=1.20)
-    board_height_m: Mapped[float] = mapped_column(Float, default=2.50)
+    board_height_m: Mapped[float] = mapped_column(Float, default=2.00)
     stud_spacing_m: Mapped[float] = mapped_column(Float, default=0.60)
     notes: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -416,7 +416,7 @@ class AgentSession:
                                board_length_m: float | None = None) -> dict:
         co = company_dict(self.db)
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
-               "board_height": board_length_m or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6}
+               "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6}
         try:
             if method == "unic":
                 surface = area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None

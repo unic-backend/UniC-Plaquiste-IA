@@ -20,7 +20,7 @@ STATUS_MISSING = "missing"
 
 DEFAULTS = {
     "board_width_m": 1.20,
-    "board_height_m": 2.50,
+    "board_height_m": 2.00,
     "waste": 0.08,
     "stud_spacing_m": 0.60,
     "screws_per_m2": 15.0,
@@ -33,6 +33,12 @@ DEFAULTS = {
     "ceiling_tile_side_m": 0.60,
     "hanger_spacing_m": 1.20,
 }
+
+
+def board_sku(board_width_m: float, board_height_m: float, suffix: str = "") -> tuple[str, str]:
+    """Référence et libellé de la plaque selon ses dimensions (2 m × 1,20 m, 2,50 m × 1,20 m…) : chaque taille a son prix."""
+    h, w = int(round(board_height_m * 1000)), int(round(board_width_m * 1000))
+    return f"BA13-{h}x{w}{suffix}", f"Plaque de plâtre BA13 {h}×{w}"
 
 
 @dataclass
@@ -282,7 +288,7 @@ def calculate_partition(
     ]
 
     result.quantities = [
-        QuantityLine("BA13-2500x1200", "Plaque de plâtre BA13 2500×1200", n_boards, "u",
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         QuantityLine("MONTANT-M48", "Montant M48", n_studs, "u",
                      "⌊L/entraxe⌋+1", STATUS_ESTIMATED, notes=f"Soit {stud_ml} ml à la hauteur {height_m:g} m"),
@@ -364,7 +370,7 @@ def calculate_ceiling(
                  {"e": DEFAULTS["hanger_spacing_m"]}, hangers, "u", STATUS_ASSUMED),
     ]
     result.quantities = [
-        QuantityLine("BA13-2500x1200", "Plaque de plâtre BA13 2500×1200", n_boards, "u",
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         QuantityLine("SUSPENTE", "Suspente de plafond", hangers, "u",
                      "maillage 1,20 m", STATUS_ASSUMED),
@@ -584,6 +590,8 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     if kind is None:
         return None
     t = text.lower().replace("×", "x")
+    if re.search(r"plaques?\s*(?:de\s*)?(?:2[.,]50?|2500)\b", t):
+        cfg["board_height_m"] = 2.5   # seulement si le patron le précise : la plaque par défaut fait 2 m
     t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
 
     pair = _extract_dimension_pair(t)

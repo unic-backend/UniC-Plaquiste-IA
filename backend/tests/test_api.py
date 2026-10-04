@@ -799,7 +799,7 @@ def test_ai_builds_quote_from_context_without_canned_question(client, claude):
     assert q["number"].endswith("-FM") and q["vat_rate"] == 0 and q["total"] == q["subtotal"]
     assert q["client_label"] == "Fast Mbaye"
     ba13 = [i for i in q["items"] if i["description"].startswith("Plaque")][0]
-    assert ba13["unit_price"] == 6500 and ba13["quantity"] > 0       # la grille du patron est bien utilisée
+    assert ba13["unit_price"] == 4500 and ba13["quantity"] > 0       # la grille du patron est bien utilisée
     caps = msg["meta"]["capabilities"]
     assert {"tool:get_prices", "tool:calculate_materials", "tool:create_quote"} <= set(caps)
 
@@ -1726,21 +1726,28 @@ def test_owner_rules_are_seeded_once_and_stay_deleted(client):
     db.close()
 
 
-def test_owner_plate_prices_applied_once_with_history(client):
+def test_owner_plate_prices_per_size_with_history(client):
     from app.models import AppSetting, Material
-    from app.seed import apply_owner_prices_v1
+    from app.seed import apply_owner_prices_v2
     from app.services import current_price
     db = _mem_db()
-    row = db.get(AppSetting, "seed_owner_prices_v1")
+    row = db.get(AppSetting, "seed_owner_prices_v2")
     if row:
         db.delete(row)
         db.commit()
-    m = db.query(Material).filter(Material.sku == "BA13-2500x1200").first()
-    assert m is not None
-    apply_owner_prices_v1(db)
-    db.refresh(m)
-    assert current_price(db, m.id, "selling").amount == 6500.0
-    h = db.query(Material).filter(Material.sku == "BA13-2500x1200-H").first()
-    assert current_price(db, h.id, "selling").amount == 8000.0
-    assert apply_owner_prices_v1(db) == 0       # une seule fois
+    apply_owner_prices_v2(db)
+    got = {m.sku: current_price(db, m.id, "selling").amount
+           for m in db.query(Material).filter(Material.sku.like("BA13-%")).all() if current_price(db, m.id, "selling")}
+    assert got["BA13-2000x1200"] == 4500 and got["BA13-2500x1200"] == 6500 and got["BA13-2500x1200-H"] == 8000
+    assert apply_owner_prices_v2(db) == 0       # une seule fois
     db.close()
+
+
+def test_plate_sku_follows_its_size():
+    from app import calc
+    assert calc.board_sku(1.2, 2.0) == ("BA13-2000x1200", "Plaque de plâtre BA13 2000×1200")
+    assert calc.board_sku(1.2, 2.5)[0] == "BA13-2500x1200"
+    r2 = calc.calculate_from_text("cloison 12 x 2,5 m")
+    r25 = calc.calculate_from_text("cloison 12 x 2,5 m avec plaques 2,50")
+    assert r2.quantities[0].sku == "BA13-2000x1200" and r25.quantities[0].sku == "BA13-2500x1200"
+    assert r2.quantities[0].quantity > r25.quantities[0].quantity     # plaque plus courte : plus de plaques

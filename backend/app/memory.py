@@ -416,10 +416,12 @@ OWNER_RULES_V1 = (
 )
 
 
-OWNER_RULES_V2 = (
-    "Prix d'une plaque BA13 standard : 6 500 FCFA l'unité. Plaque hydrofuge : 8 000 FCFA l'unité.",
+OWNER_RULES_V2: tuple = ()   # remplacée par V3 (le prix de 6 500 était celui de la plaque de 2,50 m, pas de 2 m)
+OWNER_RULES_V3 = (
+    "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; standard 2,50 m × 1,20 m = 6 500 FCFA ; hydrofuge 2,50 m × 1,20 m = 8 000 FCFA. "
+    "Chaque taille de plaque a son prix : ne jamais appliquer le prix de l'une à l'autre.",
 )
-_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2}
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3}
 
 
 def seed_owner_rules(db: Session) -> int:
@@ -431,6 +433,9 @@ def seed_owner_rules(db: Session) -> int:
         flag = f"seed_owner_rules_{version}"
         if db.get(AppSetting, flag):
             continue
+        if version == "v3":   # la règle de prix erronée de la version précédente est archivée
+            for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix d'une plaque BA13 standard : 6 500%")):
+                m.state = "archived"
         for text in rules:
             try:
                 if add(db, text, kind="preference", source="user", pinned=True):

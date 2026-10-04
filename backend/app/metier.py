@@ -27,6 +27,8 @@ PRECISION = 6
 EXISTING_SKU = {
     "Plaque standard BA13": "BA13-2500x1200",
     "Plaque hydrofuge": "BA13-2500x1200-H",
+    "Plaque BA13 standard 2 m": "BA13-2000x1200",
+    "Plaque BA13 hydrofuge 2 m": "BA13-2000x1200-H",
     "Montant 48 mm": "MONTANT-M48",
     "Montant 7 cm (70 mm)": "MONTANT-M70",
 }

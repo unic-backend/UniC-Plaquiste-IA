@@ -46,7 +46,7 @@ def test_from_text_partition_spec_example():
     brute = next(s for s in r.steps if s.label == "Surface brute")
     assert brute.result == 1600.0
     boards = next(q for q in r.quantities if q.sku.startswith("BA13"))
-    assert boards.quantity == 576
+    assert boards.quantity == 720   # plaque de 2 m par défaut (1600 m² × 1,08 ÷ 2,40 m²)
     assert any("prix" in m.lower() for m in r.missing)
 
 
