@@ -58,7 +58,10 @@ export function Voix() {
         <section className="card-box">
           <label>Voix du téléphone (gratuit)</label>
           {!canSpeakOnDevice() || voices.length === 0 ? (
-            <p className="hint">Aucune voix française trouvée. Android : Réglages › Gestion générale › Synthèse vocale › installe la voix française de Google.</p>
+            <>
+              <p className="hint">Voix par défaut du téléphone (français). Pas de liste à choisir ici : change la voix dans Réglages › Synthèse vocale.</p>
+              <button className="btn btn-line btn-small" onClick={() => speakDevice(SAMPLE, "", pref.rate)}><I.Speaker size={14} /> Tester la voix du téléphone</button>
+            </>
           ) : (
             <div className="voice-list">
               {voices.map((v) => (
