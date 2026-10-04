@@ -947,8 +947,9 @@ def handle_turn(
                     usage.record(db, ai.raw.get("usage"), ai.model)
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
-                    if session.cards or session.documents:
-                        structured = {k: v for k, v in (("drafts", session.cards), ("documents", session.documents)) if v}
+                    if session.cards or session.documents or session.images:
+                        structured = {k: v for k, v in (("drafts", session.cards), ("documents", session.documents),
+                                                        ("images", session.images)) if v}
                 if ai.error == "refusal":
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:

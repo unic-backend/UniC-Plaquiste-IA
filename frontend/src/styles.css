@@ -855,3 +855,7 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .open-link { display: block; text-align: center; text-decoration: none; margin: 10px 0 6px; padding: 12px; border-radius: 14px; }
 .li-publish { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .card-box input + input, .card-box input + button { margin-top: 8px; }
+
+.diagram { margin: 10px 0 0; border: 1px solid var(--line, #d8d2c4); border-radius: 14px; overflow: hidden; background: #fff; }
+.diagram img { display: block; width: 100%; height: auto; }
+.diagram figcaption { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; font-size: 13px; color: #55605b; background: #f6f3ec; flex-wrap: wrap; }

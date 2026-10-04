@@ -206,6 +206,18 @@ TOOLS: list[dict] = [
             "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "draw_diagram",
+        "description": ("Dessine un SCHÉMA en SVG (pas une photo) : plan de pièce coté, coupe de faux plafond ou de cloison (rails, fourrures, "
+                        "plaques, suspentes), implantation, graphique en barres, logo simple. Tu écris le SVG complet "
+                        "(<svg viewBox=\"0 0 800 600\" xmlns=\"http://www.w3.org/2000/svg\">…), texte en français, cotes lisibles, "
+                        "polices 14 px minimum, formes <rect> <line> <path> <polygon> <circle> <text> seulement. "
+                        "Pas de script, d'image ni de lien. Les cotes viennent des données du patron : n'invente aucune dimension. "
+                        "Le serveur le convertit en PNG partageable."),
+        "input_schema": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Titre court du schéma"},
+            "svg": {"type": "string", "description": "Le SVG complet"}}, "required": ["title", "svg"], "additionalProperties": False},
+    },
+    {
         "name": "remember",
         "description": ("Enregistre DÉFINITIVEMENT dans la mémoire une règle, un prix, une unité, une habitude ou une correction que le patron "
                         "vient d'énoncer (« toujours… », « quand je dis X c'est Y », « retiens… », « corrige ça pour toujours »). "
@@ -234,7 +246,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -261,6 +273,8 @@ AGENT_PROMPT = (
     "\nPLANS : quand un plan est joint (PDF, scan, photo), appelle read_plan. Présente en court : pièces avec plafond (oui / à confirmer), "
     "surfaces, références placo et cloisons du plan, doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
     "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
+    "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
+    "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."
     "\nPLAQUES : le patron choisit la plaque. Nombre de plaques sans taille (« 20 plaques ») = plaque de 2 m, sans rien redemander ; "
     "plaque de 2,50 m seulement s'il le dit ; « hydrofuge » = variante hydrofuge de la même taille. Prends le prix de CETTE taille dans get_prices."
     "\nVOCABULAIRE : ne dis jamais « brouillon » ni « statut » à propos d'un devis, d'une facture ou d'un bon : dis « le devis est prêt » "
@@ -289,6 +303,7 @@ class AgentSession:
         self.cards: list[dict] = []   # brouillons à afficher dans la conversation
         self.alerts: list[str] = []   # tentatives de manipulation vues dans un contenu de tiers
         self.documents: list[dict] = []   # documents à afficher dans la conversation
+        self.images: list[dict] = []   # schémas dessinés à afficher dans la conversation
         self.used: list[str] = []
 
     def __call__(self, name: str, args: dict) -> dict:
@@ -308,6 +323,15 @@ class AgentSession:
             return {"error": "Erreur interne du connecteur."}
         finally:
             self.db.commit()
+
+    def _t_draw_diagram(self, title: str, svg: str) -> dict:
+        from app import diagrams
+        try:
+            art = diagrams.render(self.db, title, svg, self.user_id)
+        except diagrams.DiagramError as exc:
+            return {"error": str(exc)}
+        self.images.append({"id": art.id, "filename": art.filename, "title": title[:80]})
+        return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
 
     def _t_read_plan(self, file_id: str = "", refresh: bool = False) -> dict:
         from app import plans

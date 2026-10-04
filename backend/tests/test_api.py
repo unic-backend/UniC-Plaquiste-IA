@@ -2222,3 +2222,31 @@ def test_plan_prompts_handle_english():
     for w in ("false ceiling", "partition", "bedroom", "sq.ft"):
         assert w in plans.PROMPT
     assert "anglais" in vision.PROMPT
+
+
+def test_draw_diagram_sanitized_and_rendered(client):
+    from app import diagrams
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    evil = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" onload="x()"><script>alert(1)</script>'
+            '<image href="http://evil/x.png"/><rect x="10" y="10" width="200" height="100" fill="#ccc" onclick="y()"/>'
+            '<a href="http://evil"><text x="20" y="60" font-size="16">Plafond 5 m</text></a></svg>')
+    clean = diagrams.sanitize(evil)
+    assert all(w not in clean for w in ("script", "image", "onload", "onclick", "evil"))
+    assert "<rect" in clean
+    for bad in ('<!DOCTYPE svg [<!ENTITY a "b">]><svg viewBox="0 0 1 1"/>', "<svg/>", "", "<html/>"):
+        try:
+            diagrams.sanitize(bad)
+            raise AssertionError("aurait dû être refusé")
+        except diagrams.DiagramError:
+            pass
+    ok = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect x="10" y="10" width="300" height="200" fill="none" stroke="black"/>'
+          '<text x="20" y="120" font-size="18">Salon 5 m x 4 m</text></svg>')
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        out = s("draw_diagram", {"title": "Salon", "svg": ok})
+        assert out.get("ok"), out
+        assert s.images and s.images[0]["filename"].endswith(".png")
+        assert "error" in s("draw_diagram", {"title": "x", "svg": "<svg/>"})
+    r = client.get(f"/api/artifacts/{s.images[0]['id']}/download")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"

@@ -383,6 +383,14 @@ export async function shareDocument(url: string, filename: string, text = "") {
   await downloadAuth(url, filename);
 }
 
+/** Fichier du serveur (avec le code d'accès) sous forme d'adresse locale affichable dans <img>. */
+export async function fetchBlobUrl(url: string): Promise<string> {
+  const res = await fetch(apiUrl(url), { headers: authHeaders() });
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
+  if (!res.ok) throw new Error("Image introuvable");
+  return URL.createObjectURL(await res.blob());
+}
+
 export async function downloadAuth(url: string, filename: string) {
   const res = await fetch(apiUrl(url), { headers: authHeaders() });
   if (res.status === 401) throw new AuthError("Code d'accès requis");

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { FicheGoogle } from "./Google";
 import { Voix } from "./Voix";
-import { CoverLetterBox, ShareButton } from "./Share";
+import { CoverLetterBox, DiagramCard, ShareButton } from "./Share";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
@@ -334,6 +334,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
         <DraftCards drafts={structured?.drafts} />
         {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
         {(structured?.documents || []).map((d: any) => <DocCard key={d.id} kind={d.kind} id={d.id} />)}
+        {(structured?.images || []).map((d: any) => <DiagramCard key={d.id} id={d.id} filename={d.filename} title={d.title} />)}
         {arts.length && !structured?.document && !structured?.documents ? (
           <div className="arts">
             {arts.map((a: any) => (

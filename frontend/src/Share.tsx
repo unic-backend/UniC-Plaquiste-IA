@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as I from "./Icons";
-import { api, shareDocument } from "./api";
+import { api, fetchBlobUrl, shareDocument } from "./api";
 
 /** Bouton « Partager » : ouvre la feuille de partage Android avec le PDF (WhatsApp, e-mail…). */
 export function ShareButton({ url, filename, text = "", className = "btn btn-line btn-small", label = "Partager" }:
@@ -52,5 +52,26 @@ export function CoverLetterBox({ quote, url, filename, onChanged }: { quote: any
       )}
       {msg && <p className="hint">{msg}</p>}
     </section>
+  );
+}
+
+/** Schéma dessiné par l'IA (PNG) : affiché dans la conversation, partageable. */
+export function DiagramCard({ id, filename, title }: { id: string; filename: string; title?: string }) {
+  const [src, setSrc] = useState("");
+  const [err, setErr] = useState("");
+  const url = `/api/artifacts/${id}/download`;
+  useEffect(() => {
+    let off = "";
+    fetchBlobUrl(url).then((u) => { off = u; setSrc(u); }).catch((e) => setErr(e?.message || "Image introuvable"));
+    return () => { if (off) URL.revokeObjectURL(off); };
+  }, [url]);
+  return (
+    <figure className="diagram">
+      {src ? <img src={src} alt={title || "Schéma"} /> : <span className="hint">{err || "Chargement du schéma…"}</span>}
+      <figcaption>
+        <span>{title || "Schéma"} · dessin, pas un plan d'exécution</span>
+        <ShareButton url={url} filename={filename} />
+      </figcaption>
+    </figure>
   );
 }
