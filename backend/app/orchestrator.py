@@ -460,6 +460,19 @@ def handle_turn(
     intent = _intent(text, state)
     reply_text = ""
 
+    # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
+    # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
+    chain0 = provider_chain(deep)
+    if chain0 and chain0[0].id == "claude":
+        if intent == "create_quote" and not _last_quantities(state):
+            fresh = _calc_for(db, text)
+            if not (fresh is not None and fresh.quantities):
+                intent = "chat"
+        elif intent in ("create_po", "create_dn") and not _last_quantities(state):
+            intent = "chat"
+        elif intent == "create_invoice" and not (_match_quote(db, text) or state.get("last_quote_id")):
+            intent = "chat"
+
     if intent == "cancel_pending":
         state.pop("pending", None)
         reply_text = "Action en cours annulée."
@@ -904,15 +917,15 @@ def handle_turn(
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
                     )
                 tools_on = bool(chain) and chain[0].id == "claude"
-                session = agent.AgentSession(db, user.id) if tools_on else None
+                session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note()
                 ai = chat_complete(msgs, deep=deep, web=can_search,
                                    tools=agent.TOOLS if tools_on else None, tool_handler=session)
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
-                    if session.cards:
-                        structured = {"drafts": session.cards}
+                    if session.cards or session.documents:
+                        structured = {k: v for k, v in (("drafts", session.cards), ("documents", session.documents)) if v}
                 if ai.error == "refusal":
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:

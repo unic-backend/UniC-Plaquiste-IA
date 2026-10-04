@@ -241,6 +241,9 @@ def store_artifact(db: Session, path: Path, filename: str, entity_type: str, ent
     return art
 
 
+_UNSET = object()  # « TVA non précisée » ≠ « pas de TVA » (None)
+
+
 def quotation_from_quantities(
     db: Session,
     *,
@@ -253,6 +256,7 @@ def quotation_from_quantities(
     assumptions: list[str] | None = None,
     missing: list[str] | None = None,
     client_name: str | None = None,
+    vat_rate: float | None | object = _UNSET,
 ) -> Quotation:
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
@@ -266,7 +270,7 @@ def quotation_from_quantities(
         title=title or f"Devis {number}",
         status="draft",
         currency=company.get("currency") or "",
-        vat_rate=company.get("vat_rate"),
+        vat_rate=company.get("vat_rate") if vat_rate is _UNSET else vat_rate,
         validity_days=company.get("quote_validity_days") or 30,
         payment_terms=company.get("payment_terms") or "",
         notes=notes,

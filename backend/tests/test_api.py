@@ -774,3 +774,71 @@ def test_agent_tool_calls_are_audited_and_bad_inputs_are_safe(client, claude):
     assert "error" in s("read_email", {"mauvais": "param"})
     assert db.query(AuditLog).filter(AuditLog.action == "agent_tool").count() >= 5
     db.close()
+
+
+# ---------- L'IA calcule et crée les documents avec le contexte de la conversation ----------
+def _chat(client, claude, steps, msg, cid=None):
+    claude(_scripted(steps))
+    return client.post("/api/chat", json={"message": msg, "conversation_id": cid}).json()
+
+
+def test_ai_builds_quote_from_context_without_canned_question(client, claude):
+    out = _chat(client, claude, [
+        ("tool", "get_prices", {"query": "BA13"}),
+        ("tool", "calculate_materials", {"kind": "partition", "length_m": 23, "height_m": 4, "sides": 2}),
+        ("tool", "create_quote", {"client_name": "Fast Mbaye", "vat_rate": 0}),
+        ("text", "Devis prêt, sans TVA."),
+    ], "Fais moi un devis pdf")
+    msg = out["message"]
+    assert "j'ai besoin d'un métré" not in msg["content"]          # plus de phrase toute faite
+    docs = msg["meta"]["structured"]["documents"]
+    assert docs[0]["kind"] == "quote"
+    q = client.get(f"/api/quotes/{docs[0]['id']}").json()
+    assert q["number"].endswith("-FM") and q["vat_rate"] == 0 and q["total"] == q["subtotal"]
+    assert q["client_label"] == "Fast Mbaye"
+    ba13 = [i for i in q["items"] if i["description"].startswith("Plaque")][0]
+    assert ba13["unit_price"] == 4500 and ba13["quantity"] > 0       # la grille du patron est bien utilisée
+    caps = msg["meta"]["capabilities"]
+    assert {"tool:get_prices", "tool:calculate_materials", "tool:create_quote"} <= set(caps)
+
+
+def test_ai_get_prices_exposes_the_real_grid(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    res = AgentSession(db, None)("get_prices", {"query": "BA13"})
+    db.close()
+    prices = {a["sku"]: a["prix_vente"] for a in res["articles"]}
+    assert prices["BA13-2500x1200"] == 4500 and res["avec_prix"] >= 2
+
+
+def test_ai_follow_up_turn_reuses_state_and_links_documents(client, claude):
+    first = _chat(client, claude, [
+        ("tool", "calculate_materials", {"kind": "partition", "length_m": 10, "height_m": 2.5}),
+        ("tool", "create_quote", {"client_name": "Moussa Ba"}), ("text", "Devis prêt."),
+    ], "Fais le devis de 10 m par 2,5 m pour Moussa Ba")
+    cid, devis = first["conversation_id"], client.get(f"/api/quotes/{first['message']['meta']['structured']['documents'][0]['id']}").json()["number"]
+    second = _chat(client, claude, [("tool", "create_purchase_order", {}), ("tool", "create_invoice", {}), ("text", "Bon et facture créés.")],
+                   "Maintenant le bon de commande et la facture", cid)
+    kinds = [d["kind"] for d in second["message"]["meta"]["structured"]["documents"]]
+    assert kinds == ["po", "invoice"]
+    numbers = {d["kind"]: client.get({"po": f"/api/purchase-orders/{d['id']}", "invoice": f"/api/invoices/{d['id']}"}[d["kind"]]).json()["number"]
+               for d in second["message"]["meta"]["structured"]["documents"]}
+    assert numbers["po"] == f"{devis}-BC" and numbers["invoice"] == f"{devis}-F"
+
+
+def test_ai_document_tools_refuse_without_a_calculation(client, claude):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    for tool in ("create_quote", "create_purchase_order", "create_delivery_note"):
+        r = s(tool, {})
+        assert "calculate_materials" in r["error"], tool
+    assert "error" in s("calculate_materials", {"kind": "partition"})   # dimensions manquantes
+    db.close()
+
+
+def test_canned_question_remains_only_when_claude_is_absent(client):
+    out = client.post("/api/chat", json={"message": "Fais moi un devis pdf"}).json()["message"]["content"]
+    assert "besoin d'un métré" in out

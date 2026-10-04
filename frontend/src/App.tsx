@@ -148,7 +148,8 @@ function MessageView({ m, onRegenerate }: { m: ChatMessage; onRegenerate?: () =>
         <ToolChips caps={m.meta?.capabilities} />
         <DraftCards drafts={structured?.drafts} />
         {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
-        {arts.length && !structured?.document ? (
+        {(structured?.documents || []).map((d: any) => <DocCard key={d.id} kind={d.kind} id={d.id} />)}
+        {arts.length && !structured?.document && !structured?.documents ? (
           <div className="arts">
             {arts.map((a: any) => (
               <div className="art" key={a.id || a.artifact_id}>
@@ -362,7 +363,7 @@ function Chat({ initialId }: { initialId?: string }) {
     if ((!msg && pending.length === 0) || busy) return;
     setBusy(true);
     setText("");
-    const local: ChatMessage = { id: "local", role: "user", content: msg || pending.map((f) => f.name).join(", ") };
+    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || pending.map((f) => f.name).join(", ") };
     setMessages((m) => [...m, local]);
     try {
       const file_ids: string[] = [];
@@ -378,7 +379,7 @@ function Chat({ initialId }: { initialId?: string }) {
         justCreated.current = out.conversation_id;
         nav(`/c/${out.conversation_id}`, { replace: true });
       }
-      setMessages((m) => [...m.filter((x) => x.id !== "local"), local, { ...out.message, fresh: true }]);
+      setMessages((m) => [...m, { ...out.message, fresh: true }]);   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
       setMessages((m) => [
         ...m,
