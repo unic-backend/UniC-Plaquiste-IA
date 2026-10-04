@@ -164,22 +164,6 @@ function Connexion({ onDone }: { onDone: () => void }) {
   );
 }
 
-const NAV = [
-  { to: "/", label: "Conversation" },
-  { to: "/chantiers", label: "Chantiers" },
-  { to: "/devis", label: "Devis" },
-  { to: "/factures", label: "Factures" },
-  { to: "/commandes", label: "Bons de commande" },
-  { to: "/livraisons", label: "Bons de livraison" },
-  { to: "/clients", label: "Clients" },
-  { to: "/fournisseurs", label: "Fournisseurs" },
-  { to: "/materiaux", label: "Matériaux" },
-  { to: "/documents", label: "Documents" },
-  { to: "/memoire", label: "Mémoire" },
-  { to: "/courrier", label: "Courrier" },
-  { to: "/reseaux", label: "Réseaux & Google" },
-  { to: "/parametres", label: "Paramètres" },
-];
 
 function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -210,14 +194,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           onChange={(e) => setQ(e.target.value)}
           style={{ background: "#24302c", color: "#efeae2", borderColor: "#3d4a45" }}
         />
-        <nav className="nav">
-          {NAV.map((n) => (
-            <Link key={n.to} to={n.to} className={loc.pathname === n.to ? "active" : ""}>
-              {n.label}
-            </Link>
-          ))}
-        </nav>
+        <div className="conv-label">Conversations</div>
         <div className="conv-list">
+          {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
           {convs.map((c) => (
             <div className="conv-item" key={c.id}>
               <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
@@ -236,19 +215,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           ))}
         </div>
         <div className="side-foot">
-          <strong>{user.name}</strong>
-          {user.email}
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            <Link to="/sante" style={{ color: "#d5ddd8" }}>
-              Santé
-            </Link>
-            {(isNative || getCode()) && (
-              <button className="btn-ghost" style={{ width: "auto", padding: 0 }}
-                onClick={() => { clearConnection(); window.location.reload(); }}>
-                Se déconnecter
-              </button>
-            )}
-          </div>
+          <Link to="/parametres" className={`foot-link ${loc.pathname.startsWith("/parametres") ? "active" : ""}`}>
+            ⚙ Paramètres
+          </Link>
         </div>
       </aside>
       <section className="main">
@@ -931,7 +900,81 @@ function Documents() {
   );
 }
 
-function SettingsPage() {
+type HubItem = { to: string; title: string; text: string };
+
+const HUB: { title: string; items: HubItem[] }[] = [
+  {
+    title: "Connecteurs",
+    items: [
+      { to: "/courrier", title: "Courrier", text: "Boîte mail : lire, comprendre, répondre" },
+      { to: "/reseaux", title: "Réseaux & Google", text: "Publications, avis, fiche Google, site" },
+    ],
+  },
+  {
+    title: "Cerveau de l'IA",
+    items: [
+      { to: "/memoire", title: "Mémoire", text: "Ce que l'IA a appris de vous" },
+      { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
+    ],
+  },
+  {
+    title: "Entreprise",
+    items: [
+      { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, paramètres de calcul" },
+      { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
+      { to: "/clients", title: "Clients", text: "Fiches clients" },
+      { to: "/fournisseurs", title: "Fournisseurs", text: "Fiches fournisseurs" },
+    ],
+  },
+  {
+    title: "Documents créés par l'IA",
+    items: [
+      { to: "/devis", title: "Devis", text: "Consulter, approuver, télécharger" },
+      { to: "/factures", title: "Factures", text: "Suivi des paiements" },
+      { to: "/commandes", title: "Bons de commande", text: "Consulter et approuver" },
+      { to: "/livraisons", title: "Bons de livraison", text: "Consulter et approuver" },
+      { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
+      { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
+    ],
+  },
+];
+
+function SettingsHub() {
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Paramètres</h1>
+        <p className="lede">
+          Vous n'avez pas besoin d'ouvrir ces pages pour travailler : dites à l'IA ce que vous voulez
+          (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
+        </p>
+        {HUB.map((g) => (
+          <section key={g.title}>
+            <h3>{g.title}</h3>
+            <div className="hub-grid">
+              {g.items.map((i) => (
+                <Link key={i.to} to={i.to} className="hub-item">
+                  <b>{i.title}</b>
+                  <span>{i.text}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ))}
+        {(isNative || getCode()) && (
+          <section>
+            <h3>Session</h3>
+            <button className="btn btn-line" onClick={() => { clearConnection(); window.location.reload(); }}>
+              Se déconnecter
+            </button>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompanyPage() {
   const [s, setS] = useState<any>(null);
   useEffect(() => {
     api.settings().then(setS);
@@ -1110,7 +1153,8 @@ export default function App() {
         <Route path="/memoire" element={<Memoire />} />
         <Route path="/courrier" element={<Courrier />} />
         <Route path="/reseaux" element={<Reseaux />} />
-        <Route path="/parametres" element={<SettingsPage />} />
+        <Route path="/parametres" element={<SettingsHub />} />
+        <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
       </Routes>
     </Shell>
