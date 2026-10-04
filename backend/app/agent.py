@@ -105,7 +105,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "create_quote",
-        "description": ("Crée un DEVIS (brouillon + PDF) à partir du dernier calcul. À n'appeler que si le patron demande le devis. "
+        "description": ("Crée un DEVIS avec son PDF à partir du dernier calcul. À n'appeler que si le patron demande le devis. "
                         "vat_rate : 0 = pas de TVA ; ex. 0.18 = 18 % ; omis = réglage de l'entreprise."),
         "input_schema": {"type": "object", "properties": {
             "client_name": {"type": "string", "description": "Prénom et nom (ou raison sociale) du client, donnés par le patron"},
@@ -125,7 +125,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "create_invoice",
-        "description": "Crée une FACTURE (brouillon) à partir d'un devis. À n'appeler que si le patron le demande.",
+        "description": "Crée une FACTURE à partir d'un devis. À n'appeler que si le patron le demande.",
         "input_schema": {"type": "object", "properties": {
             "quote_number": {"type": "string", "description": "Numéro du devis ; omis = dernier devis"},
             "kind": {"type": "string", "enum": ["invoice", "deposit", "partial", "final", "credit"]}},
@@ -133,17 +133,17 @@ TOOLS: list[dict] = [
     },
     {
         "name": "create_purchase_order",
-        "description": "Crée un BON DE COMMANDE (brouillon) à partir du dernier calcul. À n'appeler que si le patron le demande.",
+        "description": "Crée un BON DE COMMANDE à partir du dernier calcul. À n'appeler que si le patron le demande.",
         "input_schema": {"type": "object", "properties": {"client_name": {"type": "string"}}, "additionalProperties": False},
     },
     {
         "name": "create_delivery_note",
-        "description": "Crée un BON DE LIVRAISON (brouillon) à partir du dernier calcul. À n'appeler que si le patron le demande.",
+        "description": "Crée un BON DE LIVRAISON à partir du dernier calcul. À n'appeler que si le patron le demande.",
         "input_schema": {"type": "object", "properties": {"client_name": {"type": "string"}}, "additionalProperties": False},
     },
     {
         "name": "revise_document",
-        "description": ("CORRIGE un document déjà créé (brouillon) : retirer / ajouter / changer des lignes, TVA, titre, client. "
+        "description": ("CORRIGE un document déjà créé (non approuvé) : retirer / ajouter / changer des lignes, TVA, titre, client. "
                         "À utiliser dès que le patron dit « retire ça », « ajoute ça », « corrige ». Ne crée JAMAIS un second "
                         "document pour une correction. Les totaux sont recalculés par le système. Document approuvé = refusé."),
         "input_schema": {"type": "object", "properties": {
@@ -165,7 +165,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "discard_document",
-        "description": ("RETIRE de la bibliothèque un document brouillon faux ou abandonné (pas de doublon d'erreur). "
+        "description": ("RETIRE de la bibliothèque un document non approuvé faux ou abandonné (pas de doublon d'erreur). "
                         "Jamais un document approuvé. À n'utiliser que sur demande ou quand une refonte complète le remplace."),
         "input_schema": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
@@ -196,6 +196,25 @@ TOOLS: list[dict] = [
             "kind": {"type": "string", "enum": ["all", "quote", "invoice", "po", "dn"]}, "query": {"type": "string"},
             "min_total": {"type": "number"}, "max_total": {"type": "number"}}, "additionalProperties": False},
     },
+    {
+        "name": "remember",
+        "description": ("Enregistre DÉFINITIVEMENT dans la mémoire une règle, un prix, une unité, une habitude ou une correction que le patron "
+                        "vient d'énoncer (« toujours… », « quand je dis X c'est Y », « retiens… », « corrige ça pour toujours »). "
+                        "UNE phrase courte et précise par appel (plusieurs règles = plusieurs appels). Appelle-le sans attendre qu'on te le redise."),
+        "input_schema": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "La règle, formulée seule et complète, ex. « 1 barre de fourrure coûte 1 200 FCFA ; barre ≠ paquet »."},
+            "kind": {"type": "string", "enum": ["fact", "preference", "correction"]}}, "required": ["text"], "additionalProperties": False},
+    },
+    {
+        "name": "list_memory",
+        "description": "Liste ce que tu as en mémoire sur le patron (avec identifiants), éventuellement filtré par mots-clés.",
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "additionalProperties": False},
+    },
+    {
+        "name": "forget_memory",
+        "description": "Retire un souvenir de la mémoire (id obtenu avec list_memory) quand le patron dit qu'il est faux ou périmé.",
+        "input_schema": {"type": "object", "properties": {"memory_id": {"type": "string"}}, "required": ["memory_id"], "additionalProperties": False},
+    },
 ]
 
 TOOL_LABELS = {
@@ -206,6 +225,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
+    "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -229,6 +249,14 @@ AGENT_PROMPT = (
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
+    "\nVOCABULAIRE : ne dis jamais « brouillon » ni « statut » à propos d'un devis, d'une facture ou d'un bon : dis « le devis est prêt » "
+    "et propose l'aperçu ou l'approbation."
+    "\nMÉMOIRE : tu AS une mémoire durable, via les outils remember / list_memory / forget_memory. Quand le patron énonce une règle, un prix, "
+    "une unité, une habitude ou corrige une erreur (« toujours », « quand je dis », « pour toujours », « retiens »), appelle remember "
+    "TOUT DE SUITE (une règle précise par appel), puis confirme en une ligne ce qui est enregistré, mot pour mot. "
+    "Ne dis JAMAIS que tu n'as pas de mémoire ou pas d'outil pour retenir. Si une règle est ambiguë, enregistre ce qui est clair "
+    "et pose UNE question sur le reste. Les souvenirs t'arrivent dans MÉMOIRE : applique-les sans les redemander ; "
+    "s'ils se contredisent avec la demande du moment, la demande du moment gagne et tu le signales."
 )
 
 
@@ -266,6 +294,29 @@ class AgentSession:
             return {"error": "Erreur interne du connecteur."}
         finally:
             self.db.commit()
+
+    # --- mémoire
+    def _t_remember(self, text: str, kind: str = "") -> dict:
+        from app import memory as mem
+        try:
+            m = mem.add(self.db, text, kind=kind or None, source="user", pinned=True)   # dit par le patron : fait confirmé, toujours présent
+        except mem.MemoryRefused as exc:
+            return {"error": str(exc)}
+        if m is None:
+            return {"ok": True, "note": "Déjà en mémoire (compté une fois de plus) ou trop court pour être retenu."}
+        return {"ok": True, "id": m.id, "enregistre": m.text}
+
+    def _t_list_memory(self, query: str = "") -> dict:
+        from app.models import Memory
+        rows = self.db.query(Memory).filter(Memory.state == "active").order_by(Memory.created_at.desc()).limit(60).all()
+        q = (query or "").lower().split()
+        rows = [m for m in rows if all(w in m.text.lower() for w in q)][:25]
+        return {"souvenirs": [{"id": m.id, "texte": m.text, "nature": m.nature} for m in rows]}
+
+    def _t_forget_memory(self, memory_id: str) -> dict:
+        from app import memory as mem
+        m = mem.decide(self.db, memory_id, "archive")
+        return {"ok": True, "retire": m.text} if m else {"error": "Souvenir introuvable."}
 
     # --- courrier
     def _t_read_inbox(self, limit: int = 8) -> dict:

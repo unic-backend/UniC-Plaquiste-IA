@@ -1685,3 +1685,21 @@ def test_clean_for_speech_drops_markup():
     from app import voice
     t = voice.clean_for_speech("| a | b |\n|---|---|\n- **Prix** : 5 000 FCFA\n`code`")
     assert "|" not in t and "*" not in t and "francs CFA" in t
+
+
+def test_agent_remembers_rules_for_good(client, claude):
+    rule = "1 barre de fourrure coûte 1 200 FCFA ; barre ≠ paquet ; les vis font 25 mm sauf indication"
+    claude(_scripted([("tool", "remember", {"text": rule, "kind": "correction"}), ("text", "Enregistré.")]))
+    out = client.post("/api/chat", json={"message": "Corrige ça pour toujours dans ta mémoire : barre ≠ paquet, fourrure 1200 la barre, vis 25 mm."}).json()["message"]
+    assert "remember" in " ".join(out["meta"]["capabilities"])
+    mem = client.get("/api/memory").json()
+    items = mem["items"] if isinstance(mem, dict) else mem
+    assert any("fourrure" in (m.get("text") or "") for m in items)
+
+
+def test_agent_memory_refuses_secrets_and_can_forget(client, claude):
+    claude(_scripted([("tool", "remember", {"text": "mon mot de passe est hunter2hunter2 sk-ant-abcdefghijklmnopqrstuvwx"}), ("text", "Je ne retiens pas ça.")]))
+    client.post("/api/chat", json={"message": "garde en tête mon code sk-ant-abcdefghijklmnopqrstuvwx"})
+    mem = client.get("/api/memory").json()
+    items = mem["items"] if isinstance(mem, dict) else mem
+    assert not any("sk-ant" in (m.get("text") or "") for m in items)

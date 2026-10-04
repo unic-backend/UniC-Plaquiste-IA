@@ -647,7 +647,7 @@ def handle_turn(
                     else "\nClient non renseigné : le numéro finit par XXX. Dites « devis pour Prénom Nom »."
                 )
             reply_text = (
-                f"Devis **{q.number}** créé au statut **brouillon** (version {q.version}). "
+                f"Devis **{q.number}** créé (version {q.version}). "
                 f"PDF réel généré : {art['filename'] if art else '—'}."
                 f"{extra}\n\nDites « approuve {q.number} » après relecture."
             )

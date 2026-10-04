@@ -85,9 +85,16 @@ function revealHtml(html: string, totalMs = 3200): string {
   return tpl.innerHTML;
 }
 
+const STATUS_FR: Record<string, string> = {
+  draft: "À valider", approved: "Approuvé", sent: "Envoyé", paid: "Payé", partial: "Partiel", cancelled: "Annulé", review: "En revue",
+};
+/** Le mot « brouillon » n'apparaît jamais sur un devis : un document pas encore approuvé est simplement « à valider ». */
+const statusFr = (s?: string) => STATUS_FR[(s || "").toLowerCase()] ?? (s || "—");
+
 function Badge({ s }: { s?: string }) {
   const v = (s || "").toLowerCase();
-  return <span className={`badge ${v}`}>{v || "—"}</span>;
+  if (v === "draft") return null;   // rien à afficher : l'état normal d'un document en préparation
+  return <span className={`badge ${v}`}>{statusFr(v)}</span>;
 }
 
 function fmt(n: number | null | undefined, cur = ""): string {
@@ -1138,7 +1145,7 @@ function ChantierDetail() {
           {(p.quotations || []).map((q: any) => (
             <li key={q.id}>
               <Link to={`/devis/${q.id}`}>
-                {q.number} — {q.status} — {q.total ?? "total incomplet"}
+                {q.number} — {statusFr(q.status)} — {q.total ?? "total incomplet"}
               </Link>
             </li>
           ))}
@@ -1148,7 +1155,7 @@ function ChantierDetail() {
           {(p.invoices || []).map((q: any) => (
             <li key={q.id}>
               <Link to={`/factures/${q.id}`}>
-                {q.number} — {q.status} — payé {q.paid}
+                {q.number} — {statusFr(q.status)} — payé {q.paid}
               </Link>
             </li>
           ))}
@@ -1167,7 +1174,7 @@ function DevisList() {
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
       onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
@@ -1304,7 +1311,7 @@ function Factures() {
       title="Factures"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, q.status, q.total, q.paid, q.remaining])}
+      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, statusFr(q.status), q.total, q.paid, q.remaining])}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
@@ -1317,7 +1324,7 @@ function Commandes() {
       title="Bons de commande"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client / fournisseur", "Statut", "Total"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, q.status, q.total ?? "incomplet"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, statusFr(q.status), q.total ?? "incomplet"])}
       onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
@@ -1330,7 +1337,7 @@ function Livraisons() {
       title="Bons de livraison"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, q.status])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, statusFr(q.status)])}
       onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );
