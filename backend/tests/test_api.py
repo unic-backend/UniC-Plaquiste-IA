@@ -2321,7 +2321,7 @@ def test_availability_note_reports_real_connectors(client):
     from app.database import SessionLocal
     with SessionLocal() as db:
         n = agent.availability_note(db)
-        assert n.startswith("\nÉTAT RÉEL")
+        assert n.startswith("\nAUJOURD'HUI") and "ÉTAT RÉEL" in n
         want = "ACTIF" if linkedin.status(db)["connected"] else "NON CONNECTÉ"
         assert f"LinkedIn {want}" in n   # reflète la base, pas une valeur figée
         for k in ("courrier", "fiche Google", "site web", "voix ElevenLabs", "vision"):
@@ -2595,3 +2595,30 @@ def test_unpaid_due_dates_late_and_reminders(client):
     r = client.get("/api/invoices-unpaid").json()
     assert any(x["numero"] == "FA-TEST-LATE" for x in r["en_retard"])
     assert client.put("/api/settings", json={"invoice_due_days": 30}).json()["invoice_due_days"] == 30
+
+
+def test_agenda_create_conflict_briefing_and_tools(client):
+    from datetime import datetime, timedelta, timezone
+    from app import agent, briefing
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    t = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+    r = client.post("/api/agenda", json={"title": "Métré bureaux RH", "start": t.strftime("%Y-%m-%d %H:%M"), "kind": "metre",
+                                         "client_name": "Pape Diop", "location": "Médina"})
+    assert r.status_code == 200 and r.json()["conflits"] == []
+    rid = r.json()["rdv"]["id"]
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        out = s("add_appointment", {"title": "Livraison plaques", "start": (t + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M"), "kind": "livraison"})
+        assert out["ok"] and out["conflits"] and "Métré bureaux RH" in out["conflits"][0]   # chevauchement signalé
+        assert "error" in s("add_appointment", {"title": "X rdv", "start": "jeudi prochain"})
+        lst = s("list_agenda", {})
+        assert lst["nombre"] >= 2
+        assert s("update_appointment", {"appointment_id": rid, "status": "done"})["rdv"]["status"] == "done"
+        b = briefing._agenda(db)
+        assert "Demain" in b.text and "Livraison plaques" in b.text
+        assert "AUJOURD'HUI" in agent.availability_note(db)
+    assert client.post("/api/agenda", json={"title": "X", "start": "2026-13-40 99:99"}).status_code in (400, 422)
+    lst = client.get("/api/agenda").json()["rdv"]
+    assert all(a["status"] == "planned" for a in lst)
+    assert client.patch(f"/api/agenda/{lst[0]['id']}", json={"status": "cancelled"}).json()["rdv"]["status"] == "cancelled"

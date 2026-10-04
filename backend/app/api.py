@@ -1129,6 +1129,57 @@ def delete_signature(user: User = Depends(require_roles("admin", "manager"))):
     return {"ok": True}
 
 
+class AppointmentIn(BaseModel):
+    title: str = Field(min_length=2, max_length=255)
+    start: str
+    kind: str = "rdv"
+    duration_min: int | None = None
+    location: str = ""
+    client_name: str = ""
+    phone: str = ""
+    notes: str = ""
+    remind_minutes: int = 60
+
+
+@router.get("/agenda")
+def agenda_list(days: int = 30, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    return {"rdv": [agenda.to_dict(a) for a in agenda.upcoming(db, days=max(1, min(days, 365)))], "kinds": agenda.KINDS}
+
+
+@router.post("/agenda")
+def agenda_create(body: AppointmentIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    try:
+        a, clash = agenda.create(db, **body.model_dump())
+    except agenda.AgendaError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"rdv": agenda.to_dict(a), "conflits": [agenda.line(c) for c in clash]}
+
+
+@router.patch("/agenda/{aid}")
+def agenda_update(aid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    from app.models import Appointment
+    a = db.get(Appointment, aid)
+    if a is None:
+        raise HTTPException(404, "Rendez-vous introuvable")
+    if body.get("status") in ("planned", "done", "cancelled"):
+        a.status = body["status"]
+    if body.get("start"):
+        try:
+            s = agenda.parse_dt(body["start"])
+        except agenda.AgendaError as exc:
+            raise HTTPException(400, str(exc))
+        dur = (agenda._aware(a.end_at) - agenda._aware(a.start_at)) if a.end_at else None
+        a.start_at = s
+        if dur:
+            a.end_at = s + dur
+    db.commit()
+    return {"rdv": agenda.to_dict(a)}
+
+
 @router.get("/invoices-unpaid")
 def invoices_unpaid(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import unpaid

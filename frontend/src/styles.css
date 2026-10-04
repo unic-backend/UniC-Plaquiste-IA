@@ -903,3 +903,18 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .unpaid li > div { display: grid; gap: 2px; min-width: 0; }
 .unpaid li span { color: var(--muted); font-size: 12.5px; }
 .unpaid li.late span { color: #b3261e; font-weight: 600; }
+
+.agenda-form { margin: 12px 0; display: grid; gap: 10px; }
+.agenda-form label { display: grid; gap: 4px; font-size: 13px; }
+.agenda-day h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
+.agenda-item { display: flex; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-bottom: 8px; border-left: 4px solid var(--copper); }
+.agenda-item.k-pose { border-left-color: #2e7d4f; }
+.agenda-item.k-livraison { border-left-color: #1f3a93; }
+.agenda-item.k-visite, .agenda-item.k-metre { border-left-color: var(--copper); }
+.agenda-time { font-weight: 700; font-size: 15px; display: grid; align-content: start; min-width: 48px; }
+.agenda-time span { font-weight: 400; font-size: 12px; color: var(--muted); }
+.agenda-body { display: grid; gap: 4px; min-width: 0; }
+.agenda-body > span { font-size: 13px; color: var(--muted); }
+.agenda-body .row-actions { margin-top: 4px; gap: 6px; }
+.agenda-form .two-col { grid-template-columns: 1fr 1fr; margin: 0; gap: 10px; }
+.agenda-day h3::first-letter { text-transform: uppercase; }

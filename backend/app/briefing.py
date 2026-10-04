@@ -105,6 +105,23 @@ def _drafts(db: Session) -> Section:
     return Section("Brouillons à valider", OK, f"{posts} publication(s) et {mails} e-mail(s) en attente d'approbation ou de publication.")
 
 
+def _agenda(db: Session) -> Section:
+    from datetime import timedelta
+    from app import agenda
+    now = datetime.now(timezone.utc)
+    rows = agenda.upcoming(db, days=2, now=now)
+    today = [r for r in rows if agenda._aware(r.start_at).date() == now.date()]
+    tomorrow = [r for r in rows if agenda._aware(r.start_at).date() == (now + timedelta(days=1)).date()]
+    if not today and not tomorrow:
+        return Section("Agenda", OK, "Rien de prévu aujourd'hui ni demain. Dis « note un métré jeudi à 10 h chez… ».")
+    out = []
+    if today:
+        out += ["Aujourd'hui :"] + [f"- {agenda.line(r)}" for r in today]
+    if tomorrow:
+        out += ["Demain :"] + [f"- {agenda.line(r)}" for r in tomorrow]
+    return Section("Agenda", OK, "\n".join(out))
+
+
 def _tasks(db: Session) -> Section:
     rows = db.query(Memory).filter(Memory.kind == "task", Memory.state == "active").order_by(Memory.created_at.desc()).all()
     if not rows:
@@ -128,7 +145,7 @@ def _memory(db: Session) -> Section | None:
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
-    for fn in (lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
+    for fn in (lambda: _agenda(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
                lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db)):
         try:
             s = fn()

@@ -206,6 +206,30 @@ TOOLS: list[dict] = [
             "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "add_appointment",
+        "description": ("AGENDA : note une visite, un métré, une pose, une livraison ou un rendez-vous. start = « AAAA-MM-JJ HH:MM » heure de Dakar "
+                        "(calcule la date à partir d'aujourd'hui si le patron dit « jeudi », « demain »). Signale tout conflit d'horaire rendu."),
+        "input_schema": {"type": "object", "properties": {
+            "title": {"type": "string"}, "start": {"type": "string"},
+            "kind": {"type": "string", "enum": ["visite", "metre", "pose", "livraison", "rdv", "autre"]},
+            "duration_min": {"type": "integer"}, "location": {"type": "string"}, "client_name": {"type": "string"},
+            "phone": {"type": "string"}, "notes": {"type": "string"}, "remind_minutes": {"type": "integer"}},
+            "required": ["title", "start"], "additionalProperties": False},
+    },
+    {
+        "name": "list_agenda",
+        "description": "AGENDA : liste les rendez-vous à venir (par défaut 14 jours), avec leur identifiant.",
+        "input_schema": {"type": "object", "properties": {"days": {"type": "integer"}}, "additionalProperties": False},
+    },
+    {
+        "name": "update_appointment",
+        "description": "AGENDA : déplace, marque fait (status=done) ou annule (status=cancelled) un rendez-vous (id via list_agenda).",
+        "input_schema": {"type": "object", "properties": {
+            "appointment_id": {"type": "string"}, "start": {"type": "string"},
+            "status": {"type": "string", "enum": ["planned", "done", "cancelled"]}, "notes": {"type": "string"}},
+            "required": ["appointment_id"], "additionalProperties": False},
+    },
+    {
         "name": "list_unpaid",
         "description": ("IMPAYÉS : factures approuvées avec un reste à payer, séparées en « en retard » (jours de retard) et « à venir » "
                         "(échéance). Chaque ligne contient un message de relance poli prêt à envoyer. À utiliser pour « qui me doit », "
@@ -293,7 +317,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "list_unpaid": "Impayés consultés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -402,6 +426,47 @@ class AgentSession:
             return logo.audit(svg)
         except diagrams.DiagramError as exc:
             return {"error": str(exc)}
+
+    def _t_add_appointment(self, title: str, start: str, kind: str = "rdv", duration_min: int | None = None,
+                           location: str = "", client_name: str = "", phone: str = "", notes: str = "",
+                           remind_minutes: int = 60) -> dict:
+        from app import agenda
+        try:
+            a, clash = agenda.create(self.db, title=title, start=start, kind=kind, duration_min=duration_min, location=location,
+                                     client_name=client_name, phone=phone, notes=notes, remind_minutes=remind_minutes)
+        except agenda.AgendaError as exc:
+            raise ConnectorError(str(exc), 400)
+        self.db.commit()
+        return {"ok": True, "rdv": agenda.to_dict(a), "conflits": [agenda.line(c) for c in clash],
+                "note": "Rappel sur le téléphone avant l'heure. Annonce la date en toutes lettres (jour, date, heure) pour que le patron vérifie."}
+
+    def _t_list_agenda(self, days: int = 14) -> dict:
+        from app import agenda
+        rows = agenda.upcoming(self.db, days=max(1, min(int(days), 90)))
+        return {"rdv": [agenda.to_dict(r) for r in rows], "nombre": len(rows)}
+
+    def _t_update_appointment(self, appointment_id: str, start: str = "", status: str = "", notes: str = "") -> dict:
+        from datetime import timedelta
+        from app import agenda
+        from app.models import Appointment
+        a = self.db.get(Appointment, appointment_id)
+        if a is None:
+            raise ConnectorError("Rendez-vous introuvable : appelle list_agenda.", 404)
+        clash = []
+        if start:
+            try:
+                s = agenda.parse_dt(start)
+            except agenda.AgendaError as exc:
+                raise ConnectorError(str(exc), 400)
+            dur = (agenda._aware(a.end_at) - agenda._aware(a.start_at)) if a.end_at else timedelta(minutes=60)
+            a.start_at, a.end_at = s, s + dur
+            clash = agenda.conflicts(self.db, s, s + dur, exclude_id=a.id)
+        if status:
+            a.status = status
+        if notes:
+            a.notes = (a.notes + "\n" + notes).strip()
+        self.db.commit()
+        return {"ok": True, "rdv": agenda.to_dict(a), "conflits": [agenda.line(c) for c in clash]}
 
     def _t_list_unpaid(self, only_late: bool = False) -> dict:
         from app import unpaid
@@ -806,10 +871,16 @@ class AgentSession:
 
 def availability_note(db=None) -> str:
     """État RÉEL des connecteurs (pour que l'IA ne promette rien d'impossible ni ne nie ce qui marche)."""
+    from datetime import datetime, timezone
     from app.capabilities import _connectors
     c = _connectors(db)
+    now = datetime.now(timezone.utc)   # Dakar = UTC
+    jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    mois = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+    today = f"{jours[now.weekday()]} {now.day} {mois[now.month - 1]} {now.year}, {now:%H:%M} (heure de Dakar), soit {now:%Y-%m-%d}"
     on = lambda k: "ACTIF" if c.get(k) else "NON CONNECTÉ"
-    return (f"\nÉTAT RÉEL DES CONNECTEURS : courrier {on('email')} ; fiche Google {on('gbp')} ; site web {on('website')} ; "
+    return (f"\nAUJOURD'HUI : {today}. "
+            f"\nÉTAT RÉEL DES CONNECTEURS : courrier {on('email')} ; fiche Google {on('gbp')} ; site web {on('website')} ; "
             f"LinkedIn {on('linkedin')} ; Instagram {on('instagram')} ; voix ElevenLabs {on('voice')} ; OCR {on('ocr')} ; vision (photos, plans) {on('vision')}. "
             "Publication : jamais sans le clic d'approbation du patron (LinkedIn publie seulement après son accord) ; TikTok, WhatsApp et les autres réseaux : "
             "texte ou script préparé, le patron envoie lui-même. Pour « l'état des connecteurs » : donne CETTE liste telle quelle, sans dire que tu n'as pas testé.")

@@ -677,3 +677,23 @@ class LearnedAnswer(Base):
     answer: Mapped[str] = mapped_column(Text)
     hits: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Appointment(Base):
+    """Agenda : visite, métré, pose, livraison, rendez-vous. Heures stockées en UTC (Dakar = UTC, sans heure d'été)."""
+    __tablename__ = "appointments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(32), default="rdv")   # visite | metre | pose | livraison | rdv | autre
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    location: Mapped[str] = mapped_column(String(255), default="")
+    client_name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="planned")   # planned | done | cancelled
+    remind_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
