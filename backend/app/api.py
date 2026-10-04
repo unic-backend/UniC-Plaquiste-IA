@@ -99,11 +99,34 @@ def list_conversations(
     query = db.query(Conversation).filter(Conversation.user_id == user.id)
     if q:
         query = query.filter(Conversation.title.ilike(f"%{q}%"))
-    rows = query.order_by(Conversation.updated_at.desc()).limit(80).all()
+    rows = query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc()).limit(80).all()
     return [
-        {"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat() if c.updated_at else None}
+        {"id": c.id, "title": c.title, "pinned": bool(c.pinned),
+         "updated_at": c.updated_at.isoformat() if c.updated_at else None}
         for c in rows
     ]
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+    pinned: bool | None = None
+
+
+@router.patch("/conversations/{cid}")
+def patch_conversation(cid: str, body: ConversationPatch, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Épingler / renommer : l'ordre par date de dernière activité n'est pas touché."""
+    c = db.get(Conversation, cid)
+    if c is None or c.user_id != user.id:
+        raise HTTPException(404, "Conversation introuvable")
+    if body.title is not None:
+        title = " ".join(body.title.split())
+        if not title:
+            raise HTTPException(422, "Le nom ne peut pas être vide")
+        c.title = title
+    if body.pinned is not None:
+        c.pinned = body.pinned
+    db.commit()
+    return {"id": c.id, "title": c.title, "pinned": bool(c.pinned)}
 
 
 @router.post("/conversations")

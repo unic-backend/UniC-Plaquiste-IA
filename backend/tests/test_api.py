@@ -1425,3 +1425,16 @@ def test_each_client_owns_a_block_in_order_of_arrival(client):
         db.add(Quotation(number=n, title="t", client_label=who, status="draft"))
         db.commit()
     db.close()
+
+
+def test_conversation_pin_rename_delete(client):
+    a = client.post("/api/conversations").json()["id"]
+    b = client.post("/api/conversations").json()["id"]
+    assert client.patch(f"/api/conversations/{a}", json={"pinned": True}).json()["pinned"] is True
+    assert client.patch(f"/api/conversations/{b}", json={"title": "  Devis   Pape  Diop "}).json()["title"] == "Devis Pape Diop"
+    rows = client.get("/api/conversations").json()
+    assert rows[0]["id"] == a and rows[0]["pinned"] is True                 # épinglée en tête
+    assert next(r for r in rows if r["id"] == b)["title"] == "Devis Pape Diop"
+    assert client.patch(f"/api/conversations/{b}", json={"title": "   "}).status_code == 422
+    assert client.patch("/api/conversations/inconnu", json={"pinned": True}).status_code == 404
+    assert client.delete(f"/api/conversations/{a}").json() == {"ok": True}

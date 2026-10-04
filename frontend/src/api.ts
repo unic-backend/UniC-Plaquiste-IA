@@ -176,6 +176,8 @@ export const api = {
     request<Conv[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   newConversation: () => request<Conv>("/api/conversations", { method: "POST" }),
   getConversation: (id: string) => request<ConvDetail>(`/api/conversations/${id}`),
+  patchConversation: (id: string, b: { title?: string; pinned?: boolean }) =>
+    request<Conv>(`/api/conversations/${id}`, { method: "PATCH", ...json(b) }),
   deleteConversation: (id: string) =>
     request(`/api/conversations/${id}`, { method: "DELETE" }),
   chat: (body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean }) =>
@@ -225,7 +227,7 @@ export const api = {
 };
 
 export type User = { id: string; email: string; name: string; role: string };
-export type Conv = { id: string; title: string; updated_at?: string };
+export type Conv = { id: string; title: string; updated_at?: string; pinned?: boolean };
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";

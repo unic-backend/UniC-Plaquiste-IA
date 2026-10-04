@@ -31,3 +31,6 @@ export const Circle = mk(<circle cx="12" cy="12" r="4.5" />);
 export const Refresh = mk(<><path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5" /><path d="M19.5 4.5v4h-4" /></>);
 export const Pencil = mk(<><path d="M4.5 19.5 5.3 15 15.8 4.5a2 2 0 0 1 2.9 0l.8.8a2 2 0 0 1 0 2.9L9 18.7z" /><path d="m14 6.5 3.5 3.5" /></>);
 export const Eye = mk(<><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>);
+export const More = mk(<><circle cx="5.5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="18.5" cy="12" r="1.4" fill="currentColor" /></>);
+export const Pin = mk(<><path d="M9 4h6l-1 5.5 3 3H7l3-3z" /><path d="M12 12.5V20" /></>);
+export const Trash = mk(<><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /><path d="M10 11v5M14 11v5" /></>);

@@ -660,7 +660,7 @@ body { letter-spacing: -0.006em; }
 .sheet-btn:active { transform: scale(.95); background: #fff; }
 .icon-btn { border-radius: 14px; }
 .topbar { background: rgba(251,248,243,.8); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
-.table-wrap, table { border-radius: var(--r-md); overflow: hidden; }
+.table-wrap { border-radius: var(--r-md); }
 .toast { border-radius: 18px; backdrop-filter: blur(14px); }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
@@ -736,3 +736,39 @@ h1, h2, h3, b, strong, th { font-weight: 800; }
 .preview-body .hint, .preview-body .error { color: #fff; text-align: center; }
 .preview-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 10px 12px calc(12px + var(--safe-b)); background: rgba(255,255,255,.07); }
 .preview-actions .hint { color: #fff; align-self: center; }
+
+/* Menu latéral plus étroit : un peu plus que la moitié de l'écran */
+.sidebar { width: 272px; padding: 14px 12px; }
+@media (max-width: 860px) { .sidebar { width: min(62vw, 300px); } }
+.brand-name { font-size: 21px; }
+.brand-sub { font-size: 10.5px; }
+.sidebar .btn, .sidebar .btn-copper { font-size: 15px; padding: 12px; }
+.sidebar input { font-size: 15px; padding: 11px 12px; }
+.conv-label { font-size: 11px; display: flex; align-items: center; gap: 5px; }
+.conv-item { position: relative; }
+.conv-item a { font-size: 15px; padding: 11px 10px; display: flex; align-items: center; gap: 6px; }
+.conv-item > button { opacity: .75; padding: 8px 6px; font-size: 14px; }
+.conv-item.menu-open { z-index: 5; }
+.conv-menu { position: absolute; right: 4px; top: 100%; z-index: 10; min-width: 170px; background: #2c3a35; border: 1px solid #44544e; border-radius: 14px; padding: 6px; box-shadow: 0 12px 30px rgba(0,0,0,.35); animation: msgIn .18s var(--ease) both; }
+.conv-menu button { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; color: #efeae2; font: inherit; font-size: 15px; padding: 11px 10px; border-radius: 10px; cursor: pointer; text-align: left; opacity: 1; }
+.conv-menu button:active { background: rgba(255,255,255,.1); }
+.conv-menu button.danger, .conv-item.confirming button.danger { color: #ff9b8f; }
+.conv-item.editing, .conv-item.confirming { flex-wrap: wrap; padding: 6px 4px; gap: 6px; }
+.conv-item.editing input { flex: 1; min-width: 0; background: #24302c; color: #efeae2; border: 1px solid #44544e; border-radius: 10px; padding: 9px 10px; font-size: 15px; }
+.conv-item.confirming span { flex: 1 1 100%; font-size: 14px; }
+.conv-item.confirming button { flex: 1; background: rgba(255,255,255,.1); border-radius: 10px; padding: 10px; color: #efeae2; opacity: 1; }
+.conv-err { flex: 1 1 100%; font-size: 12px; color: #ff9b8f; }
+.credit-badge { display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--ink); margin: 0 0 18px; padding: 16px; border-radius: 20px; background: linear-gradient(135deg, rgba(44,74,62,.12), rgba(184,97,46,.12)); border: 1px solid rgba(26,24,20,.07); }
+.credit-badge span, .credit-badge i { font-size: 12px; font-style: normal; opacity: .7; }
+.credit-badge b { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+
+/* Tableaux : sur téléphone chaque ligne devient une fiche (plus de défilement latéral) */
+@media (max-width: 700px) {
+  .table-wrap table, .table-wrap tbody, .table-wrap tr, .table-wrap td { display: block; width: 100%; }
+  .table-wrap thead { display: none; }
+  .table-wrap tr { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .table-wrap td { display: flex; justify-content: space-between; gap: 14px; border: 0; padding: 5px 0; text-align: right; word-break: break-word; }
+  .table-wrap td::before { content: attr(data-label); flex: 0 0 38%; text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+  .table-wrap td:first-child { font-weight: 800; }
+}
+select, input, textarea { max-width: 100%; box-sizing: border-box; }

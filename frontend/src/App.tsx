@@ -5,7 +5,7 @@ import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
+import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -408,11 +408,64 @@ function Connexion({ onDone }: { onDone: () => void }) {
 }
 
 
+/** Une conversation du menu : ouvrir, ⋯ → épingler, renommer, supprimer (avec confirmation). */
+function ConvItem({ c, active, onClose, onChange, onRemove }: {
+  c: Conv; active: boolean; onClose: () => void; onChange: (n: Partial<Conv>) => void; onRemove: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const [mode, setMode] = useState<"view" | "rename" | "confirm">("view");
+  const [name, setName] = useState(c.title);
+  const [err, setErr] = useState("");
+  const done = () => { setMenu(false); setMode("view"); setErr(""); };
+  const save = async () => {
+    const t = name.trim();
+    if (!t || t === c.title) return done();
+    try { const r = await api.patchConversation(c.id, { title: t }); onChange({ title: r.title }); done(); } catch (e: any) { setErr(e.message); }
+  };
+  if (mode === "rename")
+    return (
+      <div className="conv-item editing">
+        <input autoFocus value={name} maxLength={80} aria-label="Nouveau nom" onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") done(); }} />
+        <button aria-label="Enregistrer le nom" onClick={save}><I.Check size={18} /></button>
+        <button aria-label="Annuler" onClick={done}><I.Close size={18} /></button>
+        {err && <span className="conv-err">{err}</span>}
+      </div>
+    );
+  if (mode === "confirm")
+    return (
+      <div className="conv-item confirming">
+        <span>Supprimer « {c.title.length > 22 ? c.title.slice(0, 22) + "…" : c.title} » ?</span>
+        <button className="danger" onClick={async () => { try { await api.deleteConversation(c.id); onRemove(); } catch (e: any) { setErr(e.message); } }}>Confirmer</button>
+        <button onClick={done}>Annuler</button>
+        {err && <span className="conv-err">{err}</span>}
+      </div>
+    );
+  return (
+    <div className={`conv-item ${menu ? "menu-open" : ""}`}>
+      <Link to={`/c/${c.id}`} className={active ? "active" : ""} onClick={onClose}>
+        {c.pinned && <I.Pin size={13} />} {c.title}
+      </Link>
+      <button aria-label="Options de la conversation" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><I.More size={20} /></button>
+      {menu && (
+        <div className="conv-menu" role="menu">
+          <button role="menuitem" onClick={async () => { const r = await api.patchConversation(c.id, { pinned: !c.pinned }); onChange({ pinned: r.pinned }); done(); }}>
+            <I.Pin size={16} /> {c.pinned ? "Désépingler" : "Épingler"}
+          </button>
+          <button role="menuitem" onClick={() => { setName(c.title); setMode("rename"); }}><I.Pencil size={16} /> Renommer</button>
+          <button role="menuitem" className="danger" onClick={() => setMode("confirm")}><I.Trash size={16} /> Supprimer</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [convs, setConvs] = useState<Conv[]>([]);
   const [q, setQ] = useState("");
   const loc = useLocation();
+  const nav = useNavigate();
   useEffect(() => {
     api.conversations(q).then(setConvs).catch(() => setConvs([]));
   }, [q, loc.pathname]);
@@ -439,24 +492,16 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         />
         <div className="conv-list">
           {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
-          {groupByDate(convs).map((g) => (
+          {[
+            ...(convs.some((c) => c.pinned) ? [{ label: "Épinglées", rows: convs.filter((c) => c.pinned) }] : []),
+            ...groupByDate(convs.filter((c) => !c.pinned)),
+          ].map((g) => (
             <div key={g.label}>
-              <div className="conv-label">{g.label}</div>
+              <div className="conv-label">{g.label === "Épinglées" && <I.Pin size={12} />} {g.label}</div>
               {g.rows.map((c) => (
-                <div className="conv-item" key={c.id}>
-                  <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
-                    {c.title}
-                  </Link>
-                  <button
-                    title="Supprimer"
-                    onClick={async () => {
-                      await api.deleteConversation(c.id);
-                      setConvs((x) => x.filter((i) => i.id !== c.id));
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
+                <ConvItem key={c.id} c={c} active={loc.pathname === `/c/${c.id}`} onClose={() => setOpen(false)}
+                  onChange={(next) => setConvs((x) => x.map((i) => (i.id === c.id ? { ...i, ...next } : i)))}
+                  onRemove={() => { setConvs((x) => x.filter((i) => i.id !== c.id)); if (loc.pathname === `/c/${c.id}`) nav("/"); }} />
               ))}
             </div>
           ))}
@@ -840,7 +885,7 @@ function TablePage({
                 {rows.map((r, i) => (
                   <tr key={i} onClick={() => onRow?.(i)} style={{ cursor: onRow ? "pointer" : "default" }}>
                     {r.map((c, j) => (
-                      <td key={j}>{c ?? "—"}</td>
+                      <td key={j} data-label={columns[j]}>{c ?? "—"}</td>
                     ))}
                   </tr>
                 ))}
@@ -970,11 +1015,11 @@ function Materiaux() {
             <tbody>
               {rows.map((m) => (
                 <tr key={m.id}>
-                  <td>{m.sku}</td>
-                  <td>{m.name}</td>
-                  <td>{m.unit}</td>
-                  <td>{m.selling_price ?? "non renseigné"}</td>
-                  <td>{m.purchase_price ?? "non renseigné"}</td>
+                  <td data-label="SKU">{m.sku}</td>
+                  <td data-label="Nom">{m.name}</td>
+                  <td data-label="Unité">{m.unit}</td>
+                  <td data-label="Vente">{m.selling_price ?? "non renseigné"}</td>
+                  <td data-label="Achat">{m.purchase_price ?? "non renseigné"}</td>
                 </tr>
               ))}
             </tbody>
@@ -1330,6 +1375,19 @@ const HUB: { title: string; items: HubItem[] }[] = [
   },
 ];
 
+/** Crédit Claude restant, en tête des Paramètres (touche pour le détail). */
+function CreditBadge() {
+  const [u, setU] = useState<Usage | null>(null);
+  useEffect(() => { net.usage().then(setU).catch(() => {}); }, []);
+  return (
+    <Link to="/couts" className="credit-badge">
+      <span>Crédit Claude</span>
+      <b>{u === null ? "…" : u.reste_usd !== null ? `${Math.max(0, u.reste_usd).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} $ restants` : "À renseigner"}</b>
+      <i>{u ? `${u.aujourdhui_usd.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} $ aujourd'hui · ${u.messages_total} messages` : ""}</i>
+    </Link>
+  );
+}
+
 function SettingsHub() {
   return (
     <div className="page">
@@ -1339,6 +1397,7 @@ function SettingsHub() {
           Vous n'avez pas besoin d'ouvrir ces pages pour travailler : dites à l'IA ce que vous voulez
           (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
         </p>
+        <CreditBadge />
         {HUB.map((g) => (
           <section key={g.title}>
             <h3>{g.title}</h3>
