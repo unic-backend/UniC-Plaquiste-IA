@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { FicheGoogle } from "./Google";
+import { Voix } from "./Voix";
+import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
@@ -257,6 +259,8 @@ function GreetingTyper({ g }: { g: Greeting }) {
 
 function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [speakErr, setSpeakErr] = useState("");
+  const speech = useSpeech(m.id);
   const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
   const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
   const structured = m.meta?.structured;
@@ -279,7 +283,14 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
               {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
             </button>
+            {tw.done && (
+              <button className={`speak-btn ${speech !== "idle" ? "on" : ""}`} aria-pressed={speech === "playing"}
+                onClick={async () => setSpeakErr(await toggleSpeech(m.id, m.content))}>
+                {speech === "idle" ? <><I.Speaker size={15} /> Écouter</> : speech === "loading" ? <>… Chargement</> : <><I.Stop size={15} /> Arrêter</>}
+              </button>
+            )}
             {onRegenerate && tw.done && <button onClick={onRegenerate}><I.Refresh size={15} /> Régénérer</button>}
+            {speakErr && <span className="error">{speakErr}</span>}
           </div>
         )}
         {structured?.steps?.length ? (
@@ -1365,6 +1376,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/courrier", title: "Courrier", text: "Boîte mail : lire, comprendre, répondre" },
       { to: "/google", title: "Fiche Google", text: "Publier tous les 4 jours, mots-clés, fiche complète" },
       { to: "/reseaux", title: "Réseaux & avis", text: "Publications, avis Google, site" },
+      { to: "/voix", title: "Voix", text: "Écouter les réponses : voix du téléphone, ElevenLabs, ta voix" },
     ],
   },
   {
@@ -1661,6 +1673,7 @@ export default function App() {
         <Route path="/livraisons/:id" element={<DocDetail kind="dn" />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/memoire" element={<Memoire />} />
+        <Route path="/voix" element={<Voix />} />
         <Route path="/journal" element={<Journal />} />
         <Route path="/couts" element={<Couts />} />
         <Route path="/google" element={<FicheGoogle />} />

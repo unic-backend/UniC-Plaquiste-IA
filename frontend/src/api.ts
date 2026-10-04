@@ -174,6 +174,17 @@ export const net = {
     return request<{ candidats: number }>("/api/memory/import", { method: "POST", body: fd });
   },
   usage: () => request<Usage>("/api/usage"),
+  voiceStatus: () => request<{ configured: boolean; voice_id: string; limits: string }>("/api/voice"),
+  voiceConnect: (key: string) => request("/api/voice/connect", { method: "POST", body: JSON.stringify({ key }) }),
+  voiceDisconnect: () => request("/api/voice/connect", { method: "DELETE" }),
+  voiceList: () => request<{ id: string; name: string; category: string; gender: string; accent: string; mine: boolean; preview: string }[]>("/api/voice/voices"),
+  voiceSelect: (voice_id: string) => request("/api/voice/select", { method: "POST", body: JSON.stringify({ voice_id }) }),
+  voiceDelete: (id: string) => request(`/api/voice/voices/${id}`, { method: "DELETE" }),
+  voiceClone: (name: string, file: Blob, filename: string) => {
+    const fd = new FormData();
+    fd.append("name", name); fd.append("own_voice", "true"); fd.append("file", file, filename);
+    return request<{ id: string; name: string }>("/api/voice/clone", { method: "POST", body: fd });
+  },
   setBudget: (amount_usd: number) => request<Usage>("/api/usage/budget", { method: "PUT", ...json({ amount_usd }) }),
   journal: (action = "") => request<JournalRow[]>(`/api/journal${action ? `?action=${encodeURIComponent(action)}` : ""}`),
   deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),

@@ -1,0 +1,185 @@
+import { useEffect, useRef, useState } from "react";
+import * as I from "./Icons";
+import { net } from "./api";
+import { canSpeakOnDevice, clearCache, deviceVoices, getPref, setPref, speakDevice, stop, type VoicePref } from "./speech";
+
+const SAMPLE = "Bonjour patron, voici ma voix. Le devis est prêt, je te lis les détails.";
+type EVoice = Awaited<ReturnType<typeof net.voiceList>>[number];
+
+/** Page Voix : choisir la voix de lecture (téléphone ou ElevenLabs) et cloner sa propre voix. */
+export function Voix() {
+  const [pref, setP] = useState<VoicePref>(getPref());
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(deviceVoices());
+  const [st, setSt] = useState<{ configured: boolean; voice_id: string; limits: string } | null>(null);
+  const [eVoices, setEVoices] = useState<EVoice[]>([]);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const say = (m: string) => { setMsg(m); setTimeout(() => setMsg(""), 4000); };
+  const upd = (p: Partial<VoicePref>) => setP(setPref(p));
+
+  useEffect(() => {
+    const load = () => setVoices(deviceVoices());
+    load();
+    window.speechSynthesis?.addEventListener?.("voiceschanged", load);
+    return () => { window.speechSynthesis?.removeEventListener?.("voiceschanged", load); stop(); };
+  }, []);
+  const refresh = async () => {
+    try {
+      const s = await net.voiceStatus();
+      setSt(s);
+      setEVoices(s.configured ? await net.voiceList() : []);
+    } catch (e: any) { say(e.message); }
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    setBusy(true);
+    try { await fn(); if (ok) say(ok); } catch (e: any) { say(e.message || "Erreur"); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Voix</h1>
+        <p className="lede">Le bouton <I.Speaker size={14} /> sous chaque réponse la lit à voix haute.</p>
+
+        <section className="card-box">
+          <label>Moteur de lecture</label>
+          <div className="seg" role="group" aria-label="Moteur de lecture">
+            <button className={pref.engine === "device" ? "on" : ""} onClick={() => { stop(); upd({ engine: "device" }); }}>Téléphone</button>
+            <button className={pref.engine === "eleven" ? "on" : ""} onClick={() => { stop(); upd({ engine: "eleven" }); }}>ElevenLabs</button>
+          </div>
+          <label>Vitesse</label>
+          <input type="range" min={0.7} max={1.3} step={0.05} value={pref.rate} onChange={(e) => upd({ rate: Number(e.target.value) })} aria-label="Vitesse de lecture" />
+          <p className="hint">{pref.rate === 1 ? "Normale" : pref.rate < 1 ? "Plus lente" : "Plus rapide"}</p>
+        </section>
+
+        <section className="card-box">
+          <label>Voix du téléphone (gratuit)</label>
+          {!canSpeakOnDevice() || voices.length === 0 ? (
+            <p className="hint">Aucune voix française trouvée. Android : Réglages › Gestion générale › Synthèse vocale › installe la voix française de Google.</p>
+          ) : (
+            <div className="voice-list">
+              {voices.map((v) => (
+                <div key={v.voiceURI} className={`voice-row ${pref.deviceVoice === v.voiceURI ? "on" : ""}`}>
+                  <button className="voice-pick" onClick={() => upd({ deviceVoice: v.voiceURI, engine: "device" })}>
+                    <b>{v.name}</b><span>{v.lang}{v.localService ? " · hors ligne" : ""}</span>
+                  </button>
+                  <button className="btn btn-line btn-small" onClick={() => speakDevice(SAMPLE, v.voiceURI, pref.rate)}><I.Speaker size={14} /> Test</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="hint">Le téléphone ne dit pas si une voix est d'homme ou de femme : teste-les et garde celle que tu préfères.</p>
+        </section>
+
+        <section className="card-box">
+          <label>ElevenLabs : voix naturelles et ta voix</label>
+          {st && !st.configured && (
+            <>
+              <ol className="steps">
+                <li>Crée un compte sur <b>elevenlabs.io</b> (gratuit pour les voix prêtes).</li>
+                <li>Profil → <b>Clés API</b> → crée une clé et copie-la.</li>
+                <li>Colle-la ici.</li>
+              </ol>
+              <input type="password" autoComplete="off" placeholder="Clé ElevenLabs" value={key} onChange={(e) => setKey(e.target.value)} />
+              <button className="btn btn-copper" disabled={busy || key.trim().length < 20}
+                onClick={() => run(async () => { await net.voiceConnect(key); setKey(""); await refresh(); upd({ engine: "eleven" }); }, "ElevenLabs connecté.")}>
+                Connecter
+              </button>
+            </>
+          )}
+          {st?.configured && (
+            <>
+              <p className="post-body"><I.Check size={16} /> Connecté</p>
+              <div className="voice-list">
+                {eVoices.map((v) => (
+                  <div key={v.id} className={`voice-row ${st.voice_id === v.id ? "on" : ""}`}>
+                    <button className="voice-pick" disabled={busy}
+                      onClick={() => run(async () => { await net.voiceSelect(v.id); clearCache(); upd({ engine: "eleven" }); await refresh(); })}>
+                      <b>{v.mine ? "★ " : ""}{v.name}</b>
+                      <span>{v.mine ? "Ta voix" : v.gender === "female" ? "Femme" : v.gender === "male" ? "Homme" : v.category}{v.accent ? ` · ${v.accent}` : ""}</span>
+                    </button>
+                    {v.preview && <button className="btn btn-line btn-small" onClick={() => { stop(); new Audio(v.preview).play().catch(() => {}); }}><I.Speaker size={14} /> Test</button>}
+                    {v.mine && <button className="btn btn-line btn-small" disabled={busy}
+                      onClick={() => { if (window.confirm(`Supprimer la voix « ${v.name} » chez ElevenLabs ?`)) run(async () => { await net.voiceDelete(v.id); clearCache(); await refresh(); }, "Voix supprimée."); }}>Supprimer</button>}
+                  </div>
+                ))}
+              </div>
+              <Cloner busy={busy} run={run} onDone={async () => { clearCache(); upd({ engine: "eleven" }); await refresh(); }} />
+              <button className="btn btn-ghost btn-small" disabled={busy}
+                onClick={() => { if (window.confirm("Déconnecter ElevenLabs ? La clé sera effacée du serveur.")) run(async () => { await net.voiceDisconnect(); clearCache(); upd({ engine: "device" }); await refresh(); }, "ElevenLabs déconnecté."); }}>
+                Déconnecter
+              </button>
+            </>
+          )}
+          {st && <p className="hint">{st.limits}</p>}
+        </section>
+        {msg && <div className="toast" role="status">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Enregistre ~40 s de la voix du patron (ou un fichier audio) et la clone. */
+function Cloner({ busy, run, onDone }: { busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; onDone: () => Promise<void> }) {
+  const [name, setName] = useState("Ma voix");
+  const [own, setOwn] = useState(false);
+  const [blob, setBlob] = useState<{ data: Blob; name: string } | null>(null);
+  const [rec, setRec] = useState(false);
+  const [secs, setSecs] = useState(0);
+  const [err, setErr] = useState("");
+  const mr = useRef<MediaRecorder | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => { window.clearInterval(timer.current); mr.current?.stream.getTracks().forEach((t) => t.stop()); }, []);
+
+  async function start() {
+    setErr("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: Blob[] = [];
+      const r = new MediaRecorder(stream);
+      r.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      r.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const type = r.mimeType || "audio/webm";
+        setBlob({ data: new Blob(chunks, { type }), name: `voix.${type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm"}` });
+      };
+      mr.current = r; r.start(); setRec(true); setSecs(0); setBlob(null);
+      timer.current = window.setInterval(() => setSecs((s) => { if (s >= 90) { r.stop(); window.clearInterval(timer.current); setRec(false); } return s + 1; }), 1000);
+    } catch {
+      setErr("Micro indisponible. Autorise le micro pour UniC AI, ou choisis un fichier audio ci-dessous.");
+    }
+  }
+  function end() { window.clearInterval(timer.current); mr.current?.state === "recording" && mr.current.stop(); setRec(false); }
+
+  return (
+    <div className="cloner">
+      <label>Cloner ma voix</label>
+      <p className="hint">Lis un texte à voix naturelle pendant <b>40 à 90 secondes</b>, au calme, sans musique. Plus c'est long et propre, plus la voix ressemble.</p>
+      <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-label="Nom de la voix" />
+      <div className="row">
+        {!rec ? <button className="btn btn-copper" onClick={start} disabled={busy}><I.Mic size={16} /> Enregistrer</button>
+              : <button className="btn btn-copper rec-on" onClick={end}><I.Stop size={16} /> Arrêter ({secs} s)</button>}
+        <label className="btn btn-line file-btn">Choisir un fichier
+          <input type="file" accept="audio/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setBlob({ data: f, name: f.name }); }} />
+        </label>
+      </div>
+      {err && <p className="error">{err}</p>}
+      {blob && !rec && (
+        <>
+          <audio controls src={URL.createObjectURL(blob.data)} className="sample" />
+          <label className="check-row"><input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} />
+            C'est ma propre voix (ou une personne qui m'y autorise).</label>
+          <button className="btn btn-copper" disabled={busy || !own || !name.trim()}
+            onClick={() => run(async () => { await net.voiceClone(name.trim(), blob.data, blob.name); setBlob(null); setOwn(false); await onDone(); }, "Voix créée et choisie.")}>
+            Créer ma voix
+          </button>
+        </>
+      )}
+      <p className="hint">Le cloner demande un abonnement ElevenLabs payant. Ton enregistrement part chez ElevenLabs, pas ailleurs.</p>
+    </div>
+  );
+}

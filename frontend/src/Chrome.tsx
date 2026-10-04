@@ -6,7 +6,7 @@ import { api, net, type Post } from "./api";
 /* ---------- Barre de page avec bouton retour (toutes les pages hors conversation) ---------- */
 
 const TITLES: Record<string, string> = {
-  parametres: "Paramètres", entreprise: "Informations société", courrier: "Courrier", reseaux: "Réseaux & Google",
+  parametres: "Paramètres", entreprise: "Informations société", courrier: "Courrier", reseaux: "Réseaux & Google", voix: "Voix",
   memoire: "Mémoire", sante: "Moteur & santé", materiaux: "Matériaux & prix", clients: "Clients",
   fournisseurs: "Fournisseurs", devis: "Devis", factures: "Factures", commandes: "Bons de commande",
   livraisons: "Bons de livraison", chantiers: "Chantiers", documents: "Fichiers reçus",

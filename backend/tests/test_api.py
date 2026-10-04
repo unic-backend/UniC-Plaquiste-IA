@@ -1629,3 +1629,59 @@ def test_chat_stream_falls_back_when_streaming_breaks(client, claude):
 def test_chat_stream_reports_errors_cleanly(client):
     ev = _ndjson(client.post("/api/chat/stream", json={"message": "   ", "file_ids": []}))
     assert ev[-1]["t"] == "error" and "vide" in ev[-1]["message"].lower()
+
+
+class _ElevenFake:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, method, path, key, **kw):
+        import httpx
+        self.calls.append((method, path, key, kw))
+        req = httpx.Request(method, "https://x")
+        if key == "bad-key-bad-key-bad-key-0000":
+            return httpx.Response(401, json={"detail": {"message": "invalid"}}, request=req)
+        if path == "/voices" and method == "GET":
+            return httpx.Response(200, request=req, json={"voices": [
+                {"voice_id": "v1", "name": "Rachel", "category": "premade", "labels": {"gender": "female"}},
+                {"voice_id": "v2", "name": "Adam", "category": "premade", "labels": {"gender": "male"}},
+                {"voice_id": "v3", "name": "Ma voix", "category": "cloned", "labels": {}}]})
+        if path == "/voices/add":
+            return httpx.Response(200, request=req, json={"voice_id": "vclone1"})
+        if path.startswith("/text-to-speech/"):
+            return httpx.Response(200, request=req, content=b"ID3-fake-mp3")
+        return httpx.Response(200, request=req, json={})
+
+
+def test_voice_connect_list_clone_and_speak(client, monkeypatch):
+    from app import voice
+    fake = _ElevenFake()
+    monkeypatch.setattr(voice, "_http", fake)
+    assert client.get("/api/voice").json()["configured"] is False
+    assert client.get("/api/voice/voices").status_code == 409
+    assert client.post("/api/voice/connect", json={"key": "bad-key-bad-key-bad-key-0000"}).status_code == 400
+    ok = client.post("/api/voice/connect", json={"key": "sk_real_key_real_key_real_0001"})
+    assert ok.status_code == 200 and ok.json()["configured"] is True
+    assert "sk_real" not in ok.text                       # la clé ne ressort jamais
+    voices = client.get("/api/voice/voices").json()
+    assert voices[0]["name"] == "Ma voix" and voices[0]["mine"] is True    # la voix du patron en premier
+    # clonage : refusé sans confirmation, refusé si trop court
+    sample = b"x" * 30_000
+    assert client.post("/api/voice/clone", data={"name": "Moi"}, files={"file": ("v.webm", sample, "audio/webm")}).status_code == 400
+    assert client.post("/api/voice/clone", data={"name": "Moi", "own_voice": "true"},
+                       files={"file": ("v.webm", b"x" * 100, "audio/webm")}).status_code == 400
+    c = client.post("/api/voice/clone", data={"name": "Moi", "own_voice": "true"}, files={"file": ("v.webm", sample, "audio/webm")})
+    assert c.status_code == 200 and c.json()["id"] == "vclone1"
+    assert client.get("/api/voice").json()["voice_id"] == "vclone1"   # sélectionnée d'office
+    r = client.post("/api/voice/speak", json={"text": "## Titre\n**Bonjour** [lien](http://x.sn) 12 m²\n\n**Sources**\n- a"})
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content == b"ID3-fake-mp3"
+    spoken = fake.calls[-1][3]["json"]["text"]
+    assert "http" not in spoken and "Sources" not in spoken and "#" not in spoken and "mètres carrés" in spoken
+    assert fake.calls[-1][1] == "/text-to-speech/vclone1"
+    assert client.delete("/api/voice/connect").json()["configured"] is False
+
+
+def test_clean_for_speech_drops_markup():
+    from app import voice
+    t = voice.clean_for_speech("| a | b |\n|---|---|\n- **Prix** : 5 000 FCFA\n`code`")
+    assert "|" not in t and "*" not in t and "francs CFA" in t
