@@ -2320,4 +2320,8 @@ def test_availability_note_reports_real_connectors(client):
     from app.database import SessionLocal
     with SessionLocal() as db:
         n = agent.availability_note(db)
-        assert "LinkedIn NON CONNECTÉ" in n and "site web NON CONNECTÉ" in n and n.startswith("\nÉTAT RÉEL")
+        assert n.startswith("\nÉTAT RÉEL")
+        want = "ACTIF" if linkedin.status(db)["connected"] else "NON CONNECTÉ"
+        assert f"LinkedIn {want}" in n   # reflète la base, pas une valeur figée
+        for k in ("courrier", "fiche Google", "site web", "voix ElevenLabs", "vision"):
+            assert k in n
