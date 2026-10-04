@@ -80,6 +80,19 @@ def plain_post(text: str | None) -> str | None:
     return t.strip()
 
 
+def clean_page_text(text: str) -> str:
+    """Nettoie le texte d'une page de site SANS toucher aux sous-titres « ## » ni aux listes « - » (lues par website.parse)."""
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", text or "")
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = t.replace("*", "")
+    t = re.sub(r"^[ \t]*•[ \t]+", "- ", t, flags=re.M)
+    t = re.sub(r"^[ \t]*#{1}[ \t]+", "## ", t, flags=re.M)        # « # Titre » → sous-titre
+    t = re.sub(r"^[ \t]*#{4,6}[ \t]+", "### ", t, flags=re.M)
+    t = re.sub(r"[ \t]+$", "", t, flags=re.M)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 def draft_post(platform: str, topic: str, details: str = "", memory: str = "") -> str | None:
     spec = PLATFORMS[platform]
     size = min(spec["max"], 900) if platform in ("linkedin", "facebook", "google_business") else spec["max"]
@@ -147,8 +160,7 @@ def draft_site_page(topic: str, details: str = "", memory: str = "") -> dict | N
             d = {}
         if not all(d.get(k) for k in ("title", "slug", "description", "content")):
             continue
-        content = plain_post(str(d["content"])) or ""
-        content = re.sub(r"^•\s+", "- ", content, flags=re.M)
+        content = clean_page_text(str(d["content"]))
         if "\n## " not in "\n" + content and attempt == 0:
             continue   # pas de sous-titres : on redemande une fois
         text = f"slug: {str(d['slug']).strip()}\ndescription: {' '.join(str(d['description']).split())}\n---\n{content}"

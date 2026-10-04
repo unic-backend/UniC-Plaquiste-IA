@@ -2037,3 +2037,10 @@ def test_draft_site_page_retries_when_subtitles_are_missing(monkeypatch):
     monkeypatch.setattr(assistant, "_ask", lambda *a, **k: next(answers))
     d = assistant.draft_site_page("Faux plafond BA13")
     assert d and "\n## Pourquoi le BA13" in d["text"] and d["text"].startswith("slug: faux-plafond-ba13")
+
+
+def test_clean_page_text_keeps_subtitles_and_lists():
+    from app.assistant import clean_page_text
+    out = clean_page_text("Intro **forte**.\n\n## Pourquoi\n\n• un\n- deux\n\n\n\n# Autre titre\nTexte *simple*")
+    assert "## Pourquoi" in out and "- un" in out and "- deux" in out and "## Autre titre" in out
+    assert "*" not in out and "\n\n\n" not in out
