@@ -54,11 +54,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path), { ...init, headers });
-  } catch {
-    throw new Error("Serveur injoignable. Vérifiez la connexion et l'adresse du serveur.");
+  let res: Response | undefined;
+  // lecture seule : on réessaie 2 fois (serveur qui redémarre après une mise à jour) ; jamais un envoi, pour éviter les doublons
+  const tries = (init.method || "GET").toUpperCase() === "GET" ? 3 : 1;
+  for (let i = 0; i < tries && !res; i++) {
+    try {
+      res = await fetch(apiUrl(path), { ...init, headers });
+    } catch {
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 2500));
+    }
+  }
+  if (!res) {
+    throw new Error(
+      "Serveur injoignable. Il redémarre peut-être après une mise à jour (1 à 2 min) : réessayez. Sinon vérifiez votre connexion.",
+    );
   }
   if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) {
