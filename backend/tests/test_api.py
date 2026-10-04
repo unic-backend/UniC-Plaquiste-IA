@@ -1272,3 +1272,33 @@ def test_quote_object_is_written_by_the_ai_and_printed_on_the_pdf(client):
     db.refresh(q)
     assert q.object_text.startswith("Fourniture et pose de plafonds")
     db.close()
+
+
+def test_with_claude_a_free_text_quote_request_never_hits_the_local_calculator(client, claude):
+    fake = claude(_scripted([("text", "Quelles sont les dimensions ?")]))
+    msg = "Fais moi un devis client Pape Diop de 25m² 15 plaque 20 cornières 2 paquet fourrure 1 paquet vis 1 sac enduits pas de main-d'œuvre"
+    out = client.post("/api/chat", json={"message": msg}).json()["message"]["content"]
+    assert "COMPRÉHENSION" not in out.upper() and "DONNÉES UTILISÉES" not in out.upper()
+    assert fake.calls
+
+
+def test_quote_from_lines_given_by_the_boss(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    out = s("create_quote", {
+        "client_name": "Pape Diop", "checks": "client, articles et quantités donnés par le patron",
+        "objet": "Fourniture de matériaux de plaquisterie pour une cloison de 25 m², sans main-d'œuvre.",
+        "lines": [{"article": "plaque BA13", "quantity": 15}, {"article": "cornières", "quantity": 20},
+                  {"article": "sac enduit", "quantity": 1}, {"article": "article inconnu xyz", "quantity": 3}]})
+    assert out.get("numero", "").endswith("PD"), out
+    q = db.query(Quotation).filter(Quotation.number == out["numero"]).first()
+    assert len(q.items) == 4 and [i.quantity for i in sorted(q.items, key=lambda x: x.position)] == [15, 20, 1, 3]
+    assert "article inconnu xyz" in out["lignes_sans_prix"]            # jamais de prix inventé
+    assert any(i.unit_price for i in q.items)                           # les articles de la grille sont chiffrés
+    # le même devis ne se recrée pas, mais de nouvelles lignes donnent un nouveau devis
+    again = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30, "lines": []})
+    assert "error" in again
+    db.close()

@@ -104,6 +104,12 @@ TOOLS: list[dict] = [
             "client_name": {"type": "string", "description": "Prénom et nom (ou raison sociale) du client, donnés par le patron"},
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
             "checks": {"type": "string", "description": "Ce que tu as VÉRIFIÉ avant de créer : client, dimensions, TVA, prix, hypothèses"},
+            "lines": {"type": "array", "description": ("Articles ET quantités donnés tels quels par le patron (ex. « 15 plaques, 20 cornières »). "
+                                                      "À utiliser à la place d'un calcul quand il énumère lui-même ce qu'il veut."),
+                      "items": {"type": "object", "properties": {
+                          "article": {"type": "string", "description": "Nom de l'article comme dit par le patron"},
+                          "sku": {"type": "string", "description": "SKU exact si tu l'as trouvé avec get_prices"},
+                          "quantity": {"type": "number"}, "unit": {"type": "string"}}, "required": ["article", "quantity"]}},
             "objet": {"type": "string", "description": ("« Objet du devis » : 1 à 3 phrases claires pour le client, rédigées par toi : nature "
                                                       "des travaux (faux plafonds, cloisons sèches, moulures, peinture…), lieu si connu, ce qui est "
                                                       "fourni et/ou posé. Pas de jargon, pas de chiffres inventés.")}},
@@ -191,7 +197,7 @@ AGENT_PROMPT = (
     "\nRÈGLES DE TRAVAIL : tu es une IA universelle, pas un automate de devis : tu ne fais que ce que le patron demande. "
     "Chaque document se construit à partir des informations données dans CETTE demande, de calculate_materials et de get_prices. "
     "N'utilise JAMAIS un ancien devis ou document comme modèle (ni lignes, ni quantités, ni prix, ni client) : list_documents sert à "
-    "retrouver un document, pas à le copier. Pour un devis, tu rédiges toi-même l'« Objet du devis » (nature des travaux : plafonds, cloisons, moulures, peinture…, lieu, fourni/posé), compréhensible par le client. Avant de créer un document : comprends la demande, calcule, vérifie (client, dimensions, "
+    "retrouver un document, pas à le copier. RÉPONSES COURTES : 2 à 5 lignes, jamais de formules, de tableaux ni de listes « hypothèses / informations manquantes » : le devis s'affiche déjà dans la conversation. Si le patron énumère lui-même articles et quantités, utilise `lines` de create_quote (aucun calcul) ; il a donné les données : crée le document sans redemander. Pour un devis, tu rédiges toi-même l'« Objet du devis » (nature des travaux : plafonds, cloisons, moulures, peinture…, lieu, fourni/posé), compréhensible par le client. Avant de créer un document : comprends la demande, calcule, vérifie (client, dimensions, "
     "TVA, prix, cohérence), puis crée ; signale les hypothèses, les lignes sans prix et les doutes AVANT de présenter le PDF."
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
@@ -370,6 +376,32 @@ class AgentSession:
             raise ConnectorError("Aucun métré en mémoire : appelle d'abord calculate_materials.", 400)
         return qs
 
+    def _lines_to_quantities(self, lines: list) -> list[dict]:
+        """Articles dits par le patron -> lignes de devis. Article reconnu = prix de la grille ; sinon « prix non renseigné »."""
+        from app import retrieval
+
+        def stem(w: str) -> str:
+            return w[:-1] if len(w) > 3 and w[-1] in "sx" else w
+
+        catalog = [(m, {stem(t) for t in retrieval.tokens(m.name)}) for m in
+                   self.db.query(Material).filter(Material.is_active.is_(True)).all()]
+        out = []
+        for ln in lines[:60]:
+            qty = float(ln.get("quantity") or 0)
+            if qty <= 0:
+                raise ConnectorError(f"Quantité invalide pour « {ln.get('article', '?')} ».", 400)
+            mat = None
+            if ln.get("sku"):
+                mat = next((m for m, _ in catalog if m.sku == ln["sku"]), None)
+            if mat is None:
+                want = {stem(t) for t in retrieval.tokens(ln.get("article", ""))}
+                hits = [(m, toks) for m, toks in catalog if want and want <= toks]
+                if hits:
+                    mat = min(hits, key=lambda h: len(h[1]))[0]
+            out.append({"sku": mat.sku if mat else "", "name": mat.name if mat else str(ln.get("article", "")).strip(),
+                        "quantity": qty, "unit": (ln.get("unit") or (mat.unit if mat else "") or "u"), "status": "confirmed"})
+        return out
+
     def _customer(self, name: str) -> Customer | None:
         n = (name or "").strip().lower()
         if not n:
@@ -383,7 +415,11 @@ class AgentSession:
         self.documents.append({"kind": kind, "id": row.id})
 
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
-                        checks: str = "", objet: str = "") -> dict:
+                        checks: str = "", objet: str = "", lines: list | None = None) -> dict:
+        if lines:
+            qty = self._lines_to_quantities(lines)
+            self.state["last_calc"] = {"quantities": qty, "assumptions": [], "missing": []}
+            self.state.pop("calc_quote_id", None)
         qty = self._quantities()
         if len(objet.strip()) < 25:
             raise ConnectorError("Rédige l'« Objet du devis » (1 à 3 phrases claires : nature des travaux, lieu, fourni/posé) dans `objet`.", 400)

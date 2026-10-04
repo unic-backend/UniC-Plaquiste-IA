@@ -466,10 +466,9 @@ def handle_turn(
     # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
     # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
     chain0 = provider_chain(deep)
-    if chain0 and chain0[0].id == "claude" and intent == "greeting":
-        intent = "chat"   # un bonjour appelle un bonjour, pas le mode d'emploi
-    if chain0 and chain0[0].id == "claude" and intent in ("create_quote", "create_po", "create_dn", "create_invoice"):
-        intent = "chat"   # l'IA lit, calcule, vérifie puis crée avec ses outils ; l'automate ne sert que sans Claude
+    if chain0 and chain0[0].id == "claude" and intent in (
+            "greeting", "calculate", "prices", "create_quote", "create_po", "create_dn", "create_invoice"):
+        intent = "chat"   # avec Claude, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":
         state.pop("pending", None)
@@ -890,7 +889,8 @@ def handle_turn(
         # general: knowledge + optional LLM polish. Never invent.
         arts = _search_knowledge(db, text)
         deep = deep or bool(DEEP_RE.search(text))
-        calc_try = _calc_for(db, text)
+        claude_first = bool(chain0) and chain0[0].id == "claude"
+        calc_try = None if claude_first else _calc_for(db, text)   # avec Claude, c'est lui qui calcule (outil), pas le parseur local
         if calc_try and calc_try.quantities:
             reply_text = _fmt_calc(calc_try)
             structured = calc_try.to_dict()
@@ -965,6 +965,10 @@ def handle_turn(
 
     if file_notes and intent not in ("analyze_doc", "analyze_photo", "site_report", "search_doc"):
         reply_text = "\n".join(file_notes) + ("\n\n" + reply_text if reply_text else "")
+
+    if reply_text and intent in ("calculate", "prices", "create_quote", "create_po", "create_dn", "create_invoice") \
+            and not (chain0 and chain0[0].id == "claude"):
+        reply_text += "\n\n_Réponse du moteur local : Claude est indisponible, donc plus limitée._"
 
     _save_state(conv, state)
     db.commit()
