@@ -832,3 +832,5 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .lede { font-size: 15px; font-weight: 500; line-height: 1.45; }
 .card-box label { text-align: left; }
 .prefs label { justify-content: flex-start; }
+.hint, .steps, .steps li, .lede, .empty { font-weight: 600; }
+.steps li { margin-bottom: 8px; }
