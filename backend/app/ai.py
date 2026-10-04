@@ -21,6 +21,30 @@ class AIResult:
     raw: dict | None = None
 
 
+def explain_error(exc: Exception) -> str:
+    """Raison lisible d'un échec Claude (jamais la clé, jamais le texte brut du serveur sans nettoyage)."""
+    status = getattr(exc, "status_code", None)
+    msg = str(getattr(exc, "message", "") or exc).lower()
+    if "credit" in msg or "balance" in msg or status == 402:
+        return "crédit Anthropic épuisé : recharge sur console.anthropic.com › Plans & Billing"
+    if status == 401:
+        return "clé API refusée (vérifie ANTHROPIC_API_KEY sur Render)"
+    if status == 403:
+        return "accès refusé par Anthropic (permission du compte ou de la clé)"
+    if status == 404:
+        return "modèle introuvable ou non autorisé pour ta clé"
+    if status == 429:
+        return "trop de requêtes en même temps : réessaie dans une minute"
+    if status and status >= 500:
+        return "Claude est surchargé ou en panne : réessaie dans un instant"
+    if status == 400:
+        return f"requête refusée par Claude ({msg[:120]})"
+    name = type(exc).__name__
+    if "timeout" in name.lower() or "connection" in name.lower():
+        return "connexion à Claude impossible ou trop lente : réessaie"
+    return name
+
+
 class AIProvider:
     id = "base"
     kind = "chat"
@@ -222,7 +246,7 @@ class ClaudeAIProvider(AIProvider):
                 text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
             return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used})
         except Exception as exc:  # la clé n'apparaît jamais dans le message
-            return AIResult("", self.id, model, False, f"claude: {type(exc).__name__}", raw={"tools_used": used})
+            return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}", raw={"tools_used": used})
 
 
 class VisionAIProvider(AIProvider):
@@ -291,7 +315,7 @@ def provider_chain(deep: bool = False) -> list[AIProvider]:
     """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
     sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
     # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
-    order = ["claude", "local", "cloud"] if deep else ["local", "cloud", "claude"]
+    order = ["claude", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 
 

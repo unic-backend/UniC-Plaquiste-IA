@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from app import calc, connectors, pricecheck, revise, trust, google_business as gbp, mailbox, metier
 from app.connectors import ConnectorError
-from app.models import Customer, DeliveryNote, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
+from app.models import ConstructionSite, Customer, DeliveryNote, Project, Supplier, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
 from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
-                          invoice_from_quote, quotation_from_quantities)
+                          invoice_from_quote, next_number, quotation_from_quantities)
 from app.social import PLATFORMS
 
 logger = logging.getLogger("unic.agent")
@@ -163,6 +163,22 @@ TOOLS: list[dict] = [
             "number": {"type": "string"}}, "required": ["kind", "number"], "additionalProperties": False},
     },
     {
+        "name": "list_directory",
+        "description": "Liste les clients, fournisseurs ou chantiers/projets enregistrés (nom, code).",
+        "input_schema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["customers", "suppliers", "projects"]}}, "required": ["kind"], "additionalProperties": False},
+    },
+    {
+        "name": "create_contact",
+        "description": ("Crée une fiche CLIENT, FOURNISSEUR ou un CHANTIER/PROJET quand le patron le demande. "
+                        "N'invente ni adresse, ni téléphone, ni e-mail."),
+        "input_schema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["customer", "supplier", "project"]},
+            "name": {"type": "string", "description": "Nom exact donné par le patron"},
+            "customer_name": {"type": "string", "description": "Projet seulement : client rattaché, s'il est connu"}},
+            "required": ["kind", "name"], "additionalProperties": False},
+    },
+    {
         "name": "list_documents",
         "description": ("Cherche / liste les devis, factures, bons de commande ou bons de livraison (numéro, client, statut, total). "
                         "query : morceau du nom du client, du numéro ou du titre ; min_total / max_total : montant."),
@@ -181,6 +197,7 @@ TOOL_LABELS = {
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
+    "list_directory": "Fiches consultées", "create_contact": "Fiche créée",
 }
 
 AGENT_PROMPT = (
@@ -516,6 +533,35 @@ class AgentSession:
         if self.state.get("last_quote_id") and kind == "quote" and self.db.get(Quotation, self.state["last_quote_id"]) is None:
             self.state.pop("last_quote_id", None)
         return {"retire": gone, "note": "Brouillon retiré de la bibliothèque."}
+
+    def _t_list_directory(self, kind: str) -> dict:
+        model = {"customers": Customer, "suppliers": Supplier, "projects": Project}.get(kind)
+        if model is None:
+            raise ConnectorError("Type inconnu.", 400)
+        rows = self.db.query(model).order_by(model.name).limit(60).all()
+        return {"fiches": [{"code": r.code, "nom": r.name} for r in rows], "total": len(rows)}
+
+    def _t_create_contact(self, kind: str, name: str, customer_name: str = "") -> dict:
+        name = (name or "").strip()
+        if len(name) < 2:
+            raise ConnectorError("Nom manquant : demande-le au patron.", 400)
+        if kind == "customer":
+            row = Customer(code=next_number(self.db, "customer"), name=name, created_by=self.user_id)
+            self.db.add(row)
+        elif kind == "supplier":
+            row = Supplier(code=next_number(self.db, "supplier"), name=name)
+            self.db.add(row)
+        elif kind == "project":
+            cust = self._customer(customer_name)
+            row = Project(code=next_number(self.db, "project"), name=name, customer_id=cust.id if cust else None,
+                          created_by=self.user_id, status="active")
+            self.db.add(row)
+            self.db.flush()
+            self.db.add(ConstructionSite(project_id=row.id, name=name, status="planned"))
+        else:
+            raise ConnectorError("Type inconnu.", 400)
+        self.db.commit()
+        return {"code": row.code, "nom": row.name, "note": "Fiche créée sans autre information (rien d'inventé)."}
 
     def _t_list_documents(self, kind: str, query: str = "", min_total: float | None = None,
                           max_total: float | None = None) -> dict:

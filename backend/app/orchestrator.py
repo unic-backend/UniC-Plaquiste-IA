@@ -467,7 +467,9 @@ def handle_turn(
     # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
     chain0 = provider_chain(deep)
     if chain0 and chain0[0].id == "claude" and intent in (
-            "greeting", "calculate", "prices", "create_quote", "create_po", "create_dn", "create_invoice"):
+            "greeting", "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
+            "list_customers", "list_suppliers", "list_projects", "list_quotes", "list_invoices",
+            "create_customer", "create_supplier", "create_project"):
         intent = "chat"   # avec Claude, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":
@@ -951,6 +953,9 @@ def handle_turn(
                             + (" (clé absente)" if not deep_available() else " (échec)")
                             + f" — réponse du moteur « {ai.provider} »._"
                         )
+                elif chain[0].id == "claude":
+                    reason = (ai.error or "").removeprefix("claude: ") or "aucune réponse"
+                    reply_text = f"Claude n'a pas pu répondre : {reason}. Rien n'a été inventé à sa place. Réessaie."
                 else:
                     reply_text = (
                         "Je n'ai pas cette information dans la base UniC, et le moteur IA ne répond pas "

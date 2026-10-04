@@ -302,12 +302,12 @@ def test_google_bad_review_id_and_denied(client, monkeypatch):
     assert r.status_code == 502 and "Accès refusé" in r.json()["detail"]
 
 
-def test_ai_chain_local_first_claude_on_deep(monkeypatch):
+def test_claude_is_always_first_in_the_chain(monkeypatch):
     from app import ai
     from app.config import settings
     monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
     monkeypatch.setattr(settings, "anthropic_api_key", "k")
-    assert [p.id for p in ai.provider_chain()] == ["local", "claude"]
+    assert [p.id for p in ai.provider_chain()] == ["claude", "local"]
     assert [p.id for p in ai.provider_chain(deep=True)] == ["claude", "local"]
     monkeypatch.setattr(settings, "local_ai_url", "")
     assert [p.id for p in ai.provider_chain()] == ["claude"]
@@ -1301,4 +1301,36 @@ def test_quote_from_lines_given_by_the_boss(client):
     # le même devis ne se recrée pas, mais de nouvelles lignes donnent un nouveau devis
     again = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30, "lines": []})
     assert "error" in again
+    db.close()
+
+
+def test_claude_failure_is_explained_not_replaced_by_a_local_guess(client, claude):
+    class Boom(Exception):
+        status_code = 400
+        message = "Your credit balance is too low to access the Anthropic API."
+    fake = claude(lambda kind, kw: (_ for _ in ()).throw(Boom()))
+    out = client.post("/api/chat", json={"message": "Quelle est la capitale du Sénégal ?"}).json()["message"]["content"]
+    assert "Claude n'a pas pu répondre" in out and "crédit" in out and "Dakar" not in out
+    assert fake.calls
+
+
+def test_every_business_question_goes_to_claude_first(client, claude):
+    fake = claude(_scripted([("text", "ok")] * 12))
+    for msg in ("liste des clients", "mes devis", "nouveau client Awa Sow", "prix du BA13", "aide",
+                "cloison 12 m x 2,5 m deux faces", "base de connaissance unic"):
+        n = len(fake.calls)
+        client.post("/api/chat", json={"message": msg})
+        assert len(fake.calls) > n, msg
+
+
+def test_agent_directory_tools(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    made = s("create_contact", {"kind": "customer", "name": "Awa Sow Test"})
+    assert made["nom"] == "Awa Sow Test"
+    names = [f["nom"] for f in s("list_directory", {"kind": "customers"})["fiches"]]
+    assert "Awa Sow Test" in names
+    assert "error" in s("create_contact", {"kind": "customer", "name": ""})
     db.close()
