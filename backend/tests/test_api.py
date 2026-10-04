@@ -1397,3 +1397,47 @@ def test_quote_number_rule_date_plus_client_initials(client):
     assert document_number(db, "Xavi Zola", d).endswith("-1004-XZ")       # autre client, même jour : seules les initiales changent
     assert document_number(db, "Qazim Wolde", date(2026, 10, 5)).endswith("-1005-QW")   # autre jour : MMJJ change
     db.close()
+
+
+def test_each_client_gets_their_own_number_even_with_same_initials(client):
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from app.services import document_number
+    db = SessionLocal()
+    d = date(2026, 11, 20)
+    made = {}
+    for who in ("Pape Diop", "Paul Dieng", "Pape Diop", "Awa Fall", "Paul Dieng"):
+        n = document_number(db, who, d)
+        assert n not in made.values(), (who, n)
+        db.add(Quotation(number=n, title="t", client_label=who, status="draft"))
+        db.commit()
+        made.setdefault(who, n)
+        made[f"{who}#{n}"] = n
+    nums = [v for k, v in made.items() if "#" in k]
+    assert len(set(nums)) == 5
+    assert made["Pape Diop"].endswith("-PD") and made["Paul Dieng"].endswith("-PDI") and made["Awa Fall"].endswith("-AF")
+    assert [n for k, n in made.items() if k.startswith("Pape Diop#")][1].endswith("-PD2")   # même client : 2
+    assert [n for k, n in made.items() if k.startswith("Paul Dieng#")][1].endswith("-PDI2")
+    db.close()
+
+
+def test_search_by_client_name_finds_every_document_without_date(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from app.services import document_number
+    db = SessionLocal()
+    for d in ("2026-12-01", "2026-12-02"):
+        from datetime import date
+        n = document_number(db, "Mamadou Séne", date.fromisoformat(d))
+        db.add(Quotation(number=n, title="Devis", client_label="Mamadou Séne", status="draft", total=1000))
+        db.commit()
+    s = AgentSession(db, None, {})
+    for q in ("Mamadou Séne", "sene mamadou", "mamadou"):
+        r = s("list_documents", {"query": q})
+        mine = [d for d in r["documents"] if d["client"] == "Mamadou Séne"]
+        assert len(mine) == 2 and len({d["numero"] for d in mine}) == 2, q
+    api = client.get("/api/quotes").json()
+    assert any(x["client_name"] == "Mamadou Séne" for x in api)
+    db.close()

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import object_session, Session
 
 from app.capabilities import health_dashboard, registry_snapshot
 from app.config import settings
@@ -44,6 +44,7 @@ from app import pricecheck
 from app.orchestrator import handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
+    client_name_of,
     apply_payment,
     approve_entity,
     audit,
@@ -549,7 +550,7 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
@@ -721,10 +722,16 @@ def approve_invoice(iid: str, db: Session = Depends(get_db), user: User = Depend
     return {"status": i.status}
 
 
+def _client_of(doc) -> str:
+    db = object_session(doc)
+    return client_name_of(db, doc) if db is not None else ""
+
+
 def _invoice(i: Invoice) -> dict:
     return {
         "id": i.id, "number": i.number, "kind": i.kind, "title": i.title, "status": i.status,
         "customer_name": i.customer.name if i.customer else None,
+        "client_name": _client_of(i),
         "subtotal": i.subtotal, "vat_amount": i.vat_amount, "total": i.total,
         "paid": i.paid, "remaining": i.remaining, "currency": i.currency,
         "artifact_id": i.artifact_id,
@@ -775,7 +782,7 @@ def approve_po(oid: str, db: Session = Depends(get_db), user: User = Depends(get
 def _po(p: PurchaseOrder) -> dict:
     return {
         "id": p.id, "number": p.number, "title": p.title, "status": p.status, "total": p.total,
-        "supplier_name": p.supplier.name if p.supplier else None, "artifact_id": p.artifact_id,
+        "supplier_name": p.supplier.name if p.supplier else None, "client_name": _client_of(p), "artifact_id": p.artifact_id,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "items": [
             {"position": it.position, "description": it.description, "quantity": it.quantity,
@@ -805,7 +812,7 @@ def get_dn(nid: str, db: Session = Depends(get_db), user: User = Depends(get_cur
 def _dn(n: DeliveryNote) -> dict:
     return {
         "id": n.id, "number": n.number, "title": n.title, "status": n.status,
-        "customer_name": n.customer.name if n.customer else None, "artifact_id": n.artifact_id,
+        "customer_name": n.customer.name if n.customer else None, "client_name": _client_of(n), "artifact_id": n.artifact_id,
         "created_at": n.created_at.isoformat() if n.created_at else None,
         "items": [
             {"position": it.position, "description": it.description, "quantity": it.quantity, "unit": it.unit}

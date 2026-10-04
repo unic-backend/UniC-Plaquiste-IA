@@ -757,8 +757,9 @@ function applyDocFilter(rows: any[], f: DocFilter): any[] {
   const max = f.max === "" ? null : Number(f.max);
   return rows.filter((r) => {
     if (q) {
-      const hay = [r.number, r.title, r.customer_name, r.client_label, r.supplier_name, r.kind, r.status].join(" ").toLowerCase();
-      if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+      const flat = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const hay = flat([r.client_name, r.customer_name, r.client_label, r.number, r.title, r.supplier_name, r.kind, r.status].join(" "));
+      if (!flat(q).split(/\s+/).every((w) => hay.includes(w))) return false;
     }
     const day = (r.created_at || "").slice(0, 10);
     if (f.from && (!day || day < f.from)) return false;
@@ -1088,7 +1089,7 @@ function DevisList() {
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={shown.map((q) => [q.number, q.title, q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
       onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
@@ -1225,7 +1226,7 @@ function Factures() {
       title="Factures"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={shown.map((q) => [q.number, q.kind, q.customer_name, q.status, q.total, q.paid, q.remaining])}
+      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, q.status, q.total, q.paid, q.remaining])}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
@@ -1237,8 +1238,8 @@ function Commandes() {
     <TablePage
       title="Bons de commande"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
-      columns={["N°", "Titre", "Fournisseur", "Statut", "Total"]}
-      rows={shown.map((q) => [q.number, q.title, q.supplier_name, q.status, q.total ?? "incomplet"])}
+      columns={["N°", "Titre", "Client / fournisseur", "Statut", "Total"]}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, q.status, q.total ?? "incomplet"])}
       onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
@@ -1251,7 +1252,7 @@ function Livraisons() {
       title="Bons de livraison"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
-      rows={shown.map((q) => [q.number, q.title, q.customer_name, q.status])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, q.status])}
       onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );

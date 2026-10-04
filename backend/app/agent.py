@@ -15,7 +15,7 @@ from app import calc, connectors, pricecheck, revise, trust, google_business as 
 from app.connectors import ConnectorError
 from app.models import ConstructionSite, Customer, DeliveryNote, Project, Supplier, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
 from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
-                          invoice_from_quote, next_number, quotation_from_quantities)
+                          invoice_from_quote, next_number, quotation_from_quantities, search_documents)
 from app.social import PLATFORMS
 
 logger = logging.getLogger("unic.agent")
@@ -182,11 +182,12 @@ TOOLS: list[dict] = [
     },
     {
         "name": "list_documents",
-        "description": ("Cherche / liste les devis, factures, bons de commande ou bons de livraison (numéro, client, statut, total). "
-                        "query : morceau du nom du client, du numéro ou du titre ; min_total / max_total : montant."),
+        "description": ("Retrouve des documents (devis, factures, bons de commande, bons de livraison) à partir du NOM DU CLIENT "
+                        "(prénom et nom, dans n'importe quel ordre, sans accent), d'un morceau de numéro ou du titre ; sans date ni année. "
+                        "kind omis = tous les types. Renvoie CHAQUE document avec son propre numéro."),
         "input_schema": {"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]}, "query": {"type": "string"},
-            "min_total": {"type": "number"}, "max_total": {"type": "number"}}, "required": ["kind"], "additionalProperties": False},
+            "kind": {"type": "string", "enum": ["all", "quote", "invoice", "po", "dn"]}, "query": {"type": "string"},
+            "min_total": {"type": "number"}, "max_total": {"type": "number"}}, "additionalProperties": False},
     },
 ]
 
@@ -565,27 +566,15 @@ class AgentSession:
         self.db.commit()
         return {"code": row.code, "nom": row.name, "note": "Fiche créée sans autre information (rien d'inventé)."}
 
-    def _t_list_documents(self, kind: str, query: str = "", min_total: float | None = None,
+    def _t_list_documents(self, kind: str = "all", query: str = "", min_total: float | None = None,
                           max_total: float | None = None) -> dict:
-        model = {"quote": Quotation, "invoice": Invoice, "po": PurchaseOrder, "dn": DeliveryNote}.get(kind)
-        if model is None:
+        if kind not in ("all", "quote", "invoice", "po", "dn"):
             raise ConnectorError("Type de document inconnu.", 400)
-        words = (query or "").lower().split()
-        out = []
-        for r in self.db.query(model).order_by(model.created_at.desc()).all():
-            who = getattr(getattr(r, "customer", None), "name", None) or getattr(r, "client_label", "") or \
-                getattr(getattr(r, "supplier", None), "name", "") or ""
-            hay = f"{r.number} {r.title} {who}".lower()
-            total = getattr(r, "total", None)
-            if not all(w in hay for w in words):
-                continue
-            if min_total is not None and not (total is not None and total >= min_total):
-                continue
-            if max_total is not None and not (total is not None and total <= max_total):
-                continue
-            out.append({"numero": r.number, "client": who, "statut": r.status, "total": total,
-                        "date": r.created_at.date().isoformat() if r.created_at else None})
-        return {"documents": out[:15], "trouves": len(out)}
+        found = search_documents(self.db, query, kind, min_total, max_total)
+        for f in found:
+            f.pop("id", None)
+        return {"documents": found, "trouves": len(found),
+                "note": "Chaque document a son propre numéro (initiales du client + date). Donne-les tous, sans les mélanger."}
 
 
 def availability_note() -> str:

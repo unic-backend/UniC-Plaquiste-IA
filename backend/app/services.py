@@ -93,16 +93,87 @@ def _taken_numbers(db: Session, prefix: str) -> set[str]:
     return out
 
 
+def _norm_name(name: str | None) -> str:
+    return " ".join(sorted(w for w in _SEPARATORS.split(str(name or "").strip().lower().translate(_ACCENTS)) if w))
+
+
+def _quote_client(q: Quotation) -> str:
+    return _norm_name(q.customer.name if q.customer else q.client_label)
+
+
+def _suffix_candidates(name: str | None) -> list[str]:
+    """OD, puis ODI, ODIO… : de quoi distinguer deux clients qui ont les mêmes initiales."""
+    first = client_initials(name)
+    clean = str(name or "").strip().lower().translate(_ACCENTS)
+    words = [w for w in _SEPARATORS.split(clean) if w.isalnum() and w not in _LINK_WORDS] or [""]
+    last = words[-1]
+    return [first] + [first + last[1:1 + k].upper() for k in range(1, 5) if last[1:1 + k]]
+
+
 def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
-    """UC-AAAA-MMJJ-CLI. Même client, même jour : le suivant prend 2, 3… (comme UC-2026-0804-FG2)."""
+    """UC-AAAA-MMJJ-CLI. Chaque client a SON numéro : même client, même jour → 2, 3… (UC-2026-0804-FG2) ;
+    autre client aux mêmes initiales le même jour → initiales allongées (PD → PDI), jamais un numéro partagé."""
     day = on or datetime.now(timezone.utc).date()
-    base = f"UC-{day.year}-{day.month:02d}{day.day:02d}-{client_initials(party_name)}"
-    taken = _taken_numbers(db, base)
-    number, i = base, 2
-    while number in taken:
-        number = f"{base}{i}"
-        i += 1
-    return number
+    root = f"UC-{day.year}-{day.month:02d}{day.day:02d}-"
+    me = _norm_name(party_name)
+    for suffix in _suffix_candidates(party_name):
+        base = root + suffix
+        owners = {
+            _quote_client(q) for q in db.query(Quotation).filter(Quotation.number.like(f"{base}%")).all()
+            if re.fullmatch(re.escape(base) + r"\d*", q.number)
+        }
+        owners.discard("")   # devis ancien sans nom de client : on ne peut pas affirmer qu'il est d'un autre client
+        if owners and owners != {me}:
+            continue   # ce suffixe appartient déjà à un autre client ce jour-là
+        taken = _taken_numbers(db, base)
+        number, i = base, 2
+        while number in taken:
+            number = f"{base}{i}"
+            i += 1
+        return number
+    return f"{root}{client_initials(party_name)}{len(_taken_numbers(db, root)) + 2}"   # dernier recours, toujours unique
+
+
+def client_name_of(db: Session, doc) -> str:
+    """Client d'un document : sa fiche, son nom saisi, ou celui du devis dont il découle (facture, bon)."""
+    if isinstance(doc, Quotation):
+        return (doc.customer.name if doc.customer else doc.client_label) or ""
+    cust = getattr(doc, "customer", None)
+    if cust is not None:
+        return cust.name
+    qid = getattr(doc, "quotation_id", None)
+    quote = db.get(Quotation, qid) if qid else None
+    if quote is None:   # bon de commande / de livraison : numéro du devis + « -BC », « -BL »
+        root = re.sub(r"-(BC|BL|F|AV)\d*$", "", doc.number or "")
+        quote = db.query(Quotation).filter(Quotation.number == root).first() if root != doc.number else None
+    return client_name_of(db, quote) if quote is not None else ""
+
+
+def search_documents(db: Session, query: str = "", kind: str = "all", min_total: float | None = None,
+                     max_total: float | None = None, limit: int = 30) -> list[dict]:
+    """Retrouve des documents par client (prénom/nom dans n'importe quel ordre, sans accents), numéro ou titre."""
+    models = {"quote": Quotation, "invoice": Invoice, "po": PurchaseOrder, "dn": DeliveryNote}
+    wanted = models if kind in ("all", "", None) else {kind: models[kind]}
+    words = [w for w in _SEPARATORS.split(str(query or "").lower().translate(_ACCENTS)) if w]
+    out = []
+    for k, model in wanted.items():
+        for r in db.query(model).order_by(model.created_at.desc()).all():
+            who = client_name_of(db, r)
+            hay = f"{who} {r.number} {r.title}".lower().translate(_ACCENTS)
+            if not all(w in hay for w in words):
+                continue
+            total = getattr(r, "total", None)
+            if min_total is not None and not (total is not None and total >= min_total):
+                continue
+            if max_total is not None and not (total is not None and total <= max_total):
+                continue
+            out.append({"kind": k, "id": r.id, "numero": r.number, "client": who, "statut": r.status, "total": total,
+                        "objet": (getattr(r, "object_text", "") or r.title or "")[:160],
+                        "date": r.created_at.date().isoformat() if r.created_at else None, "_t": r.created_at})
+    out.sort(key=lambda x: x["_t"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    for x in out:
+        x.pop("_t", None)
+    return out[:limit]
 
 
 DOC_CODES = {"invoice": "F", "credit": "AV", "po": "BC", "dn": "BL"}
