@@ -252,6 +252,30 @@ def download_artifact(aid: str, db: Session = Depends(get_db), user: User = Depe
     return FileResponse(path, media_type=a.mime_type, filename=a.filename)
 
 
+@router.get("/artifacts/{aid}/preview")
+def preview_artifact(aid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Aperçu du PDF avant téléchargement : une image par page (6 pages au plus)."""
+    import base64
+    import io
+
+    a = db.get(Artifact, aid)
+    if a is None or not Path(a.path).exists():
+        raise HTTPException(404, "Document introuvable")
+    if a.mime_type != "application/pdf":
+        raise HTTPException(415, "Aperçu disponible pour les PDF seulement")
+    try:
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(a.path))
+        images = []
+        for i in range(min(len(pdf), 6)):
+            buf = io.BytesIO()
+            pdf[i].render(scale=1.6).to_pil().convert("RGB").save(buf, format="JPEG", quality=82)
+            images.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode())
+        return {"pages": len(pdf), "images": images, "filename": a.filename, "version": a.version}
+    except Exception as exc:   # aperçu impossible : le téléchargement reste disponible
+        raise HTTPException(503, f"Aperçu indisponible ({type(exc).__name__}). Utilisez Télécharger.")
+
+
 @router.get("/files/{fid}/download")
 def download_file(fid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     f = db.get(StoredFile, fid)
@@ -525,7 +549,7 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,

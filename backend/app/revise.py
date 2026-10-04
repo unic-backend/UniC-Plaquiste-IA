@@ -89,7 +89,7 @@ def _recompute(kind: str, doc, items: list) -> None:
 
 def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | None = None, add: list[dict] | None = None,
            update: list[dict] | None = None, title: str | None = None, vat_rate: float | None = None,
-           client_name: str | None = None, objet: str | None = None) -> list[str]:
+           client_name: str | None = None, objet: str | None = None, lieu: str | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
     _draft_only(kind, doc)
     _model, item_model, fk, _col = KINDS[kind]
@@ -125,6 +125,9 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     if title:
         doc.title = title
         changes.append("titre modifié")
+    if lieu and kind == "quote":
+        doc.site_location = lieu.strip()[:255]
+        changes.append("lieu du chantier modifié")
     if objet and kind == "quote":
         doc.object_text = objet.strip()[:900]
         changes.append("objet du devis modifié")

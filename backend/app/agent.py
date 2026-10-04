@@ -110,6 +110,7 @@ TOOLS: list[dict] = [
                           "article": {"type": "string", "description": "Nom de l'article comme dit par le patron"},
                           "sku": {"type": "string", "description": "SKU exact si tu l'as trouvé avec get_prices"},
                           "quantity": {"type": "number"}, "unit": {"type": "string"}}, "required": ["article", "quantity"]}},
+            "lieu": {"type": "string", "description": "Lieu du chantier donné par le patron (quartier, ville) ; imprimé sous le client. Vide si inconnu."},
             "objet": {"type": "string", "description": ("« Objet du devis » : 1 à 3 phrases claires pour le client, rédigées par toi : nature "
                                                       "des travaux (faux plafonds, cloisons sèches, moulures, peinture…), lieu si connu, ce qui est "
                                                       "fourni et/ou posé. Pas de jargon, pas de chiffres inventés.")}},
@@ -152,6 +153,7 @@ TOOLS: list[dict] = [
                 "required": ["description", "quantity"]}},
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
             "objet": {"type": "string", "description": "Nouvel « Objet du devis » (devis seulement)"},
+            "lieu": {"type": "string", "description": "Nouveau lieu du chantier (devis seulement)"},
             "client_name": {"type": "string"}}, "required": ["kind"], "additionalProperties": False},
     },
     {
@@ -432,7 +434,7 @@ class AgentSession:
         self.documents.append({"kind": kind, "id": row.id})
 
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
-                        checks: str = "", objet: str = "", lines: list | None = None) -> dict:
+                        checks: str = "", objet: str = "", lines: list | None = None, lieu: str = "") -> dict:
         if lines:
             qty = self._lines_to_quantities(lines)
             self.state["last_calc"] = {"quantities": qty, "assumptions": [], "missing": []}
@@ -456,7 +458,7 @@ class AgentSession:
             project_id=self.project_id, user_id=self.user_id, client_name=None if cust else client_name or None,
             notes="Devis préparé par JARVIS à partir du métré de la conversation.",
             assumptions=(self.state.get("last_calc") or {}).get("assumptions"),
-            missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, **kwargs)
+            missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, lieu=lieu, **kwargs)
         anomalies = pricecheck.check_quote(q)
         if anomalies:   # un devis faux n'entre pas dans la bibliothèque
             revise.discard(self.db, "quote", q, self.user_id)
@@ -504,13 +506,13 @@ class AgentSession:
 
     def _t_revise_document(self, kind: str, number: str = "", remove: list | None = None, update: list | None = None,
                            add: list | None = None, title: str = "", vat_rate: float | None = None,
-                           client_name: str = "", objet: str = "") -> dict:
+                           client_name: str = "", objet: str = "", lieu: str = "") -> dict:
         last = self.state.get("last_quote_id") if kind == "quote" else None
         try:
             doc = revise.find(self.db, kind, number, last)
             changes = revise.revise(self.db, kind, doc, user_id=self.user_id, remove=remove, update=update, add=add,
                                     title=title or None, vat_rate=vat_rate, client_name=client_name or None,
-                                    objet=objet or None)
+                                    objet=objet or None, lieu=lieu or None)
         except revise.ReviseError as exc:
             raise ConnectorError(str(exc), 400)
         if kind == "quote":

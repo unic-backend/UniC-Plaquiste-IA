@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
@@ -91,10 +92,58 @@ function fmt(n: number | null | undefined, cur = ""): string {
 
 const DOC_LABEL: Record<string, string> = { quote: "Devis", invoice: "Facture", po: "Bon de commande", dn: "Bon de livraison" };
 
+const artifactIdOf = (d: any): string | null =>
+  d?.artifact_id || (d?.download_url ? (/\/artifacts\/([^/]+)\/download/.exec(d.download_url) || [])[1] || null : null);
+
+/** Aperçu plein écran du PDF avant de le télécharger : corriger, approuver, puis télécharger. */
+function PreviewModal({ kind, d, onClose, onChanged, onDownload }: {
+  kind: "quote" | "invoice" | "po" | "dn"; d: any; onClose: () => void; onChanged: () => void; onDownload: (() => void) | null;
+}) {
+  const [imgs, setImgs] = useState<string[] | null>(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const aid = artifactIdOf(d);
+  useEffect(() => {
+    if (!aid) { setErr("Aucun PDF pour ce document."); return; }
+    api.preview(aid).then((r) => setImgs(r.images)).catch((e: Error) => setErr(e.message));
+  }, [aid, d.version, d.total]);
+  const canApprove = kind === "quote" && d.status !== "approved";
+  return createPortal(
+    <div className="preview-back" role="dialog" aria-label={`Aperçu ${d.number}`}>
+      <div className="preview-head">
+        <button className="tool" aria-label="Fermer l'aperçu" onClick={onClose}><I.Close size={22} /></button>
+        <b>{DOC_LABEL[kind]} {d.number}</b>
+        <span />
+      </div>
+      <div className="preview-body">
+        {!imgs && !err && <p className="hint">Chargement de l'aperçu…</p>}
+        {err && <p className="error">{err}</p>}
+        {imgs?.map((src, i) => <img key={i} src={src} alt={`Page ${i + 1} du ${DOC_LABEL[kind].toLowerCase()}`} />)}
+      </div>
+      <div className="preview-actions">
+        <button className="btn btn-line" onClick={() => {
+          window.dispatchEvent(new CustomEvent("unic:prefill", { detail: `Corrige le ${DOC_LABEL[kind].toLowerCase()} ${d.number} : ` }));
+          onClose();
+        }}><I.Pencil size={16} /> Corriger</button>
+        {canApprove && (
+          <button className="btn btn-line" disabled={busy} onClick={async () => {
+            setBusy(true);
+            try { await api.approveQuote(d.id); onChanged(); } finally { setBusy(false); }
+          }}><I.Check size={16} /> Approuver</button>
+        )}
+        {d.status === "approved" && <span className="hint ic"><I.Check size={16} /> Approuvé</span>}
+        {onDownload && <button className="btn btn-copper" onClick={onDownload}>Télécharger</button>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** Document affiché directement dans la conversation (lignes, total, actions). */
 function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: string }) {
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState("");
+  const [preview, setPreview] = useState(false);
   const load = () => {
     const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
     fn(id).then(setD).catch((e: Error) => setErr(e.message));
@@ -151,6 +200,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
         </div>
       )}
       <div className="toolbar">
+        {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
         {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
         {kind === "quote" && d.status !== "approved" && (
           <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
@@ -166,6 +216,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
           </button>
         )}
       </div>
+      {preview && <PreviewModal kind={kind} d={d} onClose={() => setPreview(false)} onChanged={load} onDownload={dl} />}
     </div>
   );
 }
@@ -563,6 +614,19 @@ function Chat({ initialId }: { initialId?: string }) {
     }
   }
 
+  useEffect(() => {   // « Corriger » depuis l'aperçu d'un document : la consigne arrive dans la barre de saisie
+    const onPrefill = (e: Event) => {
+      const t = String((e as CustomEvent).detail || "");
+      setText(t);
+      setTimeout(() => {
+        const el = document.querySelector<HTMLTextAreaElement>(".composer textarea");
+        el?.focus();
+        el?.setSelectionRange(t.length, t.length);
+      }, 60);
+    };
+    window.addEventListener("unic:prefill", onPrefill);
+    return () => window.removeEventListener("unic:prefill", onPrefill);
+  }, []);
   const [greet, setGreet] = useState<Greeting>(() => pickGreeting());
   useEffect(() => {
     if (messages.length > 0) return;
@@ -1033,6 +1097,7 @@ function DevisList() {
 function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
   const { id } = useParams();
   const [d, setD] = useState<any>(null);
+  const [showPreview, setShowPreview] = useState(false);
   async function load() {
     if (!id) return;
     const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
@@ -1058,6 +1123,9 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
             <p className="lede">{d.title}</p>
           </div>
           <div className="toolbar">
+            {artifactIdOf(d) && (
+              <button className="btn btn-line" onClick={() => setShowPreview(true)}><I.Eye size={16} /> Aperçu</button>
+            )}
             {download && (
               <button className="btn btn-copper" onClick={download}>
                 Télécharger le PDF
@@ -1144,6 +1212,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
           </form>
         )}
       </div>
+      {showPreview && <PreviewModal kind={kind} d={d} onClose={() => setShowPreview(false)} onChanged={load} onDownload={download} />}
     </div>
   );
 }

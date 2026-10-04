@@ -30,3 +30,4 @@ export const Dot = mk(<circle cx="12" cy="12" r="4" fill="currentColor" stroke="
 export const Circle = mk(<circle cx="12" cy="12" r="4.5" />);
 export const Refresh = mk(<><path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5" /><path d="M19.5 4.5v4h-4" /></>);
 export const Pencil = mk(<><path d="M4.5 19.5 5.3 15 15.8 4.5a2 2 0 0 1 2.9 0l.8.8a2 2 0 0 1 0 2.9L9 18.7z" /><path d="m14 6.5 3.5 3.5" /></>);
+export const Eye = mk(<><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>);

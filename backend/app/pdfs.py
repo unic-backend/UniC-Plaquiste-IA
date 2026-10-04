@@ -267,8 +267,7 @@ def _render(
     for m in meta_lines:
         m = m.strip()
         if m.lower().startswith("statut "):
-            raw = m[7:].strip().lower()
-            m = f"Statut : {STATUS_FR.get(raw, raw)}"
+            continue   # le statut interne (brouillon…) n'a rien à faire sur un document client
         elif m.lower().startswith("date ") and ":" not in m[:6]:
             m = "Date : " + m[5:]
         elif m.lower().startswith("validité ") and ":" not in m[:10]:

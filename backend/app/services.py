@@ -264,6 +264,7 @@ def quotation_from_quantities(
     client_name: str | None = None,
     vat_rate: float | None | object = _UNSET,
     objet: str = "",
+    lieu: str = "",
 ) -> Quotation:
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
@@ -276,6 +277,7 @@ def quotation_from_quantities(
         project_id=project_id,
         title=title or f"Devis {number}",
         object_text=(objet or "").strip()[:900],
+        site_location=(lieu or "").strip()[:255],
         status="draft",
         currency=company.get("currency") or "",
         vat_rate=company.get("vat_rate") if vat_rate is _UNSET else vat_rate,
@@ -374,7 +376,6 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     meta = [
         f"N° {q.number}",
         f"Date {q.created_at.strftime('%d/%m/%Y') if q.created_at else ''}",
-        f"Statut {q.status}",
         f"Validité {q.validity_days} jours",
     ]
     extra = []   # hypothèses et infos manquantes restent dans la conversation, pas sur le devis du client
@@ -387,9 +388,8 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         status=q.status,
         meta_lines=meta,
         party_left=("Émetteur", party_text_from_company(company)),
-        party_right=("Client", party_text_customer(customer, q.client_label) + (
-            f"\nChantier : {project.name}" if project else ""
-        )),
+        party_right=("Client", (party_text_customer(customer) if customer else (q.client_label or "Client non renseigné"))
+                     + (f"\nLieu du chantier : {q.site_location or project.name}" if (q.site_location or project) else "")),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
         rows=rows,
         col_widths=[18, 210, 50, 40, 80, 80],

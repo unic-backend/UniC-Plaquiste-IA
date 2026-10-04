@@ -1359,3 +1359,41 @@ def test_cost_counter_prices_and_endpoints(client, claude):
     again = client.get("/api/usage").json()
     assert 14.97 < again["reste_usd"] < 15 and again["messages_restants_estimes"] > 100
     assert client.put("/api/usage/budget", json={"amount_usd": -1}).status_code == 422
+
+
+def test_pdf_has_site_under_client_no_status_and_preview_endpoint(client):
+    import pypdfium2 as pdfium
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    s("calculate_materials", {"kind": "ceiling", "length_m": 5, "width_m": 4})
+    out = s("create_quote", {"client_name": "Lieu Test", "lieu": "Médina, Dakar", "checks": "client et dimensions vérifiés",
+                             "objet": "Fourniture et pose d'un faux plafond BA13 dans un salon, à la Médina."})
+    q = db.query(Quotation).filter(Quotation.number == out["numero"]).first()
+    assert q.site_location == "Médina, Dakar"
+    row = next(r for r in client.get("/api/quotes").json() if r["number"] == q.number)
+    det = client.get(f"/api/quotes/{row['id']}").json()
+    assert det["site_location"] == "Médina, Dakar"
+    text = pdfium.PdfDocument(client.get(det["download_url"]).content)[0].get_textpage().get_text_range()
+    assert "Lieu du chantier : Médina, Dakar" in text
+    assert "Brouillon" not in text and "Statut" not in text and "coordonnées à renseigner" not in text
+    prev = client.get(det["download_url"].replace("/download", "/preview")).json()
+    assert prev["pages"] == 1 and prev["images"][0].startswith("data:image/jpeg;base64,")
+    s("revise_document", {"kind": "quote", "number": q.number, "lieu": "Plateau, Dakar"})
+    db.refresh(q)
+    assert q.site_location == "Plateau, Dakar"
+    db.close()
+
+
+def test_quote_number_rule_date_plus_client_initials(client):
+    from datetime import date
+    from app.database import SessionLocal
+    from app.services import document_number
+    db = SessionLocal()
+    d = date(2026, 10, 4)
+    assert document_number(db, "Qazim Wolde", d).endswith("-1004-QW")      # 1004 = jour (MMJJ), PD = client
+    assert document_number(db, "Xavi Zola", d).endswith("-1004-XZ")       # autre client, même jour : seules les initiales changent
+    assert document_number(db, "Qazim Wolde", date(2026, 10, 5)).endswith("-1005-QW")   # autre jour : MMJJ change
+    db.close()
