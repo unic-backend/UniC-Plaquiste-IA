@@ -74,7 +74,10 @@ def describe_pdf_page(path: Path, index: int) -> str:
         pdf = pdfium.PdfDocument(str(path))
         try:
             page = pdf[index]
-            return _ask(_jpeg_b64(page.render(scale=ocr.scale_for(page, 2, 2400)).to_pil()))
+            try:
+                return _ask(_jpeg_b64(page.render(scale=ocr.scale_for(page, 2, MAX_SIDE)).to_pil()))
+            finally:
+                page.close()
         finally:
             pdf.close()
     except Exception as exc:

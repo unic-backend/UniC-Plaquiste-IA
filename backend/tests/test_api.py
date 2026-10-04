@@ -2378,3 +2378,18 @@ def test_cad_style_pdf_text_read_fast_and_light(client):
     assert time.time() - t < 8
     d = client.get("/api/files").json()
     assert d
+
+
+def test_user_message_keeps_attached_file_names(client, monkeypatch):
+    import io
+    from PIL import Image
+    from app import orchestrator
+    class R:
+        text, provider, model, available, error, raw = "ok", "claude", "m", True, "", None
+    monkeypatch.setattr(orchestrator, "chat_complete", lambda msgs, **kw: R())
+    monkeypatch.setattr(orchestrator, "provider_chain", lambda deep=False: [type("P", (), {"id": "claude"})()])
+    buf = io.BytesIO(); Image.new("RGB", (40, 40), "white").save(buf, format="PNG")
+    fid = client.post("/api/files", files={"file": ("Plan RH.png", buf.getvalue(), "image/png")}).json()["id"]
+    cid = client.post("/api/chat", json={"message": "Lis le plan", "file_ids": [fid]}).json()["conversation_id"]
+    msgs = client.get(f"/api/conversations/{cid}").json()["messages"]
+    assert msgs[0]["role"] == "user" and msgs[0]["meta"]["files"][0]["filename"] == "Plan RH.png"

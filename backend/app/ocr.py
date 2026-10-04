@@ -55,7 +55,10 @@ def ocr_pdf_page(path: Path, index: int) -> str:
 
         doc = pdfium.PdfDocument(str(path))
         page = doc[index]
-        image = page.render(scale=scale_for(page, ECHELLE_RENDU, OCR_MAX_SIDE)).to_pil()
+        try:
+            image = page.render(scale=scale_for(page, ECHELLE_RENDU, OCR_MAX_SIDE)).to_pil()
+        finally:
+            page.close()
         return pytesseract.image_to_string(image, lang=lang).strip()
     except Exception as exc:
         logger.debug("OCR page %s impossible : %s", index + 1, exc)

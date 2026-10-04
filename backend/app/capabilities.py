@@ -129,6 +129,18 @@ def registry_snapshot(db=None) -> list[dict]:
     ]
 
 
+def memory_mb() -> dict:
+    """Mémoire du serveur (actuelle et pic) : permet de voir si Render (512 Mo) approche de sa limite."""
+    out = {}
+    try:
+        for line in open("/proc/self/status"):
+            if line.startswith(("VmRSS", "VmHWM")):
+                out["actuelle_mo" if line.startswith("VmRSS") else "pic_mo"] = int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return out
+
+
 def health_dashboard(db=None) -> dict:
     from app.database import engine
     db_ok = True
@@ -146,6 +158,7 @@ def health_dashboard(db=None) -> dict:
         "database": {"status": "ok" if db_ok else "error", "detail": db_detail, "url_kind": "sqlite" if settings.is_sqlite else "external"},
         "storage": {"status": "ok" if storage_ok else "error", "path": str(settings.storage_path)},
         "ai_providers": providers_health(),
+        "memory": memory_mb(),
         "capabilities": registry_snapshot(db),
         "connectors": {k: ("ok" if v else "not_configured") for k, v in _connectors(db).items()},
         "note": "Le serveur cloud UniC AI fonctionne même si le PC personnel est éteint.",

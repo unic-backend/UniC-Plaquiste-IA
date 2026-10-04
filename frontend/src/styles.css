@@ -859,3 +859,7 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .diagram { margin: 10px 0 0; border: 1px solid var(--line, #d8d2c4); border-radius: 14px; overflow: hidden; background: #fff; }
 .diagram img { display: block; width: 100%; height: auto; }
 .diagram figcaption { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; font-size: 13px; color: #55605b; background: #f6f3ec; flex-wrap: wrap; }
+
+.files-sent { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.files-sent .file-chip { background: rgba(255,255,255,.16); color: inherit; border-color: transparent; }
+.chip-x { margin-left: 6px; border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }

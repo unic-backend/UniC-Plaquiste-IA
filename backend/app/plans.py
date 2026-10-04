@@ -5,6 +5,7 @@ jamais par l'IA. Ce qui n'est pas lisible reste « à confirmer ».
 """
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import re
@@ -69,7 +70,15 @@ def _images(rec: StoredFile, pages: list[ExtractedPage]) -> list[str]:
             wanted = [p.page_number - 1 for p in pages if p.classification == "plan"] or [p.page_number - 1 for p in pages]
             pdf = pdfium.PdfDocument(str(path))
             try:
-                return [vision._jpeg_b64(pdf[i].render(scale=ocr.scale_for(pdf[i], 2, 2400)).to_pil()) for i in wanted[:MAX_IMAGES]]
+                out = []
+                for i in wanted[:MAX_IMAGES]:
+                    page = pdf[i]
+                    try:   # une page à la fois, fermée aussitôt : sinon ~110 Mo restent en mémoire par page d'un plan lourd
+                        out.append(vision._jpeg_b64(page.render(scale=ocr.scale_for(page, 2, vision.MAX_SIDE)).to_pil()))
+                    finally:
+                        page.close()
+                        gc.collect()
+                return out
             finally:
                 pdf.close()
         with Image.open(path) as img:

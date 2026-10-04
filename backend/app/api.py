@@ -213,7 +213,9 @@ def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
     text = (body.message or "").strip()
     if not text and not body.file_ids:
         raise HTTPException(400, "Message vide")
-    user_msg = Message(conversation_id=conv.id, role="user", content=text or "[fichier]")
+    names = [{"id": f.id, "filename": f.filename} for f in (db.get(StoredFile, i) for i in body.file_ids) if f is not None]
+    user_msg = Message(conversation_id=conv.id, role="user", content=text or "[fichier]",
+                       meta_json=json.dumps({"files": names}, ensure_ascii=False) if names else "{}")
     db.add(user_msg)
     db.flush()
     if conv.title == "Nouvelle conversation" and text:

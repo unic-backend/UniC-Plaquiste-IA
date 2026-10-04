@@ -281,10 +281,14 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
   const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
+  const sent: string[] = m.files || (m.meta?.files || []).map((f: any) => f.filename);   // fichiers joints, au-dessus de la question
   return (
     <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
       <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
+        {m.role === "user" && sent.length > 0 && (
+          <div className="files-sent">{sent.map((n, i) => <span className="file-chip" key={i}>📎 {n}</span>)}</div>
+        )}
         <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
         {m.role === "user" && (
           <div className="msg-actions">
@@ -644,7 +648,7 @@ function Chat({ initialId }: { initialId?: string }) {
     if (busy) return;
     setBusy(true);
     setText("");
-    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || pending.map((f) => f.name).join(", ") };
+    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || "Analyse le fichier.", files: pending.map((f) => f.name) };
     setMessages((m) => [...m, local]);
     try {
       const file_ids: string[] = [];
@@ -778,6 +782,7 @@ function Chat({ initialId }: { initialId?: string }) {
               {pending.map((f, i) => (
                 <span className="file-chip" key={i}>
                   {f.name}
+                  <button type="button" className="chip-x" aria-label={`Retirer ${f.name}`} onClick={() => setPending((p) => p.filter((_, j) => j !== i))}>×</button>
                 </span>
               ))}
             </div>
