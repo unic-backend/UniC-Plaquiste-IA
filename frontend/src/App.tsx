@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
+import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { pickGreeting, type Greeting } from "./greetings";
@@ -1234,6 +1234,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
     items: [
       { to: "/memoire", title: "Mémoire", text: "Ce que l'IA a appris de vous" },
       { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
+      { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
     ],
   },
@@ -1472,6 +1473,7 @@ export default function App() {
         <Route path="/documents" element={<Documents />} />
         <Route path="/memoire" element={<Memoire />} />
         <Route path="/journal" element={<Journal />} />
+        <Route path="/couts" element={<Couts />} />
         <Route path="/courrier" element={<Courrier />} />
         <Route path="/reseaux" element={<Reseaux />} />
         <Route path="/parametres" element={<SettingsHub />} />

@@ -714,3 +714,16 @@ h1, h2, h3, b, strong, th { font-weight: 800; }
 .w { opacity: 0; animation: wordIn .35s ease forwards; }
 @keyframes wordIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .bubble.typing .md > :last-child::after { content: none; }
+
+.big-number { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; margin: 4px 0 8px; }
+.meter { height: 10px; border-radius: 6px; background: rgba(26,24,20,.08); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--green); border-radius: 6px; transition: width .5s ease; }
+.meter i.low { background: #b42318; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+.stat { border: 1px solid var(--line); background: #fff; border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 2px; }
+.stat span, .stat i { font-size: 12px; font-style: normal; opacity: .7; }
+.stat b { font-size: 20px; font-weight: 800; }
+.bars { display: flex; align-items: flex-end; gap: 4px; height: 110px; }
+.bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+.bar i { width: 100%; background: var(--green); border-radius: 5px 5px 2px 2px; min-height: 3px; }
+.bar span { font-size: 9px; opacity: .6; }

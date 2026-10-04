@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, memory as mem, metier, pricecheck
 from app.ai import chat_complete, deep_available, provider_chain
@@ -935,6 +936,8 @@ def handle_turn(
                     msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note()
                 ai = chat_complete(msgs, deep=deep, web=can_search,
                                    tools=agent.TOOLS if tools_on else None, tool_handler=session)
+                if ai.provider == "claude" and ai.raw:
+                    usage.record(db, ai.raw.get("usage"), ai.model)
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
                     if session.cards or session.documents:

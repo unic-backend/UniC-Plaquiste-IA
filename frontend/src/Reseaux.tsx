@@ -1,6 +1,6 @@
 import * as I from "./Icons";
 import { useEffect, useState } from "react";
-import { net, type JournalRow, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
+import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
 const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
 const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
@@ -550,6 +550,92 @@ export function Journal() {
             {(r.target.trim() || r.details) && <p className="hint">{[r.target.trim(), r.details].filter(Boolean).join(" · ")}</p>}
           </article>
         ))}
+      </div>
+    </div>
+  );
+}
+
+
+const usd = (n: number) => `${n.toLocaleString("fr-FR", { minimumFractionDigits: n < 1 ? 3 : 2, maximumFractionDigits: n < 1 ? 3 : 2 })} $`;
+
+export function Couts() {
+  const [u, setU] = useState<Usage | null>(null);
+  const [credit, setCredit] = useState("");
+  const [err, setErr] = useState("");
+  const { msg, say } = useToast();
+  const load = () => net.usage().then(setU).catch((e) => setErr(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+  if (err) return <div className="page"><div className="page-inner"><p className="error">{err}</p></div></div>;
+  if (!u) return <div className="page"><div className="page-inner"><p className="hint">Chargement…</p></div></div>;
+  const max = Math.max(0.0001, ...u.jours.map((j) => j.cout_usd));
+  const pct = u.credit_usd && u.reste_usd !== null ? Math.max(0, Math.min(100, (u.reste_usd / u.credit_usd) * 100)) : null;
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Coût de Claude</h1>
+        <p className="lede">Ce que chaque réponse consomme, calculé sur les jetons réels. {u.avertissement}</p>
+        <section className="card-box">
+          <label>Crédit restant (estimé)</label>
+          {u.reste_usd === null ? (
+            <p className="hint">Indique le crédit que tu as rechargé pour voir ce qu'il reste.</p>
+          ) : (
+            <>
+              <div className="big-number">{usd(Math.max(0, u.reste_usd))}</div>
+              <div className="meter"><i style={{ width: `${pct}%` }} className={pct !== null && pct < 20 ? "low" : ""} /></div>
+              <p className="hint">
+                sur {usd(u.credit_usd ?? 0)} rechargés
+                {u.messages_restants_estimes !== null && <> · environ {u.messages_restants_estimes.toLocaleString("fr-FR")} messages au rythme actuel</>}
+              </p>
+            </>
+          )}
+          <div className="toolbar">
+            <input type="number" inputMode="decimal" min="0" step="0.5" placeholder="Crédit rechargé, en $ (ex. 15)" value={credit}
+              onChange={(e) => setCredit(e.target.value)} />
+            <button className="btn btn-copper" disabled={credit === "" || Number(credit) < 0}
+              onClick={async () => {
+                try {
+                  setU(await net.setBudget(Number(credit)));
+                  setCredit("");
+                  say("Crédit enregistré : le compteur repart de zéro.");
+                } catch (e: any) {
+                  say(e.message);
+                }
+              }}>
+              Enregistrer
+            </button>
+          </div>
+        </section>
+        <div className="stat-grid">
+          <div className="stat"><span>Aujourd'hui</span><b>{usd(u.aujourdhui_usd)}</b><i>{u.messages_aujourdhui} msg</i></div>
+          <div className="stat"><span>7 jours</span><b>{usd(u.semaine_usd)}</b></div>
+          <div className="stat"><span>Ce mois</span><b>{usd(u.mois_usd)}</b><i>{u.messages_mois} msg</i></div>
+          <div className="stat"><span>Par message</span><b>{usd(u.moyenne_par_message_usd)}</b><i>{u.messages_total} au total</i></div>
+        </div>
+        <section className="card-box">
+          <label>14 derniers jours</label>
+          <div className="bars" role="img" aria-label="Coût par jour">
+            {u.jours.map((j) => (
+              <div key={j.jour} className="bar" title={`${j.jour} : ${usd(j.cout_usd)}`}>
+                <i style={{ height: `${Math.max(3, (j.cout_usd / max) * 100)}%` }} />
+                <span>{j.jour.slice(8)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+        {u.par_modele.length > 0 && (
+          <section className="card-box">
+            <label>Par modèle</label>
+            {u.par_modele.map((m) => (
+              <div className="toolbar" key={m.model}>
+                <b>{m.model}</b><span className="hint">{m.messages} msg</span><span>{usd(m.cout_usd)}</span>
+              </div>
+            ))}
+          </section>
+        )}
+        {u.tarif_inconnu && <p className="hint">Certains calculs utilisent un tarif supposé (modèle inconnu).</p>}
+        {msg && <div className="toast" role="status">{msg}</div>}
       </div>
     </div>
   );

@@ -333,7 +333,9 @@ from types import SimpleNamespace as _NS
 
 def _resp(text, cites=(), stop="end_turn", content=None):
     block = _NS(type="text", text=text, citations=[_NS(url=u, title=t) for u, t in cites] or None)
-    return _NS(content=content or [block], stop_reason=stop, model="m")
+    return _NS(content=content or [block], stop_reason=stop, model="m",
+               usage=_NS(input_tokens=1000, output_tokens=500, cache_read_input_tokens=0, cache_creation_input_tokens=0,
+                         server_tool_use=_NS(web_search_requests=1)))
 
 
 class FakeClaude:
@@ -1334,3 +1336,26 @@ def test_agent_directory_tools(client):
     assert "Awa Sow Test" in names
     assert "error" in s("create_contact", {"kind": "customer", "name": ""})
     db.close()
+
+
+def test_cost_counter_prices_and_endpoints(client, claude):
+    from app import usage
+    # tarif public : Sonnet 5.5 = 2 $/M entrée, 10 $/M sortie, 10 $ les 1000 recherches
+    total, usd, known = usage.cost_of("claude-sonnet-5-5", [{"input": 1_000_000, "output": 1_000_000, "cache_read": 0, "cache_write": 0, "web": 100}])
+    assert known and abs(usd - (2 + 10 + 1.0)) < 1e-9
+    _, usd_unknown, known2 = usage.cost_of("modele-inconnu", [{"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0, "web": 0}])
+    assert not known2 and abs(usd_unknown - 2.0) < 1e-9
+    before = client.get("/api/usage").json()
+    fake = claude(_scripted([("text", "Dakar.")]))
+    client.post("/api/chat", json={"message": "Quelle est la capitale du Sénégal ?"})
+    after = client.get("/api/usage").json()
+    assert after["messages_total"] == before["messages_total"] + 1
+    # 1000 entrée x 2 + 500 sortie x 10 = 7 000 µ$ + 1 recherche = 0,017 $
+    assert abs((after["total_usd"] - before["total_usd"]) - 0.017) < 0.0006
+    assert after["par_modele"] and after["avertissement"] and len(after["jours"]) == 14
+    set_ = client.put("/api/usage/budget", json={"amount_usd": 15}).json()
+    assert set_["credit_usd"] == 15 and set_["reste_usd"] == 15
+    client.post("/api/chat", json={"message": "Et celle du Mali ?"})
+    again = client.get("/api/usage").json()
+    assert 14.97 < again["reste_usd"] < 15 and again["messages_restants_estimes"] > 100
+    assert client.put("/api/usage/budget", json={"amount_usd": -1}).status_code == 422

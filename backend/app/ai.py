@@ -158,10 +158,14 @@ class ClaudeAIProvider(AIProvider):
         """Essaie le repli serveur (refus de sécurité → modèle de secours) ; sans lui si l'API le rejette."""
         import anthropic
 
+        from app import usage
+
         try:
-            return client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+            resp = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
         except anthropic.BadRequestError:
-            return client.messages.create(**params)
+            resp = client.messages.create(**params)
+        usage.tally(resp)
+        return resp
 
     @staticmethod
     def _text_and_sources(resp) -> tuple[str, list[dict]]:
@@ -225,6 +229,9 @@ class ClaudeAIProvider(AIProvider):
         if tools:
             params["tools"] = tools
         used: list[str] = []
+        from app import usage as _usage
+        tally: list[dict] = []
+        _tok = _usage.TALLY.set(tally)
         try:
             client = self._client()
             try:
@@ -240,13 +247,15 @@ class ClaudeAIProvider(AIProvider):
                     params.pop("tools", None)
                 resp = self._run(client, params, handler, used)
             if getattr(resp, "stop_reason", "") == "refusal":
-                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used})
+                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used, "usage": tally})
             text, sources = self._text_and_sources(resp)
             if web and sources:
                 text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
-            return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used})
+            return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used, "usage": tally})
         except Exception as exc:  # la clé n'apparaît jamais dans le message
-            return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}", raw={"tools_used": used})
+            return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}", raw={"tools_used": used, "usage": tally})
+        finally:
+            _usage.TALLY.reset(_tok)
 
 
 class VisionAIProvider(AIProvider):

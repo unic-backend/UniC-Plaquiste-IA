@@ -561,3 +561,21 @@ def discard_document(kind: str, doc_id: str, db: Session = Depends(get_db), user
         raise HTTPException(404, "Type de document inconnu")
     except revise.ReviseError as exc:
         raise HTTPException(409, str(exc))
+
+
+class BudgetIn(BaseModel):
+    amount_usd: float = Field(ge=0, le=100000)
+
+
+@router.get("/usage")
+def usage_summary(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import usage
+    return usage.summary(db)
+
+
+@router.put("/usage/budget")
+def usage_budget(body: BudgetIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Crédit rechargé chez Anthropic : le reste est calculé depuis cet instant."""
+    from app import usage
+    usage.set_budget(db, body.amount_usd)
+    return usage.summary(db)

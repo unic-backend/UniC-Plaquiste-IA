@@ -111,6 +111,12 @@ export type MemState = {
   avertissement: string | null; recherche: string; portee_conflits: string;
 };
 export type MemConflict = { a: { id: string; text: string }; b: { id: string; text: string }; raison: string };
+export type Usage = {
+  aujourdhui_usd: number; semaine_usd: number; mois_usd: number; total_usd: number; moyenne_par_message_usd: number;
+  messages_aujourdhui: number; messages_mois: number; messages_total: number;
+  par_modele: { model: string; messages: number; cout_usd: number }[]; jours: { jour: string; cout_usd: number }[];
+  credit_usd: number | null; reste_usd: number | null; messages_restants_estimes: number | null; tarif_inconnu: boolean; avertissement: string;
+};
 export type JournalRow = { id: string; at: string | null; action: string; label: string; target: string; details: string };
 
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
@@ -148,6 +154,8 @@ export const net = {
     fd.append("file", file);
     return request<{ candidats: number }>("/api/memory/import", { method: "POST", body: fd });
   },
+  usage: () => request<Usage>("/api/usage"),
+  setBudget: (amount_usd: number) => request<Usage>("/api/usage/budget", { method: "PUT", ...json({ amount_usd }) }),
   journal: (action = "") => request<JournalRow[]>(`/api/journal${action ? `?action=${encodeURIComponent(action)}` : ""}`),
   deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),
   mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
