@@ -797,7 +797,7 @@ function Chat({ initialId }: { initialId?: string }) {
             className="sr-only"
             type="file"
             multiple
-            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp"
+            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp,.dxf,.ifc,.dwg"
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
           <input

@@ -11,7 +11,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app import ocr, vision
+from app import cad, ocr, vision
 from app.config import settings
 from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
 
@@ -296,6 +296,8 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
             text = read_docx(path)
         elif ext in {".xlsx", ".xlsm"}:
             text = read_xlsx(path)
+        elif ext in cad.CAD_EXT:
+            text = cad.read_dxf(path) if ext == ".dxf" else cad.read_ifc(path)
         elif ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             file_rec.processing_status = "completed"
             file_rec.page_count = 1
@@ -323,13 +325,14 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
             }
         else:
             file_rec.processing_status = "unsupported"
-            file_rec.processing_error = f"Type de fichier non pris en charge: {ext or mime}"
+            file_rec.processing_error = cad.DWG_MESSAGE if ext == ".dwg" else f"Type de fichier non pris en charge: {ext or mime}"
             db.commit()
             return {"file_id": file_rec.id, "status": "unsupported", "error": file_rec.processing_error}
 
         file_rec.page_count = 1
         file_rec.processing_status = "completed"
-        db.add(ExtractedPage(file_id=file_rec.id, page_number=1, text=text, classification=classify_page(text)))
+        db.add(ExtractedPage(file_id=file_rec.id, page_number=1, text=text,
+                             classification="plan" if ext in cad.CAD_EXT else classify_page(text)))
         for chunk in chunk_text(text):
             db.add(DocumentChunk(file_id=file_rec.id, page_number=1, text=chunk))
         db.commit()

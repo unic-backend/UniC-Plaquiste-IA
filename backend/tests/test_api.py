@@ -2185,3 +2185,33 @@ def test_read_plan_rooms_totals_and_cache(client, monkeypatch):
         assert any("absurde" in r for r in out["remarques"]) and any("Cuisine" in r for r in out["remarques"])
         assert s("read_plan", {}) == out and len(calls) == 1   # cache
         assert "error" in AgentSession(db, None, {})("read_plan", {})
+
+
+def test_cad_dxf_and_ifc_and_dwg(client, tmp_path):
+    import ezdxf
+    d = ezdxf.new(setup=True)
+    d.header["$INSUNITS"] = 6
+    m = d.modelspace()
+    m.add_lwpolyline([(0, 0), (5, 0), (5, 4), (0, 4)], close=True, dxfattribs={"layer": "PIECES"})
+    m.add_mtext("Salon FP BA13", dxfattribs={"insert": (2, 2)})
+    m.add_line((0, 0), (5, 0), dxfattribs={"layer": "A-WALL"})
+    p = tmp_path / "p.dxf"
+    d.saveas(p)
+    r = client.post("/api/files", files={"file": ("p.dxf", p.read_bytes(), "application/dxf")}).json()
+    assert r["processing"]["status"] == "completed", r
+    from app import cad
+    txt = cad.read_dxf(p)
+    assert "Salon FP BA13" in txt and "20.00 m²" in txt and "5.0 m" in txt
+    import ifcopenshell, ifcopenshell.api as api
+    f = api.run("project.create_file")
+    proj = api.run("root.create_entity", f, ifc_class="IfcProject", name="P")
+    api.run("unit.assign_unit", f)
+    sp = api.run("root.create_entity", f, ifc_class="IfcSpace", name="Chambre 1")
+    q = api.run("pset.add_qto", f, product=sp, name="Qto_SpaceBaseQuantities")
+    api.run("pset.edit_qto", f, qto=q, properties={"NetFloorArea": 12.5})
+    ip = tmp_path / "m.ifc"
+    f.write(str(ip))
+    t = cad.read_ifc(ip)
+    assert "Chambre 1" in t and "12.50 m²" in t
+    r = client.post("/api/files", files={"file": ("x.dwg", b"AC1027junk", "application/octet-stream")}).json()
+    assert r["processing"]["status"] == "unsupported" and "DXF" in r["processing"]["error"]
