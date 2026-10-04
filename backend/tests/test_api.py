@@ -2393,3 +2393,21 @@ def test_user_message_keeps_attached_file_names(client, monkeypatch):
     cid = client.post("/api/chat", json={"message": "Lis le plan", "file_ids": [fid]}).json()["conversation_id"]
     msgs = client.get(f"/api/conversations/{cid}").json()["messages"]
     assert msgs[0]["role"] == "user" and msgs[0]["meta"]["files"][0]["filename"] == "Plan RH.png"
+
+
+def test_heavy_pdf_never_takes_server_down(client, monkeypatch):
+    import io
+    from reportlab.pdfgen import canvas
+    from app import pdfjob, plans
+    b = io.BytesIO(); c = canvas.Canvas(b, pagesize=(2384, 1684)); c.rect(10, 10, 2000, 1500); c.save()
+    monkeypatch.setattr(pdfjob, "MEMORY_MB", 20)   # plafond ridicule : le processus séparé échoue, pas le serveur
+    r = client.post("/api/files", files={"file": ("lourd.pdf", b.getvalue(), "application/pdf")})
+    assert r.status_code == 200, r.text
+    body = r.json()["processing"]
+    assert "capture" in (body.get("warning") or "")
+    monkeypatch.setattr(plans.settings, "anthropic_api_key", "test")
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        out = plans.analyze(db, r.json()["id"])
+    assert "capture" in out.get("error", "")
+    assert client.get("/api/ping").status_code == 200

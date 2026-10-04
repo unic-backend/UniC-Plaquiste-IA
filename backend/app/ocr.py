@@ -48,24 +48,12 @@ def ocr_pdf_page(path: Path, index: int) -> str:
     lang = langues()
     if lang is None:
         return ""
-    doc = None
-    try:
-        import pypdfium2 as pdfium
-        import pytesseract
-
-        doc = pdfium.PdfDocument(str(path))
-        page = doc[index]
-        try:
-            image = page.render(scale=scale_for(page, ECHELLE_RENDU, OCR_MAX_SIDE)).to_pil()
-        finally:
-            page.close()
-        return pytesseract.image_to_string(image, lang=lang).strip()
-    except Exception as exc:
+    from app import pdfjob
+    try:   # rendu + OCR dans un processus séparé à mémoire bornée
+        return pdfjob.run("ocr", timeout=30, path=str(path), index=index, max_side=OCR_MAX_SIDE, lang=lang)["text"]
+    except pdfjob.PdfJobError as exc:
         logger.debug("OCR page %s impossible : %s", index + 1, exc)
         return ""
-    finally:
-        if doc is not None:
-            doc.close()
 
 
 def ocr_image(path: Path) -> str:

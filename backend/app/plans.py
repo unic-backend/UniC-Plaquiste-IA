@@ -5,7 +5,6 @@ jamais par l'IA. Ce qui n'est pas lisible reste « à confirmer ».
 """
 from __future__ import annotations
 
-import gc
 import json
 import logging
 import re
@@ -13,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app import ocr, vision
+from app import pdfjob, vision
 from app.config import settings
 from app.models import AppSetting, ExtractedPage, StoredFile
 
@@ -65,24 +64,12 @@ def _images(rec: StoredFile, pages: list[ExtractedPage]) -> list[str]:
         from PIL import Image
 
         if path.suffix.lower() == ".pdf":
-            import pypdfium2 as pdfium
-
             wanted = [p.page_number - 1 for p in pages if p.classification == "plan"] or [p.page_number - 1 for p in pages]
-            pdf = pdfium.PdfDocument(str(path))
-            try:
-                out = []
-                for i in wanted[:MAX_IMAGES]:
-                    page = pdf[i]
-                    try:   # une page à la fois, fermée aussitôt : sinon ~110 Mo restent en mémoire par page d'un plan lourd
-                        out.append(vision._jpeg_b64(page.render(scale=ocr.scale_for(page, 2, vision.MAX_SIDE)).to_pil()))
-                    finally:
-                        page.close()
-                        gc.collect()
-                return out
-            finally:
-                pdf.close()
+            return pdfjob.run("images", timeout=120, path=str(path), pages=wanted[:MAX_IMAGES], max_side=vision.MAX_SIDE)["images"]
         with Image.open(path) as img:
             return [vision._jpeg_b64(img)]
+    except pdfjob.PdfJobError:
+        raise   # message clair pour le patron (plan trop lourd…)
     except Exception as exc:
         logger.debug("Images du plan indisponibles : %s", exc)
         return []
@@ -145,8 +132,14 @@ def analyze(db: Session, file_id: str, refresh: bool = False) -> dict:
         return {"error": "Lecture de plan NON DISPONIBLE : clé Claude absente."}
     pages = db.query(ExtractedPage).filter(ExtractedPage.file_id == file_id).order_by(ExtractedPage.page_number).all()
     text = "\n".join(f"--- page {p.page_number} ---\n{p.text}" for p in pages if p.text)[:MAX_TEXT]
+    try:
+        images = _images(rec, pages)
+    except pdfjob.PdfJobError as exc:
+        if not text.strip():
+            return {"error": f"{exc} Envoie une capture d'écran ou une photo du plan : je la lirai."}
+        images = []   # on lit au moins le texte du plan
     content: list[dict] = [
-        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in _images(rec, pages)
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in images
     ]
     if not content and not text.strip():
         return {"error": "Rien de lisible dans ce fichier."}

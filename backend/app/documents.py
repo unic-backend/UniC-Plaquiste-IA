@@ -11,7 +11,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app import cad, ocr, vision
+from app import cad, ocr, pdfjob, vision
 from app.config import settings
 from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
 
@@ -76,43 +76,22 @@ MAX_OCR_PAGES = 15
 OCR_BUDGET_S = 40   # temps total d'OCR par fichier : un gros scan ne bloque jamais l'envoi
 
 
-def _open_pdf(path: Path):
-    """pypdfium2 (C, rapide, sobre) ; pypdf seulement en secours. pypdf met 7 s et 250 Mo sur un plan CAD de 3 Mo."""
-    try:
-        import pypdfium2 as pdfium
-        return "pdfium", pdfium.PdfDocument(str(path))
-    except Exception:
-        return "pypdf", PdfReader(str(path))
-
-
-def _page_text_and_size(kind: str, doc, i: int) -> tuple[str, float | None, float | None]:
-    if kind == "pdfium":
-        page = doc[i]
-        try:
-            w, h = page.get_size()
-            tp = page.get_textpage()
-            try:
-                return tp.get_text_range() or "", float(w), float(h)
-            finally:
-                tp.close()
-        finally:
-            page.close()
-    page = doc.pages[i]
-    try:
-        text = page.extract_text() or ""
-    except Exception:
-        text = ""
-    box = page.mediabox
-    return text, (float(box.width) if box else None), (float(box.height) if box else None)
-
-
 def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dict:
     import time
 
     path = Path(file_rec.path)
-    kind, doc = _open_pdf(path)
-    total = len(doc) if kind == "pdfium" else len(doc.pages)
-    n = min(total, max_pages)
+    heavy = ""
+    try:   # texte lu dans un processus séparé à mémoire bornée (un plan lourd ne fait plus tomber le serveur)
+        res = pdfjob.run("text", timeout=60, path=str(path), max_pages=max_pages)
+        total, items = res["total"], res["pages"]
+    except pdfjob.PdfJobError as exc:
+        heavy = str(exc)
+        try:
+            total = len(PdfReader(str(path)).pages)
+        except Exception:
+            total = 0
+        items = [{"t": "", "w": None, "h": None} for _ in range(min(total, max_pages))]
+    n = len(items)
     file_rec.page_count = total
     db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).delete()
     db.query(DocumentChunk).filter(DocumentChunk.file_id == file_rec.id).delete()
@@ -120,29 +99,26 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
     pages_out = []
     empty_pages = 0
     started = time.monotonic()
-    for i in range(n):
-        try:
-            text, width, height = _page_text_and_size(kind, doc, i)
-        except Exception:
-            text, width, height = "", None, None
-        text = text.replace("\x00", " ").strip()
-        if len(text) < 20 and i < MAX_OCR_PAGES and time.monotonic() - started < OCR_BUDGET_S:
+    for i, item in enumerate(items):
+        text = (item.get("t") or "").strip()
+        if len(text) < 20 and not heavy and i < MAX_OCR_PAGES and time.monotonic() - started < OCR_BUDGET_S:
             text = ocr.ocr_pdf_page(path, i) or text   # la lecture visuelle (Claude) se fait à la demande : outil read_plan
         if len(text) < 20:
             empty_pages += 1
         klass = classify_page(text)
-        db.add(ExtractedPage(file_id=file_rec.id, page_number=i + 1, text=text, classification=klass, width=width, height=height))
+        db.add(ExtractedPage(file_id=file_rec.id, page_number=i + 1, text=text, classification=klass,
+                             width=item.get("w"), height=item.get("h")))
         pages_out.append({"page": i + 1, "classification": klass, "chars": len(text)})
         for chunk in chunk_text(text, 900):
             db.add(DocumentChunk(file_id=file_rec.id, page_number=i + 1, text=chunk))
-    if kind == "pdfium":
-        doc.close()
 
     ocr_needed = file_rec.page_count and empty_pages / max(n, 1) > 0.6
     file_rec.processing_status = "completed"
+    if heavy:
+        file_rec.processing_error = heavy + " Envoie une capture d'écran ou une photo du plan : je la lirai."
     if ocr_needed:
         file_rec.processing_status = "completed_no_ocr"
-        file_rec.processing_error = (
+        file_rec.processing_error = file_rec.processing_error if heavy else (
             "La majorité des pages n'ont pas de texte lisible (plan dessiné ou scan). "
             + ("Demande « lis le plan » : je le regarde page par page." if vision.disponible()
                else "OCR et vision IA NON DISPONIBLES. Fournissez un PDF avec texte.")

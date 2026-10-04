@@ -6,7 +6,6 @@ import io
 import logging
 from pathlib import Path
 
-from app import ocr
 from app.config import settings
 
 logger = logging.getLogger("unic.vision")
@@ -69,17 +68,9 @@ def describe_pdf_page(path: Path, index: int) -> str:
     if not disponible():
         return ""
     try:
-        import pypdfium2 as pdfium
-
-        pdf = pdfium.PdfDocument(str(path))
-        try:
-            page = pdf[index]
-            try:
-                return _ask(_jpeg_b64(page.render(scale=ocr.scale_for(page, 2, MAX_SIDE)).to_pil()))
-            finally:
-                page.close()
-        finally:
-            pdf.close()
+        from app import pdfjob
+        images = pdfjob.run("images", timeout=60, path=str(path), pages=[index], max_side=MAX_SIDE)["images"]
+        return _ask(images[0]) if images else ""
     except Exception as exc:
         logger.debug("Vision PDF impossible : %s", exc)
         return ""
