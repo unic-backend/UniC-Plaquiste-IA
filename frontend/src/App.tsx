@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
+import { pickGreeting, type Greeting } from "./greetings";
 import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
@@ -396,7 +397,9 @@ function Chat({ initialId }: { initialId?: string }) {
 
   async function send(override?: string) {
     const msg = (override ?? text).trim();
-    if ((!msg && pending.length === 0) || busy) return;
+    if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
+    if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
+    if (busy) return;
     setBusy(true);
     setText("");
     const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || pending.map((f) => f.name).join(", ") };
@@ -427,9 +430,9 @@ function Chat({ initialId }: { initialId?: string }) {
   }
 
   async function voice() {
-    if (rec) {
-      try { const { SpeechRecognition } = await import("@capacitor-community/speech-recognition"); await SpeechRecognition.stop(); } catch { /* déjà arrêté */ }
+    if (rec) {   // arrêt immédiat côté écran : le plugin ne confirme jamais stop()
       setRec(false);
+      import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {});
       return;
     }
     try {
@@ -440,15 +443,18 @@ function Chat({ initialId }: { initialId?: string }) {
         const perm = await SpeechRecognition.requestPermissions();
         if (perm.speechRecognition !== "granted") { setNotice("Micro refusé : autorisez-le dans Réglages › Applis › UniC AI › Autorisations."); return; }
         const base = text ? text.trimEnd() + " " : "";
+        let heard = false;
         await SpeechRecognition.removeAllListeners();
         await SpeechRecognition.addListener("partialResults", (d: { matches: string[] }) => {
-          if (d.matches?.[0]) setText(base + d.matches[0]);
+          if (d.matches?.[0]) { heard = true; setText(base + d.matches[0]); }
         });
-        await SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => setRec(d.status === "started"));
+        // fin de phrase détectée par Android : le micro s'éteint, le texte final arrive juste après
+        await SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => {
+          if (d.status === "stopped") setTimeout(() => setRec(false), 800);
+        });
         setRec(true);
-        const res = await SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 });
-        if (res?.matches?.[0]) setText(base + res.matches[0]);
-        setRec(false);
+        await SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 });
+        setTimeout(() => { if (!heard) { setRec(false); setNotice("Je n'ai rien entendu. Parlez plus près, puis réessayez."); } }, 8000);
         return;
       }
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -461,17 +467,16 @@ function Chat({ initialId }: { initialId?: string }) {
       recg.start();
     } catch (e: any) {
       setRec(false);
-      setNotice("Dictée impossible : " + (e?.message || "erreur micro"));
+      setNotice("Dictée impossible : " + (typeof e === "string" ? e : e?.message || "erreur micro"));
     }
   }
 
-  const suggestions = [
-    "Cloison 12 m × 2,50 m, deux faces",
-    "Briefing du jour",
-    "Fais le devis",
-    "Explique-moi la différence entre BA13 et BA18",
-    "Aide-moi à répondre à un client mécontent",
-  ];
+  const [greet, setGreet] = useState<Greeting>(() => pickGreeting());
+  useEffect(() => {
+    if (messages.length > 0) return;
+    const t = setInterval(() => setGreet((g) => pickGreeting(g)), 4200);
+    return () => clearInterval(t);
+  }, [messages.length]);
 
   return (
     <>
@@ -484,12 +489,9 @@ function Chat({ initialId }: { initialId?: string }) {
                 Posez n'importe quelle question, ou donnez un ordre : je calcule, je rédige, j'explique, et je prépare
                 vos devis, bons et factures quand vous me le demandez. Joignez un plan ou une photo si besoin.
               </p>
-              <div className="chips">
-                {suggestions.map((s) => (
-                  <button key={s} className="chip" onClick={() => send(s)}>
-                    {s}
-                  </button>
-                ))}
+              <div className="greet" key={greet.text} aria-live="polite">
+                <span className="greet-text">{greet.text}</span>
+                <span className="greet-fr">{greet.fr} · {greet.lang}</span>
               </div>
             </div>
           )}
