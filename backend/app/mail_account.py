@@ -46,10 +46,18 @@ def test_login(address: str, password: str) -> None:
         with imaplib.IMAP4_SSL(*GMAIL_IMAP, timeout=20) as box:
             box.login(address, password)
     except imaplib.IMAP4.error as exc:
-        detail = str(exc).lower()
-        if "application-specific" in detail or "web login" in detail:
-            raise MailAccountError("Google demande un mot de passe d'APPLICATION (pas ton mot de passe Gmail). Crée-le dans ton compte Google.")
-        raise MailAccountError("Gmail a refusé ces identifiants. Vérifie l'adresse et le mot de passe d'application (16 lettres).")
+        raw = re.sub(r"\s+", " ", str(exc)).strip()[:140]   # réponse de Gmail : jamais le mot de passe
+        low = raw.lower()
+        if "application-specific" in low or "app password" in low:
+            hint = "Google demande un mot de passe d'APPLICATION (pas ton mot de passe Gmail)."
+        elif "imap" in low and ("disabled" in low or "not enabled" in low):
+            hint = "L'accès IMAP est désactivé dans Gmail (Paramètres › Transfert et POP/IMAP › Activer IMAP)."
+        elif "weblogin" in low or "web login" in low:
+            hint = "Google demande une confirmation : ouvre l'alerte de sécurité reçue et touche « C'était moi »."
+        else:
+            hint = ("Gmail refuse la connexion. Causes les plus fréquentes : 1) alerte de sécurité Google à confirmer (« C'était moi ») ; "
+                    "2) mot de passe d'application mal recopié : recrée-en un ; 3) IMAP désactivé dans Gmail.")
+        raise MailAccountError(f"{hint} (Gmail : {raw})")
     except (socket.timeout, OSError):
         raise MailAccountError("Impossible de joindre Gmail depuis le serveur. Réessaie dans un instant.")
 

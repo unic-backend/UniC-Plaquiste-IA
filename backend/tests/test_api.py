@@ -1480,7 +1480,7 @@ def test_gmail_connect_from_the_app_encrypted_and_used_for_sync(client, monkeypa
     bad = client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "mauvaismotdepasse"})
     assert bad.status_code == 400                                              # 16 lettres exigées
     refused = client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "zzzzzzzzzzzzzzzz"})
-    assert refused.status_code == 400 and "refusé" in refused.json()["detail"]
+    assert refused.status_code == 400 and "Gmail refuse" in refused.json()["detail"] and "AUTHENTICATIONFAILED" in refused.json()["detail"] and "zzzz" not in refused.json()["detail"]
     assert client.get("/api/mail/account").json()["connected"] is False       # un identifiant refusé n'est jamais gardé
     ok = client.put("/api/mail/account", json={"address": "Patron@Gmail.com", "password": "abcd efgh ijkl mnop"})   # espaces tolérés
     assert ok.status_code == 200 and ok.json()["connected"] and "•" in ok.json()["address"]
