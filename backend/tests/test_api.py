@@ -161,11 +161,31 @@ def test_scanned_pdf_ocr_or_honest_warning(client):
     r = client.post("/api/files", files={"file": ("scan.pdf", buf.getvalue(), "application/pdf")})
     assert r.status_code == 200, r.text
     body = r.json()
-    from app import ocr
-    if ocr.disponible():
+    from app import ocr, vision
+    if ocr.disponible() or vision.disponible():
         assert body["processing"]["status"] == "completed"
     else:
-        assert "OCR NON DISPONIBLE" in (body["processing"].get("warning") or "")
+        assert "NON DISPONIBLE" in (body["processing"].get("warning") or "")
+
+
+def test_vision_reads_image_and_scanned_pdf(client, monkeypatch):
+    from PIL import Image
+    import io
+    from app import vision
+    calls = []
+    monkeypatch.setattr(vision, "_ask", lambda b64: calls.append(b64) or "Plan salon 5 m x 4 m = 20 m²")
+    monkeypatch.setattr(vision.settings, "anthropic_api_key", "test")
+    im = Image.new("RGB", (800, 600), "white")
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    r = client.post("/api/files", files={"file": ("plan.png", buf.getvalue(), "image/png")})
+    assert r.status_code == 200 and r.json()["processing"]["status"] == "completed"
+    assert r.json()["processing"]["warning"] is None
+    buf = io.BytesIO()
+    im.save(buf, format="PDF")
+    r = client.post("/api/files", files={"file": ("scan.pdf", buf.getvalue(), "application/pdf")})
+    assert r.status_code == 200 and r.json()["processing"]["status"] == "completed"
+    assert len(calls) == 2 and all(isinstance(c, str) and len(c) > 100 for c in calls)
 
 
 def test_social_workflow_and_limits(client):

@@ -11,7 +11,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app import ocr
+from app import ocr, vision
 from app.config import settings
 from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
 
@@ -80,6 +80,7 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
 
     pages_out = []
     empty_pages = 0
+    vision_pages = 0
     for i in range(n):
         page = reader.pages[i]
         try:
@@ -89,6 +90,10 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
         text = text.replace("\x00", " ").strip()
         if len(text) < 20:
             text = ocr.ocr_pdf_page(path, i) or text
+        if len(text) < 20 and vision_pages < vision.MAX_PDF_PAGES:
+            vision_pages += 1
+            seen = vision.describe_pdf_page(path, i)
+            text = f"[Lecture visuelle IA] {seen}" if seen else text
         if len(text) < 20:
             empty_pages += 1
         box = page.mediabox
@@ -116,8 +121,8 @@ def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dic
             "La majorité des pages n'ont pas de calque texte. "
             + (
                 "L'OCR n'a rien pu lire sur ces pages."
-                if ocr.disponible()
-                else "OCR NON DISPONIBLE (Tesseract non installé). Fournissez un PDF vectoriel."
+                if ocr.disponible() or vision.disponible()
+                else "OCR et vision IA NON DISPONIBLES. Fournissez un PDF vectoriel."
             )
         )
     db.commit()
@@ -295,6 +300,9 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
             file_rec.processing_status = "completed"
             file_rec.page_count = 1
             read = ocr.ocr_image(path)
+            seen = vision.describe_image(path)
+            if seen:
+                read = f"[Lecture visuelle IA] {seen}" + (f"\n\n[OCR]\n{read}" if read else "")
             db.add(ExtractedPage(
                 file_id=file_rec.id, page_number=1,
                 text=read or "[Image] Aucun texte lu. Analyse visuelle NON DISPONIBLE sans IA vision.",
@@ -310,7 +318,7 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
                 "chars": len(read),
                 "warning": None if read else (
                     "Image stockée. Aucun texte lu : "
-                    + ("pas de texte détecté." if ocr.disponible() else "OCR NON DISPONIBLE et pas de modèle vision.")
+                    + ("pas de texte détecté." if ocr.disponible() or vision.disponible() else "OCR et vision IA NON DISPONIBLES (clé Claude absente).")
                 ),
             }
         else:
