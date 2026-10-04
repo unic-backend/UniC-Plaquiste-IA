@@ -2529,3 +2529,37 @@ def test_daily_backup_is_due_once(monkeypatch):
     backup._save_status(last_local="2000-01-01T00:00:00+00:00")
     assert backup.run_daily() is not None
     assert backup.run_daily() is None   # déjà faite aujourd'hui
+
+
+def test_plan_to_quote_without_retyping(client, monkeypatch):
+    import io, json
+    from reportlab.pdfgen import canvas
+    from app import plans
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    monkeypatch.setattr(plans.settings, "anthropic_api_key", "test")
+    fake = {"unite_plan": "m", "pieces": [
+        {"nom": "DRH", "longueur_m": 5.12, "largeur_m": 4.18, "surface_m2": 21.33, "plafond": "a_confirmer"},
+        {"nom": "Salle d'entretien", "longueur_m": 3.99, "largeur_m": 2.04, "surface_m2": 8.05, "plafond": "a_confirmer"},
+        {"nom": "RH", "surface_m2": 77.72, "plafond": "a_confirmer"},
+        {"nom": "Accueil", "plafond": "a_confirmer"}],
+        "emprise": [{"longueur_m": 14.10, "largeur_m": 13.89}]}
+    monkeypatch.setattr(plans, "_call", lambda content: json.dumps(fake))
+    b = io.BytesIO(); c = canvas.Canvas(b); c.drawString(100, 100, "Plan DRH RH Salle d'entretien"); c.save()
+    fid = client.post("/api/files", files={"file": ("plan.pdf", b.getvalue(), "application/pdf")}).json()["id"]
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {"last_file_id": fid})
+        assert "error" in s("calculate_from_plan", {})          # aucun plafond confirmé : on demande, on ne devine pas
+        assert "error" in s("calculate_from_plan", {"rooms": ["Cuisine"]})
+        out = s("calculate_from_plan", {"include_to_confirm": True, "hydrofuge_rooms": ["salle d'entretien"],
+                                        "partitions": [{"label": "Cloison DRH", "length_m": 5.12, "height_m": 2.8}]})
+        assert "error" not in out, out
+        q = {x["sku"]: x["quantity"] for x in out["quantites"]}
+        assert q["BA13-2000x1200"] >= 38            # ⌈99,05 × 1,08 / 2,4⌉ = 45 plafond (+ cloison) ; jamais arrondi pièce par pièce
+        assert q["BA13-2000x1200-H"] == 4           # ⌈8,05 × 1,08 / 2,4⌉
+        assert any("Accueil" in m for m in out["manquant"])
+        assert any("Contrôle" in h for h in out["hypotheses"])
+        r = s("create_quote", {"client_name": "Pape Diop", "checks": "pièces du plan confirmées par le patron",
+                                "objet": "Fourniture et pose de faux plafonds BA13 dans les bureaux RH et Achats, Dakar."})
+        assert "error" not in r, r
+        assert r["lignes"] >= 4 and r["numero"]

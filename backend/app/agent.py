@@ -206,6 +206,24 @@ TOOLS: list[dict] = [
             "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "calculate_from_plan",
+        "description": ("MÉTRÉ DEPUIS LE PLAN lu par read_plan : transforme les pièces et surfaces du plan en quantités (plaques, ossature, "
+                        "suspentes), sans redemander les dimensions. rooms = pièces retenues (noms du plan) ; vide = pièces dont le plan "
+                        "confirme le plafond ; include_to_confirm=true si le patron dit « toutes les pièces ». hydrofuge_rooms = pièces "
+                        "humides en plaque hydrofuge. partitions = cloisons à poser (longueur du plan, hauteur donnée par le patron). "
+                        "Ensuite create_quote (sans `lines`) crée le devis à partir de ce métré."),
+        "input_schema": {"type": "object", "properties": {
+            "file_id": {"type": "string"},
+            "rooms": {"type": "array", "items": {"type": "string"}},
+            "include_to_confirm": {"type": "boolean"},
+            "hydrofuge_rooms": {"type": "array", "items": {"type": "string"}},
+            "partitions": {"type": "array", "items": {"type": "object", "properties": {
+                "label": {"type": "string"}, "length_m": {"type": "number"}, "height_m": {"type": "number"},
+                "sides": {"type": "integer", "enum": [1, 2]}}, "required": ["length_m", "height_m"]}},
+            "board_length_m": {"type": "number", "description": "2 par défaut ; 2.5 seulement si le patron le dit."}},
+            "additionalProperties": False},
+    },
+    {
         "name": "draw_diagram",
         "description": ("Dessine un SCHÉMA en SVG (pas une photo) : plan de pièce coté, coupe de faux plafond ou de cloison (rails, fourrures, "
                         "plaques, suspentes), implantation, graphique en barres, logo simple. Tu écris le SVG complet "
@@ -268,7 +286,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -294,7 +312,9 @@ AGENT_PROMPT = (
     "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
     "\nPLANS : quand un plan est joint (PDF, scan, photo), appelle read_plan. Présente en court : pièces avec plafond (oui / à confirmer), "
     "surfaces, références placo et cloisons du plan, résultat du contrôle d'emprise (controle_emprise), doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
-    "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
+    "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan. "
+    "Dès que le patron a confirmé (pièces, hydrofuge, cloisons et leur hauteur), appelle calculate_from_plan puis create_quote : "
+    "ne lui redemande jamais les dimensions déjà lues sur le plan."
     "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
     "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."
     "\nTABLE RONDE : pour un devis important, un plan ambigu ou une décision à enjeu (ou si le patron demande de vérifier à plusieurs), appelle round_table avec tout le dossier, "
@@ -375,6 +395,33 @@ class AgentSession:
             return logo.audit(svg)
         except diagrams.DiagramError as exc:
             return {"error": str(exc)}
+
+    def _t_calculate_from_plan(self, file_id: str = "", rooms: list | None = None, include_to_confirm: bool = False,
+                               hydrofuge_rooms: list | None = None, partitions: list | None = None,
+                               board_length_m: float | None = None) -> dict:
+        from app import plan_quote, plans
+        fid = file_id or self.state.get("last_file_id")
+        if not fid:
+            raise ConnectorError("Aucun plan joint : demande au patron de joindre le plan.", 400)
+        analysis = plans.analyze(self.db, fid)
+        if analysis.get("error"):
+            raise ConnectorError(analysis["error"], 400)
+        co = company_dict(self.db)
+        try:
+            data = plan_quote.build(analysis, rooms=rooms, include_to_confirm=include_to_confirm,
+                                    hydrofuge_rooms=hydrofuge_rooms, partitions=partitions,
+                                    waste=co.get("default_waste") or 0.08, board_width=co.get("board_width_m") or 1.2,
+                                    board_length=board_length_m or co.get("board_height_m") or 2.0,
+                                    stud_spacing=co.get("stud_spacing_m") or 0.6)
+        except plan_quote.PlanQuoteError as exc:
+            raise ConnectorError(str(exc), 400)
+        except ValueError as exc:
+            raise ConnectorError(str(exc), 400)
+        self.state["last_calc"] = data   # create_quote / bons partent de ce métré
+        self.state.pop("calc_quote_id", None)
+        return {"titre": data["title"], "compris": data["understanding"], "quantites": data["quantities"],
+                "hypotheses": data["assumptions"], "manquant": data["missing"],
+                "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
 
     def _t_read_plan(self, file_id: str = "", refresh: bool = False) -> dict:
         from app import plans
