@@ -663,3 +663,8 @@ body { letter-spacing: -0.006em; }
 .table-wrap, table { border-radius: var(--r-md); overflow: hidden; }
 .toast { border-radius: 18px; backdrop-filter: blur(14px); }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+.ic { display: inline-flex; align-items: center; gap: 6px; }
+.btn svg, .tool-chip svg, .msg-actions svg, .badge svg, .icon-btn svg, .tool svg { vertical-align: -3px; }
+.msg-actions button, .tool-chip, .btn { display: inline-flex; align-items: center; gap: 6px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; }

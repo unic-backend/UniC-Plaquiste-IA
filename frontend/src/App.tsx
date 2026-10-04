@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
+import * as I from "./Icons";
 import { pickGreeting, type Greeting } from "./greetings";
 import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
@@ -38,15 +39,6 @@ function fmt(n: number | null | undefined, cur = ""): string {
   if (n === null || n === undefined) return "—";
   return `${new Intl.NumberFormat("fr-FR").format(n)}${cur ? ` ${cur}` : ""}`;
 }
-
-const svgProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
-const IconMic = () => (<svg {...svgProps}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></svg>);
-const IconPlus = () => (<svg {...svgProps}><path d="M12 5v14M5 12h14" /></svg>);
-const IconUp = () => (<svg {...svgProps} strokeWidth={2.2}><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" /></svg>);
-const IconStop = () => (<svg {...svgProps} fill="currentColor" stroke="none"><rect x="7" y="7" width="10" height="10" rx="2.5" /></svg>);
-const IconCamera = () => (<svg {...svgProps}><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2l1-1.5h6.6l1 1.5h1.2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" /><circle cx="12" cy="12.5" r="3.3" /></svg>);
-const IconPhoto = () => (<svg {...svgProps}><rect x="4" y="5" width="16" height="14" rx="3" /><circle cx="9" cy="10" r="1.6" /><path d="m5 17 4.5-4.5 3.5 3.5 2.5-2.5L20 17" /></svg>);
-const IconFile = () => (<svg {...svgProps}><path d="M7 3.5h6.5L18 8v11a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5A1.5 1.5 0 0 1 7.5 3.5" /><path d="M13 3.5V8h4.5M12 17v-5m0 0-2 2m2-2 2 2" /></svg>);
 
 const DOC_LABEL: Record<string, string> = { quote: "Devis", invoice: "Facture", po: "Bon de commande", dn: "Bon de livraison" };
 
@@ -100,8 +92,8 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
           <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
           {kind === "quote" && Array.isArray(d.price_check) && (
             d.price_check.length === 0
-              ? <p className="hint">✓ Prix et totaux conformes à la grille</p>
-              : <p className="error">⚠ {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
+              ? <p className="hint ic"><I.Check size={16} /> Prix et totaux conformes à la grille</p>
+              : <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
           )}
           {kind === "quote" && d.prices_complete === false && (
             <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
@@ -140,7 +132,7 @@ function MessageView({ m, onRegenerate }: { m: ChatMessage; onRegenerate?: () =>
         {m.role === "assistant" && m.id !== "err" && (
           <div className="msg-actions">
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
-              {copied ? "✓ Copié" : "Copier"}
+              {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
             </button>
             {onRegenerate && <button onClick={onRegenerate}>↻ Régénérer</button>}
           </div>
@@ -329,14 +321,14 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         </div>
         <div className="side-foot">
           <Link to="/parametres" className={`foot-link ${loc.pathname.startsWith("/parametres") ? "active" : ""}`}>
-            ⚙ Paramètres
+            <I.Settings size={18} /> Paramètres
           </Link>
         </div>
       </aside>
       <section className="main">
         <div className="topbar">
           <button className="icon-btn" onClick={() => setOpen(true)} aria-label="Menu">
-            ☰
+            <I.Menu />
           </button>
           <Logo size={22} />
           <b>UniC AI</b>
@@ -546,18 +538,18 @@ function Chat({ initialId }: { initialId?: string }) {
             }}
           />
           <div className="composer-bar">
-            <button className="tool round" aria-label="Ajouter du contexte" onClick={() => setSheet(true)}><IconPlus /></button>
+            <button className="tool round" aria-label="Ajouter du contexte" onClick={() => setSheet(true)}><I.Plus /></button>
             <button className={`mode-chip ${deep ? "on" : ""}`} aria-pressed={deep} onClick={() => setDeep((d) => !d)}
               title="Réflexion profonde (Claude Opus), pour cette question">
-              {deep ? "✦ Profond" : "Normal"}
+              {deep ? <><I.Sparkle size={16} /> Profond</> : "Normal"}
             </button>
             {pending.length > 0 && <span className="grow">{pending.length} fichier(s)</span>}
             {pending.length === 0 && <span className="grow" />}
             <button className={`tool round ${rec ? "rec-on" : ""}`} aria-label={rec ? "Arrêter la dictée" : "Dicter"} onClick={voice}>
-              {rec ? <IconStop /> : <IconMic />}
+              {rec ? <I.Stop /> : <I.Mic />}
             </button>
             <button className="send round" aria-label="Envoyer" onClick={() => send()} disabled={busy}>
-              <IconUp />
+              <I.ArrowUp />
             </button>
           </div>
           <input
@@ -593,11 +585,11 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="sheet-back" onClick={() => setSheet(false)}>
           <div className="sheet" role="dialog" aria-label="Ajouter du contexte" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-grip" />
-            <div className="sheet-head"><button className="tool" aria-label="Fermer" onClick={() => setSheet(false)}>✕</button><b>Ajouter du contexte</b><span /></div>
+            <div className="sheet-head"><button className="tool" aria-label="Fermer" onClick={() => setSheet(false)}><I.Close size={20} /></button><b>Ajouter du contexte</b><span /></div>
             <div className="sheet-grid">
-              <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><IconCamera /></span>Caméra</label>
-              <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><IconPhoto /></span>Photos</label>
-              <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><IconFile /></span>Fichiers</label>
+              <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Camera /></span>Caméra</label>
+              <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Image /></span>Photos</label>
+              <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.File /></span>Fichiers</label>
             </div>
             <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>
           </div>

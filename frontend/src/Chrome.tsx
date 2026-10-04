@@ -1,3 +1,4 @@
+import * as I from "./Icons";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, net, type Post } from "./api";
@@ -28,7 +29,7 @@ export function PageBar() {
   return (
     <div className="pagebar">
       <button className="pagebar-back" onClick={back} aria-label="Retour">
-        <span aria-hidden="true">←</span> Retour
+        <I.Back size={20} /> Retour
       </button>
       <span className="pagebar-title">{title}</span>
       <button className="pagebar-chat" onClick={() => nav("/")}>
@@ -77,7 +78,7 @@ export function ToolChips({ caps }: { caps?: string[] }) {
   return (
     <div className="tool-chips">
       {tools.map((t) => (
-        <span className="tool-chip" key={t}>🔌 {TOOL_LABELS[t.slice(5)] ?? t.slice(5)}</span>
+        <span className="tool-chip" key={t}><I.Plug size={14} /> {TOOL_LABELS[t.slice(5)] ?? t.slice(5)}</span>
       ))}
     </div>
   );
@@ -144,7 +145,7 @@ function SocialDraftCard({ id }: { id: string }) {
   return (
     <div className="draft-card">
       <div className="draft-card-head">
-        <b>{p.kind === "reply" ? "💬 Réponse préparée" : "📣 Publication préparée"} · {p.platform}</b>
+        <b>{p.kind === "reply" ? <><I.Chat size={16} /> Réponse préparée</> : <><I.Megaphone size={16} /> Publication préparée</>} · {p.platform}</b>
         <span className="badge">{p.status}</span>
       </div>
       {p.in_reply_to && <div className="hint">En réponse à : « {p.in_reply_to.slice(0, 160)} »</div>}

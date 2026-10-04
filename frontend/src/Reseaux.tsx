@@ -1,3 +1,4 @@
+import * as I from "./Icons";
 import { useEffect, useState } from "react";
 import { net, type JournalRow, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
@@ -157,7 +158,7 @@ export function Reseaux() {
           {plats.map((x) => (
             <button key={x.id} className={`plat ${x.id === sel ? "on" : ""}`} onClick={() => setSel(x.id)}>
               <b>{x.label}</b>
-              <span>{x.linked ? "● Profil enregistré" : "○ Non renseigné"}</span>
+              <span>{x.linked ? <><I.Dot size={12} /> Profil enregistré</> : <><I.Circle size={12} /> Non renseigné</>}</span>
             </button>
           ))}
         </div>
@@ -317,7 +318,7 @@ export function Courrier() {
             {mails.map((m) => (
               <button key={m.id} className={`plat mail ${open?.id === m.id ? "on" : ""}`}
                 onClick={() => { setOpen(m); setInfo({}); setDraft(null); }}>
-                <b>{m.subject || "(sans objet)"}</b>{m.suspect && <span className="badge" title="Contient des consignes suspectes : ignorées par l'IA"> ⚠ suspect</span>}
+                <b>{m.subject || "(sans objet)"}</b>{m.suspect && <span className="badge" title="Contient des consignes suspectes : ignorées par l'IA"> <I.Alert size={12} /> suspect</span>}
                 <span>{m.from_addr}{m.category ? ` · ${m.category}` : ""}</span>
               </button>
             ))}
@@ -425,7 +426,7 @@ export function Memoire() {
           Ce que l'assistant sait de vous, dans toutes les conversations. Dites « Retiens que… » dans le chat, ou ajoutez ici.
           Ce qu'il devine reste à confirmer. Supprimez ce qui est faux.
         </p>
-        {state?.avertissement && <div className="card-box warn" role="alert">⚠️ {state.avertissement}</div>}
+        {state?.avertissement && <div className="card-box warn" role="alert"><I.Alert size={16} /> {state.avertissement}</div>}
         {state && (
           <p className="hint">
             {state.actifs} actifs · {state.a_confirmer} à confirmer · {state.taches} tâches · {state.conflits} conflits ·
@@ -455,8 +456,8 @@ export function Memoire() {
             {pending.map((m) => (
               <div className="toolbar" key={m.id}>
                 <span className="post-body">{m.text}</span>
-                <button className="btn btn-copper btn-small" aria-label="Confirmer" onClick={() => decide(m.id, "confirm")}>✓</button>
-                <button className="btn btn-ghost btn-small" aria-label="Rejeter" onClick={() => decide(m.id, "reject")}>✗</button>
+                <button className="btn btn-copper btn-small" aria-label="Confirmer" onClick={() => decide(m.id, "confirm")}><I.Check size={16} /></button>
+                <button className="btn btn-ghost btn-small" aria-label="Rejeter" onClick={() => decide(m.id, "reject")}><I.Close size={16} /></button>
               </div>
             ))}
           </section>
