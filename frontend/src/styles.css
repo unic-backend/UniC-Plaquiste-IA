@@ -670,9 +670,32 @@ body { letter-spacing: -0.006em; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; }
 
 /* Police système, texte gras (comme l'app Claude) ; accueil centré */
-body { font-weight: 600; letter-spacing: 0; }
+body { font-weight: 700; letter-spacing: 0; }
 h1, h2, h3, b, strong, th { font-weight: 700; }
-.hint, .lede, .greet-fr, .badge { font-weight: 500; }
+
 .hero { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 8px 12vh; }
 .greet { margin: 0; align-items: center; text-align: center; }
 .greet-fr { font-size: 15px; }
+
+/* Tout en gras, menu latéral agrandi */
+* { font-weight: inherit; }
+button, input, textarea, select, label, a, p, span, li, td, th, div { font-weight: inherit; }
+h1, h2, h3, b, strong, th { font-weight: 800; }
+.sidebar { width: 296px; padding: 18px 14px 18px; gap: 10px; }
+.brand-name { font-size: 24px; font-weight: 800; }
+.brand-sub { font-size: 12px; font-weight: 700; }
+.sidebar .btn, .sidebar .btn-copper { font-size: 16.5px; padding: 14px 14px; border-radius: 16px; }
+.sidebar input { font-size: 16px; padding: 13px 14px; border-radius: 14px; font-weight: 700; }
+.conv-label { font-size: 12.5px; font-weight: 800; opacity: .75; }
+.conv-item a { font-size: 16.5px; padding: 13px 14px; border-radius: 14px; }
+.conv-item button { font-size: 18px; padding: 8px; }
+.side-foot, .foot-link { font-size: 16px; }
+.foot-link { padding: 12px 10px; display: flex; align-items: center; gap: 10px; }
+@media (max-width: 860px) { .sidebar { width: min(86vw, 330px); } }
+.caret { display: inline-block; width: 3px; height: .95em; margin-left: 3px; background: var(--green); vertical-align: -0.12em; border-radius: 2px; }
+.caret.blink { animation: caretBlink 1s steps(2, start) infinite; }
+@keyframes caretBlink { to { visibility: hidden; } }
+.greet-fr { opacity: 0; transform: translateY(6px); transition: opacity .6s ease, transform .6s ease; }
+.greet-fr.show { opacity: 1; transform: none; }
+.greet { animation: none; min-height: 84px; }
+.bubble.fresh { cursor: default; }

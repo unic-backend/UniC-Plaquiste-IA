@@ -120,21 +120,69 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
   );
 }
 
-function MessageView({ m, onRegenerate }: { m: ChatMessage; onRegenerate?: () => void }) {
+/** Révélation progressive d'une réponse reçue (le serveur répond d'un bloc) : rapide, ~2 s max, un toucher la termine. */
+function useTypewriter(full: string, active: boolean) {
+  const [n, setN] = useState(active ? 0 : full.length);
+  useEffect(() => {
+    if (!active) { setN(full.length); return; }
+    setN(0);
+    const step = Math.max(2, Math.ceil(full.length / 110));
+    const id = setInterval(() => {
+      setN((c) => {
+        const next = Math.min(full.length, c + step);
+        if (next >= full.length) clearInterval(id);
+        return next;
+      });
+      const chat = document.querySelector(".chat");
+      if (chat && chat.scrollHeight - chat.scrollTop - chat.clientHeight < 140) chat.scrollTo({ top: chat.scrollHeight });
+    }, 18);
+    return () => clearInterval(id);
+  }, [full, active]);
+  return { text: full.slice(0, n), done: n >= full.length, skip: () => setN(full.length) };
+}
+
+/** Salutation écrite lettre par lettre, à vitesse moyenne. */
+function GreetingTyper({ g }: { g: Greeting }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    const id = setInterval(() => setN((c) => (c >= g.text.length ? c : c + 1)), 85);
+    return () => clearInterval(id);
+  }, [g.text]);
+  const done = n >= g.text.length;
+  return (
+    <div className="greet" aria-live="polite" aria-label={g.text}>
+      <span className="greet-text">{g.text.slice(0, n)}<i className={`caret ${done ? "blink" : ""}`} /></span>
+      <span className={`greet-fr ${done ? "show" : ""}`}>{g.fr} · {g.lang}</span>
+    </div>
+  );
+}
+
+function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const tw = useTypewriter(m.content, !!m.fresh && m.role === "assistant");
+  const shown = m.role === "assistant" && m.fresh ? tw.text : m.content;
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   return (
     <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
-      <div className={`bubble ${m.fresh ? "fresh" : ""}`}>
-        <div className="md" dangerouslySetInnerHTML={{ __html: md(m.content) }} />
+      <div className={`bubble ${m.fresh ? "fresh" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
+        <div className="md" dangerouslySetInnerHTML={{ __html: md(shown) }} />
+        {m.role === "user" && (
+          <div className="msg-actions">
+            <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
+              {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
+            </button>
+            {onEdit && <button onClick={() => onEdit(m.content)}><I.Pencil size={15} /> Modifier</button>}
+          </div>
+        )}
         {m.role === "assistant" && m.id !== "err" && (
           <div className="msg-actions">
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
               {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
             </button>
-            {onRegenerate && <button onClick={onRegenerate}>↻ Régénérer</button>}
+            {onRegenerate && tw.done && <button onClick={onRegenerate}><I.Refresh size={15} /> Régénérer</button>}
           </div>
         )}
         {structured?.steps?.length ? (
@@ -475,7 +523,7 @@ function Chat({ initialId }: { initialId?: string }) {
   const [greet, setGreet] = useState<Greeting>(() => pickGreeting());
   useEffect(() => {
     if (messages.length > 0) return;
-    const t = setInterval(() => setGreet((g) => pickGreeting(g)), 4200);
+    const t = setInterval(() => setGreet((g) => pickGreeting(g)), 5600);
     return () => clearInterval(t);
   }, [messages.length]);
 
@@ -485,16 +533,14 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
-              <div className="greet" key={greet.text} aria-live="polite">
-                <span className="greet-text">{greet.text}</span>
-                <span className="greet-fr">{greet.fr} · {greet.lang}</span>
-              </div>
+              <GreetingTyper g={greet} />
             </div>
           )}
           {messages.map((m, i) => (
             <MessageView
               key={m.id + i}
               m={m}
+              onEdit={(t) => { setText(t); setTimeout(() => { const el = document.querySelector<HTMLTextAreaElement>(".composer textarea"); el?.focus(); el?.setSelectionRange(t.length, t.length); }, 30); }}
               onRegenerate={
                 !busy && i === messages.length - 1 && m.role === "assistant" && m.id !== "err"
                   ? () => {

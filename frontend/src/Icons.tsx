@@ -28,3 +28,5 @@ export const Megaphone = mk(<><path d="M4 10v4a1 1 0 0 0 1 1h2l7 4V5L7 9H5a1 1 0
 export const Copy = mk(<><rect x="8.5" y="8.5" width="11" height="11" rx="3" /><path d="M15.5 8.5V7A2.5 2.5 0 0 0 13 4.5H7A2.5 2.5 0 0 0 4.5 7v6A2.5 2.5 0 0 0 7 15.5h1.5" /></>);
 export const Dot = mk(<circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />);
 export const Circle = mk(<circle cx="12" cy="12" r="4.5" />);
+export const Refresh = mk(<><path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5" /><path d="M19.5 4.5v4h-4" /></>);
+export const Pencil = mk(<><path d="M4.5 19.5 5.3 15 15.8 4.5a2 2 0 0 1 2.9 0l.8.8a2 2 0 0 1 0 2.9L9 18.7z" /><path d="m14 6.5 3.5 3.5" /></>);
