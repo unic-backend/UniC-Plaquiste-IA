@@ -1838,3 +1838,82 @@ def test_plain_post_strips_markdown_and_draft_title():
     t = plain_post("**Post LinkedIn : Cloison terminée**\n\nUne **belle** cloison.\n\n\n\n- point un\n- point deux")
     assert "*" not in t and "Post LinkedIn" not in t and t.startswith("Une belle cloison.") and "• point un" in t
     assert plain_post(None) is None
+
+
+class _InstagramFake:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, method, url, **kw):
+        import httpx
+        self.calls.append((method, url, kw))
+        req = httpx.Request(method, url)
+        if url.endswith("/oauth/access_token"):
+            return httpx.Response(200, request=req, json={"access_token": "IGshort", "user_id": 1789})
+        if url.endswith("/access_token"):
+            return httpx.Response(200, request=req, json={"access_token": "IGlong-secret", "expires_in": 5184000})
+        if url.endswith("/me"):
+            return httpx.Response(200, request=req, json={"user_id": "1789", "username": "unicplaquiste"})
+        if url.endswith("/media"):
+            return httpx.Response(200, request=req, json={"id": "container1"})
+        if url.endswith("/container1"):
+            return httpx.Response(200, request=req, json={"status_code": "FINISHED"})
+        if url.endswith("/media_publish"):
+            return httpx.Response(200, request=req, json={"id": "media9"})
+        if url.endswith("/media9"):
+            return httpx.Response(200, request=req, json={"permalink": "https://www.instagram.com/p/XYZ/"})
+        return httpx.Response(404, request=req)
+
+
+def _jpeg(w=800, h=2000):
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 120, 60)).save(b, "JPEG")
+    return b.getvalue()
+
+
+def test_instagram_connect_publish_and_photo_hosting(client, monkeypatch):
+    from urllib.parse import parse_qs, urlparse
+    from app import instagram
+    fake = _InstagramFake()
+    monkeypatch.setattr(instagram, "_http", fake)
+    assert client.get("/api/instagram").json()["connected"] is False
+    assert client.get("/api/instagram/auth-url").status_code == 409
+    assert client.put("/api/instagram/app", json={"app_id": "abc", "app_secret": "x"}).status_code == 400
+    saved = client.put("/api/instagram/app", json={"app_id": "123456789012345", "app_secret": "ig_secret_value_0123456789"})
+    assert saved.status_code == 200 and "ig_secret" not in saved.text and saved.json()["app_saved"] is True
+    q = parse_qs(urlparse(client.get("/api/instagram/auth-url").json()["url"]).query)
+    assert q["client_id"] == ["123456789012345"] and "instagram_business_content_publish" in q["scope"][0]
+    assert client.get("/api/instagram/callback", params={"code": "c", "state": "FAUX"}).status_code == 400
+    state = parse_qs(urlparse(client.get("/api/instagram/auth-url").json()["url"]).query)["state"][0]
+    ok = client.get("/api/instagram/callback", params={"code": "code123#_", "state": state})
+    assert ok.status_code == 200 and "IGlong" not in ok.text
+    assert client.get("/api/instagram/callback", params={"code": "code123", "state": state}).status_code == 400
+    st = client.get("/api/instagram").json()
+    assert st["connected"] is True and st["username"] == "unicplaquiste" and "IGlong" not in str(st)
+    p = client.post("/api/reseaux/posts", json={"platform": "instagram", "title": "t", "body": "Cloison BA13 à Dakar.", "hashtags": "#plaquiste"}).json()
+    assert client.post(f"/api/reseaux/posts/{p['id']}/publish-instagram", files={"photo": ("a.jpg", _jpeg(), "image/jpeg")}).status_code == 409
+    client.post(f"/api/reseaux/posts/{p['id']}/advance")
+    client.post(f"/api/reseaux/posts/{p['id']}/advance")
+    assert client.post(f"/api/reseaux/posts/{p['id']}/publish-instagram", files={"photo": ("a.txt", b"pas une image", "text/plain")}).status_code == 400
+    r = client.post(f"/api/reseaux/posts/{p['id']}/publish-instagram", files={"photo": ("a.jpg", _jpeg(), "image/jpeg")})
+    assert r.status_code == 200 and r.json()["status"] == "published" and r.json()["external_url"].endswith("/p/XYZ/")
+    media = [c for c in fake.calls if c[1].endswith("/media")][-1][2]["data"]
+    assert media["image_url"].endswith(".jpg") and "/api/public-media/" in media["image_url"] and "#plaquiste" in media["caption"]
+    token = media["image_url"].rsplit("/", 1)[1][:-4]
+    assert client.get(f"/api/public-media/{token}.jpg").status_code == 404     # photo effacée après la publication
+    assert client.delete("/api/instagram").status_code == 200 and client.get("/api/instagram").json()["connected"] is False
+
+
+def test_instagram_photo_is_cropped_to_allowed_ratio_and_served_publicly(client):
+    import io
+    from PIL import Image
+    from app import instagram
+    out = Image.open(io.BytesIO(instagram.prepare_photo(_jpeg(800, 2000))))
+    assert 0.79 <= out.size[0] / out.size[1] <= 1.92
+    tok = instagram.host_photo(instagram.prepare_photo(_jpeg(1000, 1000)))
+    r = client.get(f"/api/public-media/{tok}.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert instagram.photo_path("../../etc/passwd") is None and instagram.photo_path("a/b") is None
+    instagram.photo_path(tok).unlink()

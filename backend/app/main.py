@@ -33,7 +33,7 @@ async def access_code_guard(request: Request, call_next):
     """Code d'accès unique sur /api/*. Ajouté AVANT le CORS : le 401 garde ses en-têtes CORS."""
     code = settings.unic_access_code
     path = request.url.path
-    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback") and request.method != "OPTIONS":
+    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback") and not path.startswith("/api/public-media/") and request.method != "OPTIONS":
         ip = request.client.host if request.client else "?"
         now = time.time()
         recent = [t for t in _fails.get(ip, []) if now - t < _WINDOW]

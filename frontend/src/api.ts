@@ -109,6 +109,9 @@ export type LinkedInStatus = {
   app_saved: boolean; client_id: string; connected: boolean; name: string; days_left: number | null;
   page_id: string; page_scope: boolean; redirect_uri: string;
 };
+export type InstagramStatus = {
+  app_saved: boolean; app_id: string; connected: boolean; username: string; days_left: number | null; redirect_uri: string;
+};
 export type Mail = {
   suspect?: boolean;
   id: string; from_addr: string; subject: string; date: string; body: string;
@@ -146,6 +149,16 @@ export const net = {
   createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
   advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
   deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  instagramStatus: () => request<InstagramStatus>("/api/instagram"),
+  instagramSaveApp: (app_id: string, app_secret: string) =>
+    request<InstagramStatus>("/api/instagram/app", { method: "PUT", body: JSON.stringify({ app_id, app_secret }) }),
+  instagramAuthUrl: () => request<{ url: string }>("/api/instagram/auth-url"),
+  instagramDisconnect: () => request("/api/instagram", { method: "DELETE" }),
+  instagramPublish: (id: string, photo: File) => {
+    const fd = new FormData();
+    fd.append("photo", photo, photo.name);
+    return request<Post>(`/api/reseaux/posts/${id}/publish-instagram`, { method: "POST", body: fd });
+  },
   linkedinStatus: () => request<LinkedInStatus>("/api/linkedin"),
   linkedinSaveApp: (client_id: string, client_secret: string, page_id: string) =>
     request<LinkedInStatus>("/api/linkedin/app", { method: "PUT", body: JSON.stringify({ client_id, client_secret, page_id }) }),

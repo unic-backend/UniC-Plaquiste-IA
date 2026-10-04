@@ -9,6 +9,7 @@ import logging
 
 from app import trust
 from app.config import settings
+from fastapi.responses import FileResponse
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -786,5 +787,118 @@ async def publish_linkedin(pid: str, target: str = Form("profile"), photo: Uploa
     p.status, p.published_at = "published", utcnow()
     p.external_id, p.external_url = out["id"][:500], out["url"][:500]
     audit(db, user.id, "linkedin_publish", "social_post", p.id, target)
+    db.commit()
+    return _post_out(p)
+
+
+# ---------- Instagram ----------
+
+def _ig_redirect(request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/api/instagram/callback"
+
+
+def _ig(fn, *a, **k):
+    from app import instagram
+    try:
+        return fn(*a, **k)
+    except instagram.InstagramError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+class InstagramAppIn(BaseModel):
+    app_id: str
+    app_secret: str = ""
+
+
+@router.get("/instagram")
+def instagram_status(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    return instagram.status(db, _ig_redirect(request))
+
+
+@router.put("/instagram/app")
+def instagram_app(body: InstagramAppIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    _ig(instagram.save_app, db, body.app_id, body.app_secret)
+    audit(db, user.id, "instagram_app", "instagram", "")
+    db.commit()
+    return instagram.status(db, _ig_redirect(request))
+
+
+@router.get("/instagram/auth-url")
+def instagram_auth_url(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    url = _ig(instagram.auth_url, db, _ig_redirect(request))
+    db.commit()
+    return {"url": url}
+
+
+@router.get("/instagram/callback", include_in_schema=False)
+def instagram_callback(request: Request, code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+    """Retour d'Instagram (navigateur, sans en-tête d'accès) : protégé par le `state` à usage unique."""
+    from fastapi.responses import HTMLResponse
+    from app import instagram
+    page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='font-family:system-ui;padding:32px;text-align:center'><h2>{t}</h2><p>{m}</p></body>")
+    if error or not code:
+        return HTMLResponse(page.format(t="Connexion annulée", m="Retourne dans l'appli UniC AI et recommence."), status_code=400)
+    try:
+        name = instagram.finish(db, code, state, _ig_redirect(request))
+        db.commit()
+    except instagram.InstagramError as exc:
+        db.commit()
+        return HTMLResponse(page.format(t="Connexion impossible", m=str(exc).replace("<", "")), status_code=400)
+    return HTMLResponse(page.format(t="Instagram connecté ✓", m=f"@{name or 'compte'} est relié. Retourne dans l'appli UniC AI."))
+
+
+@router.delete("/instagram")
+def instagram_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    instagram.disconnect(db)
+    audit(db, user.id, "instagram_disconnect", "instagram", "")
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/public-media/{token}.jpg", include_in_schema=False)
+def public_media(token: str):
+    """Photo servie à Instagram le temps de la publication (nom aléatoire, effacée ensuite)."""
+    from app import instagram
+    p = instagram.photo_path(token)
+    if p is None:
+        raise HTTPException(404, "Introuvable")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/reseaux/posts/{pid}/publish-instagram")
+async def publish_instagram(pid: str, request: Request, photo: UploadFile = File(...),
+                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publication réelle sur Instagram : texte approuvé + photo obligatoire."""
+    from app import instagram
+    p = _get_post(db, pid)
+    if p.platform != "instagram" or p.kind != "post":
+        raise HTTPException(400, "Ce n'est pas une publication Instagram.")
+    if p.status != "approved":
+        raise HTTPException(409, "Approuve le texte avant la publication.")
+    err = check_post(p.platform, p.body, p.hashtags)
+    if err:
+        raise HTTPException(400, err)
+    raw = await photo.read()
+    if len(raw) > 12 * 1024 * 1024:
+        raise HTTPException(400, "Photo trop lourde (12 Mo maximum).")
+    jpeg = _ig(instagram.prepare_photo, raw)
+    token = instagram.host_photo(jpeg)
+    base = _ig_redirect(request).rsplit("/instagram/", 1)[0]
+    try:
+        out = _ig(instagram.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), f"{base}/public-media/{token}.jpg")
+    finally:
+        pth = instagram.photo_path(token)
+        if pth:
+            pth.unlink(missing_ok=True)
+    p.status, p.published_at = "published", utcnow()
+    p.external_id, p.external_url = out["id"][:500], out["url"][:500]
+    audit(db, user.id, "instagram_publish", "social_post", p.id, "")
     db.commit()
     return _post_out(p)
