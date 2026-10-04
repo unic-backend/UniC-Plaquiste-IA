@@ -89,7 +89,19 @@ export type Platform = {
   id: string; label: string; description: string; tip: string; max_chars: number;
   linked: boolean; handle: string; page_url: string; auto_publish: boolean;
 };
+export type GPlan = {
+  cadence_days: number; last_published_at: string | null; days_since: number | null; due: boolean; next_due_at: string;
+  published_last_30_days: number; target_last_30_days: number; theme: { id: string; label: string };
+  draft: { id: string; title: string; body: string; photo_brief: string; status: string } | null;
+  checklist: { items: { id: string; label: string; done: boolean }[]; done: number; total: number };
+  keywords: Record<"metier" | "zones" | "recherches" | "categories", string[]>;
+  api_configured: boolean; ai: boolean; auto_publish_note: string;
+};
+export type GOptimize = {
+  description: string; services?: { nom: string; texte: string }[]; questions?: { q: string; r: string }[]; categories?: string[];
+};
 export type Post = {
+  photo_brief?: string;
   id: string; platform: string; kind: string; title: string; body: string; hashtags: string;
   in_reply_to: string; status: string; created_at: string | null;
 };
@@ -144,6 +156,13 @@ export const net = {
   addMemory: (b: { text: string; kind: string; pinned: boolean }) =>
     request<Memo>("/api/memory", { method: "POST", ...json(b) }),
   discardDoc: (kind: string, id: string) => request(`/api/documents/${kind}/${id}`, { method: "DELETE" }),
+  gPlan: () => request<GPlan>("/api/google/plan"),
+  gPlanDraft: (topic: string) => request<Post>("/api/google/plan/draft", { method: "POST", ...json({ topic }) }),
+  gPlanDone: (id: string) => request<{ plan: GPlan }>(`/api/google/plan/${id}/done`, { method: "POST", ...json({}) }),
+  gCheck: (id: string, done: boolean) =>
+    request<GPlan["checklist"]>(`/api/google/plan/checklist/${id}`, { method: "PUT", ...json({ done }) }),
+  gOptimize: () => request<GOptimize>("/api/google/optimize", { method: "POST" }),
+  editPost: (id: string, body: string) => request<Post>(`/api/reseaux/posts/${id}`, { method: "PATCH", ...json({ body }) }),
   memoriesBy: (state: string) => request<Memo[]>(`/api/memory?state=${state}`),
   memState: () => request<MemState>("/api/memory/state"),
   memConflicts: () => request<MemConflict[]>("/api/memory/conflicts"),

@@ -45,6 +45,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Photo de chantier (champ fichier avec capture) -->
     <uses-permission android:name="android.permission.CAMERA" />

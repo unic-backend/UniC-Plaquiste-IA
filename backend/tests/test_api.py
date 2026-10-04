@@ -1513,3 +1513,50 @@ def test_gmail_secret_survives_restart_and_bad_key_is_harmless(client, monkeypat
     assert secrets_box.decrypt("gAAAAABx") is None
     db.close()
     client.delete("/api/mail/account")
+
+
+def test_google_plan_cadence_checklist_and_manual_publish(client, claude):
+    from datetime import datetime, timedelta, timezone
+    from app import gbp_plan
+    from app.database import SessionLocal
+    from app.models import SocialPost
+    p0 = client.get("/api/google/plan").json()
+    assert p0["auto_publish"] is False and "API Google" in p0["auto_publish_note"]
+    assert "plaquiste Dakar" in p0["keywords"]["recherches"] and p0["checklist"]["total"] == 10
+    claude(_scripted([("text", '{"texte":"Nos faux plafonds BA13 à Dakar : finition propre, devis gratuit. Appelez-nous.","photo":"Photo du plafond fini, lumière du jour, vue du salon."}')]))
+    d = client.post("/api/google/plan/draft", json={"topic": "plafond salon Mermoz"}).json()
+    assert d["platform"] == "google_business" and d["photo_brief"].startswith("Photo du plafond") and d["status"] == "draft"
+    assert client.get("/api/google/plan").json()["draft"]["id"] == d["id"]
+    done = client.post(f"/api/google/plan/{d['id']}/done", json={}).json()
+    assert done["post"]["status"] == "published" and done["plan"]["due"] is False and done["plan"]["days_since"] == 0
+    # le thème tourne : jamais deux fois le même d'affilée
+    t1 = done["plan"]["theme"]["id"]
+    assert t1 != "realisation"
+    # 4 jours plus tard : la publication est de nouveau due
+    db = SessionLocal()
+    later = datetime.now(timezone.utc) + timedelta(days=4, minutes=1)
+    assert gbp_plan.plan(db, now=later)["due"] is True
+    assert gbp_plan.plan(db, now=later - timedelta(days=1))["due"] is False
+    db.close()
+    ck = client.put("/api/google/plan/checklist/photos", json={"done": True}).json()
+    assert ck["done"] == 1 and client.put("/api/google/plan/checklist/inconnu", json={"done": True}).status_code == 404
+    assert client.post("/api/google/plan/inconnu/done", json={}).status_code == 404
+    b = client.get("/api/briefing").json()
+    assert any(s["title"] == "Fiche Google" for s in b["sections"])
+
+
+def test_google_optimize_returns_pasteable_profile_text(client, claude):
+    claude(_scripted([("text", '{"description":"UniC Plaquiste, plaquiste à Dakar : faux plafonds BA13, cloisons sèches, moulures et peinture. Devis gratuit.",'
+                               '"services":[{"nom":"Faux plafond BA13","texte":"Pose soignée."}],"questions":[{"q":"Devis gratuit ?","r":"Oui, contactez-nous."}],'
+                               '"categories":["Plâtrier"]}')]))
+    out = client.post("/api/google/optimize").json()
+    assert out["description"].startswith("UniC Plaquiste") and len(out["description"]) <= 750 and out["categories"] == ["Plâtrier"]
+
+
+def test_agent_google_post_plan_tool(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    r = AgentSession(db, None, {})("google_post_plan", {})
+    assert "theme_conseille" in r and "plaquiste Dakar" in r["mots_cles"] and "aucun prix" in r["consigne"]
+    db.close()

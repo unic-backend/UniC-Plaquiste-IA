@@ -71,6 +71,13 @@ TOOLS: list[dict] = [
             "required": ["platform", "body"], "additionalProperties": False},
     },
     {
+        "name": "google_post_plan",
+        "description": ("Rythme de la fiche Google : une publication avec photo tous les 4 jours. Dit si une publication est due, "
+                        "le thème conseillé, les mots-clés à placer et l'ouverture des dernières publications (à ne pas répéter). "
+                        "Puis écris la publication toi-même et enregistre-la avec save_social_post_draft(platform=google_business)."),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "list_social_posts",
         "description": "Liste les derniers brouillons et publications (statut, plateforme).",
         "input_schema": {"type": "object", "properties": {"platform": {"type": "string"}}, "additionalProperties": False},
@@ -200,7 +207,7 @@ TOOL_LABELS = {
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
-    "list_directory": "Fiches consultées", "create_contact": "Fiche créée",
+    "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
 
 AGENT_PROMPT = (
@@ -314,6 +321,18 @@ class AgentSession:
         p = connectors.save_social_draft(self.db, platform, body, hashtags, title)
         self.cards.append({"kind": "social", "id": p.id})
         return {"draft_id": p.id, "statut": "brouillon : publication manuelle après approbation"}
+
+    def _t_google_post_plan(self) -> dict:
+        from app import gbp_plan
+        p = gbp_plan.plan(self.db)
+        recent = [x.body[:90] for x in self.db.query(SocialPost).filter(
+            SocialPost.platform == "google_business", SocialPost.kind == "post").order_by(SocialPost.created_at.desc()).limit(5).all()]
+        return {"due": p["due"], "jours_depuis_derniere": p["days_since"], "theme_conseille": p["theme"]["label"],
+                "publications_30_jours": p["published_last_30_days"], "objectif_30_jours": p["target_last_30_days"],
+                "mots_cles": p["keywords"]["recherches"] + p["keywords"]["metier"][:6], "zones": p["keywords"]["zones"][:10],
+                "ouvertures_recentes_a_ne_pas_repeter": recent,
+                "consigne": "500-900 caractères, 2-3 mots-clés naturels, un lieu de Dakar, appel à devis gratuit, aucun prix/chiffre inventé, "
+                            "et propose la PHOTO à prendre. Publication manuelle : le patron colle texte + photo."}
 
     def _t_list_social_posts(self, platform: str = "") -> dict:
         q = self.db.query(SocialPost)

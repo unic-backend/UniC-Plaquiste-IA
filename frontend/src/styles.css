@@ -776,3 +776,15 @@ select, input, textarea { max-width: 100%; box-sizing: border-box; }
 .steps { margin: 4px 0 12px; padding-left: 20px; line-height: 1.5; }
 .steps li { margin-bottom: 6px; }
 .card-box input[type=email], .card-box input[type=password] { display: block; width: 100%; margin-bottom: 8px; }
+
+.photo-brief { display: flex; gap: 10px; align-items: flex-start; background: rgba(184,97,46,.12); border-radius: 14px; padding: 12px; margin: 8px 0; }
+.photo-brief svg { flex-shrink: 0; margin-top: 2px; color: var(--copper-d, #8a4f22); }
+.photo-preview { width: 100%; max-height: 260px; object-fit: cover; border-radius: 14px; margin: 8px 0; }
+.kw { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.kw button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.kw button:active { background: var(--paper); }
+.opt h3 { margin: 14px 0 4px; }
+.opt-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); }
+.opt-row span { opacity: .8; font-size: 13.5px; }
+.check-row { flex-direction: row; align-items: flex-start; gap: 10px; text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--ink); margin: 8px 0; opacity: 1; }
+.check-row input { width: 22px; height: 22px; flex-shrink: 0; margin: 0; }

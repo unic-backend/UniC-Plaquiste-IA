@@ -29,7 +29,7 @@ NO_AI = "IA NON DISPONIBLE : aucun fournisseur IA configuré (OPENAI_API_KEY ou 
 def _post_out(p: SocialPost) -> dict:
     return {
         "id": p.id, "platform": p.platform, "kind": p.kind, "title": p.title, "body": p.body,
-        "hashtags": p.hashtags, "in_reply_to": p.in_reply_to, "status": p.status,
+        "hashtags": p.hashtags, "in_reply_to": p.in_reply_to, "status": p.status, "photo_brief": p.photo_brief,
         "external_url": p.external_url, "external_id": p.external_id, "created_at": p.created_at.isoformat() if p.created_at else None,
         "published_at": p.published_at.isoformat() if p.published_at else None,
     }
@@ -613,3 +613,73 @@ def usage_budget(body: BudgetIn, db: Session = Depends(get_db), user: User = Dep
     from app import usage
     usage.set_budget(db, body.amount_usd)
     return usage.summary(db)
+
+
+# ---------- fiche Google : rythme de publication, mots-clés, optimisation ----------
+
+class PlanDraftIn(BaseModel):
+    topic: str = Field("", max_length=300)
+
+
+class DoneIn(BaseModel):
+    url: str = Field("", max_length=512)
+
+
+class CheckIn(BaseModel):
+    done: bool
+
+
+@router.get("/google/plan")
+def google_plan(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import gbp_plan
+    return {**gbp_plan.plan(db), "api_configured": gbp.configured(), "ai": assistant.ai_available()}
+
+
+@router.post("/google/plan/draft")
+def google_plan_draft(body: PlanDraftIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon de la publication du jour + photo à prendre. Rien n'est publié."""
+    from app import gbp_plan
+    try:
+        post = gbp_plan.generate_draft(db, body.topic, memory=mem.block(db, body.topic or "fiche Google publication"))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    audit(db, user.id, "google_plan_draft", "social_post", post.id)
+    db.commit()
+    return _post_out(post)
+
+
+@router.post("/google/plan/{pid}/done")
+def google_plan_done(pid: str, body: DoneIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """« J'ai publié » : relance le compteur de 4 jours."""
+    from app import gbp_plan
+    try:
+        post = gbp_plan.mark_done(db, pid, body.url)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit(db, user.id, "social_published", "social_post", post.id, "google_business")
+    db.commit()
+    return {"post": _post_out(post), "plan": gbp_plan.plan(db)}
+
+
+@router.put("/google/plan/checklist/{item_id}")
+def google_plan_check(item_id: str, body: CheckIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import gbp_plan
+    try:
+        return gbp_plan.set_check(db, item_id, body.done)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/google/optimize")
+def google_optimize(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Description, services, questions-réponses et catégories à coller dans la fiche. Rien n'est modifié chez Google."""
+    from app import gbp_plan
+    try:
+        data = gbp_plan.optimize(db, memory=mem.block(db, "fiche Google référencement"))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    audit(db, user.id, "google_optimize", "google", "")
+    db.commit()
+    return data

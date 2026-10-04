@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { FicheGoogle } from "./Google";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
@@ -1341,7 +1342,8 @@ const HUB: { title: string; items: HubItem[] }[] = [
     title: "Connecteurs",
     items: [
       { to: "/courrier", title: "Courrier", text: "Boîte mail : lire, comprendre, répondre" },
-      { to: "/reseaux", title: "Réseaux & Google", text: "Publications, avis, fiche Google, site" },
+      { to: "/google", title: "Fiche Google", text: "Publier tous les 4 jours, mots-clés, fiche complète" },
+      { to: "/reseaux", title: "Réseaux & avis", text: "Publications, avis Google, site" },
     ],
   },
   {
@@ -1603,6 +1605,7 @@ export default function App() {
         <Route path="/memoire" element={<Memoire />} />
         <Route path="/journal" element={<Journal />} />
         <Route path="/couts" element={<Couts />} />
+        <Route path="/google" element={<FicheGoogle />} />
         <Route path="/courrier" element={<Courrier />} />
         <Route path="/reseaux" element={<Reseaux />} />
         <Route path="/parametres" element={<SettingsHub />} />

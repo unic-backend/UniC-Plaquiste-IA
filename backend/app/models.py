@@ -595,6 +595,7 @@ class SocialPost(Base):
     status: Mapped[str] = mapped_column(String(16), default="draft")
     external_url: Mapped[str] = mapped_column(String(512), default="")
     external_id: Mapped[str] = mapped_column(String(512), default="")  # ex. avis Google visé / post créé
+    photo_brief: Mapped[str] = mapped_column(Text, default="")  # quelle photo prendre pour cette publication
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

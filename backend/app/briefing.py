@@ -79,6 +79,15 @@ def _reviews() -> Section:
         f"- {'★' * r['stars']} {r['author']} : {(r['comment'] or '(sans commentaire)')[:80]}" for r in todo[:5]))
 
 
+def _google_plan(db: Session) -> Section:
+    from app import gbp_plan
+    p = gbp_plan.plan(db)
+    if p["due"]:
+        since = "aucune publication encore" if p["days_since"] is None else f"dernière il y a {p['days_since']} jour(s)"
+        return Section("Fiche Google", OK, f"Publication avec photo à faire aujourd'hui ({since}). Thème conseillé : {p['theme']['label']}.")
+    return Section("Fiche Google", OK, f"Publication à jour : la prochaine est attendue le {p['next_due_at'][:10]}.")
+
+
 def _drafts(db: Session) -> Section:
     posts = db.query(SocialPost).filter(SocialPost.status != "published").count()
     mails = db.query(EmailDraft).filter(EmailDraft.status.in_(("draft", "approved"))).count()
@@ -111,7 +120,7 @@ def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
     for fn in (lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
-               lambda: _drafts(db), lambda: _memory(db)):
+               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db)):
         try:
             s = fn()
         except Exception as exc:   # une rubrique en panne n'arrête pas les autres
