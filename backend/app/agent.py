@@ -132,10 +132,10 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
             "number": {"type": "string", "description": "Numéro du document ; omis = dernier devis de la conversation"},
-            "remove": {"type": "array", "items": {"type": ["string", "integer"]},
+            "remove": {"type": "array", "items": {"type": "string"},
                        "description": "Lignes à retirer : numéro de ligne ou morceau de la désignation"},
             "update": {"type": "array", "items": {"type": "object", "properties": {
-                "line": {"type": ["string", "integer"]}, "quantity": {"type": "number"}, "unit_price": {"type": "number"},
+                "line": {"type": "string"}, "quantity": {"type": "number"}, "unit_price": {"type": "number"},
                 "description": {"type": "string"}, "unit": {"type": "string"}}, "required": ["line"]}},
             "add": {"type": "array", "items": {"type": "object", "properties": {
                 "description": {"type": "string"}, "quantity": {"type": "number"}, "unit": {"type": "string"},
