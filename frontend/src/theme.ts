@@ -8,7 +8,21 @@ export function getMode(): ThemeMode {
   return "auto";
 }
 
-const systemDark = () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+// Mode nuit donné par Android (MainActivity) : prioritaire, car la page ne voit pas toujours le changement du téléphone.
+let nativeNight: boolean | null = null;
+const systemDark = () => nativeNight ?? window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+
+declare global { interface Window { __unicSetNight?: (night: boolean) => void } }
+if (typeof window !== "undefined") {
+  window.__unicSetNight = (night: boolean) => {
+    nativeNight = !!night;
+    if (getMode() === "auto") applyTheme("auto");
+  };
+  // navigateur / PC : suit le système en direct, sur tous les écrans (pas seulement Paramètres)
+  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    if (nativeNight === null && getMode() === "auto") applyTheme("auto");
+  });
+}
 
 /** Applique le thème et la couleur de la barre du navigateur / système. */
 export function applyTheme(mode: ThemeMode = getMode()): void {
