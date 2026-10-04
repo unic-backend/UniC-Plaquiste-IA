@@ -895,8 +895,18 @@ def handle_turn(
                 for m in reversed(history):
                     msgs.append({"role": m.role, "content": m.content[:2000]})
                 msgs.append({"role": "user", "content": text})
-                ai = chat_complete(msgs, deep=deep)
-                if ai.available and ai.text:
+                chain = provider_chain(deep)
+                can_search = bool(chain) and chain[0].id == "claude" and settings.web_search_enabled
+                if can_search:
+                    msgs[0]["content"] += (
+                        "\n\nOUTIL DE RECHERCHE INTERNET DISPONIBLE : pour toute information récente ou vérifiable "
+                        "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
+                        "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
+                    )
+                ai = chat_complete(msgs, deep=deep, web=can_search)
+                if ai.error == "refusal":
+                    reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
+                elif ai.available and ai.text:
                     reply_text = ai.text
                     mem.extract_and_store(db, text)
                     if deep and ai.provider != "claude":

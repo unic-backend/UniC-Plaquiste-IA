@@ -96,7 +96,7 @@ def extract_and_store(db: Session, user_text: str) -> list[str]:
                 'Réponds UNIQUEMENT par un tableau JSON de phrases courtes, ou []. Exemple : ["Le BA13 hydrofuge se pose en salle de bain"]'
             )},
             {"role": "user", "content": user_text[:2000]},
-        ], max_tokens=300)
+        ], max_tokens=300, effort="low")
         m = re.search(r"\[.*\]", res.text or "", re.S)
         items = json.loads(m.group(0)) if m else []
     except Exception as exc:  # jamais bloquer la conversation

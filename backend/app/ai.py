@@ -103,10 +103,12 @@ class LocalAIProvider(AIProvider):
 
 
 class ClaudeAIProvider(AIProvider):
-    """API Claude (Anthropic Messages). Utilisée seulement pour le raisonnement profond demandé."""
+    """API Claude via le SDK officiel `anthropic`. Raisonnement profond à la demande, recherche Internet intégrée."""
 
     id = "claude"
     kind = "chat"
+    # `_20260209` : recherche avec filtrage dynamique (Sonnet 5.5, Opus 5.5)
+    WEB_TOOL = {"type": "web_search_20260209", "name": "web_search"}
 
     def health(self) -> dict:
         ok = bool(settings.anthropic_api_key)
@@ -118,27 +120,75 @@ class ClaudeAIProvider(AIProvider):
             "detail": "" if ok else "ANTHROPIC_API_KEY absent. Raisonnement profond Claude NON DISPONIBLE.",
         }
 
+    def _client(self):
+        import anthropic
+
+        opts = {"api_key": settings.anthropic_api_key, "timeout": 180.0, "max_retries": 2}
+        if settings.anthropic_base_url:
+            opts["base_url"] = settings.anthropic_base_url
+        return anthropic.Anthropic(**opts)
+
+    @staticmethod
+    def _send(client, params: dict):
+        """Essaie le repli serveur (refus de sécurité → modèle de secours) ; sans lui si l'API le rejette."""
+        import anthropic
+
+        try:
+            return client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+        except anthropic.BadRequestError:
+            return client.messages.create(**params)
+
+    @staticmethod
+    def _text_and_sources(resp) -> tuple[str, list[dict]]:
+        parts, sources, seen = [], [], set()
+        for block in resp.content or []:
+            if getattr(block, "type", "") != "text":
+                continue
+            parts.append(block.text)
+            for cit in getattr(block, "citations", None) or []:
+                url = getattr(cit, "url", None)
+                if url and url not in seen:
+                    seen.add(url)
+                    sources.append({"title": getattr(cit, "title", "") or url, "url": url})
+        return "".join(parts).strip(), sources
+
     def complete(self, messages: list[dict], **kwargs) -> AIResult:
         model = kwargs.get("model") or settings.anthropic_model
         if not settings.anthropic_api_key:
             return AIResult("", self.id, model, False, "not_configured")
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
-        payload = {"model": model, "max_tokens": kwargs.get("max_tokens", 4096), "messages": turns}
+        params: dict = {"model": model, "max_tokens": kwargs.get("max_tokens", 8000), "messages": turns}
         if system:
-            payload["system"] = system
-        headers = {
-            "x-api-key": settings.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
+            params["system"] = system
+        if kwargs.get("effort"):
+            params["output_config"] = {"effort": kwargs["effort"]}
+        web = bool(kwargs.get("web")) and settings.web_search_enabled
+        if web:
+            params["tools"] = [{**self.WEB_TOOL, "max_uses": settings.web_search_max_uses}]
         try:
-            with httpx.Client(timeout=180) as client:
-                r = client.post(settings.anthropic_base_url.rstrip("/") + "/v1/messages", headers=headers, json=payload)
-                r.raise_for_status()
-                data = r.json()
-            text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-            return AIResult(text, self.id, model, bool(text), raw=data)
+            client = self._client()
+            try:
+                resp = self._send(client, params)
+                # recherche longue : l'API peut demander de reprendre le tour (pause_turn)
+                for _ in range(3):
+                    if getattr(resp, "stop_reason", "") != "pause_turn":
+                        break
+                    params["messages"] = turns + [{"role": "assistant", "content": resp.content}]
+                    resp = self._send(client, params)
+            except Exception:
+                if not web:
+                    raise
+                # la recherche Internet est refusée (non activée sur le compte Anthropic ?) : on répond sans elle
+                params.pop("tools", None)
+                web = False
+                resp = self._send(client, params)
+            if getattr(resp, "stop_reason", "") == "refusal":
+                return AIResult("", self.id, model, False, "refusal")
+            text, sources = self._text_and_sources(resp)
+            if web and sources:
+                text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
+            return AIResult(text, self.id, model, bool(text), "" if text else "empty")
         except Exception as exc:  # la clé n'apparaît jamais dans le message
             return AIResult("", self.id, model, False, f"claude: {type(exc).__name__}")
 
@@ -218,13 +268,16 @@ def pick_chat_provider(deep: bool = False) -> AIProvider:
     return chain[0] if chain else PROVIDERS["local"]
 
 
-def chat_complete(messages: list[dict], deep: bool = False, **kwargs) -> AIResult:
+def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, **kwargs) -> AIResult:
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
     last = AIResult("", "none", "", False, "not_configured")
     for provider in provider_chain(deep):
         opts = dict(kwargs)
         if provider.id == "claude":
             opts.setdefault("model", settings.anthropic_model if deep else settings.anthropic_fast_model)
+            opts.setdefault("effort", "high" if deep else "medium")
+            opts["web"] = web
+            opts.setdefault("max_tokens", 16000 if deep else 8000)
         res = provider.complete(messages, **opts)
         if res.available and res.text:
             return res

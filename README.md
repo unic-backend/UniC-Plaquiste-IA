@@ -203,3 +203,10 @@ Netlify héberge des sites statiques : il ne peut pas faire tourner ce backend P
 3. Render → service → *Settings* → *Custom Domains* → `ia.unicplaquiste.com` → noter la cible CNAME.
 4. Netlify → *Domains* → `unicplaquiste.com` → *DNS records* → ajouter `CNAME  ia  →  <cible Render>`.
 5. App Android : adresse du serveur `https://ia.unicplaquiste.com` + le code.
+
+## Recherche sur Internet
+
+Avec Claude comme moteur, JARVIS cherche sur Internet quand la question dépend de l'actualité ou de faits récents, et cite ses sources (liens sous la réponse).
+- À activer côté Anthropic : console.anthropic.com → **Settings** → **Privacy** (ou *Organization*) → autoriser **Web search**. Sans cela, l'IA répond sans recherche (sans erreur).
+- Facturée à l'usage par Anthropic (en plus des jetons). Limite : `WEB_SEARCH_MAX_USES` recherches par réponse. Désactiver : `WEB_SEARCH_ENABLED=false`.
+- Ne sert jamais pour les données privées de l'entreprise (prix, clients) : celles-ci viennent de la base UniC et de la mémoire.

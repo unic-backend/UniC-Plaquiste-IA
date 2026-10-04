@@ -313,49 +313,6 @@ def test_ai_chain_local_first_claude_on_deep(monkeypatch):
     assert [p.id for p in ai.provider_chain()] == ["claude"]
 
 
-def test_claude_request_shape_and_local_fallback(monkeypatch):
-    import httpx
-    from app import ai
-    from app.config import settings
-    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
-    monkeypatch.setattr(settings, "anthropic_api_key", "secret-key")
-    seen = {}
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        if "anthropic" in str(req.url):
-            seen["h"] = dict(req.headers)
-            seen["b"] = req.content
-            return httpx.Response(200, json={"content": [{"type": "text", "text": "réponse profonde"}]})
-        return httpx.Response(200, json={"choices": [{"message": {"content": "réponse locale"}}]})
-
-    real = httpx.Client
-    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
-    msgs = [{"role": "system", "content": "règles"}, {"role": "user", "content": "q"}]
-    r = ai.chat_complete(msgs, deep=True)
-    assert r.provider == "claude" and r.text == "réponse profonde"
-    assert seen["h"]["x-api-key"] == "secret-key" and seen["h"]["anthropic-version"] == "2023-06-01"
-    import json
-    body = json.loads(seen["b"])
-    assert body["system"] == "règles" and body["messages"] == [{"role": "user", "content": "q"}]
-    r2 = ai.chat_complete(msgs)  # normal → local d'abord
-    assert r2.provider == "local" and r2.text == "réponse locale"
-    monkeypatch.setattr(settings, "local_ai_url", "")
-    r2b = ai.chat_complete(msgs)  # Claude seul → modèle rapide
-    assert r2b.provider == "claude" and r2b.model == settings.anthropic_fast_model
-    r2c = ai.chat_complete(msgs, deep=True)  # profond → modèle profond
-    assert r2c.model == settings.anthropic_model
-    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
-
-    # Claude en panne → repli local
-    def broken(req):
-        if "anthropic" in str(req.url):
-            return httpx.Response(500, json={})
-        return httpx.Response(200, json={"choices": [{"message": {"content": "secours"}}]})
-    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(broken), **kw))
-    r3 = ai.chat_complete(msgs, deep=True)
-    assert r3.provider == "local" and "secret-key" not in (r3.error or "")
-
-
 def test_chat_deep_without_claude_key_is_honest(client, monkeypatch):
     import httpx
     from app import ai
@@ -370,45 +327,147 @@ def test_chat_deep_without_claude_key_is_honest(client, monkeypatch):
     assert "avis local" in txt and "Claude NON DISPONIBLE" in txt
 
 
-def test_memory_persists_across_conversations(client, monkeypatch):
+# ---------- Faux client Claude (SDK officiel) ----------
+from types import SimpleNamespace as _NS
+
+
+def _resp(text, cites=(), stop="end_turn", content=None):
+    block = _NS(type="text", text=text, citations=[_NS(url=u, title=t) for u, t in cites] or None)
+    return _NS(content=content or [block], stop_reason=stop, model="m")
+
+
+class FakeClaude:
+    def __init__(self, reply):
+        self.calls, self.reply = [], reply
+        self.beta = _NS(messages=_NS(create=lambda **kw: self._go("beta", kw)))
+        self.messages = _NS(create=lambda **kw: self._go("plain", kw))
+
+    def _go(self, kind, kw):
+        self.calls.append((kind, kw))
+        out = self.reply(kind, kw)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+
+@pytest.fixture
+def claude(monkeypatch):
+    from app.ai import ClaudeAIProvider
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_ai_url", "")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "secret-key")
+
+    def install(reply):
+        fake = FakeClaude(reply)
+        monkeypatch.setattr(ClaudeAIProvider, "_client", lambda self: fake)
+        return fake
+    return install
+
+
+def test_claude_sdk_request_shape_models_effort_and_fallback(claude):
+    from app import ai
+    from app.config import settings
+    fake = claude(lambda kind, kw: _resp("réponse"))
+    msgs = [{"role": "system", "content": "règles"}, {"role": "user", "content": "q"}]
+    deep = ai.chat_complete(msgs, deep=True)
+    kind, kw = fake.calls[-1]
+    assert deep.provider == "claude" and deep.text == "réponse"
+    assert kind == "beta" and kw["betas"] == ["server-side-fallback-2026-07-01"] and kw["fallbacks"] == "default"
+    assert kw["model"] == settings.anthropic_model and kw["output_config"] == {"effort": "high"}
+    assert kw["system"] == "règles" and kw["messages"] == [{"role": "user", "content": "q"}] and "tools" not in kw
+    ai.chat_complete(msgs)  # courant : modèle rapide, effort moyen
+    kw = fake.calls[-1][1]
+    assert kw["model"] == settings.anthropic_fast_model and kw["output_config"] == {"effort": "medium"}
+
+
+def test_claude_web_search_tool_and_sources(claude):
+    from app import ai
+    fake = claude(lambda kind, kw: _resp("Il fait 31 °C à Dakar.", cites=[("https://meteo.sn/dakar", "Météo Dakar")]))
+    r = ai.chat_complete([{"role": "user", "content": "météo Dakar ?"}], web=True)
+    tool = fake.calls[-1][1]["tools"][0]
+    assert tool["type"] == "web_search_20260209" and tool["name"] == "web_search" and tool["max_uses"] >= 1
+    assert "[Météo Dakar](https://meteo.sn/dakar)" in r.text and "**Sources**" in r.text
+
+
+def test_claude_web_search_refused_by_account_falls_back_to_plain_answer(claude):
+    from app import ai
+    def reply(kind, kw):
+        return RuntimeError("web search not enabled") if "tools" in kw else _resp("réponse sans web")
+    fake = claude(reply)
+    r = ai.chat_complete([{"role": "user", "content": "q"}], web=True)
+    assert r.text == "réponse sans web" and "tools" not in fake.calls[-1][1]
+
+
+def test_claude_pause_turn_is_resumed(claude):
+    from app import ai
+    state = {"n": 0}
+    def reply(kind, kw):
+        state["n"] += 1
+        if state["n"] == 1:
+            return _resp("", stop="pause_turn", content=[_NS(type="server_tool_use")])
+        return _resp("fin")
+    fake = claude(reply)
+    r = ai.chat_complete([{"role": "user", "content": "q"}], web=True)
+    assert r.text == "fin" and fake.calls[-1][1]["messages"][-1]["role"] == "assistant"
+
+
+def test_claude_bad_request_on_fallback_param_retries_plain(claude):
+    import anthropic
+    import httpx2
+    from app import ai
+    err = anthropic.BadRequestError("bad", response=httpx2.Response(400, request=httpx2.Request("POST", "http://x")), body=None)
+    fake = claude(lambda kind, kw: err if kind == "beta" else _resp("ok plain"))
+    assert ai.chat_complete([{"role": "user", "content": "q"}]).text == "ok plain"
+    assert [k for k, _ in fake.calls] == ["beta", "plain"]
+
+
+def test_claude_refusal_and_failure_are_honest_and_never_leak_the_key(claude, client):
+    from app import ai
+    claude(lambda kind, kw: _resp("", stop="refusal"))
+    assert ai.chat_complete([{"role": "user", "content": "q"}]).error == "refusal"
+    out = client.post("/api/chat", json={"message": "Raconte-moi une histoire"}).json()["message"]["content"]
+    assert "Je ne peux pas aider" in out
+    claude(lambda kind, kw: RuntimeError("secret-key leaked?"))
+    res = ai.chat_complete([{"role": "user", "content": "q"}])
+    assert not res.available and "secret-key" not in res.error
+
+
+def test_claude_failure_falls_back_to_local(claude, monkeypatch):
     import httpx
     from app import ai
     from app.config import settings
+    claude(lambda kind, kw: RuntimeError("down"))
+    monkeypatch.setattr(settings, "local_ai_url", "http://local/v1")
+    real = httpx.Client
+    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "secours local"}}]})), **kw))
+    r = ai.chat_complete([{"role": "user", "content": "q"}], deep=True)
+    assert r.provider == "local" and r.text == "secours local"
+
+
+def test_chat_uses_web_search_and_mentions_it_in_the_prompt(claude, client):
+    fake = claude(lambda kind, kw: _resp("D'après les sources, il pleut.", cites=[("https://x.org/a", "Source A")]))
+    out = client.post("/api/chat", json={"message": "Quel temps fait-il à Paris aujourd'hui ?"}).json()["message"]["content"]
+    assert "Sources" in out and "https://x.org/a" in out
+    chat_call = [kw for _, kw in fake.calls if "tools" in kw][0]
+    assert "OUTIL DE RECHERCHE INTERNET" in chat_call["system"]
+
+
+def test_memory_persists_across_conversations(client, claude):
     r = client.post("/api/chat", json={"message": "Retiens que le BA13 hydrofuge se pose dans les salles de bain"}).json()
     assert "Retenu" in r["message"]["content"]
     assert any("hydrofuge" in m["text"] for m in client.get("/api/memory").json())
     # nouvelle conversation : le souvenir part dans le prompt envoyé à Claude
-    monkeypatch.setattr(settings, "local_ai_url", "")
-    monkeypatch.setattr(settings, "anthropic_api_key", "k")
-    seen = []
-
-    def handler(req):
-        import json as j
-        seen.append(j.loads(req.content))
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "[]" if len(seen) % 2 == 0 else "ok salle de bain"}]})
-
-    real = httpx.Client
-    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    fake = claude(lambda kind, kw: _resp("[]" if "Extrais" in kw.get("system", "") else "ok salle de bain"))
     out = client.post("/api/chat", json={"message": "Quel type de plaque pour une salle de bain, dis-moi"}).json()
     assert "ok salle de bain" in out["message"]["content"]
-    assert "hydrofuge" in seen[0]["system"] and "MÉMOIRE UNIC" in seen[0]["system"]
+    first = fake.calls[0][1]
+    assert "hydrofuge" in first["system"] and "MÉMOIRE UNIC" in first["system"]
 
 
-def test_memory_auto_extract_dedupe_and_delete(client, monkeypatch):
-    import httpx
-    from app import ai
-    from app.config import settings
-    monkeypatch.setattr(settings, "local_ai_url", "")
-    monkeypatch.setattr(settings, "anthropic_api_key", "k")
-    calls = {"n": 0}
-
-    def handler(req):
-        calls["n"] += 1
-        txt = '["Awa Diop est une cliente fidèle de Dakar"]' if "Extrais" in req.content.decode() else "Bien noté."
-        return httpx.Response(200, json={"content": [{"type": "text", "text": txt}]})
-
-    real = httpx.Client
-    monkeypatch.setattr(ai.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+def test_memory_auto_extract_dedupe_and_delete(client, claude):
+    claude(lambda kind, kw: _resp('["Awa Diop est une cliente fidèle de Dakar"]' if "Extrais" in kw.get("system", "") else "Bien noté."))
     msg = "Pour info, Awa Diop est une cliente fidèle de Dakar, fais attention aux délais"
     for _ in range(2):
         client.post("/api/chat", json={"message": msg})

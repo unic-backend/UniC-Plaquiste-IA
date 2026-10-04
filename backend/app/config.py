@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-5-5"  # raisonnement profond
     anthropic_fast_model: str = "claude-sonnet-5-5"  # usage courant quand Claude est le seul moteur
-    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_base_url: str = ""  # vide = adresse officielle du SDK
+    web_search_enabled: bool = True  # recherche Internet par Claude (facturée à l'usage par Anthropic)
+    web_search_max_uses: int = 3
 
     local_ai_url: str = ""
     local_ai_model: str = ""
