@@ -338,6 +338,8 @@ def quotation_from_quantities(
 
 
 def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(q, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, q.customer_id) if q.customer_id else None
     project = db.get(Project, q.project_id) if q.project_id else None
@@ -347,7 +349,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     for it in items:
         rows.append([
             str(it.position),
-            it.description + (f"<br/><font color='#6B645B' size='7'>{it.formula}</font>" if it.formula else ""),
+            it.description,
             fr_num(it.quantity, 2),
             it.unit,
             money(it.unit_price, currency),
@@ -459,6 +461,8 @@ def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | 
 
 
 def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(inv, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
     currency = inv.currency or company.get("currency") or ""
@@ -491,7 +495,7 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
         dest, company=company, doc_label=kind_label, number=inv.number,
         title=inv.title or kind_label, status=inv.status,
         meta_lines=[f"N° {inv.number}", f"Date {inv.created_at.strftime('%d/%m/%Y') if inv.created_at else ''}",
-                    f"Type {inv.kind}"],
+                    "Type : " + {"invoice": "Facture", "deposit": "Acompte", "partial": "Situation", "final": "Solde", "credit": "Avoir"}.get(inv.kind, "Facture")],
         party_left=("Émetteur", party_text_from_company(company)),
         party_right=("Client", party_text_customer(customer)),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
@@ -548,6 +552,8 @@ def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
 
 
 def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(po, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     supplier = db.get(Supplier, po.supplier_id) if po.supplier_id else None
     currency = po.currency or ""
@@ -606,6 +612,8 @@ def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
 
 
 def generate_dn_pdf(db: Session, dn: DeliveryNote, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(dn, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, dn.customer_id) if dn.customer_id else None
     items = sorted(dn.items, key=lambda x: x.position)

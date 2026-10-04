@@ -1217,3 +1217,19 @@ def test_hello_goes_to_claude_when_available(client, claude):
     fake = claude(_scripted([("text", "Bonjour patron, que puis-je faire pour vous ?")]))
     out = client.post("/api/chat", json={"message": "salut"}).json()["message"]["content"]
     assert "Bonjour patron" in out and "Exemples" not in out and fake.calls
+
+
+def test_every_document_pdf_lists_its_lines(client):
+    """Régression : le bon de commande, le bon de livraison et la facture sortaient avec un tableau vide."""
+    import pypdfium2 as pdfium
+    r = client.post("/api/chat", json={"message": "méthode UniC cloison 5,40 m x 2,50 m, 18 parois, fais le devis pour Fast Group"}).json()
+    cid = r["conversation_id"]
+    for m in ("crée le bon de commande", "crée le bon de livraison", "prépare la facture"):
+        client.post("/api/chat", json={"message": m, "conversation_id": cid})
+    for url in ("/api/quotes", "/api/purchase-orders", "/api/delivery-notes", "/api/invoices"):
+        row = client.get(url).json()[0]
+        det = client.get(f"{url}/{row['id']}").json()
+        pdf = pdfium.PdfDocument(client.get(det["download_url"]).content)
+        text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+        assert "Plaque standard BA13" in text, url
+        assert "UniC Plaquiste" in text and "NINEA" in text
