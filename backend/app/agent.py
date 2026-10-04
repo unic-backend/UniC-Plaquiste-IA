@@ -218,6 +218,19 @@ TOOLS: list[dict] = [
             "svg": {"type": "string", "description": "Le SVG complet"}}, "required": ["title", "svg"], "additionalProperties": False},
     },
     {
+        "name": "logo_guide",
+        "description": ("Guide de métier pour CRÉER UN LOGO (méthode d'un designer d'identité). À lire AVANT de dessiner un logo, "
+                        "un favicon ou une icône. Sujets : processus, brief, principes, types_de_marques, construction_svg, "
+                        "techniques_visuelles, couleur, typographie, tests, critique, refonte, systeme_identite, presentation."),
+        "input_schema": {"type": "object", "properties": {"topic": {"type": "string"}}, "required": ["topic"], "additionalProperties": False},
+    },
+    {
+        "name": "audit_logo",
+        "description": ("Audite le SVG d'un logo (texte vivant, nombre de couleurs, détails trop fins, marges, complexité) et rend un score "
+                        "et des corrections à faire. À appeler sur chaque concept avant de le montrer."),
+        "input_schema": {"type": "object", "properties": {"svg": {"type": "string"}}, "required": ["svg"], "additionalProperties": False},
+    },
+    {
         "name": "remember",
         "description": ("Enregistre DÉFINITIVEMENT dans la mémoire une règle, un prix, une unité, une habitude ou une correction que le patron "
                         "vient d'énoncer (« toujours… », « quand je dis X c'est Y », « retiens… », « corrige ça pour toujours »). "
@@ -246,7 +259,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
 }
@@ -275,6 +288,10 @@ AGENT_PROMPT = (
     "et surfaces retenues ; les surfaces « à confirmer » ou illisibles se demandent, jamais deviner. Les totaux viennent de read_plan."
     "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
     "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."
+    "\nLOGOS : demande de logo, favicon ou icône → lis logo_guide (processus, principes, types_de_marques, construction_svg), pose au plus 5 questions "
+    "(nom exact, activité, 3 adjectifs, couleurs imposées) ou annonce tes hypothèses, imagine 3 concepts différents d'une phrase chacun, dessine-les "
+    "avec draw_diagram (viewBox 0 0 256 256, formes simples, noir d'abord), passe audit_logo et corrige, puis montre les 3 et ATTENDS le choix du patron "
+    "avant couleurs, variantes et kit. Jamais de copie ni d'imitation d'une marque existante. Dis que c'est un concept à faire valider, pas une marque déposée."
     "\nPLAQUES : le patron choisit la plaque. Nombre de plaques sans taille (« 20 plaques ») = plaque de 2 m, sans rien redemander ; "
     "plaque de 2,50 m seulement s'il le dit ; « hydrofuge » = variante hydrofuge de la même taille. Prends le prix de CETTE taille dans get_prices."
     "\nVOCABULAIRE : ne dis jamais « brouillon » ni « statut » à propos d'un devis, d'une facture ou d'un bon : dis « le devis est prêt » "
@@ -332,6 +349,17 @@ class AgentSession:
             return {"error": str(exc)}
         self.images.append({"id": art.id, "filename": art.filename, "title": title[:80]})
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
+
+    def _t_logo_guide(self, topic: str) -> dict:
+        from app import logo
+        return logo.guide(topic)
+
+    def _t_audit_logo(self, svg: str) -> dict:
+        from app import diagrams, logo
+        try:
+            return logo.audit(svg)
+        except diagrams.DiagramError as exc:
+            return {"error": str(exc)}
 
     def _t_read_plan(self, file_id: str = "", refresh: bool = False) -> dict:
         from app import plans

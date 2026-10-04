@@ -2250,3 +2250,19 @@ def test_draw_diagram_sanitized_and_rendered(client):
         assert "error" in s("draw_diagram", {"title": "x", "svg": "<svg/>"})
     r = client.get(f"/api/artifacts/{s.images[0]['id']}/download")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"
+
+
+def test_logo_guide_and_audit():
+    from app import logo
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        g = s("logo_guide", {"topic": "principes"})
+        assert "texte" in g and len(g["texte"]) > 1000
+        assert "sujets" in s("logo_guide", {"topic": "zzz"})
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><circle cx="128" cy="128" r="90" fill="#111"/>'
+               '<rect x="108" y="108" width="40" height="40" fill="#fff"/></svg>')
+        a = s("audit_logo", {"svg": svg})
+        assert isinstance(a.get("score"), int), a
+        assert "error" in s("audit_logo", {"svg": "<html/>"})
