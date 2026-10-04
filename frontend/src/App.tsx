@@ -1622,6 +1622,64 @@ function SignatureCard() {
   );
 }
 
+const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "jamais");
+
+/** Sauvegardes : chaque jour sur le serveur et dans la boîte Gmail ; téléchargement et restauration. */
+function BackupCard() {
+  const [d, setD] = useState<any>(null);
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  const load = () => api.backups().then(setD).catch((e) => setMsg(e?.message || "Erreur"));
+  useEffect(() => { load(); }, []);
+  const st = d?.status || {};
+  return (
+    <section className="card-box backup-card">
+      <h2>Sauvegardes</h2>
+      <p className="hint">Chaque jour, tout seul : devis, factures, clients, mémoire, signature.
+        Gardées sur le serveur (14 dernières) et dans ta boîte Gmail, dossier « {d?.folder || "UniC-Sauvegardes"} » (30 dernières).</p>
+      {d && (
+        <ul className="backup-status">
+          <li>Dernière sauvegarde : <b>{when(st.last_local)}</b></li>
+          <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b></li>
+          {st.last_remote_error && <li className="error">{st.last_remote_error}</li>}
+          {st.last_error && <li className="error">{st.last_error}</li>}
+        </ul>
+      )}
+      <div className="row-actions">
+        <button className="btn btn-copper" disabled={!!busy} onClick={async () => {
+          setBusy("save"); setMsg("");
+          try {
+            const r = await api.backupNow();
+            setMsg(r.offsite?.ok ? "Sauvegardé ici et dans Gmail." : r.offsite?.error ? `Sauvegardé sur le serveur. ${r.offsite.error}` : "Sauvegardé sur le serveur.");
+            await load();
+          } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
+        }}>{busy === "save" ? "Sauvegarde…" : "Sauvegarder maintenant"}</button>
+        <button className="btn btn-line" disabled={!!busy} onClick={() => ref.current?.click()}>Restaurer…</button>
+      </div>
+      <input ref={ref} type="file" accept=".zip,application/zip" hidden onChange={async (e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (!f) return;
+        if (!window.confirm(`Remplacer toutes les données par la sauvegarde « ${f.name} » ? Une copie de l'état actuel est faite avant.`)) return;
+        setBusy("restore"); setMsg("");
+        try { const r = await api.restoreBackup(f); setMsg(`Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`); await load(); }
+        catch (err: any) { setMsg(err?.message || "Erreur"); } finally { setBusy(""); }
+      }} />
+      {msg && <p className="hint">{msg}</p>}
+      {d?.backups?.length > 0 && (
+        <ul className="backup-list">
+          {d.backups.slice(0, 5).map((b: any) => (
+            <li key={b.name}>
+              <span>{when(b.created_at)} · {b.size < 1048576 ? `${Math.max(1, Math.round(b.size / 1024))} Ko` : `${(b.size / 1048576).toFixed(1)} Mo`}</span>
+              <button className="btn btn-line btn-small" onClick={() => downloadAuth(`/api/backups/${b.name}/download`, b.name)}>Télécharger</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function Sante() {
   const [h, setH] = useState<any>(null);
   useEffect(() => {
@@ -1633,6 +1691,7 @@ function Sante() {
       <div className="page-inner">
         <h1>Santé du système</h1>
         <p className="lede">{h.note}</p>
+        <BackupCard />
         <div className="health-grid">
           <div className="stat">
             <h3>Application</h3>

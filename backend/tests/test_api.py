@@ -2472,3 +2472,60 @@ def test_signature_boxes_adobe_fields_and_owner_signature(client):
     assert len(xobjects) >= 2   # logo + signature du gérant
     assert client.delete("/api/settings/signature").status_code == 200
     assert client.get("/api/settings/signature").status_code == 404
+
+
+def test_backup_create_download_restore_and_offsite(client, monkeypatch):
+    import io, zipfile, json
+    from app import backup
+    from app.database import SessionLocal
+    from app.models import Customer
+    with SessionLocal() as db:
+        db.add(Customer(code="BKP1", name="Client Sauvegarde")); db.commit()
+    made = client.post("/api/backups").json()
+    assert made["name"].startswith("UniC_Sauvegarde_") and made["counts"]["customers"] >= 1
+    lst = client.get("/api/backups").json()
+    assert any(b["name"] == made["name"] for b in lst["backups"])
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/backups/{made['name']}/download").content))
+    assert {"unic.db", "manifest.json"} <= set(z.namelist()) and ".secret_key" not in z.namelist()
+    assert json.loads(z.read("manifest.json"))["app"] == "UniC AI"
+    zip_bytes = client.get(f"/api/backups/{made['name']}/download").content
+    with SessionLocal() as db:   # perte de données après la sauvegarde…
+        db.query(Customer).filter(Customer.code == "BKP1").delete(); db.commit()
+        assert db.query(Customer).filter(Customer.code == "BKP1").first() is None
+    r = client.post("/api/backups/restore", files={"file": ("s.zip", zip_bytes, "application/zip")})
+    assert r.status_code == 200, r.text
+    assert r.json()["safety_backup"].startswith("UniC_Sauvegarde_")
+    with SessionLocal() as db:   # … retrouvées après restauration
+        assert db.query(Customer).filter(Customer.code == "BKP1").first() is not None
+    assert client.post("/api/backups/restore", files={"file": ("x.zip", b"pas un zip", "application/zip")}).status_code == 400
+    for bad in ("../unic.db", "UniC_Sauvegarde_../../x.zip", ".secret_key"):
+        try:
+            backup.path_of(bad); raise AssertionError(bad)
+        except backup.BackupError:
+            pass
+    assert client.get("/api/backups/UniC_Sauvegarde_absent.zip/download").status_code == 404
+    # dépôt hors serveur : IMAP simulé
+    sent = {}
+    class Box:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def login(self, u, p): sent["user"] = u
+        def create(self, f): sent["folder"] = f
+        def append(self, f, flags, t, data): sent["data"] = data; return "OK", [b""]
+        def select(self, f): return "OK", [b"1"]
+        def search(self, *a): return "OK", [b"1"]
+        def close(self): pass
+    monkeypatch.setattr(backup.imaplib, "IMAP4_SSL", Box)
+    monkeypatch.setattr(backup.mailbox, "_imap", lambda: ("imap.gmail.com", 993, "moi@gmail.com", "pwd"))
+    out = backup.push_offsite(made["name"])
+    assert out["ok"] and sent["folder"] == "UniC-Sauvegardes" and made["name"].encode() in sent["data"]
+    assert backup.status()["last_remote_name"] == made["name"]
+
+
+def test_daily_backup_is_due_once(monkeypatch):
+    from app import backup
+    monkeypatch.setattr(backup, "offsite_available", lambda: False)
+    backup._save_status(last_local="2000-01-01T00:00:00+00:00")
+    assert backup.run_daily() is not None
+    assert backup.run_daily() is None   # déjà faite aujourd'hui

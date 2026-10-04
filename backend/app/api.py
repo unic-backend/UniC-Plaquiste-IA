@@ -1128,6 +1128,53 @@ def delete_signature(user: User = Depends(require_roles("admin", "manager"))):
     return {"ok": True}
 
 
+@router.get("/backups")
+def backups_list(user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    return {"backups": backup.list_local(), "status": backup.status(), "offsite": backup.offsite_available(),
+            "folder": backup.REMOTE_FOLDER, "every_hours": backup.EVERY_HOURS}
+
+
+@router.post("/backups")
+def backups_create(user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    try:
+        made = backup.create("manuel")
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    remote = None
+    if backup.offsite_available():
+        try:
+            remote = backup.push_offsite(made["name"])
+        except backup.BackupError as exc:
+            remote = {"ok": False, "error": str(exc)}
+    release_memory()
+    return {**made, "offsite": remote}
+
+
+@router.get("/backups/{name}/download")
+def backups_download(name: str, user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    try:
+        p = backup.path_of(name)
+    except backup.BackupError as exc:
+        raise HTTPException(404, str(exc))
+    return FileResponse(p, media_type="application/zip", filename=name)
+
+
+@router.post("/backups/restore")
+async def backups_restore(file: UploadFile = File(...), user: User = Depends(require_roles("admin"))):
+    from app import backup
+    data = await file.read()
+    try:
+        out = backup.restore(data)
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    finally:
+        release_memory()
+    return out
+
+
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     return health_dashboard(db)
