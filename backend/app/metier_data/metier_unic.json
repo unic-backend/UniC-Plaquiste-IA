@@ -42,14 +42,14 @@
     "mention_prix_unitaire": "Les prix indiques dans la colonne « Prix Unitaire » sont des prix a l'unite, et non des montants totaux."
   },
   "prix_materiaux": {
-    "Plaque standard BA13": 4500,
-    "Plaque hydrofuge": 7000,
+    "Plaque standard BA13": 6500,
+    "Plaque hydrofuge": 8000,
     "Rails 48 mm": 1500,
     "Montant 48 mm": 1600,
     "Rails 7 cm (70 mm)": 2600,
     "Montant 7 cm (70 mm)": 2700,
     "Cornières": 700,
-    "Paquet de fourrures": 1200,
+    "Barre de fourrure (2,90 m)": 1200,
     "Paquet chevilles à frapper": 5000,
     "Chevilles à Leton": 6000,
     "Pivot": 6500,

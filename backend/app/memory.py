@@ -416,21 +416,29 @@ OWNER_RULES_V1 = (
 )
 
 
+OWNER_RULES_V2 = (
+    "Prix d'une plaque BA13 standard : 6 500 FCFA l'unité. Plaque hydrofuge : 8 000 FCFA l'unité.",
+)
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2}
+
+
 def seed_owner_rules(db: Session) -> int:
-    """Pose une seule fois les règles énoncées par le patron. Supprimées ensuite, elles ne reviennent pas."""
+    """Pose une seule fois chaque série de règles énoncées par le patron. Supprimées ensuite, elles ne reviennent pas."""
     from app.models import AppSetting
 
-    if db.get(AppSetting, "seed_owner_rules_v1"):
-        return 0
     n = 0
-    for text in OWNER_RULES_V1:
-        try:
-            if add(db, text, kind="preference", source="user", pinned=True):
-                n += 1
-        except MemoryRefused:
+    for version, rules in _RULE_SETS.items():
+        flag = f"seed_owner_rules_{version}"
+        if db.get(AppSetting, flag):
             continue
-    db.add(AppSetting(key="seed_owner_rules_v1", value="1"))
-    db.commit()
+        for text in rules:
+            try:
+                if add(db, text, kind="preference", source="user", pinned=True):
+                    n += 1
+            except MemoryRefused:
+                continue
+        db.add(AppSetting(key=flag, value="1"))
+        db.commit()
     return n
 
 

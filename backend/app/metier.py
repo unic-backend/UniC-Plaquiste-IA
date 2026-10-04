@@ -49,7 +49,7 @@ def sku_for(article: str) -> str:
 
 def _unit(article: str) -> str:
     low = article.lower()
-    for word, unit in (("paquet", "paquet"), ("sac", "sac"), ("seau", "seau"), ("feuille", "feuille"),
+    for word, unit in (("barre", "barre"), ("paquet", "paquet"), ("sac", "sac"), ("seau", "seau"), ("feuille", "feuille"),
                        ("planche", "planche"), ("rails", "barre"), ("tiges", "u")):
         if word in low:
             return unit

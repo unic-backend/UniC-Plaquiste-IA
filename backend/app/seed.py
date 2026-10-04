@@ -164,3 +164,42 @@ def seed_if_empty(db: Session) -> None:
         import_metier(db)
     except Exception:  # l'application doit démarrer ; l'erreur reste visible dans les logs
         logging.getLogger("unic.seed").exception("Import des connaissances métier impossible")
+
+
+def apply_owner_prices_v1(db: Session) -> int:
+    """Prix des plaques donnés par le patron (une seule fois) : standard 6 500, hydrofuge 8 000, en plaque de 2 m × 1,20 m.
+
+    L'ancien prix est clos (historique gardé), jamais effacé. Les SKU ne changent pas."""
+    from app.models import AppSetting, MaterialPrice, utcnow
+
+    flag = "seed_owner_prices_v1"
+    if db.get(AppSetting, flag):
+        return 0
+    wanted = {
+        "BA13-2500x1200": ("Plaque de plâtre BA13 standard 2 m × 1,20 m", 6500.0),
+        "BA13-2500x1200-H": ("Plaque BA13 hydrofuge 2 m × 1,20 m", 8000.0),
+    }
+    n = 0
+    now = utcnow()
+    for sku, (name, amount) in wanted.items():
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is None:
+            continue
+        old = [p for p in m.prices if p.kind == "selling" and p.valid_to is None]
+        currency = next((p.currency for p in old if p.currency), "") or "FCFA"
+        for p in old:
+            p.valid_to = now
+        m.name = name
+        m.notes = "Plaque 2 m × 1,20 m par défaut (2,50 m × 1,20 m seulement si le patron le précise). Prix donné par le patron."
+        db.add(MaterialPrice(material_id=m.id, kind="selling", amount=amount, currency=currency,
+                             source="donné par le patron", notes="Prix de vente de la plaque"))
+        n += 1
+    # « 1 200 » est le prix d'UNE BARRE de fourrure (2,90 m), pas d'un paquet
+    fourrure = db.query(Material).filter(Material.sku == "UC-PAQUET-DE-FOURRURES").first()
+    if fourrure is not None:
+        fourrure.name, fourrure.unit = "Barre de fourrure (2,90 m)", "barre"
+        fourrure.notes = "Prix d'une barre de 2,90 m (pas d'un paquet), donné par le patron."
+        n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n

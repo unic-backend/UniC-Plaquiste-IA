@@ -71,6 +71,8 @@ def startup():
         try:
             from app import memory
             memory.seed_owner_rules(db)
+            from app.seed import apply_owner_prices_v1
+            apply_owner_prices_v1(db)
         except Exception:
             pass
         try:

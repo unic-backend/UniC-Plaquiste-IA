@@ -799,7 +799,7 @@ def test_ai_builds_quote_from_context_without_canned_question(client, claude):
     assert q["number"].endswith("-FM") and q["vat_rate"] == 0 and q["total"] == q["subtotal"]
     assert q["client_label"] == "Fast Mbaye"
     ba13 = [i for i in q["items"] if i["description"].startswith("Plaque")][0]
-    assert ba13["unit_price"] == 4500 and ba13["quantity"] > 0       # la grille du patron est bien utilisée
+    assert ba13["unit_price"] == 6500 and ba13["quantity"] > 0       # la grille du patron est bien utilisée
     caps = msg["meta"]["capabilities"]
     assert {"tool:get_prices", "tool:calculate_materials", "tool:create_quote"} <= set(caps)
 
@@ -811,7 +811,7 @@ def test_ai_get_prices_exposes_the_real_grid(client):
     res = AgentSession(db, None)("get_prices", {"query": "BA13"})
     db.close()
     prices = {a["sku"]: a["prix_vente"] for a in res["articles"]}
-    assert prices["BA13-2500x1200"] == 4500 and res["avec_prix"] >= 2
+    assert prices["BA13-2500x1200"] == 6500 and res["avec_prix"] >= 2
 
 
 def test_ai_follow_up_turn_reuses_state_and_links_documents(client, claude):
@@ -1723,4 +1723,24 @@ def test_owner_rules_are_seeded_once_and_stay_deleted(client):
     db.query(Memory).delete()
     db.commit()
     assert mem.seed_owner_rules(db) == 0 and db.query(Memory).count() == 0   # supprimées : elles ne reviennent pas
+    db.close()
+
+
+def test_owner_plate_prices_applied_once_with_history(client):
+    from app.models import AppSetting, Material
+    from app.seed import apply_owner_prices_v1
+    from app.services import current_price
+    db = _mem_db()
+    row = db.get(AppSetting, "seed_owner_prices_v1")
+    if row:
+        db.delete(row)
+        db.commit()
+    m = db.query(Material).filter(Material.sku == "BA13-2500x1200").first()
+    assert m is not None
+    apply_owner_prices_v1(db)
+    db.refresh(m)
+    assert current_price(db, m.id, "selling").amount == 6500.0
+    h = db.query(Material).filter(Material.sku == "BA13-2500x1200-H").first()
+    assert current_price(db, h.id, "selling").amount == 8000.0
+    assert apply_owner_prices_v1(db) == 0       # une seule fois
     db.close()
