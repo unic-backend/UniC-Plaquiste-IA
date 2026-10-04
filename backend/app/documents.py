@@ -283,6 +283,13 @@ def read_xlsx(path: Path) -> str:
 
 
 def process_file(file_rec: StoredFile, db: Session) -> dict:
+    # Déjà lu (à l'envoi du fichier) : on ne relit pas au moment du message. Évite doubles coûts OCR/vision et conflits de pages.
+    if file_rec.processing_status in ("completed", "completed_no_ocr") and \
+            db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).first() is not None:
+        return {"file_id": file_rec.id, "status": file_rec.processing_status, "pages": file_rec.page_count,
+                "warning": file_rec.processing_error or None, "cached": True}
+    db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).delete()
+    db.query(DocumentChunk).filter(DocumentChunk.file_id == file_rec.id).delete()
     path = Path(file_rec.path)
     mime = (file_rec.mime_type or "").lower()
     ext = path.suffix.lower()

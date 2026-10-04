@@ -2325,3 +2325,22 @@ def test_availability_note_reports_real_connectors(client):
         assert f"LinkedIn {want}" in n   # reflète la base, pas une valeur figée
         for k in ("courrier", "fiche Google", "site web", "voix ElevenLabs", "vision"):
             assert k in n
+
+
+def test_claude_is_told_about_attached_file(client, monkeypatch):
+    import io
+    from PIL import Image
+    from app import orchestrator, vision
+    seen = {}
+    class R:
+        text, provider, model, available, error, raw = "ok", "claude", "m", True, "", None
+    def fake(msgs, **kw):
+        seen["system"] = msgs[0]["content"]
+        return R()
+    monkeypatch.setattr(orchestrator, "chat_complete", fake)
+    monkeypatch.setattr(orchestrator, "provider_chain", lambda deep=False: [type("P", (), {"id": "claude"})()])
+    buf = io.BytesIO(); Image.new("RGB", (50, 50), "white").save(buf, format="PNG")
+    fid = client.post("/api/files", files={"file": ("Plan Bureaux.png", buf.getvalue(), "image/png")}).json()["id"]
+    r = client.post("/api/chat", json={"message": "Lit le plan", "file_ids": [fid]})
+    assert r.status_code == 200, r.text
+    assert "FICHIER(S) JOINT(S)" in seen["system"] and fid in seen["system"] and "read_plan" in seen["system"]

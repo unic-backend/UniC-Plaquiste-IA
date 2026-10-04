@@ -446,6 +446,7 @@ def handle_turn(
     structured: dict = {}
 
     file_notes = []
+    attached: list[str] = []   # annoncés à Claude : sans ça il ne sait pas qu'un fichier est joint
     for fid in file_ids:
         rec = db.get(StoredFile, fid)
         if rec is None:
@@ -456,6 +457,8 @@ def handle_turn(
         caps.append("read_pdf" if (rec.filename or "").lower().endswith(".pdf") else "analyze_site_photo")
         pages = info.get("pages") or info.get("processed")
         warn = info.get("warning") or info.get("error") or ""
+        attached.append(f"{rec.filename} (file_id={rec.id}, {info.get('status')}" + (f", {pages} page(s)" if pages else "")
+                        + (f", ATTENTION : {warn[:160]}" if warn else "") + ")")
         file_notes.append(
             f"Fichier **{rec.filename}** : statut `{info.get('status')}`"
             + (f", {pages} page(s)" if pages else "")
@@ -938,6 +941,11 @@ def handle_turn(
                     )
                 tools_on = bool(chain) and chain[0].id == "claude"
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
+                if attached:
+                    msgs[0]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)
+                                           + ". Le patron parle de CE fichier : plan, métré, photo, tableur ou document. "
+                                           "Plan, PDF d'architecte, DXF, IFC ou « lis le plan » → appelle read_plan (file_id ci-dessus) puis présente le résultat ; "
+                                           "autre document → réponds d'après son contenu indexé. Ne réponds jamais hors sujet.")
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note(db)
                 with live_stream():
