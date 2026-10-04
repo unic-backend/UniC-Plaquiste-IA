@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { FicheGoogle } from "./Google";
 import { Voix } from "./Voix";
+import { CoverLetterBox, ShareButton } from "./Share";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
@@ -144,6 +145,7 @@ function PreviewModal({ kind, d, onClose, onChanged, onDownload }: {
           }}><I.Check size={16} /> Approuver</button>
         )}
         {d.status === "approved" && <span className="hint ic"><I.Check size={16} /> Approuvé</span>}
+        {aid && <ShareButton url={`/api/artifacts/${aid}/download`} filename={`${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="btn btn-line" />}
         {onDownload && <button className="btn btn-copper" onClick={onDownload}>Télécharger</button>}
       </div>
     </div>,
@@ -170,6 +172,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
     : d.artifact_id
       ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
       : null;
+  const shareUrl: string | null = d.download_url || (d.artifact_id ? `/api/artifacts/${d.artifact_id}/download` : null);
   return (
     <div className="doc-card">
       <div className="doc-card-head">
@@ -214,6 +217,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
       <div className="toolbar">
         {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
         {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
+        {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} />}
         {kind === "quote" && d.status !== "approved" && (
           <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
         )}
@@ -228,6 +232,7 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
           </button>
         )}
       </div>
+      {kind === "quote" && d.status === "approved" && <CoverLetterBox quote={d} url={shareUrl} filename={d.filename || `${d.number}.pdf`} onChanged={load} />}
       {preview && <PreviewModal kind={kind} d={d} onClose={() => setPreview(false)} onChanged={load} onDownload={dl} />}
     </div>
   );
@@ -1198,6 +1203,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
     : d.artifact_id
       ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
       : null;
+  const shareUrl: string | null = d.download_url || (d.artifact_id ? `/api/artifacts/${d.artifact_id}/download` : null);
   return (
     <div className="page">
       <div className="page-inner">
@@ -1217,6 +1223,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
                 Télécharger le PDF
               </button>
             )}
+            {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="btn btn-line" />}
             {kind === "quote" && d.status !== "approved" && (
               <button
                 className="btn btn-line"
@@ -1233,6 +1240,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
         {!d.prices_complete && kind === "quote" && (
           <p className="hint">Prix UniC manquants — rien n'a été inventé. Total incomplet.</p>
         )}
+        {kind === "quote" && d.status === "approved" && <CoverLetterBox quote={d} url={shareUrl} filename={d.filename || `${d.number}.pdf`} onChanged={load} />}
         <div className="table-wrap">
           <table>
             <thead>

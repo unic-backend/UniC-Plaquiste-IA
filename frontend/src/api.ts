@@ -317,6 +317,8 @@ export const api = {
   quotes: () => request<any[]>("/api/quotes"),
   getQuote: (id: string) => request<any>(`/api/quotes/${id}`),
   preview: (artifactId: string) => request<{ pages: number; images: string[]; filename: string }>(`/api/artifacts/${artifactId}/preview`),
+  regenerateCoverLetter: (id: string) => request<{ cover_letter: string }>(`/api/quotes/${id}/cover-letter`, { method: "POST" }),
+  saveCoverLetter: (id: string, text: string) => request<{ cover_letter: string }>(`/api/quotes/${id}/cover-letter`, { method: "PUT", body: JSON.stringify({ text }) }),
   approveQuote: (id: string) => request(`/api/quotes/${id}/approve`, { method: "POST" }),
   invoices: () => request<any[]>("/api/invoices"),
   getInvoice: (id: string) => request<any>(`/api/invoices/${id}`),
@@ -357,6 +359,24 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
     reader.readAsDataURL(blob);
   });
+}
+
+/** Partage direct du PDF (WhatsApp, e-mail…) : feuille de partage Android, avec un texte facultatif (lettre d'accompagnement). */
+export async function shareDocument(url: string, filename: string, text = "") {
+  const res = await fetch(apiUrl(url), { headers: authHeaders() });
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
+  if (!res.ok) throw new Error("Partage impossible : le PDF est introuvable.");
+  const blob = await res.blob();
+  const safe = filename.replace(/[^\w.\-]+/g, "_");
+  if (isNative) {
+    const written = await Filesystem.writeFile({ path: safe, data: await blobToBase64(blob), directory: Directory.Cache });
+    await Share.share({ title: filename, text: text || undefined, url: written.uri, dialogTitle: "Envoyer le document" });
+    return;
+  }
+  const file = new File([blob], safe, { type: blob.type || "application/pdf" });
+  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+  if (nav.canShare?.({ files: [file] })) { await nav.share({ files: [file], title: filename, text }); return; }
+  await downloadAuth(url, filename);
 }
 
 export async function downloadAuth(url: string, filename: string) {

@@ -749,8 +749,12 @@ def handle_turn(
             reply_text = "Précisez le document, ex. « approuve UC-2026-0714-OD »."
         else:
             approve_entity(db, target, user.id)
+            if isinstance(target, Quotation):
+                from app.cover import ensure_cover_letter
+                ensure_cover_letter(db, target)
             db.commit()
-            reply_text = f"**{getattr(target, 'number', target.id)}** est maintenant **approuvé**. L'envoi au client n'est pas automatique."
+            reply_text = (f"**{getattr(target, 'number', target.id)}** est maintenant **approuvé**. L'envoi au client n'est pas automatique."
+                          + (" La lettre d'accompagnement est prête : ouvre le devis, puis « Partager avec le PDF »." if isinstance(target, Quotation) else ""))
     elif intent == "draft_email":
         related = _match_quote(db, text) or _match_invoice(db, text)
         customer = _match_customer(db, text)

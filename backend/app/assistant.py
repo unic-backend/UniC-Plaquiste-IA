@@ -229,3 +229,53 @@ def draft_whatsapp_message(kind: str, client_name: str = "", details: str = "", 
         memory=memory,
     )
     return plain_post(text) if text else None
+
+
+COVER_MAX_WORDS = 250
+
+
+def _fr_amount(v: float | None, cur: str) -> str:
+    return "" if v is None else f"{v:,.0f} {cur or 'FCFA'}".replace(",", " ")
+
+
+def cover_letter_fallback(client: str, number: str, objet: str, lieu: str, total: float | None, cur: str,
+                          validity_days: int, phone: str, email: str) -> str:
+    """Lettre sans IA : uniquement les données du devis. Toujours disponible."""
+    first = (client or "").strip()
+    lines = [f"Bonjour{(' ' + first) if first else ''},", "",
+             f"Suite à votre demande, vous trouverez ci-joint notre devis n° {number}"
+             + (f" pour {objet.strip().rstrip('.').lower() if objet else 'vos travaux'}" if objet else "")
+             + (f", au {lieu.strip()}" if lieu else "") + "."]
+    if total is not None:
+        lines.append(f"Le montant total s'élève à {_fr_amount(total, cur)}.")
+    lines.append(f"Ce devis est valable {validity_days} jours.")
+    lines += ["", "Nous restons à votre disposition pour toute question, ou pour ajuster le devis à votre besoin. "
+              "Dès votre accord, nous pouvons convenir ensemble de la date de démarrage.", "",
+              "Cordialement,", "UniC Plaquiste"]
+    contact = " · ".join(x for x in (phone, email) if x)
+    if contact:
+        lines.append(contact)
+    return "\n".join(lines)
+
+
+def draft_cover_letter(client: str, number: str, objet: str, lieu: str, items: list[str], total: float | None, cur: str,
+                       validity_days: int, phone: str, email: str, memory: str = "") -> str:
+    """Lettre d'accompagnement du devis, 250 mots maximum. Retombe sur le modèle sans IA si l'IA échoue ou dépasse la limite."""
+    fallback = cover_letter_fallback(client, number, objet, lieu, total, cur, validity_days, phone, email)
+    facts = (f"Client : {client or 'non précisé'}\nDevis n° : {number}\nObjet : {objet or 'non précisé'}\nLieu du chantier : {lieu or 'non précisé'}\n"
+             f"Postes principaux : {'; '.join(items[:8]) or 'non précisés'}\nTotal : {_fr_amount(total, cur) or 'non précisé'}\n"
+             f"Validité : {validity_days} jours\nContact : {phone or ''} {email or ''}")
+    out = _ask(
+        f"{_BASE} Rédige la lettre d'accompagnement qui accompagne un devis envoyé au client (par WhatsApp ou e-mail). "
+        f"MAXIMUM {COVER_MAX_WORDS - 30} MOTS. Style : professionnel, chaleureux, vouvoiement, phrases courtes. "
+        "Structure : « Bonjour [nom] », 1 phrase qui rappelle la demande et le devis joint, 2 à 3 phrases sur ce que comprend le devis "
+        "(en termes simples, sans recopier les prix ligne par ligne), le total et la validité tels que fournis, une phrase qui propose de répondre "
+        "aux questions et de convenir d'une date, formule de politesse, signature « UniC Plaquiste » et le contact fourni. "
+        "N'invente AUCUN fait : ni délai de chantier, ni garantie, ni remise, ni acompte, ni date. Utilise seulement les données fournies. "
+        "Texte brut uniquement : pas de Markdown, pas de titre, pas de « Objet : ».",
+        facts, memory=memory,
+    )
+    text = plain_post(out) if out else ""
+    if not text or len(text.split()) > COVER_MAX_WORDS:
+        return fallback
+    return text

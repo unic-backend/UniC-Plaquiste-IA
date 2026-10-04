@@ -41,6 +41,7 @@ from app.models import (
     utcnow,
 )
 from app import pricecheck
+from app.cover import ensure_cover_letter, make_cover_letter
 from app.orchestrator import handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
@@ -643,7 +644,7 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "cover_letter": q.cover_letter or "", "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
@@ -757,8 +758,37 @@ def approve_quote(qid: str, db: Session = Depends(get_db), user: User = Depends(
         raise HTTPException(404, "Devis introuvable")
     approve_entity(db, q, user.id)
     generate_quote_pdf(db, q, user.id)
+    ensure_cover_letter(db, q)   # lettre d'accompagnement préparée à l'approbation
     db.commit()
-    return {"status": q.status, "number": q.number}
+    return {"status": q.status, "number": q.number, "cover_letter": q.cover_letter or ""}
+
+
+class CoverLetterIn(BaseModel):
+    text: str = Field(..., max_length=4000)
+
+
+@router.post("/quotes/{qid}/cover-letter")
+def regenerate_cover_letter(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.get(Quotation, qid)
+    if not q:
+        raise HTTPException(404, "Devis introuvable")
+    q.cover_letter = make_cover_letter(db, q)
+    audit(db, user.id, "cover_letter", "quotation", q.id)
+    db.commit()
+    return {"cover_letter": q.cover_letter}
+
+
+@router.put("/quotes/{qid}/cover-letter")
+def edit_cover_letter(qid: str, body: CoverLetterIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.get(Quotation, qid)
+    if not q:
+        raise HTTPException(404, "Devis introuvable")
+    text = body.text.strip()
+    if len(text.split()) > 250:
+        raise HTTPException(400, "Lettre trop longue : 250 mots au maximum.")
+    q.cover_letter = text
+    db.commit()
+    return {"cover_letter": q.cover_letter}
 
 
 @router.post("/quotes/{qid}/invoice")

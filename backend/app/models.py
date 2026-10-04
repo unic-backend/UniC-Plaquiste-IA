@@ -218,6 +218,7 @@ class Quotation(Base):
     title: Mapped[str] = mapped_column(String(255), default="")
     object_text: Mapped[str] = mapped_column(Text, default="")   # « Objet du devis » rédigé par l'IA (nature des travaux)
     site_location: Mapped[str] = mapped_column(String(255), default="")   # lieu du chantier, sous le client sur le PDF
+    cover_letter: Mapped[str] = mapped_column(Text, default="")   # lettre d'accompagnement (250 mots maximum), préparée à l'approbation
     status: Mapped[str] = mapped_column(String(32), default="draft")
     currency: Mapped[str] = mapped_column(String(8), default="")
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)

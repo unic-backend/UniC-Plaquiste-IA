@@ -2085,3 +2085,26 @@ def test_whatsapp_message_draft_uses_customer_phone_and_cleans_text(client, monk
     assert st["external_id"] == "" and st["title"] == "Statut WhatsApp"
     assert client.post("/api/whatsapp/message", json={"kind": "spam"}).status_code == 400
     assert client.post("/api/whatsapp/message", json={"kind": "merci", "customer_id": "inconnu"}).status_code == 404
+
+
+def test_cover_letter_on_approval_is_short_and_editable(client, monkeypatch):
+    from app import assistant
+    monkeypatch.setattr(assistant, "ai_available", lambda: False)      # modèle sans IA : toujours disponible
+    r = client.post("/api/chat", json={"message": "Cloison 320 m × 2,50 m, deux faces. Fais le devis."})
+    qid = r.json()["message"]["meta"]["structured"]["quotation_id"]
+    assert client.get(f"/api/quotes/{qid}").json()["cover_letter"] == ""
+    a = client.post(f"/api/quotes/{qid}/approve").json()
+    letter = a["cover_letter"]
+    assert letter.startswith("Bonjour") and "devis n°" in letter and len(letter.split()) <= 250 and "UniC Plaquiste" in letter
+    assert client.get(f"/api/quotes/{qid}").json()["cover_letter"] == letter
+    assert client.put(f"/api/quotes/{qid}/cover-letter", json={"text": "mot " * 260}).status_code == 400
+    assert client.put(f"/api/quotes/{qid}/cover-letter", json={"text": "Bonjour Awa, voici le devis."}).json()["cover_letter"].startswith("Bonjour Awa")
+
+
+def test_cover_letter_ai_over_limit_falls_back(monkeypatch):
+    from app import assistant
+    monkeypatch.setattr(assistant, "_ask", lambda *a, **k: "mot " * 400)
+    t = assistant.draft_cover_letter("Awa", "UC-2026-1004-AF", "faux plafond salon", "Mermoz", ["Plaques"], 250000.0, "FCFA", 30, "77 708 50 92", "unicplaquiste@gmail.com")
+    assert len(t.split()) <= 250 and t.startswith("Bonjour Awa") and "250 000 FCFA" in t and "30 jours" in t
+    monkeypatch.setattr(assistant, "_ask", lambda *a, **k: "**Bonjour Awa**, voici le devis joint. UniC Plaquiste")
+    assert assistant.draft_cover_letter("Awa", "UC-1", "", "", [], None, "FCFA", 30, "", "").startswith("Bonjour Awa")
