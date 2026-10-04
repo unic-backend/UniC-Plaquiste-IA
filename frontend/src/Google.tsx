@@ -45,6 +45,13 @@ async function sharePhoto(photo: File | null, text: string): Promise<string> {
   return "Partage ouvert. Choisis Google Maps / Profil d'établissement ; le texte est déjà copié.";
 }
 
+const API_REQUEST = `Business: UniC Plaquiste - drywall, false ceilings, partitions, painting and interior finishing, Dakar, Senegal
+Website: https://www.unicplaquiste.com
+Google Business Profile: https://maps.app.goo.gl/fKvNLhN1r3U88gsv9
+Contact e-mail: unicplaquiste@gmail.com
+
+Use case: UniC Plaquiste requests Basic API access for its own, single business location. We are building a private internal assistant used only by the business owner to: (1) publish Google Posts with photos on our own listing about every 4 days, (2) read and reply to customer reviews on our own listing, and (3) keep our own listing information (description, services, Q&A) up to date. Every post and every reply is reviewed and approved by the owner before it is sent. We do not manage third-party listings, we do not resell or share Business Profile data, and we store only an OAuth refresh token for the owner's account, encrypted on our server. Expected volume: a few API calls per day.`;
+
 export function FicheGoogle() {
   const [plan, setPlan] = useState<GPlan | null>(null);
   const [err, setErr] = useState("");
@@ -195,6 +202,24 @@ export function FicheGoogle() {
               <span>{c.label}</span>
             </label>
           ))}
+        </section>
+        <section className="card-box">
+          <label>Publier automatiquement (plus tard)</label>
+          <p className="hint">
+            {plan.api_configured ? "Accès Google configuré." : "Google doit d'abord t'accorder l'accès à son API : c'est une demande à faire une fois, sur ton compte. Délai : non garanti. En attendant, tu publies à la main (20 secondes)."}
+          </p>
+          {!plan.api_configured && (
+            <>
+              <ol className="steps">
+                <li>Crée un projet sur <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud</a> (nom : UniC AI) ; note son numéro.</li>
+                <li>Ouvre la <a href="https://developers.google.com/my-business/content/prereqs" target="_blank" rel="noopener noreferrer">page des prérequis</a> → « request access » et colle le texte ci-dessous.</li>
+                <li>Quand Google répond oui, reviens ici : je te guide pour la connexion.</li>
+              </ol>
+              <button className="btn btn-line" onClick={async () => say((await cp(API_REQUEST)) ? "Texte de la demande copié." : "Copie impossible.")}>
+                <I.Copy size={16} /> Copier le texte de la demande
+              </button>
+            </>
+          )}
         </section>
         {toast && <div className="toast" role="status">{toast}</div>}
       </div>
