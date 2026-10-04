@@ -11,7 +11,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, trust, google_business as gbp, mailbox, metier
+from app import calc, connectors, revise, trust, google_business as gbp, mailbox, metier
 from app.connectors import ConnectorError
 from app.models import Customer, DeliveryNote, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
 from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
@@ -124,6 +124,34 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"client_name": {"type": "string"}}, "additionalProperties": False},
     },
     {
+        "name": "revise_document",
+        "description": ("CORRIGE un document déjà créé (brouillon) : retirer / ajouter / changer des lignes, TVA, titre, client. "
+                        "À utiliser dès que le patron dit « retire ça », « ajoute ça », « corrige ». Ne crée JAMAIS un second "
+                        "document pour une correction. Les totaux sont recalculés par le système. Document approuvé = refusé."),
+        "input_schema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
+            "number": {"type": "string", "description": "Numéro du document ; omis = dernier devis de la conversation"},
+            "remove": {"type": "array", "items": {"type": ["string", "integer"]},
+                       "description": "Lignes à retirer : numéro de ligne ou morceau de la désignation"},
+            "update": {"type": "array", "items": {"type": "object", "properties": {
+                "line": {"type": ["string", "integer"]}, "quantity": {"type": "number"}, "unit_price": {"type": "number"},
+                "description": {"type": "string"}, "unit": {"type": "string"}}, "required": ["line"]}},
+            "add": {"type": "array", "items": {"type": "object", "properties": {
+                "description": {"type": "string"}, "quantity": {"type": "number"}, "unit": {"type": "string"},
+                "unit_price": {"type": "number", "description": "Prix du patron ou de get_prices ; absent = « prix non renseigné »"}},
+                "required": ["description", "quantity"]}},
+            "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "client_name": {"type": "string"}}, "required": ["kind"], "additionalProperties": False},
+    },
+    {
+        "name": "discard_document",
+        "description": ("RETIRE de la bibliothèque un document brouillon faux ou abandonné (pas de doublon d'erreur). "
+                        "Jamais un document approuvé. À n'utiliser que sur demande ou quand une refonte complète le remplace."),
+        "input_schema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
+            "number": {"type": "string"}}, "required": ["kind", "number"], "additionalProperties": False},
+    },
+    {
         "name": "list_documents",
         "description": "Liste les derniers devis, factures, bons de commande ou bons de livraison (numéro, statut, total).",
         "input_schema": {"type": "object", "properties": {
@@ -139,6 +167,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
+    "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
 }
 
 AGENT_PROMPT = (
@@ -152,6 +181,9 @@ AGENT_PROMPT = (
     "Ne redemande jamais une information déjà donnée ; demande seulement ce qui manque vraiment (ex. dimensions). "
     "Les prix viennent UNIQUEMENT de get_prices et des documents : n'invente jamais un prix, et ne dis pas qu'« aucun tarif n'existe » "
     "sans avoir appelé get_prices. « Pas de TVA » = vat_rate 0. Un calcul n'est pas un devis : ne crée un document que s'il est demandé."
+    "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
+    "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
+    "Un document approuvé est figé : propose une nouvelle version. Après correction, annonce ce qui a changé et le nouveau total."
 )
 
 
@@ -382,6 +414,37 @@ class AgentSession:
                                   quote_number=quote.number if quote else None, client_name=client_name or None)
         self._doc("dn", dn)
         return {"numero": dn.number, "statut": dn.status, "rattache_au_devis": quote.number if quote else None}
+
+    def _t_revise_document(self, kind: str, number: str = "", remove: list | None = None, update: list | None = None,
+                           add: list | None = None, title: str = "", vat_rate: float | None = None,
+                           client_name: str = "") -> dict:
+        last = self.state.get("last_quote_id") if kind == "quote" else None
+        try:
+            doc = revise.find(self.db, kind, number, last)
+            changes = revise.revise(self.db, kind, doc, user_id=self.user_id, remove=remove, update=update, add=add,
+                                    title=title or None, vat_rate=vat_rate, client_name=client_name or None)
+        except revise.ReviseError as exc:
+            raise ConnectorError(str(exc), 400)
+        if kind == "quote":
+            self.state["last_quote_id"] = doc.id
+        self._doc(kind, doc)
+        linked = []
+        if kind == "quote":
+            linked = [i.number for i in self.db.query(Invoice).filter(Invoice.quotation_id == doc.id).all()]
+        return {"numero": doc.number, "modifications": changes, "total": getattr(doc, "total", None),
+                "version": doc.version, "documents_lies": linked,
+                "note": "Document corrigé sur place (aucun doublon). "
+                        + ("Les documents liés ne sont PAS mis à jour : propose de les corriger aussi." if linked else "")}
+
+    def _t_discard_document(self, kind: str, number: str) -> dict:
+        try:
+            doc = revise.find(self.db, kind, number)
+            gone = revise.discard(self.db, kind, doc, self.user_id)
+        except revise.ReviseError as exc:
+            raise ConnectorError(str(exc), 400)
+        if self.state.get("last_quote_id") and kind == "quote" and self.db.get(Quotation, self.state["last_quote_id"]) is None:
+            self.state.pop("last_quote_id", None)
+        return {"retire": gone, "note": "Brouillon retiré de la bibliothèque."}
 
     def _t_list_documents(self, kind: str) -> dict:
         model = {"quote": Quotation, "invoice": Invoice, "po": PurchaseOrder, "dn": DeliveryNote}.get(kind)

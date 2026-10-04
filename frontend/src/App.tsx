@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
-import { api, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
+import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -104,6 +104,15 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
           <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
         )}
         <Link className="btn btn-ghost btn-small" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}>Détail</Link>
+        {d.status === "draft" && (
+          <button className="btn btn-ghost btn-small"
+            onClick={async () => {
+              if (!window.confirm("Retirer ce brouillon de la bibliothèque ?")) return;
+              try { await net.discardDoc(kind, d.id); setD(null); setErr("Brouillon retiré."); } catch (e: any) { setErr(e.message); }
+            }}>
+            Retirer
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1041,10 +1050,10 @@ const HUB: { title: string; items: HubItem[] }[] = [
   {
     title: "Documents créés par l'IA",
     items: [
-      { to: "/devis", title: "Devis", text: "Consulter, approuver, télécharger" },
-      { to: "/factures", title: "Factures", text: "Suivi des paiements" },
-      { to: "/commandes", title: "Bons de commande", text: "Consulter et approuver" },
-      { to: "/livraisons", title: "Bons de livraison", text: "Consulter et approuver" },
+      { to: "/devis", title: "Devis", text: "Tous les devis de l'IA, corrigés sur place" },
+      { to: "/factures", title: "Factures", text: "Factures et paiements" },
+      { to: "/commandes", title: "Bons de commande", text: "Bibliothèque des bons de commande" },
+      { to: "/livraisons", title: "Bons de livraison", text: "Bibliothèque des bons de livraison" },
       { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
       { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
     ],

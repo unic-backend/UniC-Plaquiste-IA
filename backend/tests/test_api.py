@@ -1103,3 +1103,67 @@ def test_agent_flags_manipulation_in_mail(client):
     db.delete(clean)
     db.commit()
     db.close()
+
+
+def _mk_quote(client, claude_fake=None):
+    from app.database import SessionLocal
+    from app.models import Quotation, QuotationItem
+    from app import services as svc
+    db = SessionLocal()
+    q = Quotation(number=svc.document_number(db, "Rev Test"), title="t", status="draft", vat_rate=0.18, currency="FCFA")
+    db.add(q)
+    db.flush()
+    for i, (d, qty, up) in enumerate([("Plaque BA13", 10, 5000), ("Rail R48", 4, 3000), ("Vis", 2, None)], 1):
+        db.add(QuotationItem(quotation_id=q.id, position=i, description=d, quantity=qty, unit="u", unit_price=up,
+                             total=qty * up if up else None))
+    db.commit()
+    db.refresh(q)
+    return db, q
+
+
+def test_revise_quote_edits_in_place_and_recomputes(client):
+    from app import revise, pricecheck
+    from app.models import Quotation, Artifact
+    db, q = _mk_quote(client)
+    n = db.query(Quotation).count()
+    ch = revise.revise(db, "quote", q, user_id=None, remove=["rail"], update=[{"line": 1, "quantity": 20}],
+                       add=[{"description": "Enduit", "quantity": 3, "unit": "sac", "unit_price": 7000}])
+    assert len(ch) == 3 and db.query(Quotation).count() == n          # pas de doublon
+    q = db.get(Quotation, q.id)
+    assert [i.description for i in sorted(q.items, key=lambda x: x.position)] == ["Plaque BA13", "Vis", "Enduit"]
+    assert q.subtotal == 20 * 5000 + 3 * 7000 and q.total == round(q.subtotal * 1.18, 2) and q.version == 2
+    assert pricecheck.check_quote(q) == []
+    assert db.query(Artifact).filter(Artifact.entity_id == q.id).count() == 1   # un seul PDF, remplacé
+    with pytest.raises(revise.ReviseError):
+        revise.revise(db, "quote", q, user_id=None, remove=["inconnu"])
+    q.status = "approved"
+    db.commit()
+    with pytest.raises(revise.ReviseError):
+        revise.revise(db, "quote", q, user_id=None, remove=[1])
+    with pytest.raises(revise.ReviseError):
+        revise.discard(db, "quote", q, None)
+    db.close()
+
+
+def test_discard_draft_removes_it_from_library(client):
+    from app import revise
+    from app.models import Quotation, QuotationItem
+    db, q = _mk_quote(client)
+    qid = q.id
+    num = revise.discard(db, "quote", q, None)
+    assert db.get(Quotation, qid) is None and db.query(QuotationItem).filter_by(quotation_id=qid).count() == 0
+    assert client.delete("/api/documents/quote/inexistant").status_code == 404
+    assert client.delete("/api/documents/zzz/x").status_code == 404
+    assert num
+    db.close()
+
+
+def test_agent_revise_tool_fixes_instead_of_duplicating(client, claude):
+    from app.agent import AgentSession
+    db, q = _mk_quote(client)
+    s = AgentSession(db, None, {"last_quote_id": q.id})
+    out = s("revise_document", {"kind": "quote", "remove": ["vis"]})
+    assert out["numero"] == q.number and any("retirée" in c for c in out["modifications"]) and s.documents
+    bad = s("revise_document", {"kind": "quote", "remove": ["zzz"]})
+    assert "error" in bad
+    db.close()

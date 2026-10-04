@@ -225,6 +225,12 @@ def store_artifact(db: Session, path: Path, filename: str, entity_type: str, ent
                    key: str, user_id: str | None, mime: str = "application/pdf") -> Artifact:
     if not validate_pdf(path) and mime == "application/pdf":
         raise RuntimeError("PDF invalide après génération")
+    existing = db.query(Artifact).filter(Artifact.artifact_key == key).first()
+    if existing is not None:   # même document corrigé : on remplace le PDF, on n'en empile pas un second
+        existing.filename, existing.path, existing.size = filename, str(path), path.stat().st_size
+        existing.version += 1
+        db.flush()
+        return existing
     art = Artifact(
         artifact_key=key,
         filename=filename,

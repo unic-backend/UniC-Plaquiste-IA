@@ -528,7 +528,9 @@ JOURNAL_LABELS = {
     "social_approved": "Publication approuvée", "social_published": "Publication marquée publiée",
     "google_publish": "Publié sur Google", "google_reply_draft": "Réponse à un avis préparée",
     "create_quote": "Devis créé", "upload": "Fichier reçu", "memory_import": "Mémoire importée",
-    "memory_confirm": "Souvenir confirmé", "memory_reject": "Souvenir rejeté", "social_account": "Profil enregistré",
+    "revise_quote": "Devis corrigé", "revise_invoice": "Facture corrigée", "revise_po": "Bon de commande corrigé",
+    "revise_dn": "Bon de livraison corrigé", "discard_quote": "Devis retiré", "discard_invoice": "Facture retirée",
+    "discard_po": "Bon de commande retiré", "discard_dn": "Bon de livraison retiré", "memory_confirm": "Souvenir confirmé", "memory_reject": "Souvenir rejeté", "social_account": "Profil enregistré",
 }
 
 
@@ -543,3 +545,19 @@ def journal(limit: int = 100, action: str = "", db: Session = Depends(get_db), u
     return [{"id": r.id, "at": r.created_at.isoformat() if r.created_at else None, "action": r.action,
              "label": JOURNAL_LABELS.get(r.action, r.action), "target": f"{r.entity_type} {r.entity_id}".strip(),
              "details": (r.details or "")[:300]} for r in rows]
+
+
+@router.delete("/documents/{kind}/{doc_id}")
+def discard_document(kind: str, doc_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Retire un brouillon erroné de la bibliothèque (jamais un document approuvé)."""
+    from app import revise
+    try:
+        model = revise.KINDS[kind][0]
+        doc = db.get(model, doc_id)
+        if doc is None:
+            raise HTTPException(404, "Document introuvable")
+        return {"retire": revise.discard(db, kind, doc, user.id)}
+    except KeyError:
+        raise HTTPException(404, "Type de document inconnu")
+    except revise.ReviseError as exc:
+        raise HTTPException(409, str(exc))

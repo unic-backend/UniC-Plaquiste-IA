@@ -128,6 +128,7 @@ export const net = {
   memories: () => request<Memo[]>("/api/memory"),
   addMemory: (b: { text: string; kind: string; pinned: boolean }) =>
     request<Memo>("/api/memory", { method: "POST", ...json(b) }),
+  discardDoc: (kind: string, id: string) => request(`/api/documents/${kind}/${id}`, { method: "DELETE" }),
   memoriesBy: (state: string) => request<Memo[]>(`/api/memory?state=${state}`),
   memState: () => request<MemState>("/api/memory/state"),
   memConflicts: () => request<MemConflict[]>("/api/memory/conflicts"),
