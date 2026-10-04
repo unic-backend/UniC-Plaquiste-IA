@@ -26,7 +26,7 @@ def main(src: Path) -> None:
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(st, target)
-    print("Restauration terminée. Redémarrez UniC AI et vérifiez un devis PDF + un login.")
+    print("Restauration terminée. Redémarrez UniC AI et vérifiez un devis PDF.")
 
 
 if __name__ == "__main__":

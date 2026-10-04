@@ -518,7 +518,7 @@ def _find_numbers(text: str) -> list[float]:
 def _extract_dimension_pair(text: str) -> tuple[float, float] | None:
     t = text.lower().replace("×", "x").replace("*", "x")
     m = re.search(
-        rf"({_NUM})\s*(?:m|ml|mètres?|metres?)?\s*[x/]\s*({_NUM})\s*(?:m|ml)?",
+        rf"({_NUM})\s*(?:m|ml|mètres?|metres?)?\s*(?:[x/]|sur|par)\s*({_NUM})\s*(?:m|ml)?",
         t,
         re.I,
     )
@@ -616,6 +616,13 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
             L = nums[0]
         if H is None:
             H = nums[1] if len(nums) > 1 else 2.50
+        if L is None:
+            return CalcResult(
+                kind="partition", title="Calcul de cloison",
+                understanding="Cloison détectée, longueur manquante.",
+                missing=["Longueur de la cloison."],
+                next_step="Indiquez par exemple : cloison 12 x 2,5 m.",
+            )
         return calculate_partition(
             L, H, sides=_sides(t), openings=_openings(t), waste=waste,
             board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],

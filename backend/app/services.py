@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -57,6 +58,158 @@ def next_number(db: Session, kind: str) -> str:
     seq.value += 1
     prefix = PREFIX.get(kind, kind.upper()[:3])
     return f"{prefix}-{year}-{seq.value:04d}"
+
+
+# ---------- numérotation maison : UC-AAAA-MMJJ-CLI ----------
+# CLI = initiales (prénom + nom) du client. Règle du propriétaire : « Ousmane Diop » → OD,
+# « Fast Group » → FG. Jamais un code fixe. XXX = client inconnu (trou visible, pas un identifiant).
+
+UNKNOWN_SUFFIX = "XXX"
+MAX_INITIALS = 3
+SINGLE_WORD_LETTERS = 3
+_SEPARATORS = re.compile(r"[\s\-_'’.]+")
+_LINK_WORDS = frozenset({"de", "du", "des", "la", "le", "les", "et", "d", "l", "au", "aux", "a"})
+_ACCENTS = str.maketrans("àâäáãåçéèêëíìîïñóòôöõúùûüýÿ", "aaaaaaceeeeiiiinooooouuuuyy")
+
+
+def client_initials(name: str | None) -> str:
+    """« Ousmane Diop » → OD ; « Jean-Pierre Ndiaye » → JPN ; « Sonatel » → SON ; vide → XXX."""
+    clean = str(name or "").strip().lower().translate(_ACCENTS)
+    words = [w for w in _SEPARATORS.split(clean) if w.isalnum()]
+    if not words:
+        return UNKNOWN_SUFFIX
+    carriers = [w for w in words if w not in _LINK_WORDS]
+    if len(carriers) >= 2:
+        words = carriers
+    if len(words) == 1:
+        return words[0][:SINGLE_WORD_LETTERS].upper()
+    return "".join(w[0] for w in words[:MAX_INITIALS]).upper()
+
+
+def _taken_numbers(db: Session, prefix: str) -> set[str]:
+    out: set[str] = set()
+    for model in (Quotation, Invoice, PurchaseOrder, DeliveryNote):
+        out.update(n for (n,) in db.query(model.number).filter(model.number.like(f"{prefix}%")).all())
+    return out
+
+
+def _norm_name(name: str | None) -> str:
+    return " ".join(sorted(w for w in _SEPARATORS.split(str(name or "").strip().lower().translate(_ACCENTS)) if w))
+
+
+def _quote_client(q: Quotation) -> str:
+    return _norm_name(q.customer.name if q.customer else q.client_label)
+
+
+_NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
+
+
+def _client_block(db: Session, party_name: str | None, day: date) -> int:
+    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006, même le
+    même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…)."""
+    me, init = _norm_name(party_name), client_initials(party_name)
+    owners: dict[int, set[str]] = {}
+    for (number, label, cust_name) in (
+        (q.number, q.client_label, q.customer.name if q.customer else None)
+        for q in db.query(Quotation).filter(Quotation.number.like(f"UC-{day.year}-%")).all()
+    ):
+        m = _NUMBER_RE.match(number)
+        if not m:
+            continue
+        block = int(m.group(2))
+        owner = _norm_name(cust_name or label)
+        if not owner and m.group(3) == init:
+            owner = me   # devis ancien sans nom de client, mêmes initiales : on le rattache à ce client
+        owners.setdefault(block, set()).add(owner)
+    if me:
+        mine = [b for b, o in owners.items() if me in o]
+        if mine:
+            return min(mine)
+    block = int(f"{day.month:02d}{day.day:02d}")
+    while block in owners:
+        block += 1
+    return block
+
+
+def _client_root(db: Session, party_name: str | None, day: date) -> str:
+    return f"UC-{day.year}-{_client_block(db, party_name, day):04d}-{client_initials(party_name)}"
+
+
+def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
+    """UC-AAAA-BLOC-CLI. Chaque client a SON bloc (1004, 1005, 1006… dans l'ordre d'arrivée) ; son devis suivant
+    garde le même bloc et prend 2, 3… (UC-2026-1004-PD2). Deux clients ne partagent jamais un numéro."""
+    day = on or datetime.now(timezone.utc).date()
+    base = _client_root(db, party_name, day)
+    taken = _taken_numbers(db, base)
+    number, i = base, 2
+    while number in taken:
+        number = f"{base}{i}"
+        i += 1
+    return number
+
+
+def client_name_of(db: Session, doc) -> str:
+    """Client d'un document : sa fiche, son nom saisi, ou celui du devis dont il découle (facture, bon)."""
+    if isinstance(doc, Quotation):
+        return (doc.customer.name if doc.customer else doc.client_label) or ""
+    cust = getattr(doc, "customer", None)
+    if cust is not None:
+        return cust.name
+    qid = getattr(doc, "quotation_id", None)
+    quote = db.get(Quotation, qid) if qid else None
+    if quote is None:   # bon de commande / de livraison : numéro du devis + « -BC », « -BL »
+        root = re.sub(r"-(BC|BL|F|AV)\d*$", "", doc.number or "")
+        quote = db.query(Quotation).filter(Quotation.number == root).first() if root != doc.number else None
+    return client_name_of(db, quote) if quote is not None else ""
+
+
+def search_documents(db: Session, query: str = "", kind: str = "all", min_total: float | None = None,
+                     max_total: float | None = None, limit: int = 30) -> list[dict]:
+    """Retrouve des documents par client (prénom/nom dans n'importe quel ordre, sans accents), numéro ou titre."""
+    models = {"quote": Quotation, "invoice": Invoice, "po": PurchaseOrder, "dn": DeliveryNote}
+    wanted = models if kind in ("all", "", None) else {kind: models[kind]}
+    words = [w for w in _SEPARATORS.split(str(query or "").lower().translate(_ACCENTS)) if w]
+    out = []
+    for k, model in wanted.items():
+        for r in db.query(model).order_by(model.created_at.desc()).all():
+            who = client_name_of(db, r)
+            hay = f"{who} {r.number} {r.title}".lower().translate(_ACCENTS)
+            if not all(w in hay for w in words):
+                continue
+            total = getattr(r, "total", None)
+            if min_total is not None and not (total is not None and total >= min_total):
+                continue
+            if max_total is not None and not (total is not None and total <= max_total):
+                continue
+            out.append({"kind": k, "id": r.id, "numero": r.number, "client": who, "statut": r.status, "total": total,
+                        "objet": (getattr(r, "object_text", "") or r.title or "")[:160],
+                        "date": r.created_at.date().isoformat() if r.created_at else None, "_t": r.created_at})
+    out.sort(key=lambda x: x["_t"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    for x in out:
+        x.pop("_t", None)
+    return out[:limit]
+
+
+DOC_CODES = {"invoice": "F", "credit": "AV", "po": "BC", "dn": "BL"}
+
+
+def linked_number(db: Session, code: str, *, quote_number: str | None = None,
+                  party_name: str | None = None, on: date | None = None) -> str:
+    """Numéro d'un document lié à un devis : « numéro du devis » + « -BC / -BL / -F / -AV ».
+
+    UC-2026-0714-OD (devis) → UC-2026-0714-OD-BC, -BL, -F. Ressemble au devis, ne s'y confond jamais.
+    Plusieurs du même type : -BC2, -BC3. Sans devis : racine date + initiales du client."""
+    if quote_number:
+        root = quote_number
+    else:
+        day = on or datetime.now(timezone.utc).date()
+        root = _client_root(db, party_name, day)
+    taken = _taken_numbers(db, root)
+    number, i = f"{root}-{code}", 2
+    while number in taken:
+        number = f"{root}-{code}{i}"
+        i += 1
+    return number
 
 
 def company_dict(db: Session) -> dict:
@@ -121,9 +274,9 @@ def material_by_sku(db: Session, sku: str) -> Material | None:
     return db.query(Material).filter(Material.sku == sku).first()
 
 
-def party_text_customer(c: Customer | None) -> str:
+def party_text_customer(c: Customer | None, label: str = "") -> str:
     if c is None:
-        return "Client non renseigné (non inventé)."
+        return f"{label}\n(coordonnées à renseigner)" if label else "Client non renseigné (non inventé)."
     parts = [c.name]
     if c.contact_name:
         parts.append(c.contact_name)
@@ -157,6 +310,12 @@ def store_artifact(db: Session, path: Path, filename: str, entity_type: str, ent
                    key: str, user_id: str | None, mime: str = "application/pdf") -> Artifact:
     if not validate_pdf(path) and mime == "application/pdf":
         raise RuntimeError("PDF invalide après génération")
+    existing = db.query(Artifact).filter(Artifact.artifact_key == key).first()
+    if existing is not None:   # même document corrigé : on remplace le PDF, on n'en empile pas un second
+        existing.filename, existing.path, existing.size = filename, str(path), path.stat().st_size
+        existing.version += 1
+        db.flush()
+        return existing
     art = Artifact(
         artifact_key=key,
         filename=filename,
@@ -173,6 +332,9 @@ def store_artifact(db: Session, path: Path, filename: str, entity_type: str, ent
     return art
 
 
+_UNSET = object()  # « TVA non précisée » ≠ « pas de TVA » (None)
+
+
 def quotation_from_quantities(
     db: Session,
     *,
@@ -184,17 +346,26 @@ def quotation_from_quantities(
     notes: str = "",
     assumptions: list[str] | None = None,
     missing: list[str] | None = None,
+    client_name: str | None = None,
+    vat_rate: float | None | object = _UNSET,
+    objet: str = "",
+    lieu: str = "",
 ) -> Quotation:
     company = company_dict(db)
-    number = next_number(db, "quote")
+    known = db.get(Customer, customer_id) if customer_id else None
+    label = (known.name if known else (client_name or "")).strip()
+    number = document_number(db, label)
     q = Quotation(
         number=number,
+        client_label="" if known else label,
         customer_id=customer_id,
         project_id=project_id,
         title=title or f"Devis {number}",
+        object_text=(objet or "").strip()[:900],
+        site_location=(lieu or "").strip()[:255],
         status="draft",
         currency=company.get("currency") or "",
-        vat_rate=company.get("vat_rate"),
+        vat_rate=company.get("vat_rate") if vat_rate is _UNSET else vat_rate,
         validity_days=company.get("quote_validity_days") or 30,
         payment_terms=company.get("payment_terms") or "",
         notes=notes,
@@ -256,6 +427,8 @@ def quotation_from_quantities(
 
 
 def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(q, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, q.customer_id) if q.customer_id else None
     project = db.get(Project, q.project_id) if q.project_id else None
@@ -265,7 +438,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     for it in items:
         rows.append([
             str(it.position),
-            it.description + (f"<br/><font color='#6B645B' size='7'>{it.formula}</font>" if it.formula else ""),
+            it.description,
             fr_num(it.quantity, 2),
             it.unit,
             money(it.unit_price, currency),
@@ -282,36 +455,26 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     warnings = []
     if not q.prices_complete:
         warnings.append("Des prix UniC sont manquants. Aucun tarif n'a été inventé. Total incomplet.")
-    if q.assumptions:
-        warnings.append("Des hypothèses de calcul s'appliquent — voir notes.")
     filename = f"UniC_Devis_{q.number.replace('-', '_')}.pdf"
     key = f"unic-quote-{q.number.lower()}"
     dest = settings.artifacts_path / "quotes" / filename
     meta = [
         f"N° {q.number}",
         f"Date {q.created_at.strftime('%d/%m/%Y') if q.created_at else ''}",
-        f"Statut {q.status}",
         f"Validité {q.validity_days} jours",
     ]
-    extra = []
-    if q.assumptions:
-        extra.append("<b>Hypothèses</b><br/>" + q.assumptions.replace("\n", "<br/>"))
-    if q.missing_info:
-        extra.append("<b>Informations manquantes</b><br/>" + q.missing_info.replace("\n", "<br/>"))
-    if q.payment_terms:
-        extra.append("<b>Conditions de paiement</b><br/>" + q.payment_terms)
+    extra = []   # hypothèses et infos manquantes restent dans la conversation, pas sur le devis du client
     build_document_pdf(
         dest,
         company=company,
         doc_label="DEVIS",
         number=q.number,
-        title=q.title or f"Devis {q.number}",
+        title=q.object_text or q.title or f"Devis {q.number}",
         status=q.status,
         meta_lines=meta,
         party_left=("Émetteur", party_text_from_company(company)),
-        party_right=("Client", party_text_customer(customer) + (
-            f"\nChantier : {project.name}" if project else ""
-        )),
+        party_right=("Client", (party_text_customer(customer) if customer else (q.client_label or "Client non renseigné"))
+                     + (f"\nLieu du chantier : {q.site_location or project.name}" if (q.site_location or project) else "")),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
         rows=rows,
         col_widths=[18, 210, 50, 40, 80, 80],
@@ -338,7 +501,7 @@ def party_text_from_company(company: dict) -> str:
 
 def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
     company = company_dict(db)
-    number = next_number(db, "credit" if kind == "credit" else "invoice")
+    number = linked_number(db, DOC_CODES["credit" if kind == "credit" else "invoice"], quote_number=quote.number)
     inv = Invoice(
         number=number,
         kind=kind,
@@ -377,6 +540,8 @@ def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | 
 
 
 def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(inv, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
     currency = inv.currency or company.get("currency") or ""
@@ -409,7 +574,7 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
         dest, company=company, doc_label=kind_label, number=inv.number,
         title=inv.title or kind_label, status=inv.status,
         meta_lines=[f"N° {inv.number}", f"Date {inv.created_at.strftime('%d/%m/%Y') if inv.created_at else ''}",
-                    f"Type {inv.kind}"],
+                    "Type : " + {"invoice": "Facture", "deposit": "Acompte", "partial": "Situation", "final": "Solde", "credit": "Avoir"}.get(inv.kind, "Facture")],
         party_left=("Émetteur", party_text_from_company(company)),
         party_right=("Client", party_text_customer(customer)),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
@@ -423,9 +588,10 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
 
 def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
                           supplier_id: str | None, project_id: str | None, user_id: str | None,
-                          notes: str = "") -> PurchaseOrder:
+                          notes: str = "", quote_number: str | None = None,
+                          client_name: str | None = None) -> PurchaseOrder:
     company = company_dict(db)
-    number = next_number(db, "po")
+    number = linked_number(db, DOC_CODES["po"], quote_number=quote_number, party_name=client_name)
     po = PurchaseOrder(
         number=number, supplier_id=supplier_id, project_id=project_id,
         title=title or f"Bon de commande {number}", status="draft",
@@ -465,6 +631,8 @@ def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
 
 
 def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(po, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     supplier = db.get(Supplier, po.supplier_id) if po.supplier_id else None
     currency = po.currency or ""
@@ -496,8 +664,11 @@ def generate_po_pdf(db: Session, po: PurchaseOrder, user_id: str | None) -> Arti
 
 def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
                          customer_id: str | None, project_id: str | None, user_id: str | None,
-                         notes: str = "") -> DeliveryNote:
-    number = next_number(db, "dn")
+                         notes: str = "", quote_number: str | None = None,
+                         client_name: str | None = None) -> DeliveryNote:
+    buyer = db.get(Customer, customer_id) if customer_id else None
+    number = linked_number(db, DOC_CODES["dn"], quote_number=quote_number,
+                           party_name=buyer.name if buyer else client_name)
     dn = DeliveryNote(
         number=number, customer_id=customer_id, project_id=project_id,
         title=title or f"Bon de livraison {number}", status="draft",
@@ -520,6 +691,8 @@ def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
 
 
 def generate_dn_pdf(db: Session, dn: DeliveryNote, user_id: str | None) -> Artifact:
+    db.flush()
+    db.expire(dn, ["items"])   # les lignes ajoutées à l'instant doivent figurer sur le PDF
     company = company_dict(db)
     customer = db.get(Customer, dn.customer_id) if dn.customer_id else None
     items = sorted(dn.items, key=lambda x: x.position)

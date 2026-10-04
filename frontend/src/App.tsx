@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, downloadAuth, getToken, setToken, type ChatMessage, type Conv, type User } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
+import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
+import * as I from "./Icons";
+import { pickGreeting, type Greeting } from "./greetings";
+import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -15,15 +20,64 @@ function Logo({ size = 28 }: { size?: number }) {
 
 function md(text: string) {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  let html = esc(text);
-  html = html.replace(/^### (.*)$/gm, "<h3>$1</h3>");
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/^\- (.*)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
-  html = html.replace(/\n\n/g, "</p><p>");
-  html = html.replace(/\n/g, "<br/>");
-  return `<p>${html}</p>`;
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*(?!\s)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+  const out: string[] = [];
+  let list: "ul" | "ol" | null = null;
+  let para: string[] = [];
+  const flushPara = () => { if (para.length) { out.push(`<p>${para.join("<br/>")}</p>`); para = []; } };
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const head = /^#{1,4}\s+(.*)$/.exec(line);
+    if (bullet || num) {
+      flushPara();
+      const kind = bullet ? "ul" : "ol";
+      if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${inline((bullet || num)![1])}</li>`);
+    } else if (head) {
+      flushPara(); closeList();
+      out.push(`<h3>${inline(head[1])}</h3>`);
+    } else if (!line.trim()) {
+      flushPara(); closeList();
+    } else {
+      closeList();
+      para.push(inline(line));
+    }
+  }
+  flushPara(); closeList();
+  return out.join("");
+}
+
+/** Chaque mot apparaît à son tour (fondu) : mise en page stable, pas de Markdown cassé en cours de route. */
+function revealHtml(html: string, totalMs = 3200): string {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const words: Text[] = [];
+  const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n.textContent || "").trim()) words.push(n as Text);
+  const count = words.reduce((s, t) => s + (t.textContent || "").split(/\s+/).filter(Boolean).length, 0);
+  const step = Math.min(45, totalMs / Math.max(1, count));
+  let k = 0;
+  for (const t of words) {
+    const frag = document.createDocumentFragment();
+    for (const part of (t.textContent || "").split(/(\s+)/)) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) { frag.append(part); continue; }
+      const s = document.createElement("span");
+      s.className = "w";
+      s.style.animationDelay = `${Math.round(k++ * step)}ms`;
+      s.textContent = part;
+      frag.append(s);
+    }
+    t.replaceWith(frag);
+  }
+  return tpl.innerHTML;
 }
 
 function Badge({ s }: { s?: string }) {
@@ -31,14 +85,200 @@ function Badge({ s }: { s?: string }) {
   return <span className={`badge ${v}`}>{v || "—"}</span>;
 }
 
-function MessageView({ m }: { m: ChatMessage }) {
+function fmt(n: number | null | undefined, cur = ""): string {
+  if (n === null || n === undefined) return "—";
+  return `${new Intl.NumberFormat("fr-FR").format(n)}${cur ? ` ${cur}` : ""}`;
+}
+
+const DOC_LABEL: Record<string, string> = { quote: "Devis", invoice: "Facture", po: "Bon de commande", dn: "Bon de livraison" };
+
+const artifactIdOf = (d: any): string | null =>
+  d?.artifact_id || (d?.download_url ? (/\/artifacts\/([^/]+)\/download/.exec(d.download_url) || [])[1] || null : null);
+
+/** Aperçu plein écran du PDF avant de le télécharger : corriger, approuver, puis télécharger. */
+function PreviewModal({ kind, d, onClose, onChanged, onDownload }: {
+  kind: "quote" | "invoice" | "po" | "dn"; d: any; onClose: () => void; onChanged: () => void; onDownload: (() => void) | null;
+}) {
+  const [imgs, setImgs] = useState<string[] | null>(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const aid = artifactIdOf(d);
+  useEffect(() => {
+    if (!aid) { setErr("Aucun PDF pour ce document."); return; }
+    api.preview(aid).then((r) => setImgs(r.images)).catch((e: Error) => setErr(e.message));
+  }, [aid, d.version, d.total]);
+  const canApprove = kind === "quote" && d.status !== "approved";
+  return createPortal(
+    <div className="preview-back" role="dialog" aria-label={`Aperçu ${d.number}`}>
+      <div className="preview-head">
+        <button className="tool" aria-label="Fermer l'aperçu" onClick={onClose}><I.Close size={22} /></button>
+        <b>{DOC_LABEL[kind]} {d.number}</b>
+        <span />
+      </div>
+      <div className="preview-body">
+        {!imgs && !err && <p className="hint">Chargement de l'aperçu…</p>}
+        {err && <p className="error">{err}</p>}
+        {imgs?.map((src, i) => <img key={i} src={src} alt={`Page ${i + 1} du ${DOC_LABEL[kind].toLowerCase()}`} />)}
+      </div>
+      <div className="preview-actions">
+        <button className="btn btn-line" onClick={() => {
+          window.dispatchEvent(new CustomEvent("unic:prefill", { detail: `Corrige le ${DOC_LABEL[kind].toLowerCase()} ${d.number} : ` }));
+          onClose();
+        }}><I.Pencil size={16} /> Corriger</button>
+        {canApprove && (
+          <button className="btn btn-line" disabled={busy} onClick={async () => {
+            setBusy(true);
+            try { await api.approveQuote(d.id); onChanged(); } finally { setBusy(false); }
+          }}><I.Check size={16} /> Approuver</button>
+        )}
+        {d.status === "approved" && <span className="hint ic"><I.Check size={16} /> Approuvé</span>}
+        {onDownload && <button className="btn btn-copper" onClick={onDownload}>Télécharger</button>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Document affiché directement dans la conversation (lignes, total, actions). */
+function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: string }) {
+  const [d, setD] = useState<any>(null);
+  const [err, setErr] = useState("");
+  const [preview, setPreview] = useState(false);
+  const load = () => {
+    const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
+    fn(id).then(setD).catch((e: Error) => setErr(e.message));
+  };
+  useEffect(load, [kind, id]);
+  if (err) return <div className="doc-card"><p className="error">{err}</p></div>;
+  if (!d) return <div className="doc-card">Chargement du document…</div>;
+  const cur = d.currency || "";
+  const priced = kind !== "dn";
+  const dl = d.download_url
+    ? () => downloadAuth(d.download_url, d.filename || `${d.number}.pdf`)
+    : d.artifact_id
+      ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
+      : null;
+  return (
+    <div className="doc-card">
+      <div className="doc-card-head">
+        <div>
+          <b>{DOC_LABEL[kind]} {d.number}</b>
+          <div className="hint">{d.customer_name || d.client_label ? `Client : ${d.customer_name || d.client_label} · ` : ""}{d.title}</div>
+        </div>
+        <Badge s={d.status} />
+      </div>
+      {d.object_text && <p className="hint">{d.object_text}</p>}
+      <div className="doc-lines">
+        {(d.items || []).map((it: any) => (
+          <div className="doc-line" key={it.id || it.position}>
+            <div className="doc-line-main">
+              <span>{it.description}</span>
+              <span className="doc-qty">{it.quantity} {it.unit}</span>
+            </div>
+            {priced && (
+              <div className="doc-line-price">
+                <span>{it.unit_price === null || it.unit_price === undefined ? "prix non renseigné" : `${fmt(it.unit_price)} / u.`}</span>
+                <b>{fmt(it.total)}</b>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {priced && (
+        <div className="doc-totals">
+          {d.subtotal !== null && d.subtotal !== undefined && d.vat_amount ? <div><span>Sous-total</span><span>{fmt(d.subtotal, cur)}</span></div> : null}
+          {d.vat_amount ? <div><span>TVA</span><span>{fmt(d.vat_amount, cur)}</span></div> : null}
+          <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
+          {kind === "quote" && Array.isArray(d.price_check) && (
+            d.price_check.length === 0
+              ? <p className="hint ic"><I.Check size={16} /> Prix et totaux conformes à la grille</p>
+              : <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
+          )}
+          {kind === "quote" && d.prices_complete === false && (
+            <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
+          )}
+        </div>
+      )}
+      <div className="toolbar">
+        {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
+        {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
+        {kind === "quote" && d.status !== "approved" && (
+          <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
+        )}
+        <Link className="btn btn-ghost btn-small" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}>Détail</Link>
+        {d.status === "draft" && (
+          <button className="btn btn-ghost btn-small"
+            onClick={async () => {
+              if (!window.confirm("Retirer ce brouillon de la bibliothèque ?")) return;
+              try { await net.discardDoc(kind, d.id); setD(null); setErr("Brouillon retiré."); } catch (e: any) { setErr(e.message); }
+            }}>
+            Retirer
+          </button>
+        )}
+      </div>
+      {preview && <PreviewModal kind={kind} d={d} onClose={() => setPreview(false)} onChanged={load} onDownload={dl} />}
+    </div>
+  );
+}
+
+/** Réponse qui vient d'arriver : ses mots apparaissent un à un ; un toucher affiche tout. */
+function useReveal(len: number, active: boolean) {
+  const [done, setDone] = useState(!active);
+  useEffect(() => {
+    if (!active) { setDone(true); return; }
+    setDone(false);
+    const id = setTimeout(() => setDone(true), 3600);
+    const chat = document.querySelector(".chat");
+    if (chat) chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
+    return () => clearTimeout(id);
+  }, [len, active]);
+  return { done, skip: () => setDone(true) };
+}
+
+/** Salutation écrite lettre par lettre, à vitesse moyenne. */
+function GreetingTyper({ g }: { g: Greeting }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    const id = setInterval(() => setN((c) => (c >= g.text.length ? c : c + 1)), 85);
+    return () => clearInterval(id);
+  }, [g.text]);
+  const done = n >= g.text.length;
+  return (
+    <div className="greet" aria-live="polite" aria-label={g.text}>
+      <span className="greet-text">{g.text.slice(0, n)}<i className={`caret ${done ? "blink" : ""}`} /></span>
+      <span className={`greet-fr ${done ? "show" : ""}`}>{g.fr} · {g.lang}</span>
+    </div>
+  );
+}
+
+function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
+  const [copied, setCopied] = useState(false);
+  const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
+  const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   return (
-    <div className={`msg ${m.role}`}>
+    <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
-      <div className="bubble">
-        <div className="md" dangerouslySetInnerHTML={{ __html: md(m.content) }} />
+      <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
+        <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
+        {m.role === "user" && (
+          <div className="msg-actions">
+            <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
+              {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
+            </button>
+            {onEdit && <button onClick={() => onEdit(m.content)}><I.Pencil size={15} /> Modifier</button>}
+          </div>
+        )}
+        {m.role === "assistant" && m.id !== "err" && (
+          <div className="msg-actions">
+            <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
+              {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
+            </button>
+            {onRegenerate && tw.done && <button onClick={onRegenerate}><I.Refresh size={15} /> Régénérer</button>}
+          </div>
+        )}
         {structured?.steps?.length ? (
           <div className="calc-card">
             <div className="calc-row">
@@ -63,7 +303,11 @@ function MessageView({ m }: { m: ChatMessage }) {
             ))}
           </div>
         ) : null}
-        {arts.length ? (
+        <ToolChips caps={m.meta?.capabilities} />
+        <DraftCards drafts={structured?.drafts} />
+        {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
+        {(structured?.documents || []).map((d: any) => <DocCard key={d.id} kind={d.kind} id={d.id} />)}
+        {arts.length && !structured?.document && !structured?.documents ? (
           <div className="arts">
             {arts.map((a: any) => (
               <div className="art" key={a.id || a.artifact_id}>
@@ -85,38 +329,86 @@ function MessageView({ m }: { m: ChatMessage }) {
   );
 }
 
-function useAuth() {
+type Gate = "loading" | "connect" | "error" | "ok";
+
+function useOwner() {
   const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (!getToken()) {
-      setReady(true);
+  const [gate, setGate] = useState<Gate>(needsServer() ? "connect" : "loading");
+  const [error, setError] = useState("");
+  const check = () => {
+    if (needsServer()) {
+      setGate("connect");
       return;
     }
+    setGate("loading");
     api
       .me()
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setReady(true));
-  }, []);
-  return { user, setUser, ready };
+      .then((u) => {
+        setUser(u);
+        setGate("ok");
+      })
+      .catch((e) => {
+        if (e instanceof AuthError) setGate("connect");
+        else {
+          setError(e.message);
+          setGate("error");
+        }
+      });
+  };
+  useEffect(check, []);
+  return { user, gate, error, check };
 }
 
-const NAV = [
-  { to: "/", label: "Conversation" },
-  { to: "/chantiers", label: "Chantiers" },
-  { to: "/devis", label: "Devis" },
-  { to: "/factures", label: "Factures" },
-  { to: "/commandes", label: "Bons de commande" },
-  { to: "/livraisons", label: "Bons de livraison" },
-  { to: "/clients", label: "Clients" },
-  { to: "/fournisseurs", label: "Fournisseurs" },
-  { to: "/materiaux", label: "Matériaux" },
-  { to: "/documents", label: "Documents" },
-  { to: "/parametres", label: "Paramètres" },
-];
+function Connexion({ onDone }: { onDone: () => void }) {
+  const [server, setServer] = useState(getServer());
+  const [code, setCode] = useState(getCode());
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true);
+    setMsg("");
+    const url = server.trim();
+    if (isNative && !/^https:\/\/[^\s/]+/i.test(url)) {
+      setMsg("Adresse invalide : elle doit commencer par https://");
+      setBusy(false);
+      return;
+    }
+    saveConnection(isNative ? url : "", code);
+    try {
+      await api.me();
+      onDone();
+    } catch (e: any) {
+      setMsg(e instanceof AuthError ? "Code d'accès incorrect." : e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="login">
+      <div className="login-card">
+        <h1>UniC AI</h1>
+        <p className="hint">{isNative ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
+        {isNative && (
+          <>
+            <label>Adresse du serveur</label>
+            <input value={server} placeholder="https://unic.exemple.com" autoCapitalize="none" autoCorrect="off"
+              inputMode="url" onChange={(e) => setServer(e.target.value)} />
+          </>
+        )}
+        <label>Code d'accès</label>
+        <input type="password" value={code} autoComplete="current-password" onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && go()} />
+        {msg && <p className="error">{msg}</p>}
+        <button className="btn btn-copper" disabled={busy || (isNative && !server.trim())} onClick={go}>
+          {busy ? "Connexion…" : "Se connecter"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
-function Shell({ user, onLogout, children }: { user: User; onLogout: () => void; children: React.ReactNode }) {
+
+function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [convs, setConvs] = useState<Conv[]>([]);
   const [q, setQ] = useState("");
@@ -145,53 +437,48 @@ function Shell({ user, onLogout, children }: { user: User; onLogout: () => void;
           onChange={(e) => setQ(e.target.value)}
           style={{ background: "#24302c", color: "#efeae2", borderColor: "#3d4a45" }}
         />
-        <nav className="nav">
-          {NAV.map((n) => (
-            <Link key={n.to} to={n.to} className={loc.pathname === n.to ? "active" : ""}>
-              {n.label}
-            </Link>
-          ))}
-        </nav>
         <div className="conv-list">
-          {convs.map((c) => (
-            <div className="conv-item" key={c.id}>
-              <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
-                {c.title}
-              </Link>
-              <button
-                title="Supprimer"
-                onClick={async () => {
-                  await api.deleteConversation(c.id);
-                  setConvs((x) => x.filter((i) => i.id !== c.id));
-                }}
-              >
-                ×
-              </button>
+          {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
+          {groupByDate(convs).map((g) => (
+            <div key={g.label}>
+              <div className="conv-label">{g.label}</div>
+              {g.rows.map((c) => (
+                <div className="conv-item" key={c.id}>
+                  <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
+                    {c.title}
+                  </Link>
+                  <button
+                    title="Supprimer"
+                    onClick={async () => {
+                      await api.deleteConversation(c.id);
+                      setConvs((x) => x.filter((i) => i.id !== c.id));
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
           ))}
         </div>
         <div className="side-foot">
-          <strong>{user.name}</strong>
-          {user.email}
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            <Link to="/sante" style={{ color: "#d5ddd8" }}>
-              Santé
-            </Link>
-            <button className="btn-ghost" style={{ width: "auto", padding: 0 }} onClick={onLogout}>
-              Déconnexion
-            </button>
-          </div>
+          <Link to="/parametres" className={`foot-link ${loc.pathname.startsWith("/parametres") ? "active" : ""}`}>
+            <I.Settings size={18} /> Paramètres
+          </Link>
         </div>
       </aside>
       <section className="main">
         <div className="topbar">
           <button className="icon-btn" onClick={() => setOpen(true)} aria-label="Menu">
-            ☰
+            <I.Menu />
           </button>
           <Logo size={22} />
           <b>UniC AI</b>
         </div>
-        {children}
+        {loc.pathname === "/" || loc.pathname.startsWith("/c/") ? null : <PageBar />}
+        <div className="route-anim" key={loc.pathname.startsWith("/c/") ? "/" : loc.pathname}>
+          {children}
+        </div>
       </section>
     </div>
   );
@@ -204,15 +491,44 @@ function Chat({ initialId }: { initialId?: string }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<File[]>([]);
+  const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  useEffect(() => {
+    if (!isNative) return;
+    let off: (() => void) | undefined;
+    (async () => {
+      const { Keyboard } = await import("@capacitor/keyboard");
+      const root = document.documentElement;
+      const show = await Keyboard.addListener("keyboardWillShow", (i) => {
+        root.style.setProperty("--kb", `${i.keyboardHeight}px`);
+        setTimeout(() => end.current?.scrollIntoView({ block: "end" }), 60);
+      });
+      const hide = await Keyboard.addListener("keyboardWillHide", () => root.style.setProperty("--kb", "0px"));
+      off = () => { show.remove(); hide.remove(); root.style.setProperty("--kb", "0px"); };
+    })().catch(() => {});
+    return () => off?.();
+  }, []);
   const end = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
 
+  const justCreated = useRef<string | undefined>(undefined);
   useEffect(() => {
     setCid(initialId);
     if (!initialId) {
       setMessages([]);
+      return;
+    }
+    // conversation créée à l'instant : l'écran est déjà à jour (et garde ses animations), on ne recharge pas
+    if (justCreated.current === initialId) {
+      justCreated.current = undefined;
       return;
     }
     api.getConversation(initialId).then((c) => setMessages(c.messages || []));
@@ -224,10 +540,12 @@ function Chat({ initialId }: { initialId?: string }) {
 
   async function send(override?: string) {
     const msg = (override ?? text).trim();
-    if ((!msg && pending.length === 0) || busy) return;
+    if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
+    if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
+    if (busy) return;
     setBusy(true);
     setText("");
-    const local: ChatMessage = { id: "local", role: "user", content: msg || pending.map((f) => f.name).join(", ") };
+    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || pending.map((f) => f.name).join(", ") };
     setMessages((m) => [...m, local]);
     try {
       const file_ids: string[] = [];
@@ -236,12 +554,14 @@ function Chat({ initialId }: { initialId?: string }) {
         file_ids.push(up.id);
       }
       setPending([]);
-      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids });
+      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep });
+      setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
+        justCreated.current = out.conversation_id;
         nav(`/c/${out.conversation_id}`, { replace: true });
       }
-      setMessages((m) => [...m.filter((x) => x.id !== "local"), local, out.message]);
+      setMessages((m) => [...m, { ...out.message, fresh: true }]);   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
       setMessages((m) => [
         ...m,
@@ -252,29 +572,67 @@ function Chat({ initialId }: { initialId?: string }) {
     }
   }
 
-  function voice() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert("Saisie vocale non disponible sur ce navigateur.");
+  async function voice() {
+    if (rec) {   // arrêt immédiat côté écran : le plugin ne confirme jamais stop()
+      setRec(false);
+      import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {});
       return;
     }
-    const recg = new SR();
-    recg.lang = "fr-FR";
-    recg.onstart = () => setRec(true);
-    recg.onend = () => setRec(false);
-    recg.onresult = (ev: any) => {
-      const t = ev.results[0][0].transcript;
-      setText((x) => (x ? x + " " + t : t));
-    };
-    recg.start();
+    try {
+      if (isNative) {
+        const { SpeechRecognition } = await import("@capacitor-community/speech-recognition");
+        const { available } = await SpeechRecognition.available();
+        if (!available) { setNotice("Reconnaissance vocale absente sur ce téléphone. Utilisez le micro du clavier."); return; }
+        const perm = await SpeechRecognition.requestPermissions();
+        if (perm.speechRecognition !== "granted") { setNotice("Micro refusé : autorisez-le dans Réglages › Applis › UniC AI › Autorisations."); return; }
+        const base = text ? text.trimEnd() + " " : "";
+        let heard = false;
+        await SpeechRecognition.removeAllListeners();
+        await SpeechRecognition.addListener("partialResults", (d: { matches: string[] }) => {
+          if (d.matches?.[0]) { heard = true; setText(base + d.matches[0]); }
+        });
+        // fin de phrase détectée par Android : le micro s'éteint, le texte final arrive juste après
+        await SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => {
+          if (d.status === "stopped") setTimeout(() => setRec(false), 800);
+        });
+        setRec(true);
+        await SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 });
+        setTimeout(() => { if (!heard) { setRec(false); setNotice("Je n'ai rien entendu. Parlez plus près, puis réessayez."); } }, 8000);
+        return;
+      }
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SR) { setNotice("Dictée indisponible sur ce navigateur."); return; }
+      const recg = new SR();
+      recg.lang = "fr-FR";
+      recg.onstart = () => setRec(true);
+      recg.onend = () => setRec(false);
+      recg.onresult = (ev: any) => setText((x) => (x ? x + " " : "") + ev.results[0][0].transcript);
+      recg.start();
+    } catch (e: any) {
+      setRec(false);
+      setNotice("Dictée impossible : " + (typeof e === "string" ? e : e?.message || "erreur micro"));
+    }
   }
 
-  const suggestions = [
-    "Cloison 12 m × 2,50 m, deux faces, 2 portes",
-    "Combien de plaques pour 320 m × 2,50 m deux faces ?",
-    "Fais le devis",
-    "Prépare le rapport de chantier",
-  ];
+  useEffect(() => {   // « Corriger » depuis l'aperçu d'un document : la consigne arrive dans la barre de saisie
+    const onPrefill = (e: Event) => {
+      const t = String((e as CustomEvent).detail || "");
+      setText(t);
+      setTimeout(() => {
+        const el = document.querySelector<HTMLTextAreaElement>(".composer textarea");
+        el?.focus();
+        el?.setSelectionRange(t.length, t.length);
+      }, 60);
+    };
+    window.addEventListener("unic:prefill", onPrefill);
+    return () => window.removeEventListener("unic:prefill", onPrefill);
+  }, []);
+  const [greet, setGreet] = useState<Greeting>(() => pickGreeting());
+  useEffect(() => {
+    if (messages.length > 0) return;
+    const t = setInterval(() => setGreet((g) => pickGreeting(g)), 5600);
+    return () => clearInterval(t);
+  }, [messages.length]);
 
   return (
     <>
@@ -282,29 +640,25 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
-              <h1>UniC AI, à votre service.</h1>
-              <p>
-                Employé digital d'UniC Plaquiste. Décrivez le besoin, joignez un plan ou une photo de chantier.
-                Je calcule, je prépare les documents — je n'invente jamais un prix.
-              </p>
-              <div className="chips">
-                {suggestions.map((s) => (
-                  <button key={s} className="chip" onClick={() => send(s)}>
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <GreetingTyper g={greet} />
             </div>
           )}
           {messages.map((m, i) => (
-            <MessageView key={m.id + i} m={m} />
+            <MessageView
+              key={m.id + i}
+              m={m}
+              onEdit={(t) => { setText(t); setTimeout(() => { const el = document.querySelector<HTMLTextAreaElement>(".composer textarea"); el?.focus(); el?.setSelectionRange(t.length, t.length); }, 30); }}
+              onRegenerate={
+                !busy && i === messages.length - 1 && m.role === "assistant" && m.id !== "err"
+                  ? () => {
+                      const lastUser = [...messages].reverse().find((x) => x.role === "user");
+                      if (lastUser) send(lastUser.content);
+                    }
+                  : undefined
+              }
+            />
           ))}
-          {busy && (
-            <div className="msg assistant">
-              <div className="avatar">U</div>
-              <div className="bubble">Traitement en cours…</div>
-            </div>
-          )}
+          {busy && <Typing deep={deep} web />}
           <div ref={end} />
         </div>
       </div>
@@ -332,83 +686,121 @@ function Chat({ initialId }: { initialId?: string }) {
             }}
           />
           <div className="composer-bar">
-            <button className="tool" title="Joindre" onClick={() => fileRef.current?.click()}>
-              ＋
+            <button className="tool round" aria-label="Ajouter du contexte" onClick={() => setSheet(true)}><I.Plus /></button>
+            <button className={`mode-chip ${deep ? "on" : ""}`} aria-pressed={deep} onClick={() => setDeep((d) => !d)}
+              title="Réflexion profonde (Claude Opus), pour cette question">
+              {deep ? <><I.Sparkle size={16} /> Profond</> : "Normal"}
             </button>
-            <button className="tool" title="Photo chantier" onClick={() => camRef.current?.click()}>
-              ⌯
+            {pending.length > 0 && <span className="grow">{pending.length} fichier(s)</span>}
+            {pending.length === 0 && <span className="grow" />}
+            <button className={`tool round ${rec ? "rec-on" : ""}`} aria-label={rec ? "Arrêter la dictée" : "Dicter"} onClick={voice}>
+              {rec ? <I.Stop /> : <I.Mic />}
             </button>
-            <button className={`tool ${rec ? "rec" : ""}`} title="Voix" onClick={voice}>
-              ●
-            </button>
-            <div className="grow">{pending.length ? `${pending.length} fichier(s)` : "Entrée pour envoyer"}</div>
-            <button className="send" onClick={() => send()} disabled={busy}>
-              ↑
+            <button className="send round" aria-label="Envoyer" onClick={() => send()} disabled={busy}>
+              <I.ArrowUp />
             </button>
           </div>
           <input
+            id="chat-file"
             ref={fileRef}
-            hidden
+            className="sr-only"
             type="file"
             multiple
             accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp"
-            onChange={(e) => setPending((p) => [...p, ...Array.from(e.target.files || [])])}
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
           <input
+            id="chat-photo"
+            className="sr-only"
+            type="file"
+            multiple
+            accept="image/*"
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
+          />
+          <input
+            id="chat-cam"
             ref={camRef}
-            hidden
+            className="sr-only"
             type="file"
             accept="image/*"
             capture="environment"
-            onChange={(e) => setPending((p) => [...p, ...Array.from(e.target.files || [])])}
+            onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
         </div>
+        {notice && <div className="toast" role="status">{notice}</div>}
       </div>
+      {sheet && (
+        <div className="sheet-back" onClick={() => setSheet(false)}>
+          <div className="sheet" role="dialog" aria-label="Ajouter du contexte" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-grip" />
+            <div className="sheet-head"><button className="tool" aria-label="Fermer" onClick={() => setSheet(false)}><I.Close size={20} /></button><b>Ajouter du contexte</b><span /></div>
+            <div className="sheet-grid">
+              <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Camera /></span>Caméra</label>
+              <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Image /></span>Photos</label>
+              <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.File /></span>Fichiers</label>
+            </div>
+            <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function Login({ onLogin }: { onLogin: (u: User) => void }) {
-  const [email, setEmail] = useState("marco.r@example.org");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr("");
-    try {
-      const r = await api.login(email, password);
-      setToken(r.token);
-      onLogin(r.user);
-    } catch (ex: any) {
-      setErr(ex.message || "Connexion impossible");
+
+type DocFilter = { q: string; from: string; to: string; min: string; max: string };
+const NO_FILTER: DocFilter = { q: "", from: "", to: "", min: "", max: "" };
+
+function applyDocFilter(rows: any[], f: DocFilter): any[] {
+  const q = f.q.trim().toLowerCase();
+  const min = f.min === "" ? null : Number(f.min);
+  const max = f.max === "" ? null : Number(f.max);
+  return rows.filter((r) => {
+    if (q) {
+      const flat = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const hay = flat([r.client_name, r.customer_name, r.client_label, r.number, r.title, r.supplier_name, r.kind, r.status].join(" "));
+      if (!flat(q).split(/\s+/).every((w) => hay.includes(w))) return false;
     }
-  }
+    const day = (r.created_at || "").slice(0, 10);
+    if (f.from && (!day || day < f.from)) return false;
+    if (f.to && (!day || day > f.to)) return false;
+    if (min !== null && !(typeof r.total === "number" && r.total >= min)) return false;
+    if (max !== null && !(typeof r.total === "number" && r.total <= max)) return false;
+    return true;
+  });
+}
+
+/** Recherche dans une bibliothèque : texte (client, numéro, titre), dates, montants. */
+function DocFilters({ value, onChange, count, total, money = true }: {
+  value: DocFilter; onChange: (f: DocFilter) => void; count: number; total: number; money?: boolean;
+}) {
+  const set = (k: keyof DocFilter) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value });
+  const active = JSON.stringify(value) !== JSON.stringify(NO_FILTER);
   return (
-    <div className="login">
-      <div className="login-card">
-        <Logo size={40} />
-        <h1>UniC AI</h1>
-        <p>Plateforme métier d'UniC Plaquiste. Accès réservé.</p>
-        <form onSubmit={submit}>
-          <label>
-            E-mail
-            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            Mot de passe
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-          </label>
-          {err && <div className="error">{err}</div>}
-          <button className="btn btn-copper" type="submit">
-            Entrer
-          </button>
-        </form>
-        <p className="hint">
-          Premier démarrage : compte admin créé automatiquement. Changez le mot de passe en production. Voir README.
-        </p>
+    <div className="doc-filters">
+      <input type="search" placeholder="Rechercher : client, numéro, titre…" value={value.q} onChange={set("q")} aria-label="Rechercher" />
+      <div className="doc-filters-row">
+        <label>Du <input type="date" value={value.from} onChange={set("from")} /></label>
+        <label>Au <input type="date" value={value.to} onChange={set("to")} /></label>
+        {money && <label>Min <input type="number" inputMode="numeric" value={value.min} onChange={set("min")} /></label>}
+        {money && <label>Max <input type="number" inputMode="numeric" value={value.max} onChange={set("max")} /></label>}
       </div>
+      <p className="hint">
+        {count} sur {total} document(s)
+        {active && <> · <button className="link-btn" onClick={() => onChange(NO_FILTER)}>Effacer</button></>}
+      </p>
     </div>
   );
+}
+
+function useDocLibrary(load: () => Promise<any[]>) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [f, setF] = useState<DocFilter>(NO_FILTER);
+  useEffect(() => {
+    load().then(setRows);
+  }, []);
+  const shown = applyDocFilter(rows, f);
+  return { rows, shown, f, setF };
 }
 
 function TablePage({
@@ -690,17 +1082,15 @@ function ChantierDetail() {
 
 function DevisList() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.quotes().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.quotes);
   return (
     <TablePage
       title="Devis"
-      lede="PDF réels, éditables tant qu'ils sont en brouillon."
+      lede="Tous les devis de l'IA. Une correction modifie le même devis."
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={rows.map((q) => [q.number, q.title, q.customer_name, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
-      onRow={(i) => nav(`/devis/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
 }
@@ -708,6 +1098,7 @@ function DevisList() {
 function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
   const { id } = useParams();
   const [d, setD] = useState<any>(null);
+  const [showPreview, setShowPreview] = useState(false);
   async function load() {
     if (!id) return;
     const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
@@ -733,6 +1124,9 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
             <p className="lede">{d.title}</p>
           </div>
           <div className="toolbar">
+            {artifactIdOf(d) && (
+              <button className="btn btn-line" onClick={() => setShowPreview(true)}><I.Eye size={16} /> Aperçu</button>
+            )}
             {download && (
               <button className="btn btn-copper" onClick={download}>
                 Télécharger le PDF
@@ -819,52 +1213,47 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
           </form>
         )}
       </div>
+      {showPreview && <PreviewModal kind={kind} d={d} onClose={() => setShowPreview(false)} onChanged={load} onDownload={download} />}
     </div>
   );
 }
 
 function Factures() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.invoices().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.invoices);
   return (
     <TablePage
       title="Factures"
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={rows.map((q) => [q.number, q.kind, q.customer_name, q.status, q.total, q.paid, q.remaining])}
-      onRow={(i) => nav(`/factures/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, q.status, q.total, q.paid, q.remaining])}
+      onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
 }
 function Commandes() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.pos().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.pos);
   return (
     <TablePage
       title="Bons de commande"
-      columns={["N°", "Titre", "Fournisseur", "Statut", "Total"]}
-      rows={rows.map((q) => [q.number, q.title, q.supplier_name, q.status, q.total ?? "incomplet"])}
-      onRow={(i) => nav(`/commandes/${rows[i].id}`)}
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
+      columns={["N°", "Titre", "Client / fournisseur", "Statut", "Total"]}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, q.status, q.total ?? "incomplet"])}
+      onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
 }
 function Livraisons() {
   const nav = useNavigate();
-  const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => {
-    api.dns().then(setRows);
-  }, []);
+  const { rows, shown, f, setF } = useDocLibrary(api.dns);
   return (
     <TablePage
       title="Bons de livraison"
+      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
-      rows={rows.map((q) => [q.number, q.title, q.customer_name, q.status])}
-      onRow={(i) => nav(`/livraisons/${rows[i].id}`)}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, q.status])}
+      onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );
 }
@@ -900,7 +1289,83 @@ function Documents() {
   );
 }
 
-function SettingsPage() {
+type HubItem = { to: string; title: string; text: string };
+
+const HUB: { title: string; items: HubItem[] }[] = [
+  {
+    title: "Connecteurs",
+    items: [
+      { to: "/courrier", title: "Courrier", text: "Boîte mail : lire, comprendre, répondre" },
+      { to: "/reseaux", title: "Réseaux & Google", text: "Publications, avis, fiche Google, site" },
+    ],
+  },
+  {
+    title: "Cerveau de l'IA",
+    items: [
+      { to: "/memoire", title: "Mémoire", text: "Ce que l'IA a appris de vous" },
+      { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
+      { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
+      { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
+    ],
+  },
+  {
+    title: "Entreprise",
+    items: [
+      { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, paramètres de calcul" },
+      { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
+      { to: "/clients", title: "Clients", text: "Fiches clients" },
+      { to: "/fournisseurs", title: "Fournisseurs", text: "Fiches fournisseurs" },
+    ],
+  },
+  {
+    title: "Documents créés par l'IA",
+    items: [
+      { to: "/devis", title: "Devis", text: "Tous les devis de l'IA, corrigés sur place" },
+      { to: "/factures", title: "Factures", text: "Factures et paiements" },
+      { to: "/commandes", title: "Bons de commande", text: "Bibliothèque des bons de commande" },
+      { to: "/livraisons", title: "Bons de livraison", text: "Bibliothèque des bons de livraison" },
+      { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
+      { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
+    ],
+  },
+];
+
+function SettingsHub() {
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <h1>Paramètres</h1>
+        <p className="lede">
+          Vous n'avez pas besoin d'ouvrir ces pages pour travailler : dites à l'IA ce que vous voulez
+          (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
+        </p>
+        {HUB.map((g) => (
+          <section key={g.title}>
+            <h3>{g.title}</h3>
+            <div className="hub-grid">
+              {g.items.map((i) => (
+                <Link key={i.to} to={i.to} className="hub-item">
+                  <b>{i.title}</b>
+                  <span>{i.text}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        ))}
+        {(isNative || getCode()) && (
+          <section>
+            <h3>Session</h3>
+            <button className="btn btn-line" onClick={() => { clearConnection(); window.location.reload(); }}>
+              Se déconnecter
+            </button>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompanyPage() {
   const [s, setS] = useState<any>(null);
   useEffect(() => {
     api.settings().then(setS);
@@ -1036,28 +1501,32 @@ function Sante() {
   );
 }
 
-function ChatRoute() {
-  const { id } = useParams();
-  return <Chat initialId={id} />;
-}
-
 export default function App() {
-  const { user, setUser, ready } = useAuth();
-  const nav = useNavigate();
-  if (!ready) return <div className="login">Chargement…</div>;
-  if (!user) return <Login onLogin={(u) => { setUser(u); nav("/"); }} />;
+  const { user, gate, error, check } = useOwner();
+  const loc = useLocation();
+  const chatMatch = useMatch("/c/:id");
+  // la conversation reste montée entre « / » et « /c/:id » : pas de rechargement, animations conservées
+  const isChat = loc.pathname === "/" || !!chatMatch;
+  if (gate === "connect") return <Connexion onDone={check} />;
+  if (gate === "error")
+    return (
+      <div className="login">
+        <div className="login-card">
+          <p className="error">{error}</p>
+          <button className="btn btn-copper" onClick={check}>Réessayer</button>
+          {isNative && (
+            <button className="btn btn-line" onClick={() => { clearConnection(); check(); }}>Changer de serveur</button>
+          )}
+        </div>
+      </div>
+    );
+  if (gate === "loading" || !user) return <div className="login">Chargement…</div>;
   return (
-    <Shell
-      user={user}
-      onLogout={() => {
-        setToken(null);
-        setUser(null);
-        nav("/login");
-      }}
-    >
+    <Shell user={user}>
+      {isChat ? (
+        <Chat initialId={chatMatch?.params.id} />
+      ) : (
       <Routes>
-        <Route path="/" element={<Chat />} />
-        <Route path="/c/:id" element={<ChatRoute />} />
         <Route path="/clients" element={<Clients />} />
         <Route path="/fournisseurs" element={<Fournisseurs />} />
         <Route path="/materiaux" element={<Materiaux />} />
@@ -1072,10 +1541,17 @@ export default function App() {
         <Route path="/livraisons" element={<Livraisons />} />
         <Route path="/livraisons/:id" element={<DocDetail kind="dn" />} />
         <Route path="/documents" element={<Documents />} />
-        <Route path="/parametres" element={<SettingsPage />} />
+        <Route path="/memoire" element={<Memoire />} />
+        <Route path="/journal" element={<Journal />} />
+        <Route path="/couts" element={<Couts />} />
+        <Route path="/courrier" element={<Courrier />} />
+        <Route path="/reseaux" element={<Reseaux />} />
+        <Route path="/parametres" element={<SettingsHub />} />
+        <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
-        <Route path="/login" element={<Navigate to="/" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      )}
     </Shell>
   );
 }

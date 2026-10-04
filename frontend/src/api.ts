@@ -1,27 +1,75 @@
-const TOKEN_KEY = "unic_token";
+import { Capacitor } from "@capacitor/core";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+const SERVER_KEY = "unic_server";
+const CODE_KEY = "unic_code";
+
+export const isNative = Capacitor.isNativePlatform();
+
+function store(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
 }
 
-export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+export const getServer = () => store(SERVER_KEY).replace(/\/+$/, "");
+export const getCode = () => store(CODE_KEY);
+export function saveConnection(server: string, code: string) {
+  try {
+    localStorage.setItem(SERVER_KEY, server.trim().replace(/\/+$/, ""));
+    localStorage.setItem(CODE_KEY, code);
+  } catch {
+    /* stockage indisponible */
+  }
+}
+export function clearConnection() {
+  try {
+    localStorage.removeItem(SERVER_KEY);
+    localStorage.removeItem(CODE_KEY);
+  } catch {
+    /* empty */
+  }
+}
+
+export class AuthError extends Error {}
+
+/** Application native : adresse du serveur obligatoire. Web : même origine que l'API. */
+export const needsServer = () => isNative && !getServer();
+
+export function apiUrl(path: string): string {
+  return path.startsWith("http") ? path : getServer() + path;
+}
+
+function authHeaders(headers = new Headers()): Headers {
+  const code = getCode();
+  if (code) headers.set("X-Access-Code", code);
+  return headers;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const headers = authHeaders(new Headers(init.headers));
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers });
-  if (res.status === 401) {
-    setToken(null);
-    if (!path.includes("/auth/login")) window.location.href = "/login";
-    throw new Error("Session expirée");
+  let res: Response | undefined;
+  // lecture seule : on réessaie 2 fois (serveur qui redémarre après une mise à jour) ; jamais un envoi, pour éviter les doublons
+  const tries = (init.method || "GET").toUpperCase() === "GET" ? 3 : 1;
+  for (let i = 0; i < tries && !res; i++) {
+    try {
+      res = await fetch(apiUrl(path), { ...init, headers });
+    } catch {
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 2500));
+    }
   }
+  if (!res) {
+    throw new Error(
+      "Serveur injoignable. Il redémarre peut-être après une mise à jour (1 à 2 min) : réessayez. Sinon vérifiez votre connexion.",
+    );
+  }
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -37,12 +85,92 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res as unknown as T;
 }
 
+export type Platform = {
+  id: string; label: string; description: string; tip: string; max_chars: number;
+  linked: boolean; handle: string; page_url: string; auto_publish: boolean;
+};
+export type Post = {
+  id: string; platform: string; kind: string; title: string; body: string; hashtags: string;
+  in_reply_to: string; status: string; created_at: string | null;
+};
+export type Mail = {
+  suspect?: boolean;
+  id: string; from_addr: string; subject: string; date: string; body: string;
+  summary: string; category: string; reply_draft_id: string | null;
+};
+export type GReview = { id: string; author: string; stars: number; comment: string; created: string; replied: boolean };
+export type GProfile = { title: string; website: string; phone: string; description: string; gaps: string[]; complete: boolean };
+export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
+
+export type Memo = {
+  id: string; text: string; kind: string; source: string; pinned: boolean; created_at: string | null;
+  nature?: string; state?: string; importance?: number; occurrences?: number; expires_at?: string | null;
+};
+export type MemState = {
+  actifs: number; a_confirmer: number; rejetes: number; archives: number; taches: number; conflits: number;
+  avertissement: string | null; recherche: string; portee_conflits: string;
+};
+export type MemConflict = { a: { id: string; text: string }; b: { id: string; text: string }; raison: string };
+export type Usage = {
+  aujourdhui_usd: number; semaine_usd: number; mois_usd: number; total_usd: number; moyenne_par_message_usd: number;
+  messages_aujourdhui: number; messages_mois: number; messages_total: number;
+  par_modele: { model: string; messages: number; cout_usd: number }[]; jours: { jour: string; cout_usd: number }[];
+  credit_usd: number | null; reste_usd: number | null; messages_restants_estimes: number | null; tarif_inconnu: boolean; avertissement: string;
+};
+export type JournalRow = { id: string; at: string | null; action: string; label: string; target: string; details: string };
+
+const json = (b: unknown) => ({ body: JSON.stringify(b) });
+
+export const net = {
+  platforms: () =>
+    request<{ platforms: Platform[]; auto_publish_note: string; ai_available: boolean }>("/api/reseaux/platforms"),
+  setAccount: (id: string, b: { handle: string; page_url: string; linked: boolean }) =>
+    request(`/api/reseaux/accounts/${id}`, { method: "PUT", ...json(b) }),
+  posts: () => request<Post[]>("/api/reseaux/posts"),
+  createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
+  advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
+  deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  generate: (b: { platform: string; topic?: string; details?: string; comment?: string }) =>
+    request<{ text: string; warning: string | null }>("/api/reseaux/generate", { method: "POST", ...json(b) }),
+  boost: (b: { target: string; facts?: string }) =>
+    request<{ plan: string; note: string }>("/api/reseaux/boost", { method: "POST", ...json(b) }),
+  publish: (id: string) => request<Post>(`/api/reseaux/posts/${id}/publish`, { method: "POST" }),
+  gStatus: () => request<{ configured: boolean; missing: string[]; ai: boolean }>("/api/google/status"),
+  gProfile: () => request<GProfile>("/api/google/profile"),
+  gReviews: () => request<GReview[]>("/api/google/reviews"),
+  gReplyDraft: (id: string, b: { comment: string; stars: number }) =>
+    request<Post>(`/api/google/reviews/${encodeURIComponent(id)}/reply-draft`, { method: "POST", ...json(b) }),
+  memories: () => request<Memo[]>("/api/memory"),
+  addMemory: (b: { text: string; kind: string; pinned: boolean }) =>
+    request<Memo>("/api/memory", { method: "POST", ...json(b) }),
+  discardDoc: (kind: string, id: string) => request(`/api/documents/${kind}/${id}`, { method: "DELETE" }),
+  memoriesBy: (state: string) => request<Memo[]>(`/api/memory?state=${state}`),
+  memState: () => request<MemState>("/api/memory/state"),
+  memConflicts: () => request<MemConflict[]>("/api/memory/conflicts"),
+  decideMemory: (id: string, action: string) =>
+    request<Memo>(`/api/memory/${id}`, { method: "PATCH", ...json({ action }) }),
+  importMemory: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<{ candidats: number }>("/api/memory/import", { method: "POST", body: fd });
+  },
+  usage: () => request<Usage>("/api/usage"),
+  setBudget: (amount_usd: number) => request<Usage>("/api/usage/budget", { method: "PUT", ...json({ amount_usd }) }),
+  journal: (action = "") => request<JournalRow[]>(`/api/journal${action ? `?action=${encodeURIComponent(action)}` : ""}`),
+  deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),
+  mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
+  mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
+  mails: () => request<Mail[]>("/api/mail"),
+  analyze: (id: string) => request<Mail & { priority: string; action: string }>(`/api/mail/${id}/analyze`, { method: "POST" }),
+  replyDraft: (id: string, instruction: string) =>
+    request<MailDraft>(`/api/mail/${id}/reply-draft`, { method: "POST", ...json({ instruction }) }),
+  editDraft: (id: string, b: Partial<MailDraft>) =>
+    request<MailDraft>(`/api/mail/drafts/${id}`, { method: "PATCH", ...json(b) }),
+  approveDraft: (id: string) => request(`/api/mail/drafts/${id}/approve`, { method: "POST" }),
+  sendDraft: (id: string) => request(`/api/mail/drafts/${id}/send`, { method: "POST" }),
+};
+
 export const api = {
-  login: (email: string, password: string) =>
-    request<{ token: string; user: User }>(" /api/auth/login".trim(), {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    }),
   me: () => request<User>("/api/auth/me"),
   conversations: (q = "") =>
     request<Conv[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -50,7 +178,7 @@ export const api = {
   getConversation: (id: string) => request<ConvDetail>(`/api/conversations/${id}`),
   deleteConversation: (id: string) =>
     request(`/api/conversations/${id}`, { method: "DELETE" }),
-  chat: (body: { message: string; conversation_id?: string; file_ids?: string[] }) =>
+  chat: (body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean }) =>
     request<ChatOut>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
   upload: async (file: File, projectId?: string) => {
     const fd = new FormData();
@@ -76,6 +204,7 @@ export const api = {
     request("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   quotes: () => request<any[]>("/api/quotes"),
   getQuote: (id: string) => request<any>(`/api/quotes/${id}`),
+  preview: (artifactId: string) => request<{ pages: number; images: string[]; filename: string }>(`/api/artifacts/${artifactId}/preview`),
   approveQuote: (id: string) => request(`/api/quotes/${id}/approve`, { method: "POST" }),
   invoices: () => request<any[]>("/api/invoices"),
   getInvoice: (id: string) => request<any>(`/api/invoices/${id}`),
@@ -103,22 +232,33 @@ export type ChatMessage = {
   content: string;
   meta?: any;
   created_at?: string;
+  fresh?: boolean;
 };
 export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[] };
 export type ChatOut = { conversation_id: string; title: string; message: ChatMessage };
 export type Uploaded = { id: string; filename: string; processing: any };
 
-export function downloadUrl(path: string) {
-  const t = getToken();
-  if (!t) return path;
-  return path;
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 export async function downloadAuth(url: string, filename: string) {
-  const token = getToken();
-  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(apiUrl(url), { headers: authHeaders() });
+  if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) throw new Error("Téléchargement impossible");
   const blob = await res.blob();
+  if (isNative) {
+    // WebView : pas de téléchargement par lien → fichier en cache + feuille de partage Android
+    const safe = filename.replace(/[^\w.\-]+/g, "_");
+    const written = await Filesystem.writeFile({ path: safe, data: await blobToBase64(blob), directory: Directory.Cache });
+    await Share.share({ title: filename, url: written.uri, dialogTitle: "Ouvrir ou enregistrer" });
+    return;
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;

@@ -42,7 +42,6 @@ Déploiement recommandé : **Docker sur un VPS**.
 
 ```bash
 cp .env.example .env
-# renseigner UNIC_SECRET_KEY et le mot de passe admin
 docker compose up -d --build
 ```
 
@@ -57,7 +56,7 @@ Données persistantes : volume `unic-data`.
 cd backend
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-UNIC_DATA_DIR=../data UNIC_SECRET_KEY=dev uvicorn app.main:app --host 0.0.0.0 --port 8000
+UNIC_DATA_DIR=../data uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # frontend (autre terminal)
 cd frontend
@@ -67,12 +66,7 @@ npm run build   # ou npm run dev (proxy /api → :8000)
 
 En production locale, compiler le frontend puis servir uniquement uvicorn : l’API sert l’interface.
 
-Compte initial (base vide uniquement) :
-
-- e-mail : `marco.r@example.org`
-- mot de passe : `UniC-Plaquiste-2026`
-
-**Changez-le avant tout usage réel.**
+Application **solo** : aucune connexion. Écoute sur `127.0.0.1` seulement. Pour l’exposer sur Internet, protège-la (VPN, Tailscale ou proxy avec mot de passe).
 
 ---
 
@@ -139,7 +133,7 @@ python scripts/backup.py
 python scripts/restore.py data/backups/unic-backup-…
 ```
 
-Une sauvegarde n’est considérée comme valide **qu’après une restauration testée** (login + ouverture d’un PDF de devis).
+Une sauvegarde n’est considérée comme valide **qu’après une restauration testée** (ouverture d’un PDF de devis).
 
 ---
 
@@ -154,3 +148,65 @@ UniC AI n’invente pas : prix, clients, fournisseurs, cotes, paiements, clauses
 ## Licence interne
 
 Usage exclusif UniC Plaquiste.
+
+## Courrier, réseaux, fiche Google
+
+- **Courrier** : lecture IMAP (lecture seule), résumé, réponse proposée, **approbation puis envoi** SMTP. Rien ne part seul.
+- **Réseaux & Google** : 11 cibles (LinkedIn, Facebook, Instagram, TikTok, YouTube, Reddit, X, WhatsApp, Pinterest, fiche Google, site). Brouillon → revue → approbation → publication **manuelle**. Publication auto = NON DISPONIBLE (API/OAuth non configurées).
+- **Booster** : plan de conseils par IA. Aucune action lancée, aucun budget dépensé.
+- IA requise pour résumer / rédiger : `OPENAI_API_KEY` ou `LOCAL_AI_URL`.
+
+## Connecter la fiche Google
+
+Prérequis : tu es propriétaire de la fiche. Google exige d'**approuver** l'accès à l'API Business Profile.
+
+1. 🔑 console.cloud.google.com → nouveau projet → active **Business Profile API** (+ *My Business Business Information API*).
+2. 📨 Demande l'accès API : formulaire « GBP API access request » (délai : jours). Sans accord, Google répond 403.
+3. 🪪 *Identifiants* → ID client OAuth (type Application Web). Redirect : `https://developers.google.com/oauthplayground`.
+4. 🎫 Va sur developers.google.com/oauthplayground → ⚙ « Use your own OAuth credentials » → colle ID + secret → scope `https://www.googleapis.com/auth/business.manage` → autorise → **Exchange** → copie le *refresh token*.
+5. 🆔 `GBP_ACCOUNT_ID` et `GBP_LOCATION_ID` : les nombres dans `accounts/{ID}/locations/{ID}` (API *accounts.list* / *locations.list* dans le Playground).
+6. ⚙️ Mets les 5 variables dans `.env`, relance. La page **Réseaux & Google → Fiche Google** passe à « Charger fiche et avis ».
+
+Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses proposées par l'IA, actualités. **Tout passe par brouillon → revue → approbation → « Publier sur Google »**.
+
+## Moteurs IA
+
+- **Par défaut : modèle local** (`LOCAL_AI_URL`, ex. Ollama `http://IP:11434/v1`, + `LOCAL_AI_MODEL`). Serveur éteint → repli sur OpenAI-compatible si configuré, sinon message honnête.
+- **Raisonnement profond : Claude** (`ANTHROPIC_API_KEY`). Jamais automatique : bouton ✦ dans le chat, ou « réfléchis en profondeur ». Facturé à l'usage.
+- **Claude seul** (sans modèle local) : usage courant = `ANTHROPIC_FAST_MODEL` (Sonnet), ✦ = `ANTHROPIC_MODEL` (Opus). Chaque message IA est facturé.
+- Claude absent ou en panne → réponse du moteur local, signalée dans le message.
+
+## Numérotation des documents
+
+- **Devis** : `UC-AAAA-BLOC-CLI` — CLI = initiales prénom + nom du client (Ousmane Diop → `OD`). Le BLOC à 4 chiffres part de la date du jour (4 oct. = `1004`) puis appartient au client : Pape Diop `1004`, Awa Fall `1005`, Fallou Ndiaye `1006`, même le même jour ; le lendemain on continue. Un client qui revient garde son bloc : `UC-2026-1004-PD2`.
+- **Documents liés** : numéro du devis + code → `…-OD-BC` (bon de commande), `…-OD-BL` (livraison), `…-OD-F` (facture), `…-OD-AV` (avoir). Plusieurs du même type : `-BC2`.
+- Client inconnu : `XXX` (jamais inventé). Le numéro d'un brouillon se corrige quand une fiche client est rattachée.
+
+## Application Android (vraie app, pas une PWA)
+
+Capacitor emballe l'interface dans une app Android native (`frontend/android`). Elle se connecte à ton serveur UniC.
+
+1. **Serveur** : héberge le backend en **https** et définis `UNIC_ACCESS_CODE` (code d'accès unique).
+2. **APK** : GitHub → *Actions* → « Android APK » → dernier run → artefact `unic-ai-apk`.
+3. **Installer** : télécharge l'APK sur le téléphone, ouvre-le, autorise « sources inconnues » une fois.
+4. **Premier lancement** : saisis l'adresse du serveur (`https://…`) et le code d'accès.
+5. Mises à jour : même clé de signature, la nouvelle version s'installe par-dessus.
+
+Local : `cd frontend && npm run android:debug` (JDK 21 + Android SDK 35). La clé de signature du dépôt est une clé de **debug** : créer une vraie clé de release avant le Play Store.
+
+## Hébergement (Render + domaine Netlify)
+
+Netlify héberge des sites statiques : il ne peut pas faire tourner ce backend Python. Le domaine `unicplaquiste.com` reste sur Netlify ; on y ajoute **un sous-domaine** `ia.unicplaquiste.com` qui pointe vers Render. Les sites `www`, `app`, `expert` ne sont pas touchés.
+
+1. render.com → *New* → *Blueprint* → dépôt `UniC-Plaquiste-IA` (branche à déployer) → `render.yaml`.
+2. Saisir `UNIC_ACCESS_CODE` (code long) et `ANTHROPIC_API_KEY`.
+3. Render → service → *Settings* → *Custom Domains* → `ia.unicplaquiste.com` → noter la cible CNAME.
+4. Netlify → *Domains* → `unicplaquiste.com` → *DNS records* → ajouter `CNAME  ia  →  <cible Render>`.
+5. App Android : adresse du serveur `https://ia.unicplaquiste.com` + le code.
+
+## Recherche sur Internet
+
+Avec Claude comme moteur, JARVIS cherche sur Internet quand la question dépend de l'actualité ou de faits récents, et cite ses sources (liens sous la réponse).
+- À activer côté Anthropic : console.anthropic.com → **Settings** → **Privacy** (ou *Organization*) → autoriser **Web search**. Sans cela, l'IA répond sans recherche (sans erreur).
+- Facturée à l'usage par Anthropic (en plus des jetons). Limite : `WEB_SEARCH_MAX_USES` recherches par réponse. Désactiver : `WEB_SEARCH_ENABLED=false`.
+- Ne sert jamais pour les données privées de l'entreprise (prix, clients) : celles-ci viennent de la base UniC et de la mémoire.

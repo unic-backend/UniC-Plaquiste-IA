@@ -212,9 +212,12 @@ class Quotation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    client_label: Mapped[str] = mapped_column(String(255), default="")  # nom du client cité, sans fiche client
     customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), default="")
+    object_text: Mapped[str] = mapped_column(Text, default="")   # « Objet du devis » rédigé par l'IA (nature des travaux)
+    site_location: Mapped[str] = mapped_column(String(255), default="")   # lieu du chantier, sous le client sur le PDF
     status: Mapped[str] = mapped_column(String(32), default="draft")
     currency: Mapped[str] = mapped_column(String(8), default="")
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -561,3 +564,100 @@ class CalculationTrace(Base):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SocialAccount(Base):
+    """Profil enregistré par plateforme. `linked` = profil noté, PAS une connexion API."""
+
+    __tablename__ = "social_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    handle: Mapped[str] = mapped_column(String(255), default="")
+    page_url: Mapped[str] = mapped_column(String(512), default="")
+    linked: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class SocialPost(Base):
+    """Publication ou réponse (commentaire, avis) en brouillon → revue → approuvé → publié (manuel)."""
+
+    __tablename__ = "social_posts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="post")  # post | reply
+    title: Mapped[str] = mapped_column(String(255), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    hashtags: Mapped[str] = mapped_column(String(512), default="")
+    in_reply_to: Mapped[str] = mapped_column(Text, default="")  # texte du commentaire/avis visé
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    external_url: Mapped[str] = mapped_column(String(512), default="")
+    external_id: Mapped[str] = mapped_column(String(512), default="")  # ex. avis Google visé / post créé
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InboxMessage(Base):
+    """E-mail lu par IMAP (lecture seule). Contenu non fiable : jamais exécuté comme instruction."""
+
+    __tablename__ = "inbox_messages"
+    __table_args__ = (UniqueConstraint("uid", name="uq_inbox_uid"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    uid: Mapped[str] = mapped_column(String(255), index=True)  # Message-ID ou UID IMAP
+    from_addr: Mapped[str] = mapped_column(String(255), default="")
+    subject: Mapped[str] = mapped_column(String(512), default="")
+    date: Mapped[str] = mapped_column(String(64), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(32), default="")
+    reply_draft_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Memory(Base):
+    """Mémoire durable de l'assistant : faits, préférences, tâches. Persiste entre conversations.
+
+    `nature` dit D'OÙ vient ce qu'on croit savoir : fact / preference = dit par le patron ;
+    inference = déduit par l'IA ou importé, jamais un fait tant que le patron ne l'a pas confirmé ;
+    temporary = vrai maintenant, expiré bientôt. `state` dit ce que le patron en a décidé.
+    """
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    text: Mapped[str] = mapped_column(String(600))
+    kind: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | correction | task
+    source: Mapped[str] = mapped_column(String(16), default="user")  # user | auto | import
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    nature: Mapped[str] = mapped_column(String(16), default="fact")  # fact | preference | inference | temporary
+    state: Mapped[str] = mapped_column(String(12), default="active")  # active | rejected | archived
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)  # même chose dite plusieurs fois : comptée, pas dupliquée
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UsageLog(Base):
+    """Une réponse de Claude et ce qu'elle a coûté (estimé au tarif public Anthropic)."""
+    __tablename__ = "usage_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    web_searches: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    price_known: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")

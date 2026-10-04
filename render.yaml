@@ -1,0 +1,25 @@
+# Déploiement Render (Blueprint). Backend + interface servis par le même conteneur Docker.
+# Domaine prévu : ia.unicplaquiste.com (sous-domaine : les sites existants ne sont pas touchés).
+services:
+  - type: web
+    name: unic-ai
+    runtime: docker
+    plan: starter            # disque persistant = plan payant
+    region: frankfurt        # le plus proche de Dakar
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/ping
+    disk:
+      name: unic-data        # base SQLite, fichiers, PDF, mémoire : survit aux redéploiements
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: UNIC_DATA_DIR
+        value: /data
+      - key: UNIC_PUBLIC_URL
+        value: https://ia.unicplaquiste.com
+      - key: UNIC_ACCESS_CODE   # à saisir dans Render, jamais dans le dépôt
+        sync: false
+      - key: ANTHROPIC_API_KEY  # à saisir dans Render
+        sync: false

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import object_session, Session
 
 from app.capabilities import health_dashboard, registry_snapshot
 from app.config import settings
@@ -40,9 +40,11 @@ from app.models import (
     User,
     utcnow,
 )
+from app import pricecheck
 from app.orchestrator import handle_turn
-from app.security import create_token, get_current_user, hash_password, require_roles, verify_password
+from app.security import get_current_user, require_roles
 from app.services import (
+    client_name_of,
     apply_payment,
     approve_entity,
     audit,
@@ -54,6 +56,8 @@ from app.services import (
     generate_po_pdf,
     generate_quote_pdf,
     invoice_from_quote,
+    client_initials,
+    document_number,
     next_number,
     quotation_from_quantities,
 )
@@ -64,11 +68,6 @@ router = APIRouter()
 
 # ---------- auth ----------
 
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class UserOut(BaseModel):
     id: str
     email: str
@@ -76,39 +75,9 @@ class UserOut(BaseModel):
     role: str
 
 
-@router.post("/auth/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email.lower()).first()
-    if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Identifiants invalides")
-    if not user.is_active:
-        raise HTTPException(status_code=401, detail="Compte inactif")
-    user.last_login = utcnow()
-    audit(db, user.id, "login", "user", user.id)
-    db.commit()
-    return {"token": create_token(user), "user": UserOut(id=user.id, email=user.email, name=user.name, role=user.role)}
-
-
 @router.get("/auth/me")
 def me(user: User = Depends(get_current_user)):
     return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)
-
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    name: str
-    password: str
-    role: str = "manager"
-
-
-@router.post("/users")
-def create_user(body: UserCreate, db: Session = Depends(get_db), admin: User = Depends(require_roles("admin"))):
-    if db.query(User).filter(User.email == body.email.lower()).first():
-        raise HTTPException(400, "E-mail déjà utilisé")
-    u = User(email=body.email.lower(), name=body.name, password_hash=hash_password(body.password), role=body.role)
-    db.add(u)
-    db.commit()
-    return {"id": u.id, "email": u.email, "role": u.role}
 
 
 # ---------- conversations / chat ----------
@@ -118,6 +87,7 @@ class ChatIn(BaseModel):
     conversation_id: str | None = None
     file_ids: list[str] = Field(default_factory=list)
     project_id: str | None = None
+    deep: bool = False  # raisonnement profond (Claude) à la demande
 
 
 @router.get("/conversations")
@@ -200,7 +170,7 @@ def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_c
     db.flush()
     if conv.title == "Nouvelle conversation" and text:
         conv.title = text[:80]
-    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids)
+    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
     meta = {
         "structured": reply.structured,
         "artifacts": reply.artifacts,
@@ -281,6 +251,30 @@ def download_artifact(aid: str, db: Session = Depends(get_db), user: User = Depe
     if not path.exists():
         raise HTTPException(404, "Fichier absent du stockage")
     return FileResponse(path, media_type=a.mime_type, filename=a.filename)
+
+
+@router.get("/artifacts/{aid}/preview")
+def preview_artifact(aid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Aperçu du PDF avant téléchargement : une image par page (6 pages au plus)."""
+    import base64
+    import io
+
+    a = db.get(Artifact, aid)
+    if a is None or not Path(a.path).exists():
+        raise HTTPException(404, "Document introuvable")
+    if a.mime_type != "application/pdf":
+        raise HTTPException(415, "Aperçu disponible pour les PDF seulement")
+    try:
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(a.path))
+        images = []
+        for i in range(min(len(pdf), 6)):
+            buf = io.BytesIO()
+            pdf[i].render(scale=1.6).to_pil().convert("RGB").save(buf, format="JPEG", quality=82)
+            images.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode())
+        return {"pages": len(pdf), "images": images, "filename": a.filename, "version": a.version}
+    except Exception as exc:   # aperçu impossible : le téléchargement reste disponible
+        raise HTTPException(503, f"Aperçu indisponible ({type(exc).__name__}). Utilisez Télécharger.")
 
 
 @router.get("/files/{fid}/download")
@@ -556,13 +550,15 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
+        "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
         "subtotal": q.subtotal, "vat_rate": q.vat_rate, "vat_amount": q.vat_amount,
         "total": q.total, "prices_complete": q.prices_complete,
         "notes": q.notes, "assumptions": q.assumptions, "missing_info": q.missing_info,
         "artifact_id": q.artifact_id, "version": q.version,
+        "price_check": pricecheck.check_quote(q),
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "items": [
             {
@@ -615,6 +611,13 @@ def patch_quote(qid: str, body: QuotePatch, db: Session = Depends(get_db), user:
         q.notes = body.notes
     if body.customer_id is not None:
         q.customer_id = body.customer_id
+        owner = db.get(Customer, body.customer_id)
+        if owner is not None and q.status == "draft":
+            # le numéro porte les initiales du client : il suit le client tant que le devis est un brouillon
+            current = document_number(db, owner.name, q.created_at.date() if q.created_at else None)
+            if not q.number.startswith(current.rsplit("-", 1)[0] + "-" + client_initials(owner.name)):
+                q.number = current
+            q.client_label = ""
     if body.items is not None:
         db.query(QuotationItem).filter(QuotationItem.quotation_id == q.id).delete()
         subtotal = 0.0
@@ -719,10 +722,16 @@ def approve_invoice(iid: str, db: Session = Depends(get_db), user: User = Depend
     return {"status": i.status}
 
 
+def _client_of(doc) -> str:
+    db = object_session(doc)
+    return client_name_of(db, doc) if db is not None else ""
+
+
 def _invoice(i: Invoice) -> dict:
     return {
         "id": i.id, "number": i.number, "kind": i.kind, "title": i.title, "status": i.status,
         "customer_name": i.customer.name if i.customer else None,
+        "client_name": _client_of(i),
         "subtotal": i.subtotal, "vat_amount": i.vat_amount, "total": i.total,
         "paid": i.paid, "remaining": i.remaining, "currency": i.currency,
         "artifact_id": i.artifact_id,
@@ -773,7 +782,7 @@ def approve_po(oid: str, db: Session = Depends(get_db), user: User = Depends(get
 def _po(p: PurchaseOrder) -> dict:
     return {
         "id": p.id, "number": p.number, "title": p.title, "status": p.status, "total": p.total,
-        "supplier_name": p.supplier.name if p.supplier else None, "artifact_id": p.artifact_id,
+        "supplier_name": p.supplier.name if p.supplier else None, "client_name": _client_of(p), "artifact_id": p.artifact_id,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "items": [
             {"position": it.position, "description": it.description, "quantity": it.quantity,
@@ -803,7 +812,7 @@ def get_dn(nid: str, db: Session = Depends(get_db), user: User = Depends(get_cur
 def _dn(n: DeliveryNote) -> dict:
     return {
         "id": n.id, "number": n.number, "title": n.title, "status": n.status,
-        "customer_name": n.customer.name if n.customer else None, "artifact_id": n.artifact_id,
+        "customer_name": n.customer.name if n.customer else None, "client_name": _client_of(n), "artifact_id": n.artifact_id,
         "created_at": n.created_at.isoformat() if n.created_at else None,
         "items": [
             {"position": it.position, "description": it.description, "quantity": it.quantity, "unit": it.unit}

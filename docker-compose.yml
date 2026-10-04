@@ -3,12 +3,10 @@ services:
   unic-ai:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       UNIC_DATA_DIR: /data
-      UNIC_SECRET_KEY: ${UNIC_SECRET_KEY:-change-me-in-production}
-      UNIC_ADMIN_EMAIL: ${UNIC_ADMIN_EMAIL:-marco.r@example.org}
-      UNIC_ADMIN_PASSWORD: ${UNIC_ADMIN_PASSWORD:-UniC-Plaquiste-2026}
+      UNIC_ADMIN_EMAIL: ${UNIC_ADMIN_EMAIL:-proprietaire@unic.local}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}

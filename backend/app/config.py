@@ -13,21 +13,29 @@ class Settings(BaseSettings):
     )
 
     unic_env: str = "production"
-    unic_secret_key: str = "dev-only-change-me"
     unic_data_dir: str = "./data"
     unic_host: str = "0.0.0.0"
     unic_port: int = 8000
     unic_public_url: str = ""
 
-    unic_admin_email: str = "marco.r@example.org"
-    unic_admin_password: str = "UniC-Plaquiste-2026"
-    unic_admin_name: str = "Administrateur UniC"
+    # Code d'accès unique (app mono-propriétaire exposée sur Internet). Vide = pas de code (usage local).
+    unic_access_code: str = ""
+    unic_admin_email: str = "proprietaire@unic.local"
+    unic_admin_name: str = "UniC Plaquiste"
 
     database_url: str = ""
 
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
+
+    # Claude (Anthropic) — raisonnement profond, à la demande seulement
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-opus-5-5"  # raisonnement profond
+    anthropic_fast_model: str = "claude-sonnet-5-5"  # usage courant quand Claude est le seul moteur
+    anthropic_base_url: str = ""  # vide = adresse officielle du SDK
+    web_search_enabled: bool = True  # recherche Internet par Claude (facturée à l'usage par Anthropic)
+    web_search_max_uses: int = 3
 
     local_ai_url: str = ""
     local_ai_model: str = ""
@@ -41,8 +49,18 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    smtp_from: str = ""
 
-    jwt_expire_hours: int = 12
+    # Fiche Google (Business Profile API) — OAuth refresh token + identifiants de la fiche
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
+    gbp_account_id: str = ""
+    gbp_location_id: str = ""
+
     max_upload_mb: int = 250
 
     @property
