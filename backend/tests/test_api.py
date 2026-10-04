@@ -1572,3 +1572,11 @@ def test_mail_purge_clears_local_copy(client, monkeypatch):
     assert len(client.get("/api/mail").json()) == 1
     assert client.post("/api/mail/purge").json()["purged"] == 1
     assert client.get("/api/mail").json() == []
+
+
+def test_calc_ignores_product_refs_and_absurd_sizes():
+    from app import calc
+    r = calc.calculate_from_text("Combien de plaques BA13 pour 750 m² de plafond ?")
+    assert r.kind == "ceiling" and abs(r.steps[0].result - 750) < 1
+    r = calc.calculate_from_text("cloison ba13 longueur 12 hauteur 30")
+    assert r.missing and not r.steps

@@ -829,3 +829,6 @@ select, input, textarea { max-width: 100%; box-sizing: border-box; }
 .prefs input[type="time"] { font-size: 18px; padding: 10px 12px; border-radius: 12px; }
 .prefs label { display: flex; align-items: center; gap: 6px; }
 body, .card-box, .page, .topbar, .composer, .bubble { transition: background-color .25s ease, color .25s ease, border-color .25s ease; }
+.lede { font-size: 15px; font-weight: 500; line-height: 1.45; }
+.card-box label { text-align: left; }
+.prefs label { justify-content: flex-start; }

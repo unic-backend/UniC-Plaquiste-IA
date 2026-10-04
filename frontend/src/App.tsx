@@ -736,7 +736,7 @@ function Chat({ initialId }: { initialId?: string }) {
           )}
           <textarea
             rows={1}
-            placeholder="Écrire un message… « Analyse ce plan », « Fais le devis »"
+            placeholder="Écris ou dicte un message…"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -1442,8 +1442,7 @@ function SettingsHub() {
       <div className="page-inner">
         <h1>Paramètres</h1>
         <p className="lede">
-          Vous n'avez pas besoin d'ouvrir ces pages pour travailler : dites à l'IA ce que vous voulez
-          (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
+          Tout se fait dans la conversation. Ici : réglages, connecteurs, consultation.
         </p>
         <CreditBadge />
         <PrefsCard />

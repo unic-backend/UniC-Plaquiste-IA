@@ -562,6 +562,8 @@ def detect_calc_kind(text: str) -> str | None:
         return "ceiling"
     if re.search(r"peinture|paint|peintur", t):
         return "paint"
+    if re.search(r"plafond", t) and not re.search(r"cloison|doublage", t):
+        return "ceiling"
     if re.search(r"enduit|pl[aâ]tre(?!rie)|plaster(?!board)", t) and not re.search(
         r"plaque|placo|ba13|cloison", t
     ):
@@ -582,6 +584,7 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     if kind is None:
         return None
     t = text.lower().replace("×", "x")
+    t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
 
     pair = _extract_dimension_pair(t)
     nums = _find_numbers(t)
@@ -616,6 +619,13 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
             L = nums[0]
         if H is None:
             H = nums[1] if len(nums) > 1 else 2.50
+        if L is not None and (H > 8 or L > 2000):
+            return CalcResult(
+                kind="partition", title="Calcul de cloison",
+                understanding=f"Dimensions peu crédibles ({L:g} x {H:g} m) : je préfère ne pas calculer.",
+                missing=["Longueur et hauteur de la cloison en mètres."],
+                next_step="Indiquez par exemple : cloison 12 x 2,5 m.",
+            )
         if L is None:
             return CalcResult(
                 kind="partition", title="Calcul de cloison",
