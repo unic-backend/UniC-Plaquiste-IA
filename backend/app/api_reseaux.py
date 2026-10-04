@@ -902,3 +902,27 @@ async def publish_instagram(pid: str, request: Request, photo: UploadFile = File
     audit(db, user.id, "instagram_publish", "social_post", p.id, "")
     db.commit()
     return _post_out(p)
+
+
+# ---------- TikTok : scripts de vidéos ----------
+
+class TikTokScriptIn(BaseModel):
+    topic: str = Field(..., min_length=5, max_length=300)
+    details: str = Field("", max_length=3000)
+
+
+@router.post("/tiktok/script")
+def tiktok_script(body: TikTokScriptIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon TikTok : la légende (publiable) puis, après « --- », le script de tournage. Rien ne part vers TikTok."""
+    from app import memory as mem
+    if not assistant.ai_available():
+        raise HTTPException(503, "IA non disponible : impossible d'écrire le script.")
+    d = assistant.draft_tiktok_script(body.topic, body.details, memory=mem.block(db, body.topic))
+    if d is None:
+        raise HTTPException(502, "L'écriture du script a échoué. Réessaie.")
+    text = f"{d['caption']}\n---\nSCRIPT À FILMER\n{d['script']}"
+    p = SocialPost(platform="tiktok", kind="post", title=d["title"], body=text, hashtags=d["hashtags"], status="draft")
+    db.add(p)
+    audit(db, user.id, "tiktok_script", "social_post", p.id)
+    db.commit()
+    return _post_out(p)

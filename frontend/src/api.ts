@@ -149,6 +149,8 @@ export const net = {
   createPost: (b: Partial<Post>) => request<Post>("/api/reseaux/posts", { method: "POST", ...json(b) }),
   advance: (id: string) => request<Post>(`/api/reseaux/posts/${id}/advance`, { method: "POST" }),
   deletePost: (id: string) => request(`/api/reseaux/posts/${id}`, { method: "DELETE" }),
+  tiktokScript: (topic: string, details: string) =>
+    request<Post>("/api/tiktok/script", { method: "POST", body: JSON.stringify({ topic, details }) }),
   siteStatus: () => request<{ connected: boolean; repo: string; branch: string; site_url: string }>("/api/website"),
   siteConnect: (token: string) => request("/api/website/connect", { method: "PUT", body: JSON.stringify({ token }) }),
   siteDisconnect: () => request("/api/website", { method: "DELETE" }),

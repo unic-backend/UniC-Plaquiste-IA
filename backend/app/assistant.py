@@ -166,3 +166,38 @@ def draft_site_page(topic: str, details: str = "", memory: str = "") -> dict | N
         text = f"slug: {str(d['slug']).strip()}\ndescription: {' '.join(str(d['description']).split())}\n---\n{content}"
         return {"title": " ".join(str(d["title"]).split()), "text": text}
     return None
+
+
+def draft_tiktok_script(topic: str, details: str = "", memory: str = "") -> dict | None:
+    """Script de vidéo TikTok : {title, caption, hashtags, script}. La légende est publiable telle quelle."""
+    out = _ask(
+        f"{_BASE} Écris le script d'une vidéo TikTok de 20 à 35 secondes pour UniC Plaquiste (Dakar), tournée au téléphone sur un chantier. "
+        "N'invente AUCUN fait, chiffre, prix, délai ni nom de client : appuie-toi seulement sur les faits donnés ; "
+        "sans détails, propose des plans généraux vrais (étapes de pose, outils, avant/après) que le patron pourra filmer. "
+        "Réponds UNIQUEMENT en JSON : "
+        '{"title":"accroche de 3 secondes, 8 mots maximum",'
+        '"plans":[{"duree":"0-3 s","visuel":"ce qu\'on filme, concret","texte_ecran":"texte court affiché"}] (4 à 6 plans),'
+        '"legende":"légende de 100 à 250 caractères, texte brut, 1 ou 2 émojis, appel à contacter UniC Plaquiste sur WhatsApp",'
+        '"hashtags":"5 à 7 hashtags séparés par des espaces (#plaquiste #dakar ...)",'
+        '"son":"conseil son : musique tendance libre de droits ou voix off, en une phrase"}',
+        f"Sujet : {topic}\nFaits fournis : {details or 'aucun'}",
+        memory=memory,
+    )
+    if not out:
+        return None
+    m = re.search(r"\{.*\}", out, re.S)
+    try:
+        d = json.loads(m.group(0)) if m else {}
+    except json.JSONDecodeError:
+        return None
+    plans = d.get("plans")
+    if not (d.get("title") and d.get("legende") and isinstance(plans, list) and plans):
+        return None
+    lines = []
+    for i, pl in enumerate(plans[:8], 1):
+        if isinstance(pl, dict):
+            lines.append(f"{i}. [{pl.get('duree', '')}] Filmer : {pl.get('visuel', '')}\n   Texte à l'écran : {pl.get('texte_ecran', '')}")
+    caption = plain_post(str(d["legende"])) or ""
+    script = "\n".join(lines) + (f"\n\nSon : {plain_post(str(d['son']))}" if d.get("son") else "")
+    return {"title": " ".join(str(d["title"]).split())[:120], "caption": caption,
+            "hashtags": " ".join(str(d.get("hashtags", "")).split())[:300], "script": script}

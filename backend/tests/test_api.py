@@ -2044,3 +2044,20 @@ def test_clean_page_text_keeps_subtitles_and_lists():
     out = clean_page_text("Intro **forte**.\n\n## Pourquoi\n\n• un\n- deux\n\n\n\n# Autre titre\nTexte *simple*")
     assert "## Pourquoi" in out and "- un" in out and "- deux" in out and "## Autre titre" in out
     assert "*" not in out and "\n\n\n" not in out
+
+
+def test_tiktok_script_draft_keeps_caption_before_script(client, monkeypatch):
+    import json as _json
+    from app import assistant
+    monkeypatch.setattr(assistant, "ai_available", lambda: True)
+    monkeypatch.setattr(assistant, "_ask", lambda *a, **k: _json.dumps({
+        "title": "Un plafond en 3 étapes", "legende": "Pose d'un faux plafond **BA13** à Dakar. Devis sur WhatsApp ✨", "hashtags": "#plaquiste #dakar #bricolage",
+        "plans": [{"duree": "0-3 s", "visuel": "plafond avant travaux", "texte_ecran": "Avant"}, {"duree": "3-10 s", "visuel": "pose des plaques", "texte_ecran": "Pose"}],
+        "son": "voix off calme"}))
+    r = client.post("/api/tiktok/script", json={"topic": "Pose d'un faux plafond", "details": "BA13"})
+    assert r.status_code == 200
+    p = r.json()
+    assert p["platform"] == "tiktok" and p["status"] == "draft" and p["hashtags"].startswith("#plaquiste")
+    caption, _, script = p["body"].partition("\n---\n")
+    assert "*" not in caption and "WhatsApp" in caption and script.startswith("SCRIPT À FILMER") and "1. [0-3 s] Filmer : plafond avant travaux" in script
+    assert client.post("/api/tiktok/script", json={"topic": "abc"}).status_code == 422

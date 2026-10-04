@@ -2,6 +2,7 @@ import * as I from "./Icons";
 import { LinkedInConnect, LinkedInPublish } from "./LinkedIn";
 import { InstagramConnect, InstagramPublish } from "./Instagram";
 import { SiteConnect, SitePageActions } from "./Site";
+import { TikTokActions, TikTokStudio } from "./TikTok";
 import { sharePhoto } from "./Google";
 import { useEffect, useState } from "react";
 import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
@@ -234,6 +235,7 @@ export function Reseaux() {
         {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
         {sel === "linkedin" && <LinkedInConnect say={say} onChange={refreshLi} />}
         {sel === "instagram" && <InstagramConnect say={say} onChange={refreshIg} />}
+        {sel === "tiktok" && <TikTokStudio say={say} onDraft={load} />}
         {sel === "website" && <SiteConnect say={say} onChange={setSiteOk} onDraft={load} />}
 
         <section className="card-box">
@@ -260,6 +262,7 @@ export function Reseaux() {
             {d.platform === "linkedin" && d.status === "approved" && (
               <LinkedInPublish post={d} connected={li.connected} pageReady={li.pageReady} say={say} onDone={load} />
             )}
+            {d.platform === "tiktok" && d.kind === "post" && d.status !== "published" && <TikTokActions post={d} say={say} />}
             {d.platform === "website" && d.kind === "post" && d.status !== "published" && (
               <SitePageActions post={d} connected={siteOk} say={say} onDone={load} />
             )}
