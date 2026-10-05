@@ -12,6 +12,7 @@ import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
+import { AppsList, QuickChips } from "./Shortcuts";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
@@ -562,6 +563,14 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/" className="btn new-chat" onClick={() => setOpen(false)}>
           + Nouvelle conversation
         </Link>
+        <button className="side-brief" onClick={() => {
+          try { sessionStorage.setItem(AUTO_KEY, "briefing"); } catch { /* ignoré */ }
+          setOpen(false);
+          nav("/");
+          window.dispatchEvent(new Event("unic:autosend"));   // déjà sur une conversation vide : lancé tout de suite
+        }}>
+          <I.Sun size={18} /> Briefing du jour
+        </button>
         <input
           placeholder="Rechercher…"
           value={q}
@@ -618,6 +627,8 @@ function Chat({ initialId }: { initialId?: string }) {
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
   const [sheet, setSheet] = useState(false);
+  const [apps, setApps] = useState(false);
+  useEffect(() => { if (!sheet) setApps(false); }, [sheet]);
   const [notice, setNotice] = useState("");
   useEffect(() => {
     if (!notice) return;
@@ -672,6 +683,18 @@ function Chat({ initialId }: { initialId?: string }) {
     try { go = sessionStorage.getItem(AUTO_KEY); sessionStorage.removeItem(AUTO_KEY); } catch { /* ignoré */ }
     if (go) setTimeout(() => sendRef.current?.(go!), 300);
   }, [initialId]);
+  const idRef = useRef(initialId);
+  idRef.current = initialId;
+  useEffect(() => {   // briefing demandé depuis le menu alors que la conversation vide est déjà ouverte
+    const onAuto = () => setTimeout(() => {
+      if (idRef.current) return;   // changement de conversation : l'effet ci-dessus s'en charge
+      let go: string | null = null;
+      try { go = sessionStorage.getItem(AUTO_KEY); sessionStorage.removeItem(AUTO_KEY); } catch { /* ignoré */ }
+      if (go) sendRef.current?.(go);
+    }, 0);
+    window.addEventListener("unic:autosend", onAuto);
+    return () => window.removeEventListener("unic:autosend", onAuto);
+  }, []);
   async function send(override?: string) {
     const msg = (override ?? text).trim();
     if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
@@ -807,6 +830,7 @@ function Chat({ initialId }: { initialId?: string }) {
         </div>
       </div>
       <div className="composer-wrap">
+        <QuickChips show={messages.length === 0 && !busy && !text && pending.length === 0} onAsk={(p) => send(p)} />
         <div className="composer">
           <AttachRow items={pending.map((f) => ({ name: f.name, mime: f.type, file: f }))} className="pending"
             onRemove={(i) => setPending((p) => p.filter((_, j) => j !== i))} />
@@ -875,8 +899,11 @@ function Chat({ initialId }: { initialId?: string }) {
               <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Camera /></span>Caméra</label>
               <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Image /></span>Photos</label>
               <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.File /></span>Fichiers</label>
+              <button className={`sheet-btn ${apps ? "on" : ""}`} aria-expanded={apps} onClick={() => setApps((a) => !a)}><span><I.Apps /></span>Plus</button>
             </div>
-            <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>
+            {apps
+              ? <AppsList onAsk={(p) => send(p)} onClose={() => setSheet(false)} />
+              : <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>}
           </div>
         </div>
       )}

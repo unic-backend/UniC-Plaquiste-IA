@@ -398,6 +398,7 @@ export const api = {
   saveSettings: (body: any) =>
     request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   health: () => request<any>("/api/health"),
+  connectors: () => request<Record<string, boolean>>("/api/connectors"),
   knowledge: () => request<any[]>("/api/knowledge"),
   search: (q: string) => request<any>(`/api/search?q=${encodeURIComponent(q)}`),
   emails: () => request<any[]>("/api/emails"),

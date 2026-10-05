@@ -13,7 +13,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import object_session, Session
 
 from app import learned
-from app.capabilities import health_dashboard, registry_snapshot, release_memory
+from app.capabilities import _connectors, health_dashboard, registry_snapshot, release_memory
 from app.config import settings
 from app.database import get_db
 from app.documents import process_file, save_upload, search_pages
@@ -1378,6 +1378,12 @@ async def backups_restore(file: UploadFile = File(...), user: User = Depends(req
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     return health_dashboard(db)
+
+
+@router.get("/connectors")
+def connectors(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """État réel des connecteurs, pour les raccourcis du chat (rien de figé)."""
+    return _connectors(db)
 
 
 @router.get("/capabilities")

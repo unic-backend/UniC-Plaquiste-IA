@@ -2811,3 +2811,8 @@ def test_company_stamp_upload_dark_photo_and_pdf(client):
     assert len(PdfReader(path).pages[-1]["/Resources"].get("/XObject") or {}) >= 2
     assert client.delete("/api/settings/stamp").json()["ok"]
     assert client.get("/api/settings/stamp").status_code == 200   # retour au cachet UniC intégré
+
+
+def test_connectors_state_for_chat_shortcuts(client):
+    c = client.get("/api/connectors").json()
+    assert {"email", "gbp", "website", "linkedin", "instagram"} <= set(c) and all(isinstance(v, bool) for v in c.values())
