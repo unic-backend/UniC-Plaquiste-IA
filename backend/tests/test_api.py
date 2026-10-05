@@ -2746,3 +2746,23 @@ def test_ceiling_uses_owner_hanging_kit_not_suspente(client):
         assert "error" not in r, r
         sans_prix = r["lignes_sans_prix"]
         assert not any("Tige" in l or "Pivot" in l or "laiton" in l for l in sans_prix), sans_prix
+
+
+def test_owner_moulures_glue_and_paint_prices(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Material
+    with SessionLocal() as db:
+        def price(sku):
+            m = db.query(Material).filter(Material.sku == sku).first()
+            return [p.amount for p in m.prices if p.kind == "selling" and p.valid_to is None][0], m.unit
+        assert price("UC-MOULURE-TAILLE-4-BARRE-DE-3-M") == (3500.0, "u") and price("UC-MOULURE-TAILLE-2-BARRE-DE-3-M") == (2500.0, "u")
+        assert price("UC-COLLE-SILICONE")[0] == 3500.0 and price("UC-COLLE-A-POMPE")[0] == 3500.0
+        assert price("UC-SEAU-ENDUIT") == (11000.0, "seau") and price("UC-PEINTURE-EN-EAU-GYLATEX-COLORIS") == (11000.0, "seau")
+        assert price("UC-PAPIER-PONCAGE") == (8000.0, "paquet") and price("UC-TOILE") == (5000.0, "rouleau")
+        s = AgentSession(db, None, {})
+        r = s("create_quote", {"client_name": "Test Moulure", "checks": "périmètre 18 m confirmé par le patron",
+                                "objet": "Fourniture et pose de moulures taille 4 dans le salon, Médina, Dakar.",
+                                "lines": [{"article": "moulure taille 4", "quantity": 6}, {"article": "colle silicone", "quantity": 2}]})
+        assert "error" not in r and r["lignes_sans_prix"] == [], r
+        assert r["total"] == 6 * 3500 + 2 * 3500

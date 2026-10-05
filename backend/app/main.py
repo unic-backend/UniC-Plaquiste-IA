@@ -91,11 +91,13 @@ def startup():
         try:
             from app import memory
             memory.seed_owner_rules(db)
-            from app.seed import apply_owner_hangers_v4, apply_owner_prices_v1, apply_owner_prices_v2, apply_owner_prices_v3
+            from app.seed import (apply_owner_hangers_v4, apply_owner_prices_v1, apply_owner_prices_v2, apply_owner_prices_v3,
+                                  apply_owner_prices_v5)
             apply_owner_prices_v1(db)
             apply_owner_prices_v2(db)
             apply_owner_prices_v3(db)
             apply_owner_hangers_v4(db)
+            apply_owner_prices_v5(db)
         except Exception:
             pass
         try:

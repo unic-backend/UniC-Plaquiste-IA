@@ -436,8 +436,16 @@ OWNER_RULES_V6 = (
     "la plaque de 2 m se pose en travers des fourrures (plus résistant).",
 )
 
+OWNER_RULES_V7 = (
+    "Moulures : barres de 3 m ; taille 4 = 3 500 FCFA la barre, taille 2 = 2 500 FCFA la barre ; nombre de barres = ⌈ longueur à couvrir / 3 ⌉. "
+    "Colle silicone = 3 500 FCFA l'unité ; colle à pompe = 3 500 FCFA l'unité.",
+    "Moulures, colles et peinture ne vont dans un devis BA13 QUE si je le demande.",
+    "Peinture et finition : seau enduit 20 kg = 11 000 FCFA ; seau peinture Gylatex = 11 000 FCFA ; paquet papier ponçage = 8 000 FCFA ; "
+    "toile = 5 000 FCFA le rouleau de 10 m².",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
-              "v6": OWNER_RULES_V6}
+              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7}
 
 
 def seed_owner_rules(db: Session) -> int:

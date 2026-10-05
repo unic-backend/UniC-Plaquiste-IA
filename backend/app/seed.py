@@ -234,6 +234,41 @@ def apply_owner_prices_v2(db: Session) -> int:
     return n
 
 
+def apply_owner_prices_v5(db: Session) -> int:
+    """Moulures, colles et finitions peinture (prix donnés par le patron). Anciennes valeurs gardées dans l'historique. Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v5"
+    if db.get(AppSetting, flag):
+        return 0
+    src = "donné par le patron"
+    spec = {   # sku : (nom, catégorie, unité, prix, note)
+        "UC-MOULURE-TAILLE-4-BARRE-DE-3-M": ("Moulure taille 4 (barre de 3 m)", "moulures", "u", 3500.0, "Barre de 3 m."),
+        "UC-MOULURE-TAILLE-2-BARRE-DE-3-M": ("Moulure taille 2 (barre de 3 m)", "moulures", "u", 2500.0, "Barre de 3 m."),
+        "UC-COLLE-SILICONE": ("Colle silicone", "moulures", "u", 3500.0, "Pose des moulures."),
+        "UC-COLLE-A-POMPE": ("Colle à pompe", "moulures", "u", 3500.0, "Pose des moulures."),
+        "UC-SEAU-ENDUIT": ("Seau enduit (20 kg)", "finition", "seau", 11000.0, "Seau de 20 kg."),
+        "UC-PEINTURE-EN-EAU-GYLATEX-COLORIS": ("Seau peinture Gylatex", "peinture", "seau", 11000.0, "Peinture en eau Gylatex."),
+        "UC-PAPIER-PONCAGE": ("Paquet papier ponçage", "finition", "paquet", 8000.0, ""),
+        "UC-TOILE": ("Toile (rouleau de 10 m²)", "finition", "rouleau", 5000.0, "Rouleau de 10 m²."),
+    }
+    n = 0
+    for sku, (name, cat, unit, amount, note) in spec.items():
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is None:
+            m = Material(sku=sku, name=name, category=cat, unit=unit, waste_coefficient=0.0, notes=note)
+            db.add(m)
+            db.flush()
+        m.name, m.category, m.unit, m.is_active = name, cat, unit, True
+        if note:
+            m.notes = note
+        _set_price(db, m, amount, src, f"Prix de vente : {name}")
+        n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_hangers_v4(db: Session) -> int:
     """Le patron n'utilise pas de « suspente » : point d'accroche = tige + pivot + cheville à laiton.
     Pivot et chevilles à laiton : prix au paquet de 100 (confirmé par le patron). Une seule fois."""
