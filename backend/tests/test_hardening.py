@@ -200,3 +200,20 @@ def test_export_xlsx_and_bad_requests(client):
     assert client.get("/api/export/clients.csv").status_code == 404
     assert client.get("/api/export/invoices.csv?start=pas-une-date").status_code == 400
     assert client.get("/api/export/invoices.csv").status_code == 200
+
+
+def test_slow_queries_are_recorded_without_values(client, monkeypatch):
+    from sqlalchemy import text
+    from app import database
+    monkeypatch.setattr(database, "SLOW_QUERY_MS", 0)
+    database.SLOW_QUERIES.clear()
+    with database.engine.connect() as c:
+        c.execute(text("SELECT :secret"), {"secret": "valeur-privee-123"})
+    assert database.SLOW_QUERIES and "valeur-privee-123" not in str(database.SLOW_QUERIES[-1])
+
+
+def test_big_json_is_gzipped_but_chat_stream_is_not(client):
+    big = client.get("/api/materials", headers={"Accept-Encoding": "gzip"})
+    assert big.headers.get("content-encoding") == "gzip" or len(big.content) < 1000
+    r = client.post("/api/chat/stream", json={"message": "bonjour"}, headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("content-encoding") != "gzip"

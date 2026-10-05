@@ -64,6 +64,16 @@ export function Atelier() {
           {d.sleeping?.length > 0 && <p className="error">Agent(s) endormi(s) : {d.sleeping.map((s: any) => s.agent).join(", ")} — relancés automatiquement.</p>}
         </section>
 
+        {d.slow_queries?.length > 0 && (
+          <section className="card-box">
+            <h3>Requêtes lentes ({d.slow_queries.length})</h3>
+            <p className="hint">Requêtes de base de données de plus de 200 ms depuis le dernier démarrage.</p>
+            {d.slow_queries.slice(0, 8).map((q: any, i: number) => (
+              <p key={i}><b>{q.ms} ms</b> · {when(q.at)}<br /><code className="at-trace">{q.sql}</code></p>
+            ))}
+          </section>
+        )}
+
         <section className="card-box">
           <h3>Problèmes vus ({d.incidents.length})</h3>
           {!d.incidents.length && <p className="hint">Aucun problème ouvert.</p>}

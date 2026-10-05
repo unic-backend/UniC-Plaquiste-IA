@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from app import __version__
 from app.api import router
@@ -102,6 +103,21 @@ async def security_headers(request: Request, call_next):
     if settings.unic_env == "production":
         h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp
+
+
+class _SelectiveGZip:
+    """Compresse les réponses de plus de 1 Ko, sauf le flux de conversation (il doit partir mot par mot, sans mise en tampon)."""
+
+    def __init__(self, app):
+        self.plain = app
+        self.zipped = GZipMiddleware(app, minimum_size=1000, compresslevel=5)
+
+    async def __call__(self, scope, receive, send):
+        stream = scope["type"] == "http" and scope["path"].startswith("/api/chat")
+        await (self.plain if stream else self.zipped)(scope, receive, send)
+
+
+app.add_middleware(_SelectiveGZip)
 
 
 @app.exception_handler(Exception)

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import time
+from collections import deque
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -26,6 +30,23 @@ if settings.is_sqlite:
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
+
+
+SLOW_QUERY_MS = 200
+SLOW_QUERIES: deque = deque(maxlen=50)   # dernières requêtes lentes : texte SQL seulement, jamais les valeurs
+
+
+@event.listens_for(engine, "before_cursor_execute")
+def _query_start(conn, cursor, statement, parameters, context, executemany):
+    context._query_start = time.perf_counter()   # sur le contexte d'exécution : une requête en erreur ne laisse rien derrière
+
+
+@event.listens_for(engine, "after_cursor_execute")
+def _query_end(conn, cursor, statement, parameters, context, executemany):
+    ms = (time.perf_counter() - getattr(context, "_query_start", time.perf_counter())) * 1000
+    if ms >= SLOW_QUERY_MS:
+        SLOW_QUERIES.append({"ms": round(ms), "sql": " ".join(statement.split())[:300],
+                             "at": datetime.now(timezone.utc).isoformat()})
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
