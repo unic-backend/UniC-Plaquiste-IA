@@ -416,6 +416,8 @@ def provider_chain(deep: bool = False) -> list[AIProvider]:
     """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
     sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
     # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
+    if not settings.llm_enabled:
+        return []
     order = ["claude", "pc", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 

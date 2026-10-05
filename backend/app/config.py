@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     gbp_account_id: str = ""
     gbp_location_id: str = ""
 
+    # Coupe-circuit : LLM_ENABLED=false désactive tout appel IA ; l'appli continue en mode calcul/documents.
+    llm_enabled: bool = True
+
     max_upload_mb: int = 250
 
     # CORS : origines autorisées (liste séparée par virgules). Vide = seulement l'origine du frontend servi.
