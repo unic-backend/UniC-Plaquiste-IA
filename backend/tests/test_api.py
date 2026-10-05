@@ -1327,7 +1327,17 @@ def test_quote_from_lines_given_by_the_boss(client):
     assert any(i.unit_price for i in q.items)                           # les articles de la grille sont chiffrés
     # le même devis ne se recrée pas, mais de nouvelles lignes donnent un nouveau devis
     again = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30, "lines": []})
-    assert "error" in again
+    assert "error" in again and out["numero"] in again["error"]
+    assert s.documents[-1] == {"kind": "quote", "id": q.id}            # jamais de refus muet : la carte s'affiche
+    # le patron insiste : un nouveau devis est créé, sans discuter
+    redo = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30,
+                              "lines": [], "nouveau": True})
+    assert redo.get("numero") and redo["numero"] != out["numero"], redo
+    # retrouver un document l'affiche en carte cliquable (Détail, Aperçu, Partager)
+    s2 = AgentSession(db, None, {})
+    found = s2("list_documents", {"query": "Pape Diop"})
+    assert found["trouves"] >= 2 and "id" not in found["documents"][0]
+    assert {"kind": "quote", "id": q.id} in s2.documents and len(s2.documents) <= 5
     db.close()
 
 
