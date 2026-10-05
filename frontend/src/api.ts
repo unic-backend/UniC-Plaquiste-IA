@@ -393,6 +393,8 @@ export const api = {
   restoreBackup: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<any>("/api/backups/restore", { method: "POST", body: fd }); },
   uploadSignature: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/signature", { method: "PUT", body: fd }); },
   deleteSignature: () => request<{ ok: boolean }>("/api/settings/signature", { method: "DELETE" }),
+  uploadStamp: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/stamp", { method: "PUT", body: fd }); },
+  deleteStamp: () => request<{ ok: boolean }>("/api/settings/stamp", { method: "DELETE" }),
   saveSettings: (body: any) =>
     request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   health: () => request<any>("/api/health"),

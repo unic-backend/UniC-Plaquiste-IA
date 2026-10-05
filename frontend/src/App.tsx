@@ -1692,13 +1692,14 @@ function AccountCard() {
   );
 }
 
-/** Signature du gérant : posée automatiquement dans le cadre UniC de chaque devis, facture, bon et reliquat. */
-function SignatureCard() {
+/** Image de marque (signature, cachet) : photo sur papier blanc, fond retiré, posée sur chaque nouveau document. */
+function BrandImageCard({ title, hint, url, upload, remove, alt }: {
+  title: string; hint: string; url: string; alt: string; upload: (f: File) => Promise<unknown>; remove: () => Promise<unknown> }) {
   const [src, setSrc] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
-  const load = () => fetchBlobUrl(`/api/settings/signature?t=${Date.now()}`).then(setSrc).catch(() => setSrc(null));
+  const load = () => fetchBlobUrl(`${url}?t=${Date.now()}`).then(setSrc).catch(() => setSrc(null));
   useEffect(() => { load(); }, []);
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true); setMsg("");
@@ -1706,20 +1707,30 @@ function SignatureCard() {
   };
   return (
     <section className="card-box sig-card">
-      <h2>Ma signature</h2>
-      <p className="hint">Signe en foncé sur une feuille blanche, puis prends-la en photo. Le fond blanc est retiré.
-        Elle apparaît dans le cadre « UniC Plaquiste » des nouveaux devis, factures, bons et reliquats.</p>
-      <div className="sig-preview">{src ? <img src={src} alt="Ma signature" /> : <span className="hint">Aucune signature enregistrée.</span>}</div>
+      <h2>{title}</h2>
+      <p className="hint">{hint}</p>
+      <div className="sig-preview">{src ? <img src={src} alt={alt} /> : <span className="hint">Rien d'enregistré.</span>}</div>
       <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => {
         const f = e.target.files?.[0]; e.target.value = "";
-        if (f) run(() => api.uploadSignature(f), "Signature enregistrée.");
+        if (f) run(() => upload(f), "Enregistré.");
       }} />
       <div className="row-actions">
-        <button className="btn btn-copper" disabled={busy} onClick={() => ref.current?.click()}>{src ? "Remplacer" : "Ajouter ma signature"}</button>
-        {src && <button className="btn btn-line" disabled={busy} onClick={() => run(() => api.deleteSignature(), "Signature retirée.")}>Retirer</button>}
+        <button className="btn btn-copper" disabled={busy} onClick={() => ref.current?.click()}>{busy ? "Traitement…" : src ? "Remplacer" : "Ajouter"}</button>
+        {src && <button className="btn btn-line" disabled={busy} onClick={() => run(remove, "Retiré.")}>Retirer</button>}
       </div>
       {msg && <p className="hint">{msg}</p>}
     </section>
+  );
+}
+
+function SignatureCard() {
+  return (
+    <>
+      <BrandImageCard title="Ma signature" alt="Ma signature" url="/api/settings/signature" upload={api.uploadSignature} remove={api.deleteSignature}
+        hint="Signe en foncé sur une feuille blanche, puis prends-la en photo. Le fond est retiré. Elle apparaît dans le cadre « UniC Plaquiste » des nouveaux devis, factures, bons et reliquats." />
+      <BrandImageCard title="Mon cachet" alt="Mon cachet" url="/api/settings/stamp" upload={api.uploadStamp} remove={api.deleteStamp}
+        hint="Tamponne sur une feuille blanche, puis prends-la en photo bien éclairée. La table et le papier sont retirés. Le cachet se place à côté de ta signature." />
+    </>
   );
 }
 

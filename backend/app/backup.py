@@ -100,8 +100,9 @@ def create(reason: str = "manuel") -> dict:
                         "counts": counts, "format": 1}
             with zipfile.ZipFile(folder / name, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
                 z.write(tmp_db, "unic.db")
-                if _signature().exists():
-                    z.write(_signature(), "brand/signature.png")
+                for f in (_signature(), _signature().with_name("stamp.png")):
+                    if f.exists():
+                        z.write(f, f"brand/{f.name}")
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
         finally:
             tmp_db.unlink(missing_ok=True)
@@ -215,9 +216,10 @@ def restore(data: bytes) -> dict:
                 src.close()
         finally:
             tmp.unlink(missing_ok=True)
-        if "brand/signature.png" in names:
-            _signature().parent.mkdir(parents=True, exist_ok=True)
-            _signature().write_bytes(z.read("brand/signature.png"))
+        for name in ("signature.png", "stamp.png"):
+            if f"brand/{name}" in names:
+                _signature().parent.mkdir(parents=True, exist_ok=True)
+                _signature().with_name(name).write_bytes(z.read(f"brand/{name}"))
     _save_status(last_restore=datetime.now(timezone.utc).isoformat(), last_restore_from=manifest.get("created_at"))
     return {"ok": True, "restored_from": manifest.get("created_at"), "counts": manifest.get("counts"),
             "safety_backup": safety["name"]}

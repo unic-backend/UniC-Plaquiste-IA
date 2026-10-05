@@ -1169,35 +1169,55 @@ def get_signature(user: User = Depends(get_current_user)):
     return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
-@router.put("/settings/signature")
-async def put_signature(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
-                        db: Session = Depends(get_db)):
-    """Signature du gérant (photo sur papier blanc ou dessin) : fond blanc rendu transparent, recadrée, en PNG."""
-    import io as _io
-    from PIL import Image, ImageOps
-    from app.pdfs import owner_signature_path
-
-    data = await file.read()
+def _save_brand_image(data: bytes, dest) -> dict:
+    from app import inkimage
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(413, "Image trop lourde (15 Mo maximum).")
     try:
-        img = ImageOps.exif_transpose(Image.open(_io.BytesIO(data))).convert("RGBA")
-    except Exception:
-        raise HTTPException(400, "Image illisible : envoie une photo ou une capture de ta signature.")
-    img.thumbnail((1600, 1600))
-    gray = img.convert("L")
-    alpha = gray.point(lambda v: 0 if v > 200 else 255)   # papier blanc → transparent, trait → opaque
-    if alpha.getbbox() is None:
-        raise HTTPException(400, "Aucun trait trouvé : signe en foncé sur fond blanc.")
-    ink = Image.new("RGBA", img.size, (20, 40, 120, 255))   # encre bleu foncé, nette à l'impression
-    ink.putalpha(alpha)
-    ink = ink.crop(alpha.getbbox())
-    dest = owner_signature_path()
+        ink = inkimage.extract(inkimage.load(data))
+    except inkimage.InkError as exc:
+        raise HTTPException(400, str(exc))
     dest.parent.mkdir(parents=True, exist_ok=True)
     ink.save(dest, "PNG")
+    return {"ok": True, "width": ink.width, "height": ink.height}
+
+
+@router.put("/settings/signature")
+async def put_signature(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
+                        db: Session = Depends(get_db)):
+    """Signature du gérant (photo sur papier blanc) : fond retiré, recadrée, encre bleu foncé, PNG transparent."""
+    from app.pdfs import owner_signature_path
+    out = _save_brand_image(await file.read(), owner_signature_path())
     audit(db, user.id, "update", "signature", "owner")
     db.commit()
-    return {"ok": True, "width": ink.width, "height": ink.height}
+    return out
+
+
+@router.get("/settings/stamp")
+def get_stamp(user: User = Depends(get_current_user)):
+    from app.pdfs import owner_stamp_path
+    p = owner_stamp_path()
+    if not p.exists():
+        raise HTTPException(404, "Aucun cachet enregistré")
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/settings/stamp")
+async def put_stamp(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
+                    db: Session = Depends(get_db)):
+    """Cachet de l'entreprise (photo du tampon sur papier) : posé à côté de la signature sur les documents."""
+    from app.pdfs import owner_stamp_path
+    out = _save_brand_image(await file.read(), owner_stamp_path())
+    audit(db, user.id, "update", "stamp", "owner")
+    db.commit()
+    return out
+
+
+@router.delete("/settings/stamp")
+def delete_stamp(user: User = Depends(require_roles("admin", "manager"))):
+    from app.pdfs import owner_stamp_path
+    owner_stamp_path().unlink(missing_ok=True)
+    return {"ok": True}
 
 
 @router.delete("/settings/signature")

@@ -143,13 +143,19 @@ def owner_signature_path() -> Path:
     return settings.storage_path / "brand" / "signature.png"
 
 
+def owner_stamp_path() -> Path:
+    """Cachet de l'entreprise (PNG transparent), posé à côté de la signature dans le cadre UniC."""
+    from app.config import settings
+    return settings.storage_path / "brand" / "stamp.png"
+
+
 class SignBox(Flowable):
     """Cadre de signature : bordure fine, libellé discret, signature du gérant éventuelle.
     Un champ de signature PDF invisible y est ajouté ensuite (Adobe : signer à la main ou placer sa signature)."""
 
-    def __init__(self, width: float, height: float, field: str, image: Path | None = None):
+    def __init__(self, width: float, height: float, field: str, image: Path | None = None, stamp: Path | None = None):
         super().__init__()
-        self.width, self.height, self.field, self.image = width, height, field, image
+        self.width, self.height, self.field, self.image, self.stamp = width, height, field, image, stamp
 
     def wrap(self, aw, ah):
         return self.width, self.height
@@ -163,14 +169,28 @@ class SignBox(Flowable):
         c.setFont("Helvetica", 7)
         c.setFillColor(MUTED)
         c.drawString(4, self.height - 9, "Signature et cachet")
+        from reportlab.lib.utils import ImageReader
+        has_stamp = bool(self.stamp and self.stamp.exists())
+        sig_w = self.width * (0.55 if has_stamp else 1.0)   # signature à gauche, cachet à droite
         if self.image and self.image.exists():
             try:
-                from reportlab.lib.utils import ImageReader
                 img = ImageReader(str(self.image))
                 iw, ih = img.getSize()
-                k = min(self.width * 0.6 / iw, (self.height - 18) * 0.85 / ih)   # signature lisible, sans remplir tout le cadre
+                k = min((sig_w - 12) * (0.9 if has_stamp else 0.6) / iw, (self.height - 18) * 0.85 / ih)
                 w, h = iw * k, ih * k
-                c.drawImage(img, (self.width - w) / 2, (self.height - 12 - h) / 2 + 2, w, h, mask="auto")
+                c.drawImage(img, (sig_w - w) / 2, (self.height - 12 - h) / 2 + 2, w, h, mask="auto")
+            except Exception:
+                pass
+        if has_stamp:
+            try:
+                st = ImageReader(str(self.stamp))
+                sw, sh = st.getSize()
+                k = min((self.width - sig_w - 6) / sw, (self.height - 6) / sh)
+                w, h = sw * k, sh * k
+                c.saveState()
+                c.setFillAlpha(0.92)
+                c.drawImage(st, sig_w + (self.width - sig_w - w) / 2, (self.height - h) / 2, w, h, mask="auto")
+                c.restoreState()
             except Exception:
                 pass
         c.restoreState()
@@ -458,7 +478,7 @@ def _render(
     head = _st("sh", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
     sig = Table([[Paragraph(e["nom"], head), Paragraph(other, head)],
                  [Paragraph("Date : ____ / ____ / ________", txt), Paragraph("Date : ____ / ____ / ________", txt)],
-                 [SignBox(box_w, box_h, "Signature_UniC", owner_signature_path()), SignBox(box_w, box_h, "Signature_Client")]],
+                 [SignBox(box_w, box_h, "Signature_UniC", owner_signature_path(), owner_stamp_path()), SignBox(box_w, box_h, "Signature_Client")]],
                 colWidths=[90 * mm, 90 * mm])
     sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2)),
                              ("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "TOP")]))

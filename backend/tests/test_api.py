@@ -2771,3 +2771,33 @@ def test_owner_moulures_glue_and_paint_prices(client):
 def test_glue_rule_is_in_owner_memory(client):
     from app import memory as mem
     assert any("1 colle pour 5 barres" in r for r in mem._RULE_SETS["v8"])   # posée une fois au démarrage du serveur
+
+
+def test_company_stamp_upload_dark_photo_and_pdf(client):
+    import io
+    import numpy as np
+    from PIL import Image, ImageDraw
+    from pypdf import PdfReader
+    from app.database import SessionLocal
+    from app.models import Artifact, Quotation
+    # photo sombre : table foncée autour d'une feuille, tampon bleu foncé, petite annotation rouge
+    im = Image.new("RGB", (1200, 800), (40, 40, 45))
+    d = ImageDraw.Draw(im)
+    d.rectangle([250, 80, 950, 760], fill=(150, 150, 160))
+    d.ellipse([400, 200, 800, 600], outline=(30, 40, 110), width=14)
+    d.text((520, 380), "UniC", fill=(30, 40, 110))
+    d.line([(100, 700), (180, 690)], fill=(220, 40, 40), width=12)
+    buf = io.BytesIO(); im.save(buf, format="JPEG")
+    r = client.put("/api/settings/stamp", files={"file": ("cachet.jpg", buf.getvalue(), "image/jpeg")})
+    assert r.status_code == 200, r.text
+    assert 380 <= r.json()["width"] <= 460 and 380 <= r.json()["height"] <= 460   # recadré sur le tampon, sans table ni trait rouge
+    png = Image.open(io.BytesIO(client.get("/api/settings/stamp").content))
+    assert png.mode == "RGBA" and np.asarray(png)[..., 3].mean() > 5
+    r = client.post("/api/chat", json={"message": "Calcule une cloison de 4 m × 2,5 m une face"})
+    client.post("/api/chat", json={"message": "fais le devis pour Cachet Test", "conversation_id": r.json()["conversation_id"]})
+    with SessionLocal() as db:
+        q = db.query(Quotation).order_by(Quotation.created_at.desc()).first()
+        path = db.get(Artifact, q.artifact_id).path
+    assert len(PdfReader(path).pages[-1]["/Resources"].get("/XObject") or {}) >= 2
+    assert client.delete("/api/settings/stamp").json()["ok"]
+    assert client.get("/api/settings/stamp").status_code == 404
