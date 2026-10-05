@@ -155,11 +155,27 @@ def studs_needed(length_m: float, spacing_m: float) -> int:
     if spacing_m <= 0:
         raise ValueError("Entraxe invalide")
     # montants d'extrémité inclus : floor(L/e) + 1
-    return int(math.floor(length_m / spacing_m)) + 1
+    return int(math.floor(length_m / spacing_m + 1e-9)) + 1   # 1e-9 : évite 6,999… pour 7
 
 
 def tracks_length(length_m: float, runs: int = 2) -> float:
     return round_qty(length_m * runs, 3)
+
+
+MAX_SURFACE_M2 = 10_000.0   # au-delà : probablement une faute de frappe (unité, virgule) → confirmation explicite
+
+
+def check_inputs(*, positive: dict[str, float] | None = None, surface_m2: float | None = None,
+                 waste: float | None = None, confirmed_large: bool = False) -> None:
+    """Refuse les saisies physiquement impossibles (valeurs ≤ 0, non numériques, surface démesurée)."""
+    for name, v in (positive or {}).items():
+        if not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v <= 0:
+            raise ValueError(f"« {name} » doit être un nombre strictement positif (reçu : {v}).")
+    if waste is not None and not 0 <= waste <= 0.5:
+        raise ValueError(f"Le taux de chute doit être entre 0 % et 50 % (reçu : {waste:.0%}).")
+    if surface_m2 is not None and surface_m2 > MAX_SURFACE_M2 and not confirmed_large:
+        raise ValueError(f"Surface de {surface_m2:,.0f} m² : au-delà de {MAX_SURFACE_M2:,.0f} m² pour un seul calcul. "
+                         "Vérifie les unités (m ou mm ?) puis confirme, ou découpe en plusieurs chantiers.".replace(",", " "))
 
 
 def calculate_partition(
@@ -173,8 +189,12 @@ def calculate_partition(
     board_height: float = DEFAULTS["board_height_m"],
     stud_spacing: float = DEFAULTS["stud_spacing_m"],
     include_finish: bool = True,
+    confirmed_large: bool = False,
 ) -> CalcResult:
     openings = openings or []
+    check_inputs(positive={"longueur": length_m, "hauteur": height_m, "largeur de plaque": board_width,
+                           "hauteur de plaque": board_height, "entraxe": stud_spacing},
+                 surface_m2=length_m * height_m * sides, waste=waste, confirmed_large=confirmed_large)
     b_area = board_area(board_width, board_height)
     areas = partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
@@ -341,7 +361,11 @@ def calculate_ceiling(
     board_width: float = DEFAULTS["board_width_m"],
     board_height: float = DEFAULTS["board_height_m"],
     system: str = "ba13",
+    confirmed_large: bool = False,
 ) -> CalcResult:
+    check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
+                           "hauteur de plaque": board_height},
+                 surface_m2=length_m * width_m, waste=waste, confirmed_large=confirmed_large)
     area = round_qty(length_m * width_m, 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
@@ -417,7 +441,10 @@ def calculate_paint(
     coats: int = 2,
     include_primer: bool = True,
     consumption: float = DEFAULTS["paint_l_per_m2_per_coat"],
+    confirmed_large: bool = False,
 ) -> CalcResult:
+    check_inputs(positive={"surface": area_m2, "couches": coats, "consommation": consumption},
+                 surface_m2=area_m2, confirmed_large=confirmed_large)
     paint_l = round_qty(area_m2 * coats * consumption, 2)
     primer_l = round_qty(area_m2 * DEFAULTS["primer_l_per_m2"], 2) if include_primer else 0.0
     result = CalcResult(
@@ -466,7 +493,10 @@ def calculate_paint(
     return result
 
 
-def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float = 0.10) -> CalcResult:
+def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float = 0.10,
+                      confirmed_large: bool = False) -> CalcResult:
+    check_inputs(positive={"surface": area_m2, "épaisseur": thickness_mm}, surface_m2=area_m2,
+                 waste=waste, confirmed_large=confirmed_large)
     # 10 mm → 10 L/m² → ~10 kg/m² selon produit ; on reste en kg avec 1 kg ≈ 1 L hypothèse
     kg = round_qty(area_m2 * thickness_mm * (1.0 + waste), 2)
     result = CalcResult(
@@ -502,7 +532,10 @@ def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float =
     return result
 
 
-def calculate_surface(length_m: float, width_or_height_m: float, extra_factor: float = 1.0) -> CalcResult:
+def calculate_surface(length_m: float, width_or_height_m: float, extra_factor: float = 1.0,
+                      confirmed_large: bool = False) -> CalcResult:
+    check_inputs(positive={"longueur": length_m, "largeur/hauteur": width_or_height_m, "facteur": extra_factor},
+                 surface_m2=length_m * width_or_height_m * extra_factor, confirmed_large=confirmed_large)
     area = round_qty(length_m * width_or_height_m * extra_factor, 3)
     result = CalcResult(
         kind="surface",
