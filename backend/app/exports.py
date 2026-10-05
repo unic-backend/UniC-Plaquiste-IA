@@ -11,7 +11,7 @@ import io
 from datetime import datetime
 
 from openpyxl import Workbook
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import Invoice, Quotation
 from app.services import client_name_of
@@ -32,7 +32,7 @@ def _rate(r: float | None):
 def rows(db: Session, kind: str, start: datetime | None = None, end: datetime | None = None) -> list[list]:
     """kind : « quotes » ou « invoices ». Filtre optionnel sur la date de création."""
     model = Quotation if kind == "quotes" else Invoice
-    q = db.query(model)
+    q = db.query(model).options(selectinload(model.items), joinedload(model.customer))
     if start:
         q = q.filter(model.created_at >= start)
     if end:

@@ -7,12 +7,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
-from sqlalchemy.orm import object_session, Session
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app import learned
 from app.capabilities import _connectors, health_dashboard, registry_snapshot, release_memory
 from app.config import settings
-from app.database import get_db
+from app.database import SLOW_QUERIES, get_db
 from app.documents import UploadRejected, process_file, save_upload, search_pages
 from app.models import (
     LearnedAnswer,
@@ -866,7 +866,8 @@ def export_accounting(kind: str, fmt: str, start: str = "", end: str = "", db: S
 
 @router.get("/quotes")
 def quotes(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = page.apply(db.query(Quotation).order_by(Quotation.created_at.desc()), response)
+    rows = page.apply(db.query(Quotation).options(selectinload(Quotation.items), joinedload(Quotation.customer))
+                      .order_by(Quotation.created_at.desc()), response)
     return [_quote_out(q) for q in rows]
 
 
@@ -1001,7 +1002,8 @@ def quote_to_invoice(qid: str, kind: str = "invoice", db: Session = Depends(get_
 
 @router.get("/invoices")
 def invoices(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = page.apply(db.query(Invoice).order_by(Invoice.created_at.desc()), response)
+    rows = page.apply(db.query(Invoice).options(selectinload(Invoice.items), selectinload(Invoice.payments), joinedload(Invoice.customer))
+                      .order_by(Invoice.created_at.desc()), response)
     return [_invoice(i) for i in rows]
 
 
@@ -1557,6 +1559,7 @@ def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)
     last = db.get(AppSetting, "selfcheck_last")
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
+            "slow_queries": list(reversed(SLOW_QUERIES)),
             "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
             "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
 
