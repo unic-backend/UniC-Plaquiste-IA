@@ -1098,3 +1098,9 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .conv-item a:hover, .foot-link:hover { background: rgba(255,255,255,.07); }
 
 @media (prefers-reduced-motion: reduce) { .card-box, .doc-card, .hub-item, .stat { animation: none; } }
+
+/* Texte des réponses de l'IA en police à empattements (comme l'app Claude) ; cartes et tableaux restent en sans-serif */
+:root { --serif-reply: "Iowan Old Style", "Charter", "Georgia", "Noto Serif", "Droid Serif", "Times New Roman", serif; }
+.msg.assistant .md { font-family: var(--serif-reply); font-weight: 600; letter-spacing: 0; }
+.msg.assistant .md b, .msg.assistant .md strong { font-weight: 800; }
+.msg.assistant .md code, .msg.assistant .md pre, .msg.assistant .md table, .msg.assistant .md h3 { font-family: var(--font); }
