@@ -7,6 +7,7 @@ Tout est déterministe : les totaux sont recalculés ici, jamais par le modèle.
 from __future__ import annotations
 
 import os
+import re
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ KINDS = {
     "dn": (DeliveryNote, DeliveryNoteItem, "note_id", DeliveryNote.number),
 }
 LABEL = {"quote": "devis", "invoice": "facture", "po": "bon de commande", "dn": "bon de livraison"}
+_NUMBER_OK = re.compile(r"^[A-Z0-9][A-Z0-9-]{2,31}$")
 
 
 class ReviseError(ValueError):
@@ -61,6 +63,22 @@ def _match(items: list, ref) -> object:
     return hit[0]
 
 
+def _check_new_number(db: Session, kind: str, doc, new_number: str | None) -> str | None:
+    """Nouveau numéro demandé : valide, libre dans TOUS les types de documents, sans document lié qui en dépend."""
+    new = (new_number or "").strip().upper()
+    if not new or new == doc.number:
+        return None
+    if not _NUMBER_OK.match(new):
+        raise ReviseError("Numéro invalide : lettres, chiffres et tirets seulement (32 caractères au plus).")
+    for model in (Quotation, Invoice, PurchaseOrder, DeliveryNote):
+        if db.query(model).filter(model.number == new).first() is not None:
+            raise ReviseError(f"Le numéro {new} est déjà utilisé : choisis-en un autre.")
+    if kind == "quote" and (db.query(Invoice).filter(Invoice.quotation_id == doc.id).first() is not None
+                            or svc._taken_numbers(db, f"{doc.number}-")):
+        raise ReviseError("Des documents liés portent le numéro de ce devis : corrige-les ou retire-les d'abord.")
+    return new
+
+
 def _recompute(kind: str, doc, items: list) -> None:
     for pos, it in enumerate(sorted(items, key=lambda x: x.position), start=1):
         it.position = pos
@@ -89,9 +107,11 @@ def _recompute(kind: str, doc, items: list) -> None:
 
 def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | None = None, add: list[dict] | None = None,
            update: list[dict] | None = None, title: str | None = None, vat_rate: float | None = None,
-           client_name: str | None = None, objet: str | None = None, lieu: str | None = None) -> list[str]:
+           client_name: str | None = None, objet: str | None = None, lieu: str | None = None,
+           new_number: str | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
     _draft_only(kind, doc)
+    renumber = _check_new_number(db, kind, doc, new_number)   # vérifié avant toute modification
     _model, item_model, fk, _col = KINDS[kind]
     items = db.query(item_model).filter(getattr(item_model, fk) == doc.id).order_by(item_model.position).all()
     changes: list[str] = []
@@ -143,14 +163,29 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
         elif kind == "quote":
             doc.client_label = client_name.strip()
         changes.append(f"client : {client_name.strip()}")
+    if renumber:
+        changes.append(f"numéro : {doc.number} → {renumber}")
+        doc.number = renumber
     _recompute(kind, doc, items)
     doc.version = (doc.version or 1) + 1
+    old_art_id = doc.artifact_id
     db.flush()
     db.expire(doc)
     {"quote": svc.generate_quote_pdf, "invoice": svc.generate_invoice_pdf, "po": svc.generate_po_pdf,
      "dn": svc.generate_dn_pdf}[kind](db, doc, user_id)
+    stale_path = None
+    if renumber and old_art_id and old_art_id != doc.artifact_id:   # l'ancien PDF (ancien numéro) quitte la bibliothèque
+        old_art = db.get(Artifact, old_art_id)
+        if old_art is not None:
+            stale_path = old_art.path
+            db.delete(old_art)
     svc.audit(db, user_id, f"revise_{kind}", kind, doc.id, "; ".join(changes)[:300])
     db.commit()
+    if stale_path:
+        try:
+            os.remove(stale_path)
+        except OSError:
+            pass
     db.refresh(doc)
     return changes
 

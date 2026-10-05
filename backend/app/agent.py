@@ -136,7 +136,7 @@ TOOLS: list[dict] = [
     },
     {
         "name": "revise_document",
-        "description": ("CORRIGE un document déjà créé (brouillon) : retirer / ajouter / changer des lignes, TVA, titre, client. "
+        "description": ("CORRIGE un document déjà créé (brouillon) : retirer / ajouter / changer des lignes, TVA, titre, client, numéro. "
                         "À utiliser dès que le patron dit « retire ça », « ajoute ça », « corrige ». Ne crée JAMAIS un second "
                         "document pour une correction. Les totaux sont recalculés par le système. Document approuvé = refusé."),
         "input_schema": {"type": "object", "properties": {
@@ -154,6 +154,8 @@ TOOLS: list[dict] = [
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
             "objet": {"type": "string", "description": "Nouvel « Objet du devis » (devis seulement)"},
             "lieu": {"type": "string", "description": "Nouveau lieu du chantier (devis seulement)"},
+            "new_number": {"type": "string", "description": ("Nouveau numéro demandé par le patron (ex. UC-2026-1008-MR). "
+                                                              "Refusé s'il est déjà utilisé ou si le document est approuvé.")},
             "client_name": {"type": "string"}}, "required": ["kind"], "additionalProperties": False},
     },
     {
@@ -507,13 +509,13 @@ class AgentSession:
 
     def _t_revise_document(self, kind: str, number: str = "", remove: list | None = None, update: list | None = None,
                            add: list | None = None, title: str = "", vat_rate: float | None = None,
-                           client_name: str = "", objet: str = "", lieu: str = "") -> dict:
+                           client_name: str = "", objet: str = "", lieu: str = "", new_number: str = "") -> dict:
         last = self.state.get("last_quote_id") if kind == "quote" else None
         try:
             doc = revise.find(self.db, kind, number, last)
             changes = revise.revise(self.db, kind, doc, user_id=self.user_id, remove=remove, update=update, add=add,
                                     title=title or None, vat_rate=vat_rate, client_name=client_name or None,
-                                    objet=objet or None, lieu=lieu or None)
+                                    objet=objet or None, lieu=lieu or None, new_number=new_number or None)
         except revise.ReviseError as exc:
             raise ConnectorError(str(exc), 400)
         if kind == "quote":
