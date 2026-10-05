@@ -44,6 +44,8 @@ from app.cover import ensure_cover_letter, make_cover_letter
 from app.orchestrator import handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
+    NUMBER_RE,
+    _taken_numbers,
     client_name_of,
     apply_payment,
     approve_entity,
@@ -907,10 +909,13 @@ def patch_quote(qid: str, body: QuotePatch, db: Session = Depends(get_db), user:
         q.customer_id = body.customer_id
         owner = db.get(Customer, body.customer_id)
         if owner is not None and q.status == "draft":
-            # le numéro porte les initiales du client : il suit le client tant que le devis est un brouillon
-            current = document_number(db, owner.name, q.created_at.date() if q.created_at else None)
-            if not q.number.startswith(current.rsplit("-", 1)[0] + "-" + client_initials(owner.name)):
-                q.number = current
+            # le numéro porte les initiales du client : elles suivent le client tant que le devis est un brouillon (même bloc)
+            m = NUMBER_RE.match(q.number)
+            init = client_initials(owner.name)
+            if m and m.group(3) != init:
+                renamed = f"UC-{m.group(1)}-{m.group(2)}-{init}"
+                q.number = renamed if renamed not in _taken_numbers(db, renamed) else document_number(
+                    db, owner.name, q.created_at.date() if q.created_at else None)
             q.client_label = ""
     if body.items is not None:
         db.query(QuotationItem).filter(QuotationItem.quotation_id == q.id).delete()

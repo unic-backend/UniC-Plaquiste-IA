@@ -556,8 +556,8 @@ def test_document_number_format_and_same_day_suffix(client):
     db.add(Quotation(number=n1, title="t", client_label="Fast Group", status="draft"))
     db.commit()
     n2 = document_number(db, "Fast Group", day)
-    assert n2 == "UC-2032-0714-FG2"          # même client : même bloc, devis suivant = 2
-    assert document_number(db, "Ousmane Diop", day) == "UC-2032-0715-OD"   # autre client : bloc suivant
+    assert n2 == "UC-2032-0715-FG"           # chaque devis a son bloc : même client, devis suivant = bloc suivant
+    assert document_number(db, "Ousmane Diop", day) == "UC-2032-0715-OD"   # (rien n'est encore enregistré en 0715)
     assert re.fullmatch(r"UC-\d{4}-\d{4}-[A-Z0-9]+", document_number(db, "Ousmane Diop"))
     db.query(Quotation).filter(Quotation.number == n1).delete()
     db.commit()
@@ -1448,17 +1448,17 @@ def test_search_by_client_name_finds_every_document_without_date(client):
     db.close()
 
 
-def test_each_client_owns_a_block_in_order_of_arrival(client):
-    """Règle du patron : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006 (même jour) ; le lendemain on continue."""
+def test_each_quote_gets_its_own_block_number(client):
+    """Règle du patron : chaque devis a son numéro (1004, 1005, 1006…), même client, même jour ; le lendemain on continue."""
     from datetime import date
     from app.database import SessionLocal
     from app.models import Quotation
     from app.services import document_number
     db = SessionLocal()
     plan = [("Pape Diop", date(2031, 10, 4), "UC-2031-1004-PD"), ("Awa Fall", date(2031, 10, 4), "UC-2031-1005-AF"),
-            ("Fallou Ndiaye", date(2031, 10, 4), "UC-2031-1006-FN"), ("Pape Diop", date(2031, 10, 4), "UC-2031-1004-PD2"),
-            ("Moussa Ba", date(2031, 10, 5), "UC-2031-1007-MB"), ("Awa Fall", date(2031, 10, 5), "UC-2031-1005-AF2"),
-            ("Paul Dieng", date(2031, 10, 5), "UC-2031-1008-PD")]
+            ("Fallou Ndiaye", date(2031, 10, 4), "UC-2031-1006-FN"), ("Pape Diop", date(2031, 10, 4), "UC-2031-1007-PD"),
+            ("Moussa Ba", date(2031, 10, 5), "UC-2031-1008-MB"), ("Awa Fall", date(2031, 10, 5), "UC-2031-1009-AF"),
+            ("Pape Diop", date(2031, 10, 5), "UC-2031-1010-PD")]
     for who, day, expected in plan:
         n = document_number(db, who, day)
         assert n == expected, (who, n)

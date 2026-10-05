@@ -136,10 +136,9 @@ def quote_signature(q: Quotation) -> tuple:
                         for it in q.items))
 
 
-def _client_block(db: Session, party_name: str | None, day: date, lieu: str | None = None) -> int:
-    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT (nom + lieu du chantier) : Pape Diop 1004, Awa Fall 1005,
-    même le même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…).
-    Deux clients de même nom mais de lieux différents ont chacun leur bloc."""
+def _client_block(db: Session, party_name: str | None, day: date, lieu: str | None = None, new: bool = False) -> int:
+    """Bloc à 4 chiffres (« 1007 »). Chaque DEVIS prend le bloc libre suivant (1007, 1008, 1009…, le même jour comme le
+    lendemain). Avec new=False (documents liés sans devis), on reprend le bloc du client (nom + lieu du chantier) s'il en a un."""
     me, init = _norm_name(party_name), client_initials(party_name)
     owners: dict[int, list[tuple[str, str]]] = {}
     for (number, label, cust_name, site) in (
@@ -154,7 +153,7 @@ def _client_block(db: Session, party_name: str | None, day: date, lieu: str | No
         if not owner and m.group(3) == init:
             owner = me   # devis ancien sans nom de client, mêmes initiales : on le rattache à ce client
         owners.setdefault(block, []).append((owner, site or ""))
-    if me:
+    if me and not new:
         mine = [b for b, o in owners.items() if any(n == me and same_site(site, lieu) for n, site in o)]
         if mine:
             return min(mine)
@@ -164,15 +163,14 @@ def _client_block(db: Session, party_name: str | None, day: date, lieu: str | No
     return block
 
 
-def _client_root(db: Session, party_name: str | None, day: date, lieu: str | None = None) -> str:
-    return f"UC-{day.year}-{_client_block(db, party_name, day, lieu):04d}-{client_initials(party_name)}"
+def _client_root(db: Session, party_name: str | None, day: date, lieu: str | None = None, new: bool = False) -> str:
+    return f"UC-{day.year}-{_client_block(db, party_name, day, lieu, new):04d}-{client_initials(party_name)}"
 
 
 def document_number(db: Session, party_name: str | None, on: date | None = None, lieu: str | None = None) -> str:
-    """UC-AAAA-BLOC-CLI. Chaque client a SON bloc (1004, 1005, 1006… dans l'ordre d'arrivée) ; son devis suivant
-    garde le même bloc et prend 2, 3… (UC-2026-1004-PD2). Deux clients ne partagent jamais un numéro."""
+    """UC-AAAA-BLOC-CLI. Chaque devis a SON numéro de bloc (1007, 1008, 1009…) : jamais deux devis sur le même bloc."""
     day = on or datetime.now(timezone.utc).date()
-    base = _client_root(db, party_name, day, lieu)
+    base = _client_root(db, party_name, day, lieu, new=True)
     taken = _taken_numbers(db, base)
     number, i = base, 2
     while number in taken:

@@ -231,19 +231,23 @@ def _mk_quote(db, name, lieu, lines=(("Moulure", 21.0),), status="draft"):
     return q
 
 
-def test_two_clients_with_same_name_get_separate_blocks_by_site():
+def test_every_quote_has_its_own_block_even_for_the_same_client():
     from app.database import SessionLocal
     db = SessionLocal()
     try:
-        a1 = _mk_quote(db, "Madame Ribeiro Test", "Point E, appartement A")
-        a2 = _mk_quote(db, "Madame Ribeiro Test", "Point E", lines=(("Plaque", 5.0),))
-        b1 = _mk_quote(db, "Madame Ribeiro Test", "Ngor Virage")
-        blk = lambda q: q.number.split("-")[2]  # noqa: E731
-        assert blk(a1) == blk(a2)          # même lieu (l'un contient l'autre) : même client, même bloc
-        assert blk(b1) != blk(a1)          # autre lieu : autre cliente, autre bloc
-        assert a2.number.endswith("MR2") or a2.number.endswith("RT2")   # son devis suivant prend 2
+        qs = [_mk_quote(db, "Madame Ribeiro Test", "Point E", lines=((f"Article {i}", 1.0),)) for i in range(3)]
+        blocks = [int(q.number.split("-")[2]) for q in qs]
+        assert blocks == sorted(set(blocks)) and blocks[1] == blocks[0] + 1 and blocks[2] == blocks[1] + 1
     finally:
         db.close()
+
+
+def test_same_site_matching_for_same_name_clients():
+    from app import services as svc
+    assert svc.same_site("Point E, appartement A", "Point E") and svc.same_site("", "Ngor")
+    assert not svc.same_site("Point E", "Ngor Virage")
+    assert svc.same_party("Madame Ribeiro", "Point E", "madame  ribeiro", "Point E, appt B")
+    assert not svc.same_party("Madame Ribeiro", "Point E", "Madame Ribeiro", "Ngor Virage")
 
 
 def test_ambiguous_same_name_without_site_asks_which_one():
