@@ -163,18 +163,20 @@ class SignBox(Flowable):
         super().__init__()
         self.width, self.height, self.field, self.image, self.stamp = width, height, field, image, stamp
 
+    LABEL_H = 11   # le libellé est AU-DESSUS du cadre : le crayon du lecteur PDF (coin haut-gauche du champ) ne le cache plus
+
     def wrap(self, aw, ah):
-        return self.width, self.height
+        return self.width, self.height + self.LABEL_H
 
     def draw(self):
         c = self.canv
         c.saveState()
+        c.setFont("Helvetica", 7)
+        c.setFillColor(MUTED)
+        c.drawString(2, self.height + 3, "Signature et cachet")
         c.setStrokeColor(colors.HexColor("#1F3A93"))
         c.setLineWidth(0.8)
         c.roundRect(0, 0, self.width, self.height, 3, stroke=1, fill=0)
-        c.setFont("Helvetica", 7)
-        c.setFillColor(MUTED)
-        c.drawString(4, self.height - 9, "Signature et cachet")
         from reportlab.lib.utils import ImageReader
         has_stamp = bool(self.stamp and self.stamp.exists())
         sig_w = self.width * (0.55 if has_stamp else 1.0)   # signature à gauche, cachet à droite
@@ -182,9 +184,9 @@ class SignBox(Flowable):
             try:
                 img = ImageReader(str(self.image))
                 iw, ih = img.getSize()
-                k = min((sig_w - 12) * (0.9 if has_stamp else 0.6) / iw, (self.height - 18) * 0.85 / ih)
+                k = min((sig_w - 12) * (0.9 if has_stamp else 0.6) / iw, (self.height - 8) * 0.85 / ih)
                 w, h = iw * k, ih * k
-                c.drawImage(img, (sig_w - w) / 2, (self.height - 12 - h) / 2 + 2, w, h, mask="auto")
+                c.drawImage(img, (sig_w - w) / 2, (self.height - h) / 2, w, h, mask="auto")
             except Exception:
                 pass
         if has_stamp:
