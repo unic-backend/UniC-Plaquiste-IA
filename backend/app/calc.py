@@ -32,8 +32,12 @@ DEFAULTS = {
     "primer_l_per_m2": 0.08,
     "ceiling_tile_side_m": 0.60,
     "hanger_spacing_m": 0.90,    # méthode UniC : une tige tous les 0,90 m le long de chaque fourrure
-    "furring_spacing_m": 0.50,   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
+    "furring_spacing_m": 0.50,
+    "bar_length_m": 2.90,        # fourrures, montants, rails, cornières : barres de 2,90 m   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
 }
+
+
+BAR_LENGTH_M = 2.90   # longueur des barres UniC (fourrure, montant, rail, cornière)
 
 
 def board_sku(board_width_m: float, board_height_m: float, suffix: str = "") -> tuple[str, str]:
@@ -293,8 +297,8 @@ def calculate_partition(
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         QuantityLine("MONTANT-M48", "Montant M48", n_studs, "u",
                      "⌊L/entraxe⌋+1", STATUS_ESTIMATED, notes=f"Soit {stud_ml} ml à la hauteur {height_m:g} m"),
-        QuantityLine("RAIL-R48", "Rail R48 (haut + bas)", tracks, "ml",
-                     "L×2", STATUS_ESTIMATED),
+        QuantityLine("UC-RAILS-48-MM", "Rails 48 mm (barre de 2,90 m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
+                     "⌈ L × 2 / 2,90 ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
                      f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
     ]
@@ -389,8 +393,8 @@ def calculate_ceiling(
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
-        QuantityLine("FOURRURE", "Fourrure / ossature plafond", furring_ml, "ml",
-                     f"{rows} lignes × longueur (entraxe 0,50 m)", STATUS_ESTIMATED),
+        QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", "Barre de fourrure (2,90 m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
+                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / 2,90 ⌉", STATUS_ESTIMATED),
     ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
