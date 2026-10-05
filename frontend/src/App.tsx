@@ -1303,6 +1303,19 @@ function ChantierDetail() {
   );
 }
 
+function ExportButtons({ kind }: { kind: "quotes" | "invoices" }) {
+  const [err, setErr] = useState("");
+  const go = (fmt: "csv" | "xlsx") =>
+    downloadAuth(`/api/export/${kind}.${fmt}`, `unic-${kind === "quotes" ? "devis" : "factures"}.${fmt}`).catch((e) => setErr(e?.message || "Export impossible"));
+  return (
+    <div className="row-actions">
+      <button className="btn btn-line btn-small" onClick={() => go("xlsx")}>Exporter Excel</button>
+      <button className="btn btn-line btn-small" onClick={() => go("csv")}>Exporter CSV</button>
+      {err && <span className="error" role="alert">{err}</span>}
+    </div>
+  );
+}
+
 function DevisList() {
   const nav = useNavigate();
   const { rows, shown, f, setF } = useDocLibrary(api.quotes);
@@ -1310,7 +1323,7 @@ function DevisList() {
     <TablePage
       title="Devis"
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
-      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
+      extra={<><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
       rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
       onRow={(i) => nav(`/devis/${shown[i].id}`)}
@@ -1481,7 +1494,7 @@ function Factures() {
   return (
     <TablePage
       title="Factures"
-      extra={<><UnpaidPanel /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
+      extra={<><UnpaidPanel /><ExportButtons kind="invoices" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
       rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, statusFr(q.status), q.total, q.paid, q.remaining])}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}

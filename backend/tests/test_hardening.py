@@ -162,3 +162,41 @@ def test_flagged_injection_is_written_to_audit_log():
                                          AuditLog.entity_id == "mail de test").count() == 1
     finally:
         db.close()
+
+
+def _seed_quote(number="EXP-1"):
+    from app.database import SessionLocal
+    from app.models import Quotation, QuotationItem
+    db = SessionLocal()
+    try:
+        q = Quotation(number=number, client_label="Diallo", status="approved", currency="FCFA", subtotal=1000.0,
+                      vat_rate=0.18, vat_amount=180.0, total=1180.0)
+        q.items = [QuotationItem(position=1, description="Plaque BA13", quantity=2, unit="u", unit_price=300.0, total=600.0),
+                   QuotationItem(position=2, description="Vis", quantity=4, unit="u", unit_price=None, total=None)]
+        db.add(q)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_export_csv_is_excel_ready_and_totals_counted_once(client):
+    _seed_quote()
+    r = client.get("/api/export/quotes.csv")
+    assert r.status_code == 200 and r.content.startswith(b"\xef\xbb\xbf")
+    lines = [ln for ln in r.content.decode("utf-8-sig").splitlines() if "EXP-1" in ln]
+    assert len(lines) == 2
+    first, second = (ln.split(";") for ln in lines)
+    assert first[12] == "1000,0" and first[15] == "1180,0" and first[13] == "18.0".replace(".", ",")
+    assert second[12] == "" and second[15] == ""          # totaux seulement sur la 1re ligne
+    assert second[10] == "" and second[11] == ""          # prix inconnu = cellule vide, pas 0
+
+
+def test_export_xlsx_and_bad_requests(client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    r = client.get("/api/export/quotes.xlsx")
+    ws = load_workbook(BytesIO(r.content)).active
+    assert ws["A1"].value == "Type" and any(c.value == "EXP-1" for row in ws.iter_rows() for c in row)
+    assert client.get("/api/export/clients.csv").status_code == 404
+    assert client.get("/api/export/invoices.csv?start=pas-une-date").status_code == 400
+    assert client.get("/api/export/invoices.csv").status_code == 200

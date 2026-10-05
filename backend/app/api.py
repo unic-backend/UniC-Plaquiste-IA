@@ -839,6 +839,31 @@ def _quote_out(q: Quotation) -> dict:
     }
 
 
+
+@router.get("/export/{kind}.{fmt}")
+def export_accounting(kind: str, fmt: str, start: str = "", end: str = "", db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Export comptable (devis ou factures) en CSV ou Excel. Filtre : ?start=AAAA-MM-JJ&end=AAAA-MM-JJ."""
+    from datetime import datetime, timezone
+    from app import exports
+    if kind not in ("quotes", "invoices") or fmt not in ("csv", "xlsx"):
+        raise HTTPException(404, "Export inconnu (quotes ou invoices, csv ou xlsx).")
+    try:
+        d0 = datetime.fromisoformat(start).replace(tzinfo=timezone.utc) if start else None
+        d1 = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc) if end else None
+    except ValueError:
+        raise HTTPException(400, "Date invalide : utilise AAAA-MM-JJ.")
+    data = exports.rows(db, kind, d0, d1)
+    audit(db, user.id, "export", kind, fmt, f"{len(data)} ligne(s)")
+    db.commit()
+    name = f"unic-{'devis' if kind == 'quotes' else 'factures'}-{datetime.now(timezone.utc).date().isoformat()}.{fmt}"
+    if fmt == "csv":
+        body, mime = exports.to_csv(data), "text/csv; charset=utf-8"
+    else:
+        body, mime = exports.to_xlsx(data, "Devis" if kind == "quotes" else "Factures"), \
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(body, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
 @router.get("/quotes")
 def quotes(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = page.apply(db.query(Quotation).order_by(Quotation.created_at.desc()), response)
