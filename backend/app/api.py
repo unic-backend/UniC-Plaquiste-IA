@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
@@ -560,12 +560,24 @@ class CustomerIn(BaseModel):
     notes: str = ""
 
 
+
+class Page:
+    """Pagination commune : ?limit=&offset= (défaut 500, max 1000). Le total est dans l'en-tête X-Total-Count."""
+
+    def __init__(self, limit: int = Query(500, ge=1, le=1000), offset: int = Query(0, ge=0)):
+        self.limit, self.offset = limit, offset
+
+    def apply(self, query, response: Response):
+        response.headers["X-Total-Count"] = str(query.count())
+        return query.offset(self.offset).limit(self.limit).all()
+
+
 @router.get("/customers")
-def customers(q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def customers(response: Response, page: Page = Depends(), q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     query = db.query(Customer)
     if q:
         query = query.filter(or_(Customer.name.ilike(f"%{q}%"), Customer.code.ilike(f"%{q}%")))
-    rows = query.order_by(Customer.name).all()
+    rows = page.apply(query.order_by(Customer.name), response)
     return [_customer(c) for c in rows]
 
 
@@ -733,8 +745,8 @@ class ProjectIn(BaseModel):
 
 
 @router.get("/projects")
-def projects(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Project).order_by(Project.created_at.desc()).all()
+def projects(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Project).order_by(Project.created_at.desc()), response)
     return [_project(p) for p in rows]
 
 
@@ -828,8 +840,8 @@ def _quote_out(q: Quotation) -> dict:
 
 
 @router.get("/quotes")
-def quotes(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Quotation).order_by(Quotation.created_at.desc()).all()
+def quotes(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Quotation).order_by(Quotation.created_at.desc()), response)
     return [_quote_out(q) for q in rows]
 
 
@@ -963,8 +975,8 @@ def quote_to_invoice(qid: str, kind: str = "invoice", db: Session = Depends(get_
 
 
 @router.get("/invoices")
-def invoices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Invoice).order_by(Invoice.created_at.desc()).all()
+def invoices(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Invoice).order_by(Invoice.created_at.desc()), response)
     return [_invoice(i) for i in rows]
 
 
@@ -1053,8 +1065,8 @@ def _invoice(i: Invoice) -> dict:
 
 
 @router.get("/purchase-orders")
-def pos(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).all()
+def pos(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()), response)
     return [_po(p) for p in rows]
 
 
@@ -1094,8 +1106,8 @@ def _po(p: PurchaseOrder) -> dict:
 
 
 @router.get("/delivery-notes")
-def dns(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(DeliveryNote).order_by(DeliveryNote.created_at.desc()).all()
+def dns(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(DeliveryNote).order_by(DeliveryNote.created_at.desc()), response)
     return [_dn(n) for n in rows]
 
 

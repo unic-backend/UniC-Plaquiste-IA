@@ -131,3 +131,12 @@ def test_ensure_indexes_adds_missing_ones_without_touching_data(tmp_path):
     names = {i["name"] for i in inspect(eng).get_indexes("quotations")}
     assert "ix_quotations_status" in names
     assert ensure_indexes(eng) == 0
+
+
+def test_lists_are_paginated_with_total_header(client):
+    r = client.get("/api/customers?limit=1&offset=0")
+    assert r.status_code == 200 and len(r.json()) <= 1
+    assert "x-total-count" in r.headers
+    assert client.get("/api/quotes?limit=0").status_code == 422
+    assert client.get("/api/invoices?limit=5000").status_code == 422
+    assert client.get("/api/invoices").status_code == 200
