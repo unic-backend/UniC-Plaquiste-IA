@@ -979,3 +979,9 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .at-form label { display: flex; align-items: center; gap: 8px; }
 .atelier textarea { width: 100%; }
 .at-steps { margin: 6px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+
+/* Atelier · Code dans le menu */
+.side-code { text-decoration: none; margin-top: 8px; }
+.side-code svg { color: #8fc2ad; }
+.side-code.active { background: #2b3934; border-color: #4d5e57; }
+.side-badge { margin-left: auto; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--copper); color: #fff; font-size: 12.5px; display: inline-flex; align-items: center; justify-content: center; }

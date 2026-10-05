@@ -545,6 +545,12 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
     api.conversations(q).then(setConvs).catch(() => setConvs([]));
   }, [q, loc.pathname]);
   useEffect(() => setOpen(false), [loc.pathname]);
+  const [work, setWork] = useState(0);   // erreurs à corriger + propositions prêtes (pastille de l'Atelier)
+  useEffect(() => {
+    if (!open) return;
+    api.selfcare().then((d) => setWork(d.incidents.filter((i: any) => i.kind === "error" || i.kind === "tool").length
+      + d.jobs.filter((j: any) => j.status === "proposed").length)).catch(() => {});
+  }, [open]);
   useEffect(() => {
     let off: (() => void) | undefined;
     listenBriefingTap(() => nav("/")).then((f) => { off = f; }).catch(() => {});
@@ -572,6 +578,10 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         }}>
           <I.Sun size={18} /> Briefing du jour
         </button>
+        <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
+          <I.Code size={18} /> Atelier · Code
+          {work > 0 && <span className="side-badge" aria-label={`${work} élément(s) à voir`}>{work}</span>}
+        </Link>
         <input
           placeholder="Rechercher…"
           value={q}
