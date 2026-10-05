@@ -104,3 +104,17 @@ def test_logout_revokes_token():
         assert not auth.token_valid(db, t)
     finally:
         db.close()
+
+
+def test_health_live_and_ready(client):
+    assert client.get("/api/health/live").json() == {"status": "alive"}
+    r = client.get("/api/health/ready")
+    assert r.status_code == 200 and r.json()["checks"]["database"] == "ok"
+
+
+def test_health_probes_open_even_with_access_code(client, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main.settings, "unic_access_code", "secret-code")
+    assert client.get("/api/health/live").status_code == 200
+    assert client.get("/api/health/ready").status_code == 200
+    assert client.get("/api/materials").status_code == 401

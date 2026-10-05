@@ -11,9 +11,36 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       LOCAL_AI_URL: ${LOCAL_AI_URL:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      REDIS_URL: ${REDIS_URL:-}
+      UNIC_ACCESS_CODE: ${UNIC_ACCESS_CODE:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - unic-data:/data
     restart: unless-stopped
 
+  # Profil « prod » : Redis (limite d'essais partagée) + HTTPS automatique (Caddy). Domaine : DOMAIN dans .env.
+  redis:
+    image: redis:7.4-alpine
+    profiles: ["prod"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: ["prod"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    command: ["caddy", "reverse-proxy", "--from", "{$$DOMAIN}", "--to", "unic-ai:8000"]
+    volumes:
+      - caddy-data:/data
+    depends_on:
+      - unic-ai
+    restart: unless-stopped
+
 volumes:
   unic-data:
+  caddy-data:

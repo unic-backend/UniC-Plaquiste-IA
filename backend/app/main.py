@@ -4,7 +4,10 @@ import logging
 import secrets
 from pathlib import Path
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +22,16 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_columns
 from app.seed import seed_if_empty
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await run_in_threadpool(startup)
+    yield
+    logger.info("Arrêt propre : fermeture des connexions à la base")
+    engine.dispose()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="UniC AI",
     description="Plateforme métier UniC Plaquiste — pas un assistant généraliste.",
     version=__version__,
@@ -49,7 +61,7 @@ async def access_code_guard(request: Request, call_next):
     code = settings.unic_access_code
     path = request.url.path
     if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback",
-                                                          "/api/auth/login", "/api/auth/status") \
+                                                          "/api/auth/login", "/api/auth/status", "/api/health/live", "/api/health/ready") \
             and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
         ip = request.client.host if request.client else "?"
         if ratelimit.blocked(ip, _MAX_FAILS, _WINDOW):
@@ -103,7 +115,6 @@ app.include_router(voice_router, prefix="/api")
 app.include_router(website_router, prefix="/api")
 
 
-@app.on_event("startup")
 def startup():
     settings.data_path.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
@@ -171,6 +182,34 @@ async def site_chat(request: Request):
     finally:
         db.close()
     return out
+
+
+@app.get("/api/health/live")
+def health_live():
+    """Liveness : le processus répond (aucune dépendance testée)."""
+    return {"status": "alive"}
+
+
+@app.get("/api/health/ready")
+def health_ready():
+    """Readiness : base de données (et Redis si configuré) joignables. 503 sinon."""
+    from sqlalchemy import text
+    checks: dict[str, str] = {}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        logger.exception("Readiness : base de données injoignable")
+        checks["database"] = "down"
+    if settings.redis_url:
+        client = ratelimit._client()
+        try:
+            checks["redis"] = "ok" if client is not None and client.ping() else "down"
+        except Exception:
+            checks["redis"] = "down"
+    ok = all(v == "ok" for v in checks.values())
+    return JSONResponse({"status": "ready" if ok else "unavailable", "checks": checks}, status_code=200 if ok else 503)
 
 
 @app.get("/api/ping")
