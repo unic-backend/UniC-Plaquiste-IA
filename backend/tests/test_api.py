@@ -1331,9 +1331,12 @@ def test_quote_from_lines_given_by_the_boss(client):
     again = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30, "lines": []})
     assert "error" in again and out["numero"] in again["error"]
     assert s.documents[-1] == {"kind": "quote", "id": q.id}            # jamais de refus muet : la carte s'affiche
-    # le patron insiste : un nouveau devis est créé, sans discuter
-    redo = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30,
+    # même en insistant : jamais un second devis identique (règle du patron) ; un devis aux lignes DIFFÉRENTES est possible
+    same = s("create_quote", {"client_name": "Pape Diop", "checks": "mêmes articles revérifiés ici", "objet": "x" * 30,
                               "lines": [], "nouveau": True})
+    assert "error" in same and out["numero"] in same["error"]
+    redo = s("create_quote", {"client_name": "Pape Diop", "checks": "autres articles demandés", "objet": "x" * 30,
+                              "lines": [{"article": "plaque BA13", "quantity": 7}], "nouveau": True})
     assert redo.get("numero") and redo["numero"] != out["numero"], redo
     # retrouver un document l'affiche en carte cliquable (Détail, Aperçu, Partager)
     s2 = AgentSession(db, None, {})

@@ -99,16 +99,51 @@ def _quote_client(q: Quotation) -> str:
     return _norm_name(q.customer.name if q.customer else q.client_label)
 
 
-_NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
+NUMBER_RE = _NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
 
 
-def _client_block(db: Session, party_name: str | None, day: date) -> int:
-    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006, même le
-    même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…)."""
+def same_site(a: str | None, b: str | None) -> bool:
+    """Deux lieux de chantier désignent le même endroit : égaux ou l'un contient l'autre (« Point E » / « Point E, appt A »).
+    Un lieu vide est compatible avec tout : il ne sépare jamais deux clients."""
+    def words(v) -> set[str]:
+        return {w for w in re.split(r"[^a-z0-9]+", str(v or "").lower().translate(_ACCENTS)) if w and w not in _LINK_WORDS}
+
+    x, y = words(a), words(b)
+    if not x or not y:
+        return True
+    return x <= y or y <= x
+
+
+def same_party(name_a: str | None, site_a: str | None, name_b: str | None, site_b: str | None) -> bool:
+    """Même client = même nom ET même lieu. Deux « Madame Ribeiro » à deux adresses sont deux clients."""
+    na, nb = _norm_name(name_a), _norm_name(name_b)
+    return bool(na) and na == nb and same_site(site_a, site_b)
+
+
+def sites_of_client(db: Session, name: str | None) -> list[str]:
+    """Lieux distincts (non vides) déjà utilisés par les devis de ce nom de client."""
+    out: list[str] = []
+    for q in db.query(Quotation).filter(Quotation.site_location != "").all():
+        if _norm_name(q.customer.name if q.customer else q.client_label) == _norm_name(name) \
+                and not any(same_site(q.site_location, o) for o in out):
+            out.append(q.site_location)
+    return out
+
+
+def quote_signature(q: Quotation) -> tuple:
+    """Ce que le devis vend : lignes (désignation, quantité, unité). Deux devis de même signature sont le même travail."""
+    return tuple(sorted(((it.description or "").strip().lower(), round(it.quantity or 0, 3), (it.unit or "").lower())
+                        for it in q.items))
+
+
+def _client_block(db: Session, party_name: str | None, day: date, lieu: str | None = None) -> int:
+    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT (nom + lieu du chantier) : Pape Diop 1004, Awa Fall 1005,
+    même le même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…).
+    Deux clients de même nom mais de lieux différents ont chacun leur bloc."""
     me, init = _norm_name(party_name), client_initials(party_name)
-    owners: dict[int, set[str]] = {}
-    for (number, label, cust_name) in (
-        (q.number, q.client_label, q.customer.name if q.customer else None)
+    owners: dict[int, list[tuple[str, str]]] = {}
+    for (number, label, cust_name, site) in (
+        (q.number, q.client_label, q.customer.name if q.customer else None, q.site_location)
         for q in db.query(Quotation).filter(Quotation.number.like(f"UC-{day.year}-%")).all()
     ):
         m = _NUMBER_RE.match(number)
@@ -118,9 +153,9 @@ def _client_block(db: Session, party_name: str | None, day: date) -> int:
         owner = _norm_name(cust_name or label)
         if not owner and m.group(3) == init:
             owner = me   # devis ancien sans nom de client, mêmes initiales : on le rattache à ce client
-        owners.setdefault(block, set()).add(owner)
+        owners.setdefault(block, []).append((owner, site or ""))
     if me:
-        mine = [b for b, o in owners.items() if me in o]
+        mine = [b for b, o in owners.items() if any(n == me and same_site(site, lieu) for n, site in o)]
         if mine:
             return min(mine)
     block = int(f"{day.month:02d}{day.day:02d}")
@@ -129,15 +164,15 @@ def _client_block(db: Session, party_name: str | None, day: date) -> int:
     return block
 
 
-def _client_root(db: Session, party_name: str | None, day: date) -> str:
-    return f"UC-{day.year}-{_client_block(db, party_name, day):04d}-{client_initials(party_name)}"
+def _client_root(db: Session, party_name: str | None, day: date, lieu: str | None = None) -> str:
+    return f"UC-{day.year}-{_client_block(db, party_name, day, lieu):04d}-{client_initials(party_name)}"
 
 
-def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
+def document_number(db: Session, party_name: str | None, on: date | None = None, lieu: str | None = None) -> str:
     """UC-AAAA-BLOC-CLI. Chaque client a SON bloc (1004, 1005, 1006… dans l'ordre d'arrivée) ; son devis suivant
     garde le même bloc et prend 2, 3… (UC-2026-1004-PD2). Deux clients ne partagent jamais un numéro."""
     day = on or datetime.now(timezone.utc).date()
-    base = _client_root(db, party_name, day)
+    base = _client_root(db, party_name, day, lieu)
     taken = _taken_numbers(db, base)
     number, i = base, 2
     while number in taken:
@@ -353,7 +388,7 @@ def quotation_from_quantities(
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
     label = (known.name if known else (client_name or "")).strip()
-    number = document_number(db, label)
+    number = document_number(db, label, lieu=lieu)
     q = Quotation(
         number=number,
         client_label="" if known else label,

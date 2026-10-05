@@ -217,3 +217,87 @@ def test_big_json_is_gzipped_but_chat_stream_is_not(client):
     assert big.headers.get("content-encoding") == "gzip" or len(big.content) < 1000
     r = client.post("/api/chat/stream", json={"message": "bonjour"}, headers={"Accept-Encoding": "gzip"})
     assert r.headers.get("content-encoding") != "gzip"
+
+
+# ---------- clients de même nom, doublons, changement de numéro ----------
+
+def _mk_quote(db, name, lieu, lines=(("Moulure", 21.0),), status="draft"):
+    from app import services as svc
+    from app.models import Quotation, QuotationItem
+    q = Quotation(number=svc.document_number(db, name, lieu=lieu), client_label=name, site_location=lieu, status=status, currency="FCFA")
+    q.items = [QuotationItem(position=i + 1, description=d, quantity=n, unit="u", unit_price=10.0, total=10.0 * n) for i, (d, n) in enumerate(lines)]
+    db.add(q)
+    db.commit()
+    return q
+
+
+def test_two_clients_with_same_name_get_separate_blocks_by_site():
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        a1 = _mk_quote(db, "Madame Ribeiro Test", "Point E, appartement A")
+        a2 = _mk_quote(db, "Madame Ribeiro Test", "Point E", lines=(("Plaque", 5.0),))
+        b1 = _mk_quote(db, "Madame Ribeiro Test", "Ngor Virage")
+        blk = lambda q: q.number.split("-")[2]  # noqa: E731
+        assert blk(a1) == blk(a2)          # même lieu (l'un contient l'autre) : même client, même bloc
+        assert blk(b1) != blk(a1)          # autre lieu : autre cliente, autre bloc
+        assert a2.number.endswith("MR2") or a2.number.endswith("RT2")   # son devis suivant prend 2
+    finally:
+        db.close()
+
+
+def test_ambiguous_same_name_without_site_asks_which_one():
+    from app import agent
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        _mk_quote(db, "Madame Diallo Test", "Mermoz")
+        _mk_quote(db, "Madame Diallo Test", "Sacré-Coeur")
+        s = agent.AgentSession(db, None, {"last_calc": {"quantities": [], "assumptions": [], "missing": []}})
+        with pytest.raises(Exception, match="Plusieurs clients se nomment"):
+            s._t_create_quote(client_name="Madame Diallo Test", checks="client verifie", objet="Fourniture de moulures pour le chantier",
+                              lines=[{"article": "Moulure", "quantity": 3}])
+    finally:
+        db.close()
+
+
+def test_identical_quote_is_never_created_twice():
+    from app import agent
+    from app.database import SessionLocal
+    from app.models import Quotation
+    db = SessionLocal()
+    try:
+        s = agent.AgentSession(db, None, {})
+        args = dict(client_name="Client Doublon Test", lieu="Yoff", checks="client et lignes verifies",
+                    objet="Fourniture de plaques pour le chantier de Yoff", lines=[{"article": "Plaque de plâtre BA13", "quantity": 4}])
+        first = s._t_create_quote(**args)
+        s.state.pop("calc_quote_id", None)
+        with pytest.raises(Exception, match="existe déjà"):
+            s._t_create_quote(nouveau=True, **args)
+        assert db.query(Quotation).filter(Quotation.client_label == "Client Doublon Test").count() == 1
+        assert first["numero"]
+    finally:
+        db.close()
+
+
+def test_rename_draft_quote_number_with_rules():
+    from app import revise
+    from app.database import SessionLocal
+    from app.models import Invoice
+    db = SessionLocal()
+    try:
+        q = _mk_quote(db, "Client Renom Test", "Ouakam")
+        old = q.number
+        revise.revise(db, "quote", q, user_id=None, new_number="uc-2026-4321-rt")
+        assert q.number == "UC-2026-4321-RT" and old != q.number
+        other = _mk_quote(db, "Autre Renom Test", "Yoff")
+        with pytest.raises(revise.ReviseError, match="existe déjà"):
+            revise.revise(db, "quote", other, user_id=None, new_number="UC-2026-4321-RT")
+        with pytest.raises(revise.ReviseError, match="Format"):
+            revise.revise(db, "quote", other, user_id=None, new_number="DEVIS-1")
+        db.add(Invoice(number=q.number + "-F", quotation_id=q.id, status="draft"))
+        db.commit()
+        with pytest.raises(revise.ReviseError, match="facture est liée"):
+            revise.revise(db, "quote", q, user_id=None, new_number="UC-2026-4322-RT")
+    finally:
+        db.close()

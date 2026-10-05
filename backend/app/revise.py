@@ -89,7 +89,8 @@ def _recompute(kind: str, doc, items: list) -> None:
 
 def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | None = None, add: list[dict] | None = None,
            update: list[dict] | None = None, title: str | None = None, vat_rate: float | None = None,
-           client_name: str | None = None, objet: str | None = None, lieu: str | None = None) -> list[str]:
+           client_name: str | None = None, objet: str | None = None, lieu: str | None = None,
+           new_number: str | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
     _draft_only(kind, doc)
     _model, item_model, fk, _col = KINDS[kind]
@@ -122,6 +123,26 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
         db.add(it)
         items.append(it)
         changes.append(f"ligne ajoutée : {it.description}")
+    if new_number and new_number.strip().upper() != doc.number:
+        if kind != "quote":
+            raise ReviseError("Seul le numéro d'un devis brouillon se change : les factures gardent leur suite.")
+        n = new_number.strip().upper()
+        if not svc.NUMBER_RE.match(n):
+            raise ReviseError("Format attendu : UC-AAAA-BLOC-INITIALES, par exemple UC-2026-1008-MR.")
+        if n in svc._taken_numbers(db, n):
+            raise ReviseError(f"Le numéro {n} existe déjà.")
+        if db.query(Invoice).filter(Invoice.quotation_id == doc.id).first():
+            raise ReviseError("Une facture est liée à ce devis : son numéro ne change plus.")
+        old_art = db.get(Artifact, doc.artifact_id) if doc.artifact_id else None
+        if old_art is not None:   # le PDF porte l'ancien numéro : il est refait sous le nouveau
+            try:
+                os.remove(old_art.path)
+            except OSError:
+                pass
+            doc.artifact_id = None
+            db.delete(old_art)
+        changes.append(f"numéro {doc.number} → {n}")
+        doc.number = n
     if title:
         doc.title = title
         changes.append("titre modifié")
