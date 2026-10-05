@@ -2800,4 +2800,4 @@ def test_company_stamp_upload_dark_photo_and_pdf(client):
         path = db.get(Artifact, q.artifact_id).path
     assert len(PdfReader(path).pages[-1]["/Resources"].get("/XObject") or {}) >= 2
     assert client.delete("/api/settings/stamp").json()["ok"]
-    assert client.get("/api/settings/stamp").status_code == 404
+    assert client.get("/api/settings/stamp").status_code == 200   # retour au cachet UniC intégré

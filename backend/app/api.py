@@ -1206,8 +1206,8 @@ def get_stamp(user: User = Depends(get_current_user)):
 async def put_stamp(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
                     db: Session = Depends(get_db)):
     """Cachet de l'entreprise (photo du tampon sur papier) : posé à côté de la signature sur les documents."""
-    from app.pdfs import owner_stamp_path
-    out = _save_brand_image(await file.read(), owner_stamp_path())
+    from app.pdfs import uploaded_stamp_path
+    out = _save_brand_image(await file.read(), uploaded_stamp_path())
     audit(db, user.id, "update", "stamp", "owner")
     db.commit()
     return out
@@ -1215,8 +1215,8 @@ async def put_stamp(file: UploadFile = File(...), user: User = Depends(require_r
 
 @router.delete("/settings/stamp")
 def delete_stamp(user: User = Depends(require_roles("admin", "manager"))):
-    from app.pdfs import owner_stamp_path
-    owner_stamp_path().unlink(missing_ok=True)
+    from app.pdfs import uploaded_stamp_path
+    uploaded_stamp_path().unlink(missing_ok=True)   # le cachet intégré reprend sa place
     return {"ok": True}
 
 

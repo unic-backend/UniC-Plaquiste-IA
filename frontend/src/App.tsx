@@ -1729,7 +1729,7 @@ function SignatureCard() {
       <BrandImageCard title="Ma signature" alt="Ma signature" url="/api/settings/signature" upload={api.uploadSignature} remove={api.deleteSignature}
         hint="Signe en foncé sur une feuille blanche, puis prends-la en photo. Le fond est retiré. Elle apparaît dans le cadre « UniC Plaquiste » des nouveaux devis, factures, bons et reliquats." />
       <BrandImageCard title="Mon cachet" alt="Mon cachet" url="/api/settings/stamp" upload={api.uploadStamp} remove={api.deleteStamp}
-        hint="Tamponne sur une feuille blanche, puis prends-la en photo bien éclairée. La table et le papier sont retirés. Le cachet se place à côté de ta signature." />
+        hint="Ton cachet UniC Plaquiste est déjà intégré : il se place à côté de ta signature. Ajoute une photo seulement pour le remplacer (Retirer = retour au cachet intégré)." />
     </>
   );
 }

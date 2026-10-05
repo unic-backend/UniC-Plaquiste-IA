@@ -143,10 +143,18 @@ def owner_signature_path() -> Path:
     return settings.storage_path / "brand" / "signature.png"
 
 
-def owner_stamp_path() -> Path:
-    """Cachet de l'entreprise (PNG transparent), posé à côté de la signature dans le cadre UniC."""
+STAMP_DEFAULT = BRAND_DIR / "stamp.png"   # cachet UniC Plaquiste intégré (demandé par le patron : déjà visible sur chaque document)
+
+
+def uploaded_stamp_path() -> Path:
     from app.config import settings
     return settings.storage_path / "brand" / "stamp.png"
+
+
+def owner_stamp_path() -> Path:
+    """Cachet posé à côté de la signature : celui envoyé depuis l'appli s'il existe, sinon le cachet intégré."""
+    up = uploaded_stamp_path()
+    return up if up.exists() else STAMP_DEFAULT
 
 
 class SignBox(Flowable):
