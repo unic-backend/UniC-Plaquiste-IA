@@ -234,6 +234,29 @@ def apply_owner_prices_v2(db: Session) -> int:
     return n
 
 
+def apply_owner_hangers_v4(db: Session) -> int:
+    """Le patron n'utilise pas de « suspente » : point d'accroche = tige + pivot + cheville à laiton.
+    Pivot et chevilles à laiton : prix au paquet de 100 (confirmé par le patron). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_hangers_v4"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for sku, name in (("UC-PIVOT", "Pivot (paquet de 100)"), ("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)")):
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is not None:
+            m.name, m.unit = name, "paquet"
+            m.notes = "Paquet de 100 pièces (donné par le patron)."
+            n += 1
+    sus = db.query(Material).filter(Material.sku == "SUSPENTE").first()
+    if sus is not None:
+        sus.is_active = False   # remplacée par tige + pivot + cheville à laiton
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_prices_v3(db: Session) -> int:
     """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
     from app.models import AppSetting

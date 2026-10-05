@@ -365,15 +365,20 @@ def calculate_ceiling(
                  {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CONFIRMED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
-        CalcStep("Suspentes (maillage approx.)",
+        CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
                  "⌈(L/e + 1)×(l/e + 1)⌉",
                  {"e": DEFAULTS["hanger_spacing_m"]}, hangers, "u", STATUS_ASSUMED),
     ]
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
-        QuantityLine("SUSPENTE", "Suspente de plafond", hangers, "u",
-                     "maillage 1,20 m", STATUS_ASSUMED),
+        # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
+        QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
+                     "1 tige par point d'accroche (maillage 1,20 m)", STATUS_ASSUMED),
+        QuantityLine("UC-PIVOT", "Pivot (paquet de 100)", ceil_int(hangers / 100), "paquet",
+                     f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
+        QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
+                     f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("FOURRURE", "Fourrure / ossature plafond",
                      round_qty(length_m * (width_m / 0.60 + 1), 2), "ml",
                      "L × (l/0,60 + 1)", STATUS_ASSUMED),
@@ -381,7 +386,7 @@ def calculate_ceiling(
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
-        "Maillage suspentes 1,20 m (hypothèse).",
+        "Points d'accroche tous les 1,20 m (hypothèse) : 1 tige + 1 pivot + 1 cheville à laiton chacun.",
         "Les profils périphériques et les entretoises ne sont pas détaillés pièce par pièce.",
         "Aucun prix n'est appliqué.",
     ]

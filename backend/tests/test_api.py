@@ -2725,3 +2725,23 @@ def test_login_email_password_tokens_and_reset(client, monkeypatch):
     assert client.put("/api/auth/account", headers=H, json={"email": "moi@exemple.com", "password": "Encore-un-3"}).status_code == 200
     assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "Encore-un-3"}).status_code == 200
     assert auth.verify_password("x", auth.hash_password("x")) and not auth.verify_password("y", auth.hash_password("x"))
+
+
+def test_ceiling_uses_owner_hanging_kit_not_suspente(client):
+    from app import calc
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    res = calc.calculate_ceiling(4, 5)
+    q = {x.sku: x for x in res.quantities}
+    assert "SUSPENTE" not in q
+    points = q["UC-TIGES-A-L-UNITE"].quantity
+    assert points == 23 and q["UC-PIVOT"].quantity == 1 and q["UC-CHEVILLES-A-LETON"].quantity == 1
+    assert q["UC-PIVOT"].unit == "paquet"
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        s("calculate_materials", {"kind": "ceiling", "length_m": 4, "width_m": 5})
+        r = s("create_quote", {"client_name": "Test Client", "checks": "dimensions 4 × 5 vérifiées",
+                                "objet": "Fourniture et pose d'un faux plafond BA13 de 20 m² à la Médina, Dakar."})
+        assert "error" not in r, r
+        sans_prix = r["lignes_sans_prix"]
+        assert not any("Tige" in l or "Pivot" in l or "laiton" in l for l in sans_prix), sans_prix

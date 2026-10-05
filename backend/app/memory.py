@@ -426,7 +426,12 @@ OWNER_RULES_V4 = (
     "hydrofuge 6 000 FCFA) : choix automatique, ne pas redemander la taille. La plaque de 2,50 m (6 500 ; hydrofuge 8 000) seulement s'il dit « 2,50 ». "
     "C'est le patron qui choisit la plaque : ne jamais en choisir une autre de ton côté.",
 )
-_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4}
+OWNER_RULES_V5 = (
+    "Je n'utilise pas de « suspente » : un point d'accroche de faux plafond = 1 tige (300 FCFA l'unité) + 1 pivot + 1 cheville à laiton. "
+    "Pivot = 6 500 FCFA le paquet de 100 ; chevilles à laiton = 6 000 FCFA le paquet de 100.",
+)
+
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5}
 
 
 def seed_owner_rules(db: Session) -> int:
