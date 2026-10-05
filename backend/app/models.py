@@ -791,3 +791,37 @@ class CustomAgent(Base):
     last_ok: Mapped[bool] = mapped_column(Boolean, default=True)
     runs: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SiteCheckin(Base):
+    """Pointage chantier : arrivée ou départ, heure réelle de l'appareil, position GPS si accordée (jamais inventée)."""
+    __tablename__ = "site_checkins"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    client_id: Mapped[str] = mapped_column(String(64), unique=True)   # fourni par l'appareil : un pointage rejoué n'est jamais doublé
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(8))   # in | out
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class QuoteAcceptance(Base):
+    """Bon pour accord capturé sur l'appareil : nom, dessin de la signature, empreinte du devis au moment de signer."""
+    __tablename__ = "quote_acceptances"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quotation_id: Mapped[str] = mapped_column(ForeignKey("quotations.id"), index=True)
+    signer_name: Mapped[str] = mapped_column(String(255))
+    image_path: Mapped[str] = mapped_column(String(500))
+    quote_number: Mapped[str] = mapped_column(String(32))
+    quote_version: Mapped[int] = mapped_column(Integer, default=1)
+    quote_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64))   # SHA-256 du contenu du devis signé : preuve qu'il n'a pas changé depuis
+    signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(255), default="")

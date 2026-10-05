@@ -13,10 +13,12 @@ import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { AppsList, QuickChips } from "./Shortcuts";
+import { Pointage, SignaturePanel } from "./Terrain";
 import { Atelier } from "./Atelier";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
+import { queueMessage, readOutbox, takeQueued, useOnline } from "./offline";
 import { api, net, AuthError, Interrupted, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
@@ -699,6 +701,17 @@ function Chat({ initialId }: { initialId?: string }) {
   }, [messages, busy]);
 
   sendRef.current = (m) => { void send(m); };
+  const online = useOnline();
+  const [queued, setQueued] = useState(() => readOutbox().length);
+  useEffect(() => {   // réseau revenu : on envoie la première demande gardée (les suivantes partent à la fin de chaque réponse)
+    if (!online || busy) return;
+    const next = takeQueued();
+    setQueued(readOutbox().length);
+    if (next) {
+      setMessages((m) => { const i = m.findIndex((x) => String(x.id).startsWith("q")); return i < 0 ? m : m.filter((_, k) => k !== i); });   // la bulle « en attente » cède la place à l'envoi réel
+      setTimeout(() => sendRef.current?.(next), 300);
+    }
+  }, [online, busy]);
   useEffect(() => {
     if (initialId) return;
     let go: string | null = null;
@@ -731,6 +744,15 @@ function Chat({ initialId }: { initialId?: string }) {
     if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
     if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
     if (busy) return;
+    if (!navigator.onLine) {   // sans réseau : texte gardé sur l'appareil, envoyé au retour ; fichiers impossibles
+      if (pending.length) { setNotice("Pas de réseau : les fichiers ne peuvent pas partir. Réessayez avec du réseau."); return; }
+      const n = queueMessage(msg);
+      setText("");
+      setMessages((m) => [...m, { id: `q${Date.now()}`, role: "user", content: msg }]);
+      setQueued(n);
+      setNotice("Pas de réseau : demande gardée, envoyée dès le retour.");
+      return;
+    }
     const my = ++turn.current;
     setBusy(true);
     setText("");
@@ -947,6 +969,11 @@ function Chat({ initialId }: { initialId?: string }) {
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
         </div>
+        {(!online || queued > 0) && (
+          <div className="toast" role="status">
+            {online ? `Envoi de ${queued} demande(s) gardée(s)…` : `Hors ligne${queued ? ` · ${queued} en attente` : ""} : vos demandes écrites partiront au retour du réseau.`}
+          </div>
+        )}
         {notice && <div className="toast" role="status">{notice}</div>}
       </div>
       {sheet && (
@@ -1388,6 +1415,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
           <p className="hint">Prix UniC manquants — rien n'a été inventé. Total incomplet.</p>
         )}
         {kind === "quote" && d.status === "approved" && <CoverLetterBox quote={d} url={shareUrl} filename={d.filename || `${d.number}.pdf`} onChanged={load} />}
+        {kind === "quote" && <SignaturePanel quoteId={d.id} />}
         <div className="table-wrap">
           <table>
             <thead>
@@ -1579,6 +1607,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
       { to: "/atelier", title: "Atelier", text: "UniC se vérifie, se corrige et crée ses agents" },
+      { to: "/pointage", title: "Pointage", text: "Arrivée et départ du chantier, heures travaillées" },
     ],
   },
   {
@@ -2022,6 +2051,7 @@ export default function App() {
         <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
         <Route path="/atelier" element={<Atelier />} />
+        <Route path="/pointage" element={<Pointage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       )}

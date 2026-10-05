@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api import router
+from app.api_field import router as field_router
 from app.api_reseaux import router as reseaux_router
 from app.api_voice import router as voice_router
 from app.api_website import router as website_router
@@ -111,6 +112,7 @@ async def _unhandled(request: Request, exc: Exception):
 
 app.include_router(router, prefix="/api")
 app.include_router(reseaux_router, prefix="/api")
+app.include_router(field_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
 app.include_router(website_router, prefix="/api")
 
