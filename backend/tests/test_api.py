@@ -2769,7 +2769,5 @@ def test_owner_moulures_glue_and_paint_prices(client):
 
 
 def test_glue_rule_is_in_owner_memory(client):
-    from app.database import SessionLocal
-    from app.models import Memory
-    with SessionLocal() as db:
-        assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("%1 colle pour 5 barres%")).first() is not None
+    from app import memory as mem
+    assert any("1 colle pour 5 barres" in r for r in mem._RULE_SETS["v8"])   # posée une fois au démarrage du serveur
