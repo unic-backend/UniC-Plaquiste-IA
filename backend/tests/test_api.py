@@ -2766,3 +2766,10 @@ def test_owner_moulures_glue_and_paint_prices(client):
                                 "lines": [{"article": "moulure taille 4", "quantity": 6}, {"article": "colle silicone", "quantity": 2}]})
         assert "error" not in r and r["lignes_sans_prix"] == [], r
         assert r["total"] == 6 * 3500 + 2 * 3500
+
+
+def test_glue_rule_is_in_owner_memory(client):
+    from app.database import SessionLocal
+    from app.models import Memory
+    with SessionLocal() as db:
+        assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("%1 colle pour 5 barres%")).first() is not None
