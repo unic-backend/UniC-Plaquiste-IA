@@ -46,7 +46,7 @@ def local(tag):
 def load_svg(path):
     with open(path, encoding="utf-8", errors="ignore") as fh:
         raw = fh.read()
-    root = ET.fromstring(raw)
+    root = ET.fromstring(raw)  # nosec B314 - fichier local de l'outil, jamais un envoi
     return raw, root
 
 

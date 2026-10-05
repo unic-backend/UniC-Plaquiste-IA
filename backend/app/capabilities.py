@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Callable
 
 from app import google_business, instagram, linkedin, mailbox, ocr, vision, voice, website
 from app.config import settings

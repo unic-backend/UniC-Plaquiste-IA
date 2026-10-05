@@ -11,6 +11,20 @@ permissions:
   contents: read
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff bandit
+      - name: Ruff (imports inutiles, variables mortes, erreurs de syntaxe)
+        run: ruff check backend/app --select F,E9
+      - name: Bandit (failles, niveau moyen et plus)
+        run: bandit -q -r backend/app -ll
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20

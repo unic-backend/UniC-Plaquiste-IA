@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -38,7 +37,7 @@ def sanitize(svg: str) -> str:
     if re.search(r"<!DOCTYPE|<!ENTITY|<\?xml-stylesheet", svg, re.I):
         raise DiagramError("SVG refusé (déclarations non autorisées).")
     try:
-        root = ET.fromstring(svg)
+        root = ET.fromstring(svg)  # nosec B314 - DOCTYPE/ENTITY refusés plus haut
     except ET.ParseError as exc:
         raise DiagramError(f"SVG invalide : {exc}") from exc
     if _local(root.tag) != "svg":

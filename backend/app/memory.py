@@ -374,7 +374,6 @@ def _device(path) -> int:
 
 
 def state_report(db: Session) -> dict:
-    now = _now()
     all_rows = db.query(Memory).all()
     by_nature: dict[str, int] = {}
     for m in all_rows:

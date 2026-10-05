@@ -11,9 +11,9 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, pricecheck, revise, trust, google_business as gbp, mailbox, metier
+from app import calc, connectors, pricecheck, revise, trust, google_business as gbp, metier
 from app.connectors import ConnectorError
-from app.models import ConstructionSite, Customer, DeliveryNote, Project, Supplier, Invoice, InboxMessage, Material, PurchaseOrder, Quotation, SocialPost
+from app.models import ConstructionSite, Customer, Project, Supplier, Invoice, InboxMessage, Material, Quotation, SocialPost
 from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
                           invoice_from_quote, next_number, quotation_from_quantities, search_documents)
 from app.social import PLATFORMS

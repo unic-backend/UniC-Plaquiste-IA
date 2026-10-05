@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import re
-import shutil
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -13,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import cad, ocr, pdfjob, vision
 from app.config import settings
-from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
+from app.models import DocumentChunk, ExtractedPage, StoredFile, new_id
 
 DIM_RE = re.compile(
     r"(\d+(?:[.,]\d+)?)\s*(?:m|mm|cm)\b|"

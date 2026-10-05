@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import object_session, Session
 
@@ -55,9 +52,6 @@ from app.services import (
     reliquat_data,
     audit,
     company_dict,
-    create_delivery_note,
-    create_purchase_order,
-    generate_dn_pdf,
     generate_invoice_pdf,
     generate_po_pdf,
     generate_quote_pdf,
@@ -65,9 +59,8 @@ from app.services import (
     client_initials,
     document_number,
     next_number,
-    quotation_from_quantities,
 )
-from app.models import InvoiceItem, Payment, QuotationItem
+from app.models import QuotationItem
 
 router = APIRouter()
 

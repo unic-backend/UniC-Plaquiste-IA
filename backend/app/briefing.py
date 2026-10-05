@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app import connectors, google_business as gbp, mailbox, memory as mem, trust
-from app.models import EmailDraft, InboxMessage, Invoice, Memory, Quotation, SocialPost
+from app.models import EmailDraft, InboxMessage, Memory, Quotation, SocialPost
 
 logger = logging.getLogger("unic.briefing")
 OK, NOT_CONFIGURED, UNAVAILABLE = "OK", "NON_CONFIGURE", "INDISPONIBLE"

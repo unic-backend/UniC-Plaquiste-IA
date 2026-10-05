@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     unic_env: str = "production"
     unic_data_dir: str = "./data"
-    unic_host: str = "0.0.0.0"
+    unic_host: str = "0.0.0.0"  # nosec B104 - serveur conteneurisé
     unic_port: int = 8000
     unic_public_url: str = ""
 

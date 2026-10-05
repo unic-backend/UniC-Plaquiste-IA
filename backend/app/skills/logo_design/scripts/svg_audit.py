@@ -15,7 +15,6 @@ override a warning — but you should be able to say why.
 """
 import argparse
 import json
-import math
 import os
 import re
 import sys
@@ -119,7 +118,7 @@ def audit(path, bg=None):
     if bg:
         bgc = svglib.normalize_color(bg)
         if bgc and all_white and svglib.lightness(bgc) > 0.6:
-            add("INFO", "reversed-file", f"All paint is white/near-white: this looks like a reversed version — test it with a "
+            add("INFO", "reversed-file", "All paint is white/near-white: this looks like a reversed version — test it with a "
                 "dark --bg instead of " + bgc + ".")
         elif bgc:
             low = [f"{c} ({svglib.contrast_ratio(c, bgc):.1f}:1)" for c in colors if svglib.contrast_ratio(c, bgc) < 3]

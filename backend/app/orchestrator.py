@@ -13,7 +13,6 @@ from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, learned, memory as mem, metier, pricecheck
 from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
-from app.capabilities import registry_snapshot
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
 from app.models import (
@@ -32,25 +31,20 @@ from app.models import (
     Project,
     PurchaseOrder,
     Quotation,
-    Service,
     StoredFile,
     Supplier,
     ConstructionSite,
     utcnow,
 )
 from app.services import (
-    apply_payment,
     approve_entity,
     company_dict,
     create_delivery_note,
     create_purchase_order,
     current_price,
-    generate_invoice_pdf,
-    generate_quote_pdf,
     generate_site_report_pdf,
     invoice_from_quote,
     quotation_from_quantities,
-    selling_price_for_sku,
 )
 
 

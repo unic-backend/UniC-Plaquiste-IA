@@ -77,7 +77,7 @@ def _snapshot(dest: Path) -> dict:
     try:
         for table in ("quotations", "invoices", "customers", "memories", "messages", "purchase_orders", "delivery_notes"):
             try:
-                counts[table] = out.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                counts[table] = out.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # nosec B608 - liste fixe
             except sqlite3.Error:
                 pass
         if out.execute("PRAGMA integrity_check").fetchone()[0] != "ok":

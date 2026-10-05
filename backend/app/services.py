@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -29,7 +28,6 @@ from app.models import (
     QuotationItem,
     Sequence,
     Supplier,
-    new_id,
     utcnow,
 )
 from app.pdfs import build_document_pdf, fr_num, money, validate_pdf
@@ -501,7 +499,6 @@ def party_text_from_company(company: dict) -> str:
 
 
 def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
-    company = company_dict(db)
     number = linked_number(db, DOC_CODES["credit" if kind == "credit" else "invoice"], quote_number=quote.number)
     inv = Invoice(
         number=number,
@@ -555,7 +552,7 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     if inv.subtotal is not None:
         totals.append(("Sous-total HT", money(inv.subtotal, currency)))
         if inv.vat_rate is not None:
-            totals.append((f"TVA", money(inv.vat_amount, currency)))
+            totals.append(("TVA", money(inv.vat_amount, currency)))
         totals.append(("Total", money(inv.total, currency)))
         totals.append(("Payé", money(inv.paid, currency)))
         totals.append(("Reste dû", money(inv.remaining if inv.remaining is not None else None, currency)))
