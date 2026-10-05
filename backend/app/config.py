@@ -63,6 +63,9 @@ class Settings(BaseSettings):
 
     max_upload_mb: int = 250
 
+    # CORS : origines autorisées (liste séparée par virgules). Vide = seulement l'origine du frontend servi.
+    allowed_origins: str = ""
+
     @property
     def data_path(self) -> Path:
         p = Path(self.unic_data_dir).expanduser().resolve()

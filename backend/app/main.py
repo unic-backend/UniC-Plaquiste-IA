@@ -66,13 +66,27 @@ async def access_code_guard(request: Request, call_next):
     return await call_next(request)
 
 
+def _origins() -> list[str]:
+    raw = (settings.allowed_origins or "").strip()
+    if not raw:
+        return ["*"] if settings.unic_env != "production" else []
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins() or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    """Erreur inattendue : journalisée côté serveur, réponse générique côté client (pas de trace exposée)."""
+    logger.exception("Erreur non gérée sur %s %s", request.method, request.url.path)
+    return JSONResponse({"detail": "Erreur interne du serveur."}, status_code=500)
 
 app.include_router(router, prefix="/api")
 app.include_router(reseaux_router, prefix="/api")
