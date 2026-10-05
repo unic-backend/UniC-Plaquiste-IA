@@ -1180,6 +1180,27 @@ def agenda_update(aid: str, body: dict, db: Session = Depends(get_db), user: Use
     return {"rdv": agenda.to_dict(a)}
 
 
+@router.post("/worker/poll")
+def worker_poll(body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Appelé en boucle par l'appli Windows : signale le PC en ligne et récupère une question à traiter."""
+    from app import localworker
+    hold = 0.0 if body.get("hold") == 0 else localworker.POLL_HOLD
+    return {"job": localworker.next_job(None, str(body.get("model") or "")[:64], hold=hold)}
+
+
+@router.post("/worker/result/{jid}")
+def worker_result(jid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import localworker
+    ok = localworker.finish(db, jid, str(body.get("text") or ""), str(body.get("model") or ""), ok=bool(body.get("ok", True)))
+    return {"ok": ok}
+
+
+@router.get("/worker/status")
+def worker_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import localworker
+    return localworker.status(db)
+
+
 @router.get("/leads")
 def leads_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import sitechat

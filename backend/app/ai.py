@@ -320,6 +320,32 @@ class ClaudeAIProvider(AIProvider):
             _usage.TALLY.reset(_tok)
 
 
+class PCWorkerProvider(AIProvider):
+    """Secours quand Claude ne répond pas : d'abord les réponses validées (Retenir), puis le modèle local du PC s'il est allumé."""
+    id = "pc"
+    kind = "chat"
+
+    def health(self) -> dict:
+        from app import localworker
+        st = localworker.status()
+        return {"id": self.id, "available": st["online"], "model": st["model"] or None,
+                "status": "ok" if st["online"] else "offline",
+                "detail": "" if st["online"] else "PC éteint ou appli Windows fermée : seules les réponses validées servent de secours."}
+
+    def complete(self, messages: list[dict], **kwargs) -> AIResult:
+        from app import learned, localworker
+        from app.database import SessionLocal
+        question = next((m["content"] for m in reversed(messages) if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+        with SessionLocal() as db:
+            known = learned.local_reply(db, question)
+            if known:   # lecture seule : pas d'écriture pendant que la conversation s'enregistre
+                return AIResult(known, "learned", "réponses validées", True)
+        text, model = localworker.ask(None, messages)
+        if text:
+            return AIResult(text, self.id, model or "local", True)
+        return AIResult("", self.id, "", False, "offline")
+
+
 class VisionAIProvider(AIProvider):
     id = "vision"
     kind = "vision"
@@ -377,6 +403,7 @@ PROVIDERS: dict[str, AIProvider] = {
     "cloud": CloudAIProvider(),
     "local": LocalAIProvider(),
     "claude": ClaudeAIProvider(),
+    "pc": PCWorkerProvider(),
     "vision": VisionAIProvider(),
     "embedding": EmbeddingProvider(),
 }
@@ -386,7 +413,7 @@ def provider_chain(deep: bool = False) -> list[AIProvider]:
     """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
     sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
     # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
-    order = ["claude", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
+    order = ["claude", "pc", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 
 

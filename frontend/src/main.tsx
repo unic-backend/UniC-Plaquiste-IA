@@ -4,8 +4,10 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles.css";
 import { applyTheme } from "./theme";
+import { syncDesktopWorker } from "./api";
 
 applyTheme();
+syncDesktopWorker();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

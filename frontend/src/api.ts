@@ -7,7 +7,14 @@ const CODE_KEY = "unic_code";
 
 export const isNative = Capacitor.isNativePlatform();
 /** Application PC (Electron) : l'interface est embarquée, l'API est sur le serveur UniC. */
-export const isDesktop = typeof window !== "undefined" && !!(window as { unicDesktop?: boolean }).unicDesktop;
+type DesktopBridge = { desktop: true; configureWorker?: (server: string, code: string) => void };
+const desktopBridge = (): DesktopBridge | undefined => (typeof window !== "undefined" ? (window as { unicDesktop?: DesktopBridge }).unicDesktop : undefined);
+export const isDesktop = !!desktopBridge();
+
+/** Appli PC : transmet le serveur et le code au moteur local (Ollama) pour qu'il réponde quand Claude est indisponible. */
+export function syncDesktopWorker() {
+  try { if (getServer() && getCode()) desktopBridge()?.configureWorker?.(getServer(), getCode()); } catch { /* sans effet hors PC */ }
+}
 /** Application installée (téléphone ou PC) : adresse du serveur à saisir. */
 export const hasServerField = isNative || isDesktop;
 
@@ -28,6 +35,7 @@ export function saveConnection(server: string, code: string) {
   } catch {
     /* stockage indisponible */
   }
+  syncDesktopWorker();
 }
 export function clearConnection() {
   try {

@@ -725,3 +725,4 @@ class WebLead(Base):
     surface: Mapped[str] = mapped_column(String(64), default="")
     status: Mapped[str] = mapped_column(String(16), default="new")   # new | contacted | done
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+

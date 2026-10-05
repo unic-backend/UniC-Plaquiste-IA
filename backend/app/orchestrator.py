@@ -962,6 +962,8 @@ def handle_turn(
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:
                     reply_text = ai.text + pricecheck.review_reply(db, ai.text)
+                    if ai.provider == "pc":
+                        reply_text += f"\n\n_Réponse du moteur local du PC ({ai.model}) : Claude est indisponible, vérifie avant d'agir._"
                     if session is not None and session.alerts:
                         reply_text += ("\n\n⚠️ Tentative de manipulation détectée dans : "
                                        + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")

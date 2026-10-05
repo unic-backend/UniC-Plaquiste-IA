@@ -2658,3 +2658,34 @@ def test_site_chat_public_isolated_limited_and_leads(client, monkeypatch):
     assert client.get("/api/leads").status_code == 401
     assert client.get("/api/leads", headers={"X-Access-Code": "secret-code"}).json()[0]["name"] == "Pape Diop"
     assert client.post("/api/public/chat", json={"message": ""}).status_code == 400
+
+
+def test_pc_worker_answers_when_claude_down(client, monkeypatch):
+    import threading, time as _t
+    from app import ai, localworker
+    from app.database import SessionLocal
+    localworker.reset()
+    assert client.get("/api/worker/status").json()["online"] is False
+    assert ai.PROVIDERS["pc"].health()["available"] is False          # PC éteint : pas dans la chaîne
+    assert client.post("/api/worker/poll", json={"model": "qwen2.5:7b", "hold": 0}).json()["job"] is None
+    st = client.get("/api/worker/status").json()
+    assert st["online"] and st["model"] == "qwen2.5:7b"
+    # le « PC » traite la question dans un fil à part
+    def pc():
+        for _ in range(40):
+            job = client.post("/api/worker/poll", json={"model": "qwen2.5:7b", "hold": 0}).json()["job"]
+            if job:
+                sys_msg = job["messages"][0]["content"]
+                assert "MOTEUR LOCAL DE SECOURS" in sys_msg and job["messages"][-1]["content"] == "Quelle est la hauteur standard ?"
+                client.post(f"/api/worker/result/{job['id']}", json={"text": "2,50 m en général.", "model": "qwen2.5:7b"})
+                return
+            _t.sleep(0.2)
+    th = threading.Thread(target=pc); th.start()
+    res = ai.PROVIDERS["pc"].complete([{"role": "system", "content": "Règles UniC"}, {"role": "user", "content": "Quelle est la hauteur standard ?"}])
+    th.join()
+    assert res.available and res.text == "2,50 m en général." and res.provider == "pc"
+    # PC silencieux : on n'attend pas indéfiniment
+    text, _ = localworker.ask(None, [{"role": "user", "content": "x"}], wait=1)
+    assert text == ""
+    assert client.post("/api/worker/result/inconnu", json={"text": "x"}).json()["ok"] is False
+    localworker.reset()
