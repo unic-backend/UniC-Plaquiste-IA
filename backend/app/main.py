@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import secrets
 import time
 from pathlib import Path
@@ -25,6 +26,7 @@ app = FastAPI(
     version=__version__,
 )
 
+logger = logging.getLogger("unic.main")
 _fails: dict[str, list[float]] = {}
 _MAX_FAILS, _WINDOW = 10, 600.0
 
@@ -34,7 +36,7 @@ async def access_code_guard(request: Request, call_next):
     """Code d'accès unique sur /api/*. Ajouté AVANT le CORS : le 401 garde ses en-têtes CORS."""
     code = settings.unic_access_code
     path = request.url.path
-    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback") and not path.startswith("/api/public-media/") and request.method != "OPTIONS":
+    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback") and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
         ip = request.client.host if request.client else "?"
         now = time.time()
         recent = [t for t in _fails.get(ip, []) if now - t < _WINDOW]
@@ -91,6 +93,37 @@ def startup():
             pass
     finally:
         db.close()
+
+
+@app.get("/api/public/widget.js")
+def site_widget():
+    """Bulle de discussion pour le site (public, mise en cache 1 h)."""
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).parent / "static" / "site-widget.js", media_type="application/javascript; charset=utf-8",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.post("/api/public/chat")
+async def site_chat(request: Request):
+    """Chat public du site : réponses bornées, aucune donnée de l'entreprise exposée."""
+    from app import sitechat
+    from app.database import SessionLocal
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "Requête invalide"}, status_code=400)
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    db = SessionLocal()
+    try:
+        out = sitechat.reply(db, body.get("session_id"), str(body.get("message") or ""), ip, str(body.get("page") or ""))
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("chat du site")
+        return JSONResponse({"reply": sitechat.limit_reply(), "whatsapp": sitechat.whatsapp_number()}, status_code=200)
+    finally:
+        db.close()
+    return out
 
 
 @app.get("/api/ping")

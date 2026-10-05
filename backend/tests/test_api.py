@@ -2622,3 +2622,39 @@ def test_agenda_create_conflict_briefing_and_tools(client):
     lst = client.get("/api/agenda").json()["rdv"]
     assert all(a["status"] == "planned" for a in lst)
     assert client.patch(f"/api/agenda/{lst[0]['id']}", json={"status": "cancelled"}).json()["rdv"]["status"] == "cancelled"
+
+
+def test_site_chat_public_isolated_limited_and_leads(client, monkeypatch):
+    from app import sitechat, briefing
+    from app.database import SessionLocal
+    from app.main import app as fastapi_app
+    js = client.get("/api/public/widget.js")
+    assert js.status_code == 200 and "ucw-btn" in js.text and js.headers["content-type"].startswith("application/javascript")
+    sp = sitechat.system_prompt()
+    assert "5 000 FCFA" in sp and "AUCUN client" in sp
+    # le modèle n'a qu'un outil : save_lead ; on simule sa décision
+    def fake(db, sess, turns):
+        assert turns[-1]["role"] == "user" and all(t["role"] in ("user", "assistant") for t in turns)
+        if "Pape" in turns[-1]["content"]:
+            sitechat._save_lead(db, sess, {"name": "Pape Diop", "phone": "+221 77 123 45 67", "area": "Médina", "need": "faux plafond salon", "surface": "24 m2"})
+            return "Merci Pape, le gérant vous rappelle rapidement."
+        return "Bonjour ! Quel type de travaux ?"
+    with SessionLocal() as db:
+        a = sitechat.reply(db, None, "Bonjour, prix d'un faux plafond ?", "1.2.3.4", "/", model_call=fake)
+        b = sitechat.reply(db, a["session_id"], "Je suis Pape Diop, 77 123 45 67, Médina", "1.2.3.4", "/", model_call=fake)
+        assert b["session_id"] == a["session_id"] and "rappelle" in b["reply"] and b["whatsapp"].startswith("221")
+        assert "Pape Diop" in briefing._leads(db).text
+        monkeypatch.setattr(sitechat, "MAX_PER_SESSION", 2)
+        c = sitechat.reply(db, a["session_id"], "encore ?", "1.2.3.4", "/", model_call=fake)
+        assert c["limited"] and "WhatsApp" in c["reply"]
+        bad = sitechat._save_lead(db, db.get(sitechat.WebChatSession, a["session_id"]), {"name": "X", "phone": "12"})
+        assert "error" in bad
+    # route publique accessible sans code ; le reste reste protégé
+    from app.config import settings
+    monkeypatch.setattr(settings, "unic_access_code", "secret-code")
+    monkeypatch.setattr(sitechat, "_claude", lambda db, sess, turns: "Bonjour !")
+    r = client.post("/api/public/chat", json={"message": "Bonjour"})
+    assert r.status_code == 200 and r.json()["reply"] == "Bonjour !"
+    assert client.get("/api/leads").status_code == 401
+    assert client.get("/api/leads", headers={"X-Access-Code": "secret-code"}).json()[0]["name"] == "Pape Diop"
+    assert client.post("/api/public/chat", json={"message": ""}).status_code == 400

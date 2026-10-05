@@ -697,3 +697,31 @@ class Appointment(Base):
     status: Mapped[str] = mapped_column(String(16), default="planned")   # planned | done | cancelled
     remind_minutes: Mapped[int] = mapped_column(Integer, default=60)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebChatSession(Base):
+    """Conversation d'un visiteur du site (anonyme). Séparée de tout le reste : aucune donnée de l'entreprise n'y est lisible."""
+    __tablename__ = "web_chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ip_hash: Mapped[str] = mapped_column(String(64), index=True, default="")
+    messages_json: Mapped[str] = mapped_column(Text, default="[]")
+    msg_count: Mapped[int] = mapped_column(Integer, default=0)
+    page: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebLead(Base):
+    """Prospect laissé par un visiteur du site : le patron le rappelle."""
+    __tablename__ = "web_leads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(String(36), index=True, default="")
+    name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    area: Mapped[str] = mapped_column(String(255), default="")
+    need: Mapped[str] = mapped_column(Text, default="")
+    surface: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(16), default="new")   # new | contacted | done
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

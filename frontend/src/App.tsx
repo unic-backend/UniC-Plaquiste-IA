@@ -6,6 +6,7 @@ import { Voix } from "./Voix";
 import { CoverLetterBox, DiagramCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
 import { Agenda } from "./Agenda";
+import { Prospects } from "./Prospects";
 import { prepareFile } from "./compress";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
@@ -1470,6 +1471,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/commandes", title: "Bons de commande", text: "Bibliothèque des bons de commande" },
       { to: "/livraisons", title: "Bons de livraison", text: "Bibliothèque des bons de livraison" },
       { to: "/agenda", title: "Agenda", text: "Visites, métrés, poses, livraisons" },
+      { to: "/prospects", title: "Prospects du site", text: "Demandes laissées sur unicplaquiste.com" },
       { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
       { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
     ],
@@ -1829,6 +1831,7 @@ export default function App() {
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />
+        <Route path="/prospects" element={<Prospects />} />
         <Route path="/factures/:id" element={<DocDetail kind="invoice" />} />
         <Route path="/commandes" element={<Commandes />} />
         <Route path="/commandes/:id" element={<DocDetail kind="po" />} />

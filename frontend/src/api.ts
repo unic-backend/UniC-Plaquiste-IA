@@ -336,6 +336,8 @@ export const api = {
   settings: () => request<any>("/api/settings"),
   backups: () => request<any>("/api/backups"),
   unpaid: () => request<any>("/api/invoices-unpaid"),
+  leads: () => request<any[]>("/api/leads"),
+  updateLead: (id: string, status: string) => request<any>(`/api/leads/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
   agenda: (days = 60) => request<any>(`/api/agenda?days=${days}`),
   addAppointment: (body: any) => request<any>("/api/agenda", { method: "POST", body: JSON.stringify(body) }),
   updateAppointment: (id: string, body: any) => request<any>(`/api/agenda/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

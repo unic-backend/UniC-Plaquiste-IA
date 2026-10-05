@@ -918,3 +918,9 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .agenda-body .row-actions { margin-top: 4px; gap: 6px; }
 .agenda-form .two-col { grid-template-columns: 1fr 1fr; margin: 0; gap: 10px; }
 .agenda-day h3::first-letter { text-transform: uppercase; }
+
+.lead-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.lead .badge { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.lead.new { border-left: 4px solid var(--copper); }
+.install { margin-top: 20px; }
+.snippet { white-space: pre-wrap; word-break: break-all; background: var(--surface-2, #f1ece3); border-radius: 10px; padding: 10px; font-size: 12px; }

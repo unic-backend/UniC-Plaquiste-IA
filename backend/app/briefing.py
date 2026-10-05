@@ -122,6 +122,15 @@ def _agenda(db: Session) -> Section:
     return Section("Agenda", OK, "\n".join(out))
 
 
+def _leads(db: Session) -> Section | None:
+    from app.models import WebLead
+    rows = db.query(WebLead).filter(WebLead.status == "new").order_by(WebLead.created_at.desc()).all()
+    if not rows:
+        return None
+    lines = [f"- {l.name} — {l.phone}" + (f" — {l.area}" if l.area else "") + (f" : {l.need[:80]}" if l.need else "") for l in rows[:6]]
+    return Section("Prospects du site", OK, f"{len(rows)} à rappeler :\n" + "\n".join(lines))
+
+
 def _tasks(db: Session) -> Section:
     rows = db.query(Memory).filter(Memory.kind == "task", Memory.state == "active").order_by(Memory.created_at.desc()).all()
     if not rows:
@@ -145,7 +154,7 @@ def _memory(db: Session) -> Section | None:
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
-    for fn in (lambda: _agenda(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
+    for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
                lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db)):
         try:
             s = fn()

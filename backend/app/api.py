@@ -1180,6 +1180,25 @@ def agenda_update(aid: str, body: dict, db: Session = Depends(get_db), user: Use
     return {"rdv": agenda.to_dict(a)}
 
 
+@router.get("/leads")
+def leads_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import sitechat
+    return [{"id": l.id, "name": l.name, "phone": l.phone, "area": l.area, "need": l.need, "surface": l.surface,
+             "status": l.status, "created_at": l.created_at.isoformat() if l.created_at else None} for l in sitechat.new_leads(db, 90)]
+
+
+@router.patch("/leads/{lid}")
+def leads_update(lid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.models import WebLead
+    lead = db.get(WebLead, lid)
+    if lead is None:
+        raise HTTPException(404, "Prospect introuvable")
+    if body.get("status") in ("new", "contacted", "done"):
+        lead.status = body["status"]
+    db.commit()
+    return {"ok": True, "status": lead.status}
+
+
 @router.get("/invoices-unpaid")
 def invoices_unpaid(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import unpaid
