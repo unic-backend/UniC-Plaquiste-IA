@@ -48,12 +48,26 @@ export function Atelier() {
         {msg && <p className="hint" role="status">{msg}</p>}
 
         <section className="card-box">
+          <div className="at-head"><h3>Travail automatique</h3>
+            <button className={`btn btn-small ${d.auto_work ? "btn-line" : "btn-copper"}`} disabled={!!busy}
+              onClick={() => act("auto", () => api.setAutoWork(!d.auto_work), (r) => (r.auto_work ? "Travail automatique activé." : "Travail automatique coupé : rien ne tourne seul."))}>
+              {d.auto_work ? "Désactiver" : "Activer"}
+            </button>
+          </div>
+          <p className={d.auto_work ? "hint ic" : "hint"}>
+            {d.auto_work
+              ? <><I.Check size={16} /> Activé : contrôle de santé chaque jour et agents actifs selon leur horaire.</>
+              : "Coupé : UniC ne lance aucun contrôle ni agent tout seul. Les boutons « Vérifier maintenant » et « Lancer » marchent toujours. Il ne se modifie jamais sans ton ordre."}
+          </p>
+        </section>
+
+        <section className="card-box">
           <div className="at-head"><h3>Santé</h3>
             <button className="btn btn-line btn-small" disabled={busy === "check"} onClick={() => act("check", async () => setCheck(await api.selfCheck()))}>
               <I.Refresh size={15} /> {busy === "check" ? "Vérification…" : "Vérifier maintenant"}
             </button>
           </div>
-          <p className="hint">Contrôle automatique chaque jour · dernier : {when(d.last_check)}</p>
+          <p className="hint">Dernier contrôle : {when(d.last_check)}{d.auto_work ? " · automatique chaque jour" : " · automatique coupé"}</p>
           {check && (
             <ul className="at-checks">
               {check.checks.map((c: any) => (
@@ -147,8 +161,8 @@ export function Atelier() {
           {d.agents.map((a: any) => (
             <article key={a.id} className="at-item">
               <div className="at-line"><b>{a.name}</b>
-                <span className={`at-tag s-${a.status}`}>{a.running ? "En cours" : a.status === "active" ? "Actif" : a.status === "proposed" ? "Proposé par UniC" : "En pause"}</span></div>
-              <p className="hint">{a.mission} · toutes les {a.every_hours} h · dernier passage : {when(a.last_run)}</p>
+                <span className={`at-tag s-${a.status}`}>{a.running ? "En cours" : a.status === "active" ? (d.auto_work ? "Actif" : "Actif · travail auto coupé") : a.status === "proposed" ? "Proposé par UniC" : "En pause"}</span></div>
+              <p className="hint">{a.mission} · {d.auto_work && a.status === "active" ? `toutes les ${a.every_hours} h` : "ne tourne pas seul"} · dernier passage : {when(a.last_run)}</p>
               {a.last_result && <p className={a.last_ok ? "" : "error"}>{a.last_result}</p>}
               <div className="row-actions">
                 {a.status !== "active"

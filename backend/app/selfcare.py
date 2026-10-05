@@ -205,6 +205,27 @@ def self_check(db) -> dict:
     return {"ok": all(c["ok"] for c in checks), "checks": checks, "at": now}
 
 
+AUTO_KEY = "auto_work"
+
+
+def auto_enabled(db) -> bool:
+    """Travail automatique (contrôle quotidien + agents planifiés) : coupé tant que le patron ne l'a pas activé."""
+    from app.models import AppSetting
+    row = db.get(AppSetting, AUTO_KEY)
+    return bool(row and row.value == "on")
+
+
+def set_auto(db, on: bool) -> bool:
+    from app.models import AppSetting
+    row = db.get(AppSetting, AUTO_KEY)
+    if row is None:
+        db.add(AppSetting(key=AUTO_KEY, value="on" if on else "off"))
+    else:
+        row.value = "on" if on else "off"
+    db.commit()
+    return on
+
+
 def _check_due(db) -> bool:
     from app.models import AppSetting
     row = db.get(AppSetting, "selfcheck_last")
@@ -237,16 +258,18 @@ def to_dict(i, detail: bool = False) -> dict:
 # ---------- boucle de surveillance ----------
 
 def tick() -> None:
-    """Un passage : écrit les incidents, réveille les agents endormis, contrôle quotidien, agents créés dus."""
+    """Un passage : écrit les incidents et relance les fils endormis (passif). Contrôle quotidien et agents planifiés
+    seulement si le patron a activé le travail automatique."""
     from app import agents
     from app.database import SessionLocal
     db = SessionLocal()
     try:
         wake_sleepers()
         flush(db)
-        if _check_due(db):
-            self_check(db)
-        agents.run_due(db)
+        if auto_enabled(db):
+            if _check_due(db):
+                self_check(db)
+            agents.run_due(db)
     except Exception:
         logger.exception("Passage de surveillance en échec")
         db.rollback()

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -74,9 +75,15 @@ def _hook(db: Session) -> str:
     return (secrets_box.decrypt(raw) or "") if raw else ""
 
 
+def deployed_branch() -> str:
+    """Branche que Render a déployée (variable fournie par Render) : les corrections se proposent sur CE code, pas sur main."""
+    b = os.environ.get("RENDER_GIT_BRANCH", "").strip()
+    return b if re.fullmatch(r"[\w./-]{1,120}", b) else ""
+
+
 def status(db: Session) -> dict:
     return {"connected": bool(_token(db)), "repo": _get(db, "repair_repo") or DEFAULT_REPO,
-            "base": _get(db, "repair_base") or "", "deploy_hook": bool(_hook(db))}
+            "base": deployed_branch() or _get(db, "repair_base") or "", "deploy_hook": bool(_hook(db))}
 
 
 def connect(db: Session, token: str, repo: str = "", base: str = "", deploy_hook: str = "") -> dict:

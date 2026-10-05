@@ -2993,7 +2993,7 @@ def test_github_token_is_stored_encrypted_and_never_returned(client, monkeypatch
     assert client.post("/api/selfcare/repair", json={"kind": "feature", "request": "court"}).status_code == 400
 
 
-def test_ai_creates_agents_proposed_unless_owner_asked_and_agents_only_use_safe_tools(client, claude):
+def test_ai_only_proposes_agents_owner_activates_and_agents_only_use_safe_tools(client, claude):
     from app import agents
     from app.agent import AgentSession
     from app.database import SessionLocal
@@ -3005,7 +3005,8 @@ def test_ai_creates_agents_proposed_unless_owner_asked_and_agents_only_use_safe_
     assert prop["agent"]["status"] == "proposed"
     act = s("create_agent", {"name": "Tri du courrier", "mission": "Lis les mails du matin et signale les demandes de devis.",
                              "every_hours": 24, "owner_asked": True})
-    assert act["agent"]["status"] == "active"
+    assert act["agent"]["status"] == "proposed"                        # l'IA n'active jamais un agent : seul le patron le fait
+    agents.set_status(db, db.get(CustomAgent, act["agent"]["id"]), "active")   # clic « Activer » du patron
     fake = claude(_scripted([("tool", "create_quote", {"client_name": "X"}), ("tool", "list_unpaid", {}),
                              ("text", "Rapport : 0 facture en retard. Rien à signaler.")]))
     a = db.get(CustomAgent, act["agent"]["id"])

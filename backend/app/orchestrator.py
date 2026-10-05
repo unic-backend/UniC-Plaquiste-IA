@@ -934,6 +934,7 @@ def handle_turn(
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
                     )
                 tools_on = bool(chain) and chain[0].id == "claude"
+                state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 if attached:
                     msgs[0]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)

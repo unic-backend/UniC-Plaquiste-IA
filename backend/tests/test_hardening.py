@@ -305,3 +305,63 @@ def test_rename_draft_quote_number_with_rules():
             revise.revise(db, "quote", q, user_id=None, new_number="UC-2026-4322-RT")
     finally:
         db.close()
+
+
+# ---------- travail automatique : décision du patron seulement ----------
+
+def test_auto_work_is_off_by_default_and_gates_checks_and_agents(client, monkeypatch):
+    from app import agents, selfcare
+    from app.database import SessionLocal
+    from app.models import AppSetting
+    db = SessionLocal()
+    try:
+        row = db.get(AppSetting, selfcare.AUTO_KEY)
+        if row:
+            db.delete(row)
+            db.commit()
+        assert selfcare.auto_enabled(db) is False
+        calls = []
+        monkeypatch.setattr(selfcare, "_check_due", lambda d: True)
+        monkeypatch.setattr(selfcare, "self_check", lambda d: calls.append("check"))
+        monkeypatch.setattr(agents, "run_due", lambda d: calls.append("agents") or [])
+        selfcare.tick()
+        assert calls == []                                       # rien ne tourne seul
+        assert client.get("/api/selfcare").json()["auto_work"] is False
+        assert client.post("/api/selfcare/auto", json={"enabled": True}).json() == {"auto_work": True}
+        selfcare.tick()
+        assert calls == ["check", "agents"]                      # activé par le patron : ça tourne
+        client.post("/api/selfcare/auto", json={"enabled": False})
+        calls.clear()
+        selfcare.tick()
+        assert calls == []
+    finally:
+        db.close()
+
+
+def test_ai_cannot_improve_itself_unless_the_owner_asked(monkeypatch):
+    from app import agent, repair
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        started = []
+        monkeypatch.setattr(repair, "start_job", lambda *a, **k: started.append(a) or type("J", (), {"id": "j1"})())
+        s = agent.AgentSession(db, None, {"owner_message": "change le numéro du devis 1007 en 1008"})
+        out = s("improve_myself", {"kind": "feature", "request": "ajouter new_number au devis"})
+        assert "error" in out and not started
+        s2 = agent.AgentSession(db, None, {"owner_message": "Atelier : ajoute le changement de numéro des devis"})
+        assert s2("improve_myself", {"kind": "feature", "request": "ajouter new_number au devis"}).get("ok") is True and started
+    finally:
+        db.close()
+
+
+def test_atelier_branch_follows_the_deployed_code(monkeypatch):
+    from app import repair
+    from app.database import SessionLocal
+    monkeypatch.setenv("RENDER_GIT_BRANCH", "claude/ma-branche")
+    db = SessionLocal()
+    try:
+        assert repair.deployed_branch() == "claude/ma-branche" and repair.status(db)["base"] == "claude/ma-branche"
+        monkeypatch.setenv("RENDER_GIT_BRANCH", "bad branch; rm -rf")
+        assert repair.deployed_branch() == ""
+    finally:
+        db.close()

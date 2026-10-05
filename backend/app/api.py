@@ -1564,9 +1564,23 @@ def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)
     last = db.get(AppSetting, "selfcheck_last")
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
-            "slow_queries": list(reversed(SLOW_QUERIES)),
+            "slow_queries": list(reversed(SLOW_QUERIES)), "auto_work": selfcare.auto_enabled(db),
             "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
             "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
+
+
+class AutoIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/selfcare/auto")
+def selfcare_auto(body: AutoIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Active ou coupe le travail automatique (contrôle quotidien, agents planifiés). Seul le patron décide."""
+    from app import selfcare
+    selfcare.set_auto(db, body.enabled)
+    audit(db, user.id, "auto_work_on" if body.enabled else "auto_work_off", "selfcare", "auto_work")
+    db.commit()
+    return {"auto_work": body.enabled}
 
 
 @router.post("/selfcare/check")

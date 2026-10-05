@@ -414,6 +414,7 @@ export const api = {
   checkinSummary: () => request<any>("/api/checkins/summary"),
   signQuote: (id: string, b: any) => request<any>(`/api/quotes/${id}/signature`, { method: "POST", body: JSON.stringify(b) }),
   quoteSignatures: (id: string) => request<any[]>(`/api/quotes/${id}/signature`),
+  setAutoWork: (enabled: boolean) => request<any>("/api/selfcare/auto", { method: "POST", body: JSON.stringify({ enabled }) }),
   selfCheck: () => request<any>("/api/selfcare/check", { method: "POST" }),
   incident: (id: string) => request<any>(`/api/selfcare/incidents/${id}`),
   setIncident: (id: string, status: string) => request<any>(`/api/selfcare/incidents/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),

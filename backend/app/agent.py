@@ -7,6 +7,7 @@ Sécurité (conçue contre l'injection de consigne) :
 """
 from __future__ import annotations
 
+import re
 import logging
 
 from sqlalchemy.orm import Session
@@ -54,8 +55,8 @@ TOOLS: list[dict] = [
         "name": "create_agent",
         "description": ("ATELIER : crée un AGENT automatique : une mission qui tourne seule toutes les N heures (ex. « chaque matin, lis les mails "
                         "et prépare les réponses aux demandes de devis », « chaque lundi, liste les factures en retard »). Outils de l'agent : "
-                        "lecture et brouillons seulement. owner_asked=true si le patron l'a demandé (actif tout de suite) ; sinon l'agent est "
-                        "PROPOSÉ et attend son clic."),
+                        "lecture et brouillons seulement. L'agent est TOUJOURS créé en attente : seul le patron l'active "
+                        "(Paramètres › Atelier), jamais toi."),
         "input_schema": {"type": "object", "properties": {
             "name": {"type": "string"}, "mission": {"type": "string"}, "every_hours": {"type": "integer", "minimum": 1, "maximum": 168},
             "owner_asked": {"type": "boolean"}}, "required": ["name", "mission", "every_hours", "owner_asked"], "additionalProperties": False},
@@ -408,7 +409,7 @@ AGENT_PROMPT = (
     "\nATELIER (toi-même) : tu te surveilles et tu te répares. « Ça marche ? », « vérifie-toi », un bug signalé → self_check / list_incidents, "
     "explique la cause en clair. Pour corriger ou ajouter une fonction : improve_myself (tu codes toi-même ; une proposition testée attend "
     "le clic « Fusionner » du patron dans Paramètres › Atelier — ne dis jamais que c'est en ligne avant). Une tâche à répéter → propose "
-    "create_agent (owner_asked=true seulement s'il l'a demandé). Ne dis jamais qu'un bug est corrigé sans preuve."
+    "create_agent (toujours proposé, le patron l'active). Ne dis jamais qu'un bug est corrigé sans preuve."
     "\nTABLE RONDE : pour un devis important, un plan ambigu ou une décision à enjeu (ou si le patron demande de vérifier à plusieurs), appelle round_table avec tout le dossier, "
     "puis résume la synthèse et les désaccords en 5 lignes. Pas pour les questions simples (coût : 4 appels)."
     "\nLOGOS : demande de logo, favicon ou icône → lis logo_guide (processus, principes, types_de_marques, construction_svg), pose au plus 5 questions "
@@ -431,6 +432,12 @@ AGENT_PROMPT = (
 def _mail_row(m: InboxMessage) -> dict:
     return {"id": m.id, "from": m.from_addr, "subject": m.subject, "date": m.date,
             "extrait": m.body[:300], "brouillon_existant": bool(m.reply_draft_id)}
+
+
+SELF_EDIT = re.compile(
+    r"atelier|am[ée]liore[ -]?toi|corrige[ -]?toi|modifie[ -]?toi|r[ée]pare[ -]?toi|ajoute[ -]?toi|ton code|"
+    r"(modifie|corrige|am[ée]liore|change|r[ée]pare)\w*\s+(l'|ton |votre |notre )?(appli\b|application|programme)|nouvelle fonction",
+    re.I)
 
 
 class AgentSession:
@@ -960,6 +967,10 @@ class AgentSession:
 
     def _t_improve_myself(self, kind: str, request: str = "", incident_id: str = "") -> dict:
         from app import repair
+        if not SELF_EDIT.search(str(self.state.get("owner_message") or "")):
+            raise ConnectorError(
+                "Le patron n'a pas demandé de modifier l'application : ne le fais PAS de ta propre initiative. Explique en une phrase "
+                "ce qui manque et dis-lui de répondre « Atelier : … » ou d'utiliser Paramètres › Atelier.", 403)
         try:
             job = repair.start_job(self.db, kind, request, incident_id)
         except repair.RepairError as exc:
@@ -971,12 +982,11 @@ class AgentSession:
     def _t_create_agent(self, name: str, mission: str, every_hours: int = 24, owner_asked: bool = False) -> dict:
         from app import agents
         try:
-            a = agents.create(self.db, name, mission, every_hours, by="ai", active=bool(owner_asked))
+            a = agents.create(self.db, name, mission, every_hours, by="ai", active=False)   # jamais actif sans le clic du patron
         except agents.AgentError as exc:
             raise ConnectorError(str(exc), 400)
         return {"ok": True, "agent": agents.to_dict(a),
-                "note": "Actif : premier passage dans la minute." if a.status == "active"
-                else "Proposé : le patron l'active dans Paramètres › Atelier."}
+                "note": "Proposé : le patron l'active dans Paramètres › Atelier. Rien ne tourne sans son clic."}
 
     def _t_list_agents(self) -> dict:
         from app import agents
