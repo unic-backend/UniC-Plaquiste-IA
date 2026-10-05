@@ -16,7 +16,7 @@ import { AppsList, QuickChips } from "./Shortcuts";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, Interrupted, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -656,9 +656,15 @@ function Chat({ initialId }: { initialId?: string }) {
   const camRef = useRef<HTMLInputElement>(null);
 
   const justCreated = useRef<string | undefined>(undefined);
+  const turn = useRef(0);                                  // chaque envoi / reprise a son numéro : seul le dernier écrit à l'écran
+  const inflight = useRef<string | undefined>(undefined);  // conversation dont la réponse est en route
+  const busyRef = useRef(false);
+  busyRef.current = busy;
   useEffect(() => {
     setCid(initialId);
     if (!initialId) {
+      ++turn.current;   // nouvelle conversation : l'attente précédente s'arrête (le serveur finit quand même)
+      setBusy(false);
       setMessages([]);
       setPending([]);   // les fichiers en attente appartiennent à la discussion quittée
       return;
@@ -669,7 +675,12 @@ function Chat({ initialId }: { initialId?: string }) {
       return;
     }
     setPending([]);
-    api.getConversation(initialId).then((c) => setMessages(c.messages || []));
+    ++turn.current;   // une autre conversation : l'attente précédente s'arrête
+    setBusy(false);
+    api.getConversation(initialId).then((c) => {
+      setMessages(c.messages || []);
+      if (c.working) follow(initialId);   // UniC travaille encore dessus : la réponse arrivera ici
+    });
   }, [initialId]);
 
   useEffect(() => {
@@ -685,6 +696,15 @@ function Chat({ initialId }: { initialId?: string }) {
   }, [initialId]);
   const idRef = useRef(initialId);
   idRef.current = initialId;
+  useEffect(() => {   // retour dans l'appli : si une réponse était en route, on va la chercher sur le serveur
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const id = inflight.current || idRef.current;
+      if (busyRef.current && id) follow(id);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
   useEffect(() => {   // briefing demandé depuis le menu alors que la conversation vide est déjà ouverte
     const onAuto = () => setTimeout(() => {
       if (idRef.current) return;   // changement de conversation : l'effet ci-dessus s'en charge
@@ -700,6 +720,7 @@ function Chat({ initialId }: { initialId?: string }) {
     if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
     if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
     if (busy) return;
+    const my = ++turn.current;
     setBusy(true);
     setText("");
     const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || "Analyse le fichier.", files: pending.map((f) => ({ name: f.name, mime: f.type, file: f })) };
@@ -718,10 +739,12 @@ function Chat({ initialId }: { initialId?: string }) {
       setPending([]);
       setLive({ status: "", text: "" });
       const out = await api.chatStream({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep }, (ev) => {
-        if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "" }));
+        if (ev.t === "conv") inflight.current = ev.conversation_id;
+        else if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "" }));
         else if (ev.t === "delta") setLive((l) => ({ ...l, text: l.text + (ev.text || "") }));
         else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
       });
+      if (turn.current !== my) return;   // la reprise après coupure a déjà affiché la réponse
       setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
@@ -730,13 +753,38 @@ function Chat({ initialId }: { initialId?: string }) {
       }
       setMessages((m) => [...m, { ...out.message, fresh: !out.streamed }]);   // déjà lu en direct : pas de seconde animation   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
+      if (turn.current !== my) return;
+      const id = e instanceof Interrupted ? e.conversationId || cid : undefined;
+      if (id) { follow(id); return; }   // le serveur continue : on attend sa réponse
       setMessages((m) => [
         ...m,
         { id: "err", role: "assistant", content: e.message || "Erreur" },
       ]);
     } finally {
-      setBusy(false);
+      if (turn.current === my) { setBusy(false); inflight.current = undefined; }
     }
+  }
+
+  /** Reprend une réponse que le serveur termine seul (appli quittée, réseau coupé, conversation rouverte). */
+  async function follow(id: string) {
+    const my = ++turn.current;
+    inflight.current = id;
+    setBusy(true);
+    setLive({ status: "UniC termine le travail…", text: "" });
+    if (!idRef.current) { setCid(id); justCreated.current = id; nav(`/c/${id}`, { replace: true }); }
+    const until = Date.now() + 20 * 60_000;
+    while (turn.current === my && Date.now() < until) {
+      try {
+        const c = await api.getConversation(id);
+        if (turn.current !== my) return;
+        if (!c.working) {
+          setMessages(c.messages || []);
+          break;
+        }
+      } catch { /* réseau encore absent : on réessaie */ }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    if (turn.current === my) { setBusy(false); setLive({ status: "", text: "" }); inflight.current = undefined; }
   }
 
   async function voice() {

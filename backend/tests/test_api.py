@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -2816,3 +2817,28 @@ def test_company_stamp_upload_dark_photo_and_pdf(client):
 def test_connectors_state_for_chat_shortcuts(client):
     c = client.get("/api/connectors").json()
     assert {"email", "gbp", "website", "linkedin", "instagram"} <= set(c) and all(isinstance(v, bool) for v in c.values())
+
+
+def test_work_is_saved_first_and_visible_while_running(client, claude):
+    """Appli quittée pendant la réponse : la demande est déjà enregistrée, le serveur signale « working », puis la réponse reste."""
+    from app import api as A
+    seen = {}
+
+    def reply(kind, kw):
+        cid = next(iter(A.RUNNING))
+        seen.update(client.get(f"/api/conversations/{cid}").json())
+        return _resp("Devis prêt.")
+    claude(reply)
+    out = client.post("/api/chat", json={"message": "Fais le devis de l'appartement A"}).json()
+    assert seen["working"] is True and seen["messages"][-1]["content"] == "Fais le devis de l'appartement A"
+    after = client.get(f"/api/conversations/{out['conversation_id']}").json()
+    assert after["working"] is False and after["messages"][-1]["content"] == "Devis prêt."
+    assert out["conversation_id"] not in A.RUNNING
+
+
+def test_stream_announces_the_conversation_before_working(client, claude):
+    claude(_scripted([("text", "ok")]))
+    lines = [json.loads(l) for l in client.post("/api/chat/stream", json={"message": "Bonjour UniC"}).text.splitlines() if l.strip()]
+    kinds = [e["t"] for e in lines]
+    assert "conv" in kinds and kinds.index("conv") < kinds.index("done")
+    assert lines[kinds.index("conv")]["conversation_id"] == lines[kinds.index("done")]["conversation_id"]

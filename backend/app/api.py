@@ -237,6 +237,7 @@ def get_conversation(cid: str, db: Session = Depends(get_db), user: User = Depen
         "id": c.id,
         "title": c.title,
         "project_id": c.project_id,
+        "working": c.id in RUNNING,   # UniC travaille encore sur la dernière demande
         "messages": [
             {
                 "id": m.id,
@@ -279,7 +280,11 @@ def delete_conversation(cid: str, db: Session = Depends(get_db), user: User = De
     return {"ok": True}
 
 
-def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
+# Conversations dont la réponse est en cours : le travail continue sur le serveur même si l'appli est quittée.
+RUNNING: set[str] = set()
+
+
+def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
     if body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if conv is None or conv.user_id != user.id:
@@ -298,9 +303,22 @@ def _chat_turn(db: Session, user: User, body: ChatIn) -> dict:
     db.flush()
     if conv.title == "Nouvelle conversation" and text:
         conv.title = text[:80]
+    db.commit()   # la demande est enregistrée tout de suite : retrouvable même si l'appli est fermée pendant le travail
+    if on_start:
+        on_start(conv.id)
+    RUNNING.add(conv.id)
     try:
         reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()   # la demande reste ; une réponse claire remplace le silence
+        db.add(Message(conversation_id=conv.id, role="assistant",
+                       content="Je n'ai pas pu terminer cette tâche (erreur interne). Redemande-la et je la reprends.", meta_json="{}"))
+        db.commit()
+        raise
     finally:
+        RUNNING.discard(conv.id)
         release_memory()
     meta = {
         "structured": reply.structured,
@@ -365,7 +383,8 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
         mtok = mem.AFTER_REPLY.set(pending)
         try:
             q.put({"t": "status", "text": "Je réfléchis…"})
-            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body)})
+            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body,
+                                             on_start=lambda cid: q.put({"t": "conv", "conversation_id": cid}))})
             q.put(None)   # flux fermé : l'écran n'attend plus
             for t in pending:
                 mem.extract_in_background(t)   # la mémoire se met à jour ensuite

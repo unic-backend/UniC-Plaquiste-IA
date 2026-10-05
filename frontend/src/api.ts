@@ -86,6 +86,12 @@ export async function signOut() {
 }
 
 export class AuthError extends Error {}
+/** Connexion coupée pendant la réponse (appli quittée, réseau perdu) : le serveur, lui, continue le travail. */
+export class Interrupted extends Error {
+  constructor(public conversationId?: string) {
+    super("Connexion coupée. Si UniC a reçu ta demande, il la termine sur le serveur : elle apparaîtra dans le menu des conversations.");
+  }
+}
 
 /** Application native : adresse du serveur obligatoire. Web : même origine que l'API. */
 export const needsServer = () => hasServerField && !getServer();
@@ -310,27 +316,30 @@ export const api = {
   /** Réponse en flux : statut + texte au fil de l'eau. Si le flux ne démarre pas, repli sur la réponse d'un bloc. */
   chatStream: async (
     body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean },
-    on: (ev: { t: "status" | "delta" | "reset"; text?: string }) => void,
+    on: (ev: { t: "status" | "delta" | "reset" | "conv"; text?: string; conversation_id?: string }) => void,
   ): Promise<ChatOut & { streamed: boolean }> => {
     const headers = authHeaders(new Headers({ "Content-Type": "application/json" }));
     let res: Response | undefined;
-    try { res = await fetch(apiUrl("/api/chat/stream"), { method: "POST", headers, body: JSON.stringify(body) }); } catch { /* repli ci-dessous */ }
+    try { res = await fetch(apiUrl("/api/chat/stream"), { method: "POST", headers, body: JSON.stringify(body) }); }
+    catch { throw new Interrupted(body.conversation_id); }   // la demande a pu partir : jamais de second envoi (doublon)
     if (res?.status === 401) throw new AuthError("Code d'accès requis");
     if (!res || !res.ok) return { ...(await api.chat(body)), streamed: false };   // le flux n'a rien traité : on peut renvoyer sans doublon
-    let streamed = false, out: (ChatOut & { streamed: boolean }) | null = null;
+    let streamed = false, out: (ChatOut & { streamed: boolean }) | null = null, convId: string | undefined = body.conversation_id;
     const handle = (line: string) => {
       if (!line.trim()) return;
       const ev = JSON.parse(line);
       if (ev.t === "done") out = { conversation_id: ev.conversation_id, title: ev.title, message: ev.message, streamed };
       else if (ev.t === "error") throw new Error(ev.message || "Erreur");
-      else { if (ev.t === "delta") streamed = true; on(ev); }
+      else { if (ev.t === "delta") streamed = true; if (ev.t === "conv") convId = ev.conversation_id; on(ev); }
     };
     if (res.body && typeof res.body.getReader === "function") {
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
       for (;;) {
-        const { done, value } = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try { chunk = await reader.read(); } catch { throw new Interrupted(convId); }
+        const { done, value } = chunk;
         if (done) break;
         buf += dec.decode(value, { stream: true });
         let nl: number;
@@ -340,7 +349,7 @@ export const api = {
     } else {
       (await res.text()).split("\n").forEach(handle);   // pas de lecture en flux : tout arrive d'un coup
     }
-    if (!out) throw new Error("Réponse interrompue. Réessaie.");
+    if (!out) throw new Interrupted(convId);
     return out;
   },
   upload: async (file: File, projectId?: string) => {
@@ -417,7 +426,7 @@ export type ChatMessage = {
   files?: { name: string; mime?: string; id?: string; file?: File }[];
   fresh?: boolean;
 };
-export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[] };
+export type ConvDetail = { id: string; title: string; project_id?: string; messages: ChatMessage[]; working?: boolean };
 export type ChatOut = { conversation_id: string; title: string; message: ChatMessage };
 export type Uploaded = { id: string; filename: string; processing: any };
 
