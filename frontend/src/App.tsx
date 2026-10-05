@@ -181,63 +181,41 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
       ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
       : null;
   const shareUrl: string | null = d.download_url || (d.artifact_id ? `/api/artifacts/${d.artifact_id}/download` : null);
+  const who = d.customer_name || d.client_label || d.client_name || "";
+  const total = d.total === null || d.total === undefined ? "total incomplet" : fmt(d.total, cur);
+  const sub = [who, d.site_location, priced ? total : ""].filter(Boolean).join(" · ");
+  const open = () => (artifactIdOf(d) ? setPreview(true) : undefined);
   return (
-    <div className="doc-card">
-      <div className="doc-card-head">
-        <div>
+    <div className="doc-card doc-mini">
+      <button className="doc-open" onClick={open} aria-label={`Ouvrir ${DOC_LABEL[kind]} ${d.number}`} disabled={!artifactIdOf(d)}>
+        <span className="doc-thumb"><I.File size={26} /></span>
+        <span className="doc-meta">
           <b>{DOC_LABEL[kind]} {d.number}</b>
-          <div className="hint">{d.customer_name || d.client_label ? `Client : ${d.customer_name || d.client_label} · ` : ""}{d.title}</div>
-        </div>
-        <Badge s={d.status} />
-      </div>
-      {d.object_text && <p className="hint">{d.object_text}</p>}
-      <div className="doc-lines">
-        {(d.items || []).map((it: any) => (
-          <div className="doc-line" key={it.id || it.position}>
-            <div className="doc-line-main">
-              <span>{it.description}</span>
-              <span className="doc-qty">{it.quantity} {it.unit}</span>
-            </div>
-            {priced && (
-              <div className="doc-line-price">
-                <span>{it.unit_price === null || it.unit_price === undefined ? "prix non renseigné" : `${fmt(it.unit_price)} / u.`}</span>
-                <b>{fmt(it.total)}</b>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      {priced && (
-        <div className="doc-totals">
-          {d.subtotal !== null && d.subtotal !== undefined && d.vat_amount ? <div><span>Sous-total</span><span>{fmt(d.subtotal, cur)}</span></div> : null}
-          {d.vat_amount ? <div><span>TVA</span><span>{fmt(d.vat_amount, cur)}</span></div> : null}
-          <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
-          {kind === "quote" && Array.isArray(d.price_check) && (
-            d.price_check.length === 0
-              ? <p className="hint ic"><I.Check size={16} /> Prix et totaux conformes à la grille</p>
-              : <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
-          )}
-          {kind === "quote" && d.prices_complete === false && (
-            <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
-          )}
-        </div>
+          <span className="doc-sub">{sub || d.title}</span>
+          <span className="doc-sub">{DOC_LABEL[kind]} · PDF{d.status === "approved" ? " · approuvé" : ""}</span>
+        </span>
+      </button>
+      {priced && kind === "quote" && Array.isArray(d.price_check) && d.price_check.length > 0 && (
+        <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) de prix : ouvre le détail.</p>
       )}
-      <div className="toolbar">
-        {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
-        {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
-        {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} />}
-        {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reliquat_${d.number}.pdf`} text={d.balance_message || ""} label="Reliquat" />}
+      {kind === "quote" && d.prices_complete === false && (
+        <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
+      )}
+      <div className="doc-actions">
+        {dl && <button className="doc-act" onClick={dl} aria-label="Télécharger le PDF" title="Télécharger"><I.File size={18} /><span>PDF</span></button>}
+        {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="doc-act" />}
         {kind === "quote" && d.status !== "approved" && (
-          <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
+          <button className="doc-act" onClick={async () => { await api.approveQuote(d.id); load(); }}><I.Check size={18} /><span>Approuver</span></button>
         )}
-        <Link className="btn btn-ghost btn-small" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}>Détail</Link>
+        {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reliquat_${d.number}.pdf`} text={d.balance_message || ""} label="Reliquat" className="doc-act" />}
+        <Link className="doc-act" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}><I.Note size={18} /><span>Détail</span></Link>
         {d.status === "draft" && (
-          <button className="btn btn-ghost btn-small"
+          <button className="doc-act"
             onClick={async () => {
               if (!window.confirm("Retirer ce brouillon de la bibliothèque ?")) return;
               try { await net.discardDoc(kind, d.id); setD(null); setErr("Brouillon retiré."); } catch (e: any) { setErr(e.message); }
             }}>
-            Retirer
+            <I.Trash size={18} /><span>Retirer</span>
           </button>
         )}
       </div>

@@ -985,3 +985,22 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .side-code svg { color: #8fc2ad; }
 .side-code.active { background: #2b3934; border-color: #4d5e57; }
 .side-badge { margin-left: auto; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--copper); color: #fff; font-size: 12.5px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Document dans la conversation : petite carte à ouvrir d'un toucher (comme Claude), actions en bas */
+.doc-mini { padding: 0; overflow: hidden; }
+.doc-open { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.doc-open:disabled { cursor: default; }
+.doc-thumb { flex: 0 0 64px; height: 64px; border-radius: 12px; display: grid; place-items: center; background: #0b2a55; color: #cfe0ff; }
+.doc-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.doc-meta b { font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
+.doc-meta b { display: block; }
+.doc-sub { display: block; font-size: 14.5px; line-height: 1.35; opacity: .7; }
+.doc-mini > .hint, .doc-mini > .error { margin: 0 12px 8px; }
+.doc-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 8px; border-top: 1px solid var(--shade); }
+.doc-act { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; padding: 8px 10px; min-height: 40px; border-radius: 10px; cursor: pointer; text-decoration: none; opacity: .85; }
+.doc-act:hover, .doc-act:focus-visible { background: var(--shade); opacity: 1; }
+.doc-act:disabled { opacity: .5; }
+
+/* Texte de l'IA plus grand et net, comme l'app Claude */
+.msg.assistant .bubble { font-size: 17.5px; line-height: 1.6; }
+.msg.user .bubble { font-size: 16.5px; line-height: 1.5; }
