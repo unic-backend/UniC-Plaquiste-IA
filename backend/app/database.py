@@ -67,3 +67,21 @@ def ensure_columns(eng=None) -> None:
                 elif isinstance(arg, str):
                     default = " DEFAULT '" + arg.replace("'", "''") + "'"
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{default}'))
+
+
+def ensure_indexes(eng=None) -> int:
+    """Crée les index déclarés dans les modèles qui manquent sur une base existante (ajout seulement, aucune donnée touchée)."""
+    from sqlalchemy import inspect
+
+    eng = eng or engine
+    insp = inspect(eng)
+    made = 0
+    for table in Base.metadata.sorted_tables:
+        if not insp.has_table(table.name):
+            continue
+        have = {i["name"] for i in insp.get_indexes(table.name)}
+        for idx in table.indexes:
+            if idx.name not in have:
+                idx.create(bind=eng, checkfirst=True)
+                made += 1
+    return made

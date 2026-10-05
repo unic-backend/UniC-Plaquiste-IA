@@ -19,7 +19,7 @@ from app.api_voice import router as voice_router
 from app.api_website import router as website_router
 from app import ratelimit
 from app.config import settings
-from app.database import Base, SessionLocal, engine, ensure_columns
+from app.database import Base, SessionLocal, engine, ensure_columns, ensure_indexes
 from app.seed import seed_if_empty
 
 @asynccontextmanager
@@ -119,6 +119,7 @@ def startup():
     settings.data_path.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     ensure_columns()
+    ensure_indexes()
     db = SessionLocal()
     try:
         seed_if_empty(db)

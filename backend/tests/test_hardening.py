@@ -118,3 +118,16 @@ def test_health_probes_open_even_with_access_code(client, monkeypatch):
     assert client.get("/api/health/live").status_code == 200
     assert client.get("/api/health/ready").status_code == 200
     assert client.get("/api/materials").status_code == 401
+
+
+def test_ensure_indexes_adds_missing_ones_without_touching_data(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+    from app.database import Base, ensure_indexes
+    eng = create_engine(f"sqlite:///{tmp_path}/old.db")
+    Base.metadata.create_all(eng)
+    with eng.begin() as c:
+        c.execute(text("DROP INDEX ix_quotations_status"))
+    assert ensure_indexes(eng) >= 1
+    names = {i["name"] for i in inspect(eng).get_indexes("quotations")}
+    assert "ix_quotations_status" in names
+    assert ensure_indexes(eng) == 0
