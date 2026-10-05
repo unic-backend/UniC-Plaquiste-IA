@@ -1004,3 +1004,97 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 /* Texte de l'IA plus grand et net, comme l'app Claude */
 .msg.assistant .bubble { font-size: 17.5px; line-height: 1.6; }
 .msg.user .bubble { font-size: 16.5px; line-height: 1.5; }
+
+/* ============================================================
+   Verre dépoli (finition Apple) : surfaces translucides, reflet fin sur le bord haut,
+   dégradé vert/cuivre, ombre douce. Un seul jeu de variables pour toute l'appli.
+   ============================================================ */
+:root {
+  --g-grad: linear-gradient(135deg, rgba(44,74,62,.07), rgba(184,97,46,.09));
+  --g-base: rgba(255,255,255,.66);
+  --g-edge: rgba(26,24,20,.08);
+  --g-hi: inset 0 1px 0 rgba(255,255,255,.7);
+  --g-shadow: 0 1px 2px rgba(26,24,20,.05), 0 12px 32px rgba(26,24,20,.08);
+  --g-radius: 22px;
+  --amb-1: rgba(61,106,88,.20);
+  --amb-2: rgba(184,97,46,.16);
+}
+:root[data-theme="dark"] {
+  --g-grad: linear-gradient(135deg, rgba(74,127,105,.17), rgba(210,122,67,.13));
+  --g-base: rgba(255,255,255,.035);
+  --g-edge: rgba(255,255,255,.10);
+  --g-hi: inset 0 1px 0 rgba(255,255,255,.09);
+  --g-shadow: 0 1px 2px rgba(0,0,0,.35), 0 14px 36px rgba(0,0,0,.38);
+  --amb-1: rgba(61,106,88,.30);
+  --amb-2: rgba(210,122,67,.17);
+}
+
+/* fond : deux halos doux derrière le verre */
+.app {
+  background:
+    radial-gradient(70% 38% at 0% 0%, var(--amb-1), transparent 72%),
+    radial-gradient(60% 34% at 100% 100%, var(--amb-2), transparent 72%),
+    var(--paper);
+}
+
+/* surfaces en verre */
+.card-box, .doc-card, .draft-card, .stat, .hub-item, .calc-card, .app-row, .login-card, .at-item, .credit-badge {
+  background: var(--g-grad), var(--g-base);
+  border: 1px solid var(--g-edge);
+  border-radius: var(--g-radius);
+  box-shadow: var(--g-hi), var(--g-shadow);
+}
+.at-item { border-radius: 16px; box-shadow: var(--g-hi); }
+.hub-item { transition: transform .22s var(--spring), border-color .2s, box-shadow .2s; }
+.hub-item:hover { border-color: var(--copper); transform: translateY(-2px); }
+.hub-item:active { transform: scale(.98); }
+.hub-item b { font-size: 17px; }
+.card-box, .doc-card, .hub-item, .stat { animation: glassIn .5s var(--ease) both; }
+@keyframes glassIn { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* barres et feuilles : vrai flou derrière */
+.topbar, .sheet, .toast, .composer, .credit-badge {
+  -webkit-backdrop-filter: saturate(170%) blur(20px); backdrop-filter: saturate(170%) blur(20px);
+}
+.topbar { background: var(--glass); border-bottom: 1px solid var(--g-edge); }
+.sheet { background: var(--glass); border-top: 1px solid var(--g-edge); box-shadow: var(--g-hi); }
+.toast { background: var(--glass); border: 1px solid var(--g-edge); box-shadow: var(--g-hi), var(--g-shadow); }
+.composer { background: var(--g-grad), var(--glass); border: 1px solid var(--g-edge); box-shadow: var(--g-hi), var(--g-shadow); }
+.composer-wrap { background: linear-gradient(to top, color-mix(in srgb, var(--paper) 70%, transparent) 55%, transparent); }
+.sheet-btn { background: var(--g-grad), var(--g-base); border: 1px solid var(--g-edge); box-shadow: var(--g-hi); }
+
+/* ta question : bulle verte brillante ; boutons à dégradé et lueur */
+.msg.user .bubble {
+  background: linear-gradient(135deg, var(--green-2), var(--green));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 8px 22px rgba(44,74,62,.30);
+  border: 0;
+}
+.btn-copper, .btn.btn-copper {
+  background: linear-gradient(135deg, #e08a52, var(--copper));
+  border: 0; color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 6px 18px rgba(184,97,46,.35);
+}
+.btn-copper:hover { filter: brightness(1.06); }
+.send.round { background: linear-gradient(135deg, var(--green-2), var(--green)); box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 6px 18px rgba(44,74,62,.40); }
+.btn-line, .btn.btn-line { background: var(--g-base); border: 1px solid var(--g-edge); box-shadow: var(--g-hi); }
+.quick-chip, .chip, .mode-chip { background: var(--g-grad), var(--g-base); border: 1px solid var(--g-edge); box-shadow: var(--g-hi); }
+
+/* ce que l'IA me rend : tableaux, citations, code, cartes de document */
+.md table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--g-edge); border-radius: 16px; overflow: hidden; background: var(--g-grad), var(--g-base); box-shadow: var(--g-hi); font-size: 15px; }
+.md th { background: rgba(127,127,127,.10); text-align: left; }
+.md th, .md td { padding: 10px 12px; border-bottom: 1px solid var(--g-edge); }
+.md tr:last-child td { border-bottom: 0; }
+.md blockquote { margin: 0 0 12px; padding: 10px 14px; border-left: 3px solid var(--copper); border-radius: 0 14px 14px 0; background: var(--g-grad), var(--g-base); }
+.md pre { padding: 12px 14px; border-radius: 16px; background: var(--g-grad), var(--g-base); border: 1px solid var(--g-edge); overflow-x: auto; }
+.md code { border-radius: 8px; }
+.doc-mini { overflow: hidden; }
+.doc-thumb { background: linear-gradient(145deg, #1b4f9c, #0b2a55); box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 6px 16px rgba(11,42,85,.40); }
+.doc-actions { border-top: 1px solid var(--g-edge); background: rgba(127,127,127,.05); }
+.badge { border-radius: 999px; backdrop-filter: blur(8px); }
+
+/* menu latéral : verre sombre */
+.sidebar { background: linear-gradient(180deg, rgba(26,36,32,.96), rgba(13,18,16,.98)); border-right: 1px solid var(--g-edge); }
+.conv-item a, .side-brief, .foot-link { border-radius: 16px; }
+.conv-item a:hover, .foot-link:hover { background: rgba(255,255,255,.07); }
+
+@media (prefers-reduced-motion: reduce) { .card-box, .doc-card, .hub-item, .stat { animation: none; } }
