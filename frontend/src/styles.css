@@ -924,3 +924,8 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .lead.new { border-left: 4px solid var(--copper); }
 .install { margin-top: 20px; }
 .snippet { white-space: pre-wrap; word-break: break-all; background: var(--surface-2, #f1ece3); border-radius: 10px; padding: 10px; font-size: 12px; }
+
+.link-btn { background: none; border: 0; color: var(--copper); font: inherit; font-size: 14px; padding: 6px 0; cursor: pointer; text-align: center; }
+.link-btn.muted { color: var(--muted); font-size: 12.5px; }
+.account-card { margin-top: 24px; }
+.login-card { display: flex; flex-direction: column; gap: 8px; } .login-card input { width: 100%; box-sizing: border-box; } .login-card > .btn { width: 100%; margin-top: 6px; }

@@ -31,19 +31,35 @@ _fails: dict[str, list[float]] = {}
 _MAX_FAILS, _WINDOW = 10, 600.0
 
 
+def _token_ok(given: str) -> bool:
+    """Jeton de connexion e-mail + mot de passe (même en-tête que le code d'accès)."""
+    if not given.startswith("uat_"):
+        return False
+    from app import auth
+    db = SessionLocal()
+    try:
+        return auth.token_valid(db, given)
+    except Exception:
+        return False
+    finally:
+        db.close()
+
+
 @app.middleware("http")
 async def access_code_guard(request: Request, call_next):
     """Code d'accès unique sur /api/*. Ajouté AVANT le CORS : le 401 garde ses en-têtes CORS."""
     code = settings.unic_access_code
     path = request.url.path
-    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback") and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
+    if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback",
+                                                          "/api/auth/login", "/api/auth/status") \
+            and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
         ip = request.client.host if request.client else "?"
         now = time.time()
         recent = [t for t in _fails.get(ip, []) if now - t < _WINDOW]
         if len(recent) >= _MAX_FAILS:
             return JSONResponse({"detail": "Trop d'essais. Réessayez dans 10 minutes."}, status_code=429)
         given = request.headers.get("x-access-code", "")
-        if not secrets.compare_digest(given.encode(), code.encode()):
+        if not secrets.compare_digest(given.encode(), code.encode()) and not _token_ok(given):
             _fails[ip] = recent + [now]
             return JSONResponse({"detail": "Code d'accès requis"}, status_code=401)
         _fails.pop(ip, None)

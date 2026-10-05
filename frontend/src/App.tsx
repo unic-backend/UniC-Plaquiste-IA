@@ -15,7 +15,7 @@ import * as I from "./Icons";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -406,49 +406,76 @@ function useOwner() {
 }
 
 function Connexion({ onDone }: { onDone: () => void }) {
-  const [server, setServer] = useState(getServer());
-  const [code, setCode] = useState(getCode());
+  const [server, setServer] = useState(getServer() || DEFAULT_SERVER);
+  const [editServer, setEditServer] = useState(false);
+  const [mode, setMode] = useState<"password" | "code" | "create">("password");
+  const [email, setEmail] = useState(getSavedEmail());
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  async function go() {
-    setBusy(true);
-    setMsg("");
-    const url = server.trim();
-    if (hasServerField && !/^https:\/\/[^\s/]+/i.test(url)) {
-      setMsg("Adresse invalide : elle doit commencer par https://");
-      setBusy(false);
-      return;
-    }
-    saveConnection(hasServerField ? url : "", code);
-    try {
-      await api.me();
-      onDone();
-    } catch (e: any) {
-      setMsg(e instanceof AuthError ? "Code d'accès incorrect." : e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const base = (hasServerField ? server : "").trim().replace(/\/+$/, "");
+
+  // Pas encore d'e-mail / mot de passe sur ce serveur : première connexion avec le code d'accès.
+  useEffect(() => {
+    if (hasServerField && !/^https:\/\//i.test(base)) return;
+    authStatus(base).then((st) => { if (!st.account) setMode("code"); }).catch(() => {});
+  }, [base]);
+
+  const run = async (fn: () => Promise<void>) => {
+    if (hasServerField && !/^https:\/\/[^\s/]+/i.test(base)) { setMsg("Adresse du serveur invalide : elle commence par https://"); return; }
+    setBusy(true); setMsg("");
+    try { await fn(); } catch (e: any) { setMsg(e?.message || "Connexion impossible"); } finally { setBusy(false); }
+  };
+  const withPassword = () => run(async () => { await loginWithPassword(base, email, password); onDone(); });
+  const withCode = () => run(async () => {
+    saveConnection(base, code.trim());
+    try { await api.me(); } catch (e) { throw e instanceof AuthError ? new Error("Code d'accès incorrect.") : e; }
+    setMode("create"); setPassword("");
+  });
+  const create = () => run(async () => { await setAccount(email, password); onDone(); });
+
   return (
     <div className="login">
-      <div className="login-card">
+      <form className="login-card" onSubmit={(e) => { e.preventDefault(); (mode === "password" ? withPassword : mode === "code" ? withCode : create)(); }}>
         <h1>UniC AI</h1>
-        <p className="hint">{hasServerField ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
-        {hasServerField && (
+        {mode === "password" && <p className="hint">Connecte-toi avec ton e-mail et ton mot de passe.</p>}
+        {mode === "code" && <p className="hint">Première connexion ou mot de passe oublié : entre le code d'accès de ton serveur.</p>}
+        {mode === "create" && <p className="hint">Choisis l'e-mail et le mot de passe que tu utiliseras désormais (8 caractères minimum).</p>}
+
+        {mode !== "code" && (
           <>
-            <label>Adresse du serveur</label>
-            <input value={server} placeholder="https://unic.exemple.com" autoCapitalize="none" autoCorrect="off"
-              inputMode="url" onChange={(e) => setServer(e.target.value)} />
+            <label>E-mail</label>
+            <input type="email" value={email} autoComplete="username" inputMode="email" autoCapitalize="none" autoCorrect="off"
+              onChange={(e) => setEmail(e.target.value)} />
+            <label>{mode === "create" ? "Nouveau mot de passe" : "Mot de passe"}</label>
+            <input type="password" value={password} autoComplete={mode === "create" ? "new-password" : "current-password"}
+              onChange={(e) => setPassword(e.target.value)} />
           </>
         )}
-        <label>Code d'accès</label>
-        <input type="password" value={code} autoComplete="current-password" onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && go()} />
+        {mode === "code" && (
+          <>
+            <label>Code d'accès</label>
+            <input type="password" value={code} autoComplete="off" onChange={(e) => setCode(e.target.value)} />
+          </>
+        )}
         {msg && <p className="error">{msg}</p>}
-        <button className="btn btn-copper" disabled={busy || (hasServerField && !server.trim())} onClick={go}>
-          {busy ? "Connexion…" : "Se connecter"}
+        <button className="btn btn-copper" type="submit" disabled={busy || (mode === "code" ? !code.trim() : !email.trim() || !password)}>
+          {busy ? "Connexion…" : mode === "create" ? "Enregistrer et entrer" : "Se connecter"}
         </button>
-      </div>
+
+        {mode === "password" && <button type="button" className="link-btn" onClick={() => { setMode("code"); setMsg(""); }}>Mot de passe oublié ? Utiliser le code d'accès</button>}
+        {mode === "code" && <button type="button" className="link-btn" onClick={() => { setMode("password"); setMsg(""); }}>J'ai déjà un e-mail et un mot de passe</button>}
+
+        {hasServerField && (editServer ? (
+          <>
+            <label>Adresse du serveur</label>
+            <input value={server} autoCapitalize="none" autoCorrect="off" inputMode="url" onChange={(e) => setServer(e.target.value)} />
+          </>
+        ) : (
+          <button type="button" className="link-btn muted" onClick={() => setEditServer(true)}>Serveur : {base.replace(/^https:\/\//, "")} · changer</button>
+        ))}
+      </form>
     </div>
   );
 }
@@ -1548,7 +1575,7 @@ function SettingsHub() {
         {(isNative || getCode()) && (
           <section>
             <h3>Session</h3>
-            <button className="btn btn-line" onClick={() => { clearConnection(); window.location.reload(); }}>
+            <button className="btn btn-line" onClick={async () => { await signOut(); window.location.reload(); }}>
               Se déconnecter
             </button>
           </section>
@@ -1624,9 +1651,44 @@ function CompanyPage() {
         >
           Enregistrer
         </button>
+        <AccountCard />
         <SignatureCard />
       </div>
     </div>
+  );
+}
+
+/** Mon compte : e-mail + mot de passe de connexion, appareils connectés. */
+function AccountCard() {
+  const [d, setD] = useState<any>(null);
+  const [email, setEmail] = useState("");
+  const [cur, setCur] = useState("");
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = () => api.devices().then((x) => { setD(x); setEmail(x.email || getSavedEmail()); }).catch(() => setD(null));
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setMsg("");
+    try { await setAccount(email, pw, cur); setCur(""); setPw(""); setMsg("Enregistré. Les autres appareils devront se reconnecter."); load(); }
+    catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  return (
+    <section className="card-box account-card">
+      <h2>Mon compte</h2>
+      <p className="hint">{d?.account ? "Connexion par e-mail et mot de passe active." : "Choisis ton e-mail et ton mot de passe : tu n'auras plus besoin du code d'accès."}</p>
+      <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <label>E-mail<input type="email" value={email} autoComplete="username" onChange={(e) => setEmail(e.target.value)} /></label>
+        {d?.account && <label>Mot de passe actuel<input type="password" value={cur} autoComplete="current-password" onChange={(e) => setCur(e.target.value)} /></label>}
+        <label>{d?.account ? "Nouveau mot de passe" : "Mot de passe"}<input type="password" value={pw} autoComplete="new-password" onChange={(e) => setPw(e.target.value)} /></label>
+        <button className="btn btn-copper" type="submit" disabled={!email.trim() || pw.length < 8}>Enregistrer</button>
+      </form>
+      {msg && <p className="hint">{msg}</p>}
+      {d?.devices?.length > 0 && (
+        <ul className="backup-list">{d.devices.map((x: any, i: number) => (
+          <li key={i}><span>{x.device}</span><span>{x.last_used ? new Date(x.last_used).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}</span></li>
+        ))}</ul>
+      )}
+    </section>
   );
 }
 

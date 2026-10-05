@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
@@ -81,8 +81,86 @@ class UserOut(BaseModel):
     role: str
 
 
+class LoginIn(BaseModel):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+    device: str = Field(default="", max_length=120)
+
+
+class AccountIn(BaseModel):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+    current_password: str = Field(default="", max_length=200)
+
+
+_login_fails: dict[str, list[float]] = {}
+
+
+@router.get("/auth/status")
+def auth_status(db: Session = Depends(get_db)):
+    from app import auth
+    return {"account": auth.account_ready(db), "code_required": bool(settings.unic_access_code)}
+
+
+@router.post("/auth/login")
+def auth_login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    import time as _time
+    from app import auth
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    recent = [t for t in _login_fails.get(ip, []) if _time.time() - t < 900]
+    if len(recent) >= 8:
+        raise HTTPException(429, "Trop d'essais. Réessaie dans 15 minutes.")
+    try:
+        token = auth.login(db, body.email, body.password, body.device)
+    except auth.AuthError as exc:
+        _login_fails[ip] = recent + [_time.time()]
+        raise HTTPException(401, str(exc))
+    _login_fails.pop(ip, None)
+    db.commit()
+    return {"token": token}
+
+
+@router.post("/auth/logout")
+def auth_logout(request: Request, db: Session = Depends(get_db)):
+    from app import auth
+    auth.logout(db, request.headers.get("x-access-code", ""))
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/auth/account")
+def auth_account(body: AccountIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Choisir / changer son e-mail et son mot de passe. Avec le code d'accès (mot de passe oublié), l'ancien n'est pas demandé."""
+    import secrets as _secrets
+    from app import auth
+    given = request.headers.get("x-access-code", "")
+    code = settings.unic_access_code
+    by_code = bool(code) and _secrets.compare_digest(given.encode(), code.encode())
+    if not code:
+        by_code = not given.startswith("uat_")
+    try:
+        auth.set_account(db, body.email, body.password, body.current_password, by_access_code=by_code)
+        token = auth.login(db, body.email, body.password, "Cet appareil")
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"ok": True, "token": token}
+
+
+@router.get("/auth/devices")
+def auth_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import auth
+    return {"devices": auth.devices(db), "account": auth.account_ready(db), "email": user.email if auth.account_ready(db) else ""}
+
+
 @router.get("/auth/me")
-def me(user: User = Depends(get_current_user)):
+def me(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app import auth
+    try:
+        auth.touch(db, request.headers.get("x-access-code", ""))
+        db.commit()
+    except Exception:
+        db.rollback()
     return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)
 
 

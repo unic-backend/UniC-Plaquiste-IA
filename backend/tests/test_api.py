@@ -2689,3 +2689,39 @@ def test_pc_worker_answers_when_claude_down(client, monkeypatch):
     assert text == ""
     assert client.post("/api/worker/result/inconnu", json={"text": "x"}).json()["ok"] is False
     localworker.reset()
+
+
+def test_login_email_password_tokens_and_reset(client, monkeypatch):
+    from app import auth
+    from app.config import settings
+    monkeypatch.setattr(settings, "unic_access_code", "code-render-123")
+    auth._cache.clear()
+    H = {"X-Access-Code": "code-render-123"}
+    assert client.get("/api/auth/status").json()["account"] is False
+    assert client.get("/api/auth/me").status_code == 401
+    # création du compte avec le code d'accès
+    assert client.put("/api/auth/account", headers=H, json={"email": "moi@exemple.com", "password": "court"}).status_code == 400
+    r = client.put("/api/auth/account", headers=H, json={"email": "Moi@Exemple.com", "password": "MonMotDePasse!"})
+    assert r.status_code == 200 and r.json()["token"].startswith("uat_")
+    assert client.get("/api/auth/status").json()["account"] is True
+    # connexion e-mail + mot de passe
+    assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "faux"}).status_code == 401
+    tok = client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "MonMotDePasse!", "device": "Samsung"}).json()["token"]
+    T = {"X-Access-Code": tok}
+    assert client.get("/api/auth/me", headers=T).status_code == 200
+    assert client.get("/api/agenda", headers=T).status_code == 200
+    assert "Samsung" in [d["device"] for d in client.get("/api/auth/devices", headers=T).json()["devices"]]
+    # changer le mot de passe avec un jeton : l'ancien est exigé
+    assert client.put("/api/auth/account", headers=T, json={"email": "moi@exemple.com", "password": "Nouveau-mdp-1"}).status_code == 400
+    ok = client.put("/api/auth/account", headers=T, json={"email": "moi@exemple.com", "password": "Nouveau-mdp-1", "current_password": "MonMotDePasse!"})
+    assert ok.status_code == 200
+    auth._cache.clear()
+    assert client.get("/api/auth/me", headers=T).status_code == 401          # anciens appareils déconnectés
+    T2 = {"X-Access-Code": ok.json()["token"]}
+    assert client.post("/api/auth/logout", headers=T2).json()["ok"]
+    auth._cache.clear()
+    assert client.get("/api/auth/me", headers=T2).status_code == 401
+    # mot de passe oublié : le code d'accès permet d'en choisir un nouveau sans l'ancien
+    assert client.put("/api/auth/account", headers=H, json={"email": "moi@exemple.com", "password": "Encore-un-3"}).status_code == 200
+    assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "Encore-un-3"}).status_code == 200
+    assert auth.verify_password("x", auth.hash_password("x")) and not auth.verify_password("y", auth.hash_password("x"))

@@ -46,6 +46,45 @@ export function clearConnection() {
   }
 }
 
+/** Ton serveur : proposé d'office à la connexion (modifiable si un jour il change). */
+export const DEFAULT_SERVER = "https://unic-plaquiste-ia.onrender.com";
+const EMAIL_KEY = "unic_email";
+export const getSavedEmail = () => store(EMAIL_KEY);
+
+const deviceLabel = () => (isNative ? "Téléphone" : isDesktop ? "PC (appli)" : "Navigateur");
+
+/** État du compte sur un serveur donné (avant connexion) : e-mail + mot de passe déjà choisis ? */
+export async function authStatus(server: string): Promise<{ account: boolean; code_required: boolean }> {
+  const res = await fetch(`${server.replace(/\/+$/, "")}/api/auth/status`);
+  if (!res.ok) throw new Error("Serveur injoignable : vérifie l'adresse et ta connexion.");
+  return res.json();
+}
+
+/** Connexion e-mail + mot de passe : le jeton remplace le code d'accès dans l'appli (même emplacement, même en-tête). */
+export async function loginWithPassword(server: string, email: string, password: string) {
+  const base = server.replace(/\/+$/, "");
+  const res = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: email.trim(), password, device: deviceLabel() }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new AuthError(data.detail || "Connexion impossible");
+  saveConnection(base, data.token);
+  try { localStorage.setItem(EMAIL_KEY, email.trim()); } catch { /* ignoré */ }
+}
+
+/** Choisir / changer son e-mail et mot de passe (avec le code d'accès : mot de passe oublié ou première fois). */
+export async function setAccount(email: string, password: string, currentPassword = "") {
+  const r = await request<{ token: string }>("/api/auth/account", { method: "PUT",
+    body: JSON.stringify({ email: email.trim(), password, current_password: currentPassword }) });
+  saveConnection(getServer(), r.token);
+  try { localStorage.setItem(EMAIL_KEY, email.trim()); } catch { /* ignoré */ }
+}
+
+/** Déconnexion : le serveur oublie cet appareil ; l'adresse du serveur et l'e-mail restent proposés. */
+export async function signOut() {
+  try { await fetch(apiUrl("/api/auth/logout"), { method: "POST", headers: authHeaders() }); } catch { /* hors ligne : on oublie quand même */ }
+  try { localStorage.removeItem(CODE_KEY); } catch { /* ignoré */ }
+}
+
 export class AuthError extends Error {}
 
 /** Application native : adresse du serveur obligatoire. Web : même origine que l'API. */
@@ -343,6 +382,7 @@ export const api = {
   getDn: (id: string) => request<any>(`/api/delivery-notes/${id}`),
   settings: () => request<any>("/api/settings"),
   backups: () => request<any>("/api/backups"),
+  devices: () => request<{ devices: { device: string; last_used: string }[]; account: boolean; email: string }>("/api/auth/devices"),
   unpaid: () => request<any>("/api/invoices-unpaid"),
   leads: () => request<any[]>("/api/leads"),
   updateLead: (id: string, status: string) => request<any>(`/api/leads/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
