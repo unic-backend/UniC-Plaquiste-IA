@@ -31,7 +31,8 @@ DEFAULTS = {
     "paint_coats": 2,
     "primer_l_per_m2": 0.08,
     "ceiling_tile_side_m": 0.60,
-    "hanger_spacing_m": 1.20,
+    "hanger_spacing_m": 0.90,    # méthode UniC : une tige tous les 0,90 m le long de chaque fourrure
+    "furring_spacing_m": 0.50,   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
 }
 
 
@@ -340,7 +341,15 @@ def calculate_ceiling(
     area = round_qty(length_m * width_m, 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
-    hangers = ceil_int((length_m / DEFAULTS["hanger_spacing_m"] + 1) * (width_m / DEFAULTS["hanger_spacing_m"] + 1))
+    # Fourrures parallèles à la longueur, espacées de 0,50 m sur la largeur ; tiges tous les 0,90 m sur chaque fourrure.
+    # Sens de pose retenu : celui qui demande le moins de tiges (fourrures dans le sens le plus économique).
+    f_sp, h_sp = DEFAULTS["furring_spacing_m"], DEFAULTS["hanger_spacing_m"]
+
+    def layout(run: float, across: float) -> tuple[int, int, float]:
+        rows_ = ceil_int(across / f_sp) + 1
+        return rows_, rows_ * (ceil_int(run / h_sp) + 1), round_qty(run * rows_, 2)
+
+    rows, hangers, furring_ml = min(layout(length_m, width_m), layout(width_m, length_m), key=lambda t: (t[1], t[2]))
 
     result = CalcResult(
         kind="ceiling",
@@ -365,28 +374,29 @@ def calculate_ceiling(
                  {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CONFIRMED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
+        CalcStep("Lignes de fourrure (entraxe 0,50 m)", "⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
         CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
-                 "⌈(L/e + 1)×(l/e + 1)⌉",
-                 {"e": DEFAULTS["hanger_spacing_m"]}, hangers, "u", STATUS_ASSUMED),
+                 "lignes × (⌈ longueur de fourrure / 0,90 ⌉ + 1)",
+                 {"lignes": rows, "e": h_sp}, hangers, "u", STATUS_ESTIMATED),
     ]
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
         QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
-                     "1 tige par point d'accroche (maillage 1,20 m)", STATUS_ASSUMED),
+                     "1 tige tous les 0,90 m sur chaque fourrure", STATUS_ESTIMATED),
         QuantityLine("UC-PIVOT", "Pivot (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
-        QuantityLine("FOURRURE", "Fourrure / ossature plafond",
-                     round_qty(length_m * (width_m / 0.60 + 1), 2), "ml",
-                     "L × (l/0,60 + 1)", STATUS_ASSUMED),
+        QuantityLine("FOURRURE", "Fourrure / ossature plafond", furring_ml, "ml",
+                     f"{rows} lignes × longueur (entraxe 0,50 m)", STATUS_ESTIMATED),
     ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
-        "Points d'accroche tous les 1,20 m (hypothèse) : 1 tige + 1 pivot + 1 cheville à laiton chacun.",
+        "Méthode UniC : fourrures tous les 0,50 m, une tige tous les 0,90 m (tige + pivot + cheville à laiton), "
+        "plaques de 2 m posées en travers des fourrures.",
         "Les profils périphériques et les entretoises ne sont pas détaillés pièce par pièce.",
         "Aucun prix n'est appliqué.",
     ]

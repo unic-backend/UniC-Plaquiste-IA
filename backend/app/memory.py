@@ -431,7 +431,13 @@ OWNER_RULES_V5 = (
     "Pivot = 6 500 FCFA le paquet de 100 ; chevilles à laiton = 6 000 FCFA le paquet de 100.",
 )
 
-_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5}
+OWNER_RULES_V6 = (
+    "Ossature de faux plafond UniC : fourrures tous les 0,50 m (pas 0,60), une tige tous les 0,90 m sur chaque fourrure ; "
+    "la plaque de 2 m se pose en travers des fourrures (plus résistant).",
+)
+
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
+              "v6": OWNER_RULES_V6}
 
 
 def seed_owner_rules(db: Session) -> int:
