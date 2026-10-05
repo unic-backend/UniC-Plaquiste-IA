@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 # Isolate test data
 os.environ.setdefault("UNIC_DATA_DIR", str(Path("/tmp/unic-test-data")))
+os.environ.setdefault("UNIC_NO_BACKGROUND", "1")
 os.environ.setdefault("UNIC_SECRET_KEY", "test-secret-key-not-for-prod")
 os.environ.setdefault("UNIC_ADMIN_EMAIL", "marco.r@example.org")
 os.environ.setdefault("UNIC_ADMIN_PASSWORD", "UniC-Plaquiste-2026")
@@ -2842,3 +2843,174 @@ def test_stream_announces_the_conversation_before_working(client, claude):
     kinds = [e["t"] for e in lines]
     assert "conv" in kinds and kinds.index("conv") < kinds.index("done")
     assert lines[kinds.index("conv")]["conversation_id"] == lines[kinds.index("done")]["conversation_id"]
+
+
+# ---------- Atelier : surveillance, auto-réparation, agents ----------
+
+def test_server_errors_become_grouped_incidents_without_secrets(client):
+    import logging
+    from app import selfcare
+    from app.database import SessionLocal
+    from app.models import Incident
+    selfcare.install_log_capture()
+    log = logging.getLogger("unic.test")
+    for n in (1, 2, 3):
+        try:
+            raise KeyError(f"devis {n}")
+        except KeyError:
+            log.exception("Calcul en panne token=sk-ant-abc123DEF password=hunter2")
+    db = SessionLocal()
+    selfcare.flush(db)
+    rows = db.query(Incident).filter(Incident.source == "unic.test").all()
+    assert len(rows) == 1 and rows[0].count == 3                       # même bug = une ligne
+    assert "sk-ant" not in rows[0].message + rows[0].detail and "hunter2" not in rows[0].message
+    assert client.get("/api/selfcare").json()["incidents"]
+    db.close()
+
+
+def test_sleeping_background_agent_is_woken_and_reported(client):
+    import time
+    from app import selfcare
+    woke = []
+    selfcare.beat("test-endormi", 10, restart=lambda: woke.append(1))
+    selfcare._beats["test-endormi"] = (time.time() - 3600, 10)
+    assert any(s["agent"] == "test-endormi" for s in selfcare.sleeping())
+    assert "test-endormi" in selfcare.wake_sleepers() and woke == [1]
+    assert not any(s["agent"] == "test-endormi" for s in selfcare.sleeping())
+    selfcare._beats.pop("test-endormi", None)
+
+
+def test_self_check_lists_real_checks(client):
+    out = client.post("/api/selfcare/check").json()
+    names = {c["nom"] for c in out["checks"]}
+    assert {"Base de données", "Disque", "Mémoire", "Claude (cerveau)", "Agents de fond", "Erreurs de code"} <= names
+    assert next(c for c in out["checks"] if c["nom"] == "Base de données")["ok"] is True
+
+
+def test_repair_edits_are_exact_and_never_touch_protected_zones():
+    from app import repair
+    files = {"backend/app/calc.py": "def f():\n    return 1\n", "backend/app/auth.py": "x = 1\n"}
+    ok = repair.apply_edits(files, [{"path": "backend/app/calc.py", "search": "return 1", "replace": "return 2"}], [])
+    assert ok == {"backend/app/calc.py": "def f():\n    return 2\n"}
+    for bad, why in [
+        ([{"path": "backend/app/auth.py", "search": "x = 1", "replace": "x = 2"}], "protégé"),
+        ([{"path": ".github/workflows/tests.yml", "search": "a", "replace": "b"}], "protégé"),
+        ([{"path": "backend/app/calc.py", "search": "absent", "replace": "b"}], "introuvable"),
+        ([{"path": "backend/app/calc.py", "search": "return 1", "replace": "return (("}], "syntaxe"),
+    ]:
+        with pytest.raises(repair.RepairError) as e:
+            repair.apply_edits(files, bad, [])
+        assert why in str(e.value)
+    assert not repair.allowed("../etc/passwd") and not repair.allowed("backend/app/repair.py")
+
+
+def test_repair_job_opens_a_pull_request_and_merges_only_when_tests_are_green(client, monkeypatch):
+    from app import repair, secrets_box
+    from app.database import SessionLocal
+    from app.models import Incident, RepairJob
+    db = SessionLocal()
+    repair._put(db, "repair_gh_token", secrets_box.encrypt("ghp_" + "x" * 30))
+    repair._put(db, "repair_base", "main")
+    inc = Incident(fingerprint="fp-test-repair", source="unic.calc", message="ZeroDivisionError",
+                   detail='Traceback\n  File "/app/backend/app/calc.py", line 2, in f\nZeroDivisionError')
+    db.add(inc)
+    db.commit()
+    calls = []
+
+    class R:
+        def __init__(self, code, data):
+            self.status_code, self._d, self.content = code, data, b"x"
+
+        def json(self):
+            return self._d
+
+    def gh(method, path, token, **kw):
+        calls.append((method, path, kw.get("json")))
+        if path.endswith("/git/trees/main"):
+            return R(200, {"tree": [{"type": "blob", "path": "backend/app/calc.py", "size": 30}]})
+        if "/git/ref/heads/" in path:
+            return R(200, {"object": {"sha": "base1"}})
+        if "/git/commits/base1" in path:
+            return R(200, {"tree": {"sha": "tree0"}})
+        if path.endswith("/git/trees"):
+            return R(201, {"sha": "tree1"})
+        if path.endswith("/git/commits"):
+            return R(201, {"sha": "c1"})
+        if path.endswith("/pulls") and method == "POST":
+            return R(201, {"number": 7, "html_url": "https://github.com/x/y/pull/7"})
+        if path.endswith("/pulls/7") and method == "GET":
+            return R(200, {"merged": False, "state": "open", "head": {"sha": "c1"}})
+        if "/check-runs" in path:
+            return R(200, {"check_runs": state["runs"]})
+        return R(200, {})
+
+    state = {"runs": [{"name": "backend", "status": "in_progress"}]}
+    answers = iter([{"paths": ["backend/app/calc.py"]},
+                    {"title": "Corrige la division par zéro", "summary": "Cause : surface nulle. Correction : garde.",
+                     "edits": [{"path": "backend/app/calc.py", "search": "return 1 / x", "replace": "return 1 / x if x else 0"}]}])
+    monkeypatch.setattr(repair, "_gh", gh)
+    monkeypatch.setattr(repair, "_read", lambda tok, repo, base, p: "def f(x):\n    return 1 / x\n")
+    monkeypatch.setattr(repair, "_claude", lambda system, user, tool, deep: next(answers))
+    job = RepairJob(kind="fix", incident_id=inc.id)
+    db.add(job)
+    db.commit()
+    repair.run_job(db, job)
+    assert job.status == "proposed" and job.pr_number == 7, job.error
+    tree = next(j for m, p, j in calls if p.endswith("/git/trees"))
+    assert tree["tree"][0]["content"].endswith("return 1 / x if x else 0\n")
+    assert db.get(Incident, inc.id).status == "fixing"
+    r = client.post(f"/api/selfcare/jobs/{job.id}/merge")
+    assert r.status_code == 409 and "tests" in r.json()["detail"]       # jamais de fusion sans tests verts
+    state["runs"] = [{"name": "backend", "status": "completed", "conclusion": "success"},
+                     {"name": "frontend", "status": "completed", "conclusion": "success"}]
+    out = client.post(f"/api/selfcare/jobs/{job.id}/merge").json()
+    assert out["ok"] and any(m == "PUT" and p.endswith("/pulls/7/merge") for m, p, _ in calls)
+    db.expire_all()
+    assert job.status == "merged" and db.get(Incident, inc.id).status == "fixed"
+    db.close()
+
+
+def test_github_token_is_stored_encrypted_and_never_returned(client, monkeypatch):
+    from app import repair
+    from app.database import SessionLocal
+    from app.models import AppSetting
+
+    class R:
+        status_code, content = 200, b"x"
+
+        def json(self):
+            return {"default_branch": "main", "permissions": {"push": True}}
+    monkeypatch.setattr(repair, "_gh", lambda *a, **k: R())
+    tok = "github_pat_" + "Z" * 40
+    out = client.put("/api/selfcare/github", json={"token": tok}).json()
+    assert out["connected"] and out["base"] == "main" and tok not in str(out)
+    db = SessionLocal()
+    assert tok not in db.get(AppSetting, "repair_gh_token").value
+    db.close()
+    assert client.post("/api/selfcare/repair", json={"kind": "feature", "request": "court"}).status_code == 400
+
+
+def test_ai_creates_agents_proposed_unless_owner_asked_and_agents_only_use_safe_tools(client, claude):
+    from app import agents
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import CustomAgent
+    db = SessionLocal()
+    s = AgentSession(db, None, {})
+    prop = s("create_agent", {"name": "Veille impayés", "mission": "Chaque lundi, liste les factures en retard et prépare les relances.",
+                              "every_hours": 168, "owner_asked": False})
+    assert prop["agent"]["status"] == "proposed"
+    act = s("create_agent", {"name": "Tri du courrier", "mission": "Lis les mails du matin et signale les demandes de devis.",
+                             "every_hours": 24, "owner_asked": True})
+    assert act["agent"]["status"] == "active"
+    fake = claude(_scripted([("tool", "create_quote", {"client_name": "X"}), ("tool", "list_unpaid", {}),
+                             ("text", "Rapport : 0 facture en retard. Rien à signaler.")]))
+    a = db.get(CustomAgent, act["agent"]["id"])
+    out = agents.run(db, a)
+    assert out["ok"] and "Rien à signaler" in a.last_result and a.runs == 1
+    tools_given = {t["name"] for t in fake.calls[0][1]["tools"]}
+    assert tools_given <= agents.SAFE_TOOLS and "create_quote" not in tools_given
+    second = fake.calls[1][1]["messages"][-1]["content"][0]
+    assert "non autorisé" in second["content"]                          # outil hors liste refusé
+    assert "Tri du courrier" in client.post("/api/chat", json={"message": "briefing"}).json()["message"]["content"]
+    db.close()

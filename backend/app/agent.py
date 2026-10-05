@@ -26,6 +26,45 @@ UNTRUSTED_NOTE = (
 
 TOOLS: list[dict] = [
     {
+        "name": "self_check",
+        "description": ("ATELIER : contrôle de santé d'UniC AI (base, disque, mémoire, Claude, sauvegardes, agents endormis, agents créés, "
+                        "problèmes ouverts). Réveille les agents endormis. À appeler quand le patron demande si tout marche, ou avant de corriger."),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "list_incidents",
+        "description": "ATELIER : problèmes vus par la surveillance (erreurs du serveur, agents endormis, contrôles échoués) avec leur id et leur nombre.",
+        "input_schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["open", "fixing", "fixed", "ignored", "all"]}},
+                         "additionalProperties": False},
+    },
+    {
+        "name": "improve_myself",
+        "description": ("ATELIER : UniC code LUI-MÊME une correction (kind=fix, avec incident_id ou la description du bug) ou une nouvelle "
+                        "fonction (kind=feature, décrite précisément). Claude Opus lit le code, écrit le correctif + un test et ouvre une "
+                        "proposition (pull request) testée automatiquement. Rien ne change en production avant le clic « Fusionner » du patron "
+                        "dans Paramètres › Atelier. Prend quelques minutes, en fond."),
+        "input_schema": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["fix", "feature"]},
+            "request": {"type": "string", "description": "Ce qu'il faut corriger ou ajouter, avec les détails donnés par le patron."},
+            "incident_id": {"type": "string", "description": "Id d'un problème de list_incidents (pour kind=fix)."}},
+            "required": ["kind"], "additionalProperties": False},
+    },
+    {
+        "name": "create_agent",
+        "description": ("ATELIER : crée un AGENT automatique : une mission qui tourne seule toutes les N heures (ex. « chaque matin, lis les mails "
+                        "et prépare les réponses aux demandes de devis », « chaque lundi, liste les factures en retard »). Outils de l'agent : "
+                        "lecture et brouillons seulement. owner_asked=true si le patron l'a demandé (actif tout de suite) ; sinon l'agent est "
+                        "PROPOSÉ et attend son clic."),
+        "input_schema": {"type": "object", "properties": {
+            "name": {"type": "string"}, "mission": {"type": "string"}, "every_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+            "owner_asked": {"type": "boolean"}}, "required": ["name", "mission", "every_hours", "owner_asked"], "additionalProperties": False},
+    },
+    {
+        "name": "list_agents",
+        "description": "ATELIER : agents automatiques existants, leur état et leur dernier rapport.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "read_inbox",
         "description": "Relève la boîte mail (IMAP, lecture seule) et liste les derniers e-mails : id, expéditeur, objet, extrait, brouillon de réponse existant.",
         "input_schema": {"type": "object", "properties": {
@@ -322,6 +361,8 @@ TOOL_LABELS = {
     "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
+    "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -356,6 +397,10 @@ AGENT_PROMPT = (
     "ne lui redemande jamais les dimensions déjà lues sur le plan."
     "\nSCHÉMAS : tu ne génères pas de photos ni de rendus réalistes, mais tu DESSINES en code avec draw_diagram (SVG → image) : plan de pièce coté, "
     "coupe de faux plafond ou de cloison, graphique, logo simple. Propose-le quand un dessin aide ; n'invente aucune cote ; dis que c'est un schéma, pas un plan d'exécution."
+    "\nATELIER (toi-même) : tu te surveilles et tu te répares. « Ça marche ? », « vérifie-toi », un bug signalé → self_check / list_incidents, "
+    "explique la cause en clair. Pour corriger ou ajouter une fonction : improve_myself (tu codes toi-même ; une proposition testée attend "
+    "le clic « Fusionner » du patron dans Paramètres › Atelier — ne dis jamais que c'est en ligne avant). Une tâche à répéter → propose "
+    "create_agent (owner_asked=true seulement s'il l'a demandé). Ne dis jamais qu'un bug est corrigé sans preuve."
     "\nTABLE RONDE : pour un devis important, un plan ambigu ou une décision à enjeu (ou si le patron demande de vérifier à plusieurs), appelle round_table avec tout le dossier, "
     "puis résume la synthèse et les désaccords en 5 lignes. Pas pour les questions simples (coût : 4 appels)."
     "\nLOGOS : demande de logo, favicon ou icône → lis logo_guide (processus, principes, types_de_marques, construction_svg), pose au plus 5 questions "
@@ -870,6 +915,44 @@ class AgentSession:
             raise ConnectorError("Type inconnu.", 400)
         self.db.commit()
         return {"code": row.code, "nom": row.name, "note": "Fiche créée sans autre information (rien d'inventé)."}
+
+    def _t_self_check(self) -> dict:
+        from app import selfcare
+        woke = selfcare.wake_sleepers()
+        out = selfcare.self_check(self.db)
+        out["agents_reveilles"] = woke
+        out["incidents"] = selfcare.incidents(self.db, "open", 10)
+        return out
+
+    def _t_list_incidents(self, status: str = "open") -> dict:
+        from app import selfcare
+        rows = selfcare.incidents(self.db, status if status in ("open", "fixing", "fixed", "ignored", "all") else "open", 20)
+        return {"incidents": rows, "nombre": len(rows)}
+
+    def _t_improve_myself(self, kind: str, request: str = "", incident_id: str = "") -> dict:
+        from app import repair
+        try:
+            job = repair.start_job(self.db, kind, request, incident_id)
+        except repair.RepairError as exc:
+            raise ConnectorError(str(exc), exc.status)
+        return {"ok": True, "proposition": job.id, "statut": "en cours (quelques minutes)",
+                "note": ("Dis au patron : la proposition (résumé, fichiers, tests) apparaîtra dans Paramètres › Atelier ; "
+                         "elle ne sera en ligne qu'après son clic « Fusionner » quand les tests sont verts.")}
+
+    def _t_create_agent(self, name: str, mission: str, every_hours: int = 24, owner_asked: bool = False) -> dict:
+        from app import agents
+        try:
+            a = agents.create(self.db, name, mission, every_hours, by="ai", active=bool(owner_asked))
+        except agents.AgentError as exc:
+            raise ConnectorError(str(exc), 400)
+        return {"ok": True, "agent": agents.to_dict(a),
+                "note": "Actif : premier passage dans la minute." if a.status == "active"
+                else "Proposé : le patron l'active dans Paramètres › Atelier."}
+
+    def _t_list_agents(self) -> dict:
+        from app import agents
+        from app.models import CustomAgent
+        return {"agents": [agents.to_dict(a) for a in self.db.query(CustomAgent).all()]}
 
     def _t_list_documents(self, kind: str = "all", query: str = "", min_total: float | None = None,
                           max_total: float | None = None) -> dict:

@@ -13,6 +13,7 @@ import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { AppsList, QuickChips } from "./Shortcuts";
+import { Atelier } from "./Atelier";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
@@ -1554,6 +1555,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
       { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
+      { to: "/atelier", title: "Atelier", text: "UniC se vérifie, se corrige et crée ses agents" },
     ],
   },
   {
@@ -1996,6 +1998,7 @@ export default function App() {
         <Route path="/parametres" element={<SettingsHub />} />
         <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
+        <Route path="/atelier" element={<Atelier />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       )}

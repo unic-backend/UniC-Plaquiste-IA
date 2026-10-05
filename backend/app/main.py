@@ -106,6 +106,11 @@ def startup():
         except Exception:
             pass
         try:
+            from app import selfcare
+            selfcare.start()   # surveillance : incidents, agents endormis, contrôle quotidien, agents créés
+        except Exception:
+            pass
+        try:
             from app import mail_account
             mail_account.load_into_runtime(db)   # compte Gmail connecté depuis l'appli
         except Exception:   # un secret illisible ne doit jamais empêcher le démarrage

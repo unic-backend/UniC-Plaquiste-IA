@@ -408,6 +408,23 @@ export const api = {
     request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   health: () => request<any>("/api/health"),
   connectors: () => request<Record<string, boolean>>("/api/connectors"),
+  selfcare: () => request<any>("/api/selfcare"),
+  selfCheck: () => request<any>("/api/selfcare/check", { method: "POST" }),
+  incident: (id: string) => request<any>(`/api/selfcare/incidents/${id}`),
+  setIncident: (id: string, status: string) => request<any>(`/api/selfcare/incidents/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  repair: (body: { kind: "fix" | "feature"; request?: string; incident_id?: string }) =>
+    request<any>("/api/selfcare/repair", { method: "POST", body: JSON.stringify(body) }),
+  repairJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}`),
+  mergeJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}/merge`, { method: "POST" }),
+  closeJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}/close`, { method: "POST" }),
+  githubConnect: (body: { token?: string; repo?: string; base?: string; deploy_hook?: string }) =>
+    request<any>("/api/selfcare/github", { method: "PUT", body: JSON.stringify(body) }),
+  githubDisconnect: () => request<any>("/api/selfcare/github", { method: "DELETE" }),
+  createAgent: (body: { name: string; mission: string; every_hours: number }) =>
+    request<any>("/api/agents", { method: "POST", body: JSON.stringify(body) }),
+  setAgent: (id: string, status: string) => request<any>(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  runAgent: (id: string) => request<any>(`/api/agents/${id}/run`, { method: "POST" }),
+  deleteAgent: (id: string) => request<any>(`/api/agents/${id}`, { method: "DELETE" }),
   knowledge: () => request<any[]>("/api/knowledge"),
   search: (q: string) => request<any>(`/api/search?q=${encodeURIComponent(q)}`),
   emails: () => request<any[]>("/api/emails"),

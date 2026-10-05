@@ -259,8 +259,11 @@ def run_daily() -> dict | None:
 def start_scheduler() -> None:
     """Fil discret : vérifie toutes les heures si la sauvegarde du jour est faite."""
     def loop():
+        from app import selfcare
+        selfcare.beat("sauvegarde", 3600, restart=start_scheduler)
         time.sleep(90)   # laisse le serveur démarrer
         while True:
+            selfcare.beat("sauvegarde", 3600, restart=start_scheduler)   # pouls : la surveillance voit s'il s'endort
             run_daily()
             time.sleep(3600)
 

@@ -1,0 +1,48 @@
+name: Tests
+
+# Chaque proposition d'UniC AI (branches unic-ai/*) et chaque changement passent ici avant toute fusion.
+on:
+  pull_request:
+  push:
+    paths: ["backend/**", "frontend/src/**", ".github/workflows/tests.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Outils système (OCR, PDF)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng libcairo2
+      - run: pip install -r requirements.txt
+      - name: Tests serveur
+        run: UNIC_DATA_DIR="$(mktemp -d)" python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Types et construction de l'appli
+        run: npx tsc --noEmit -p . && npm run build

@@ -738,3 +738,56 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Incident(Base):
+    """Problème vu par UniC lui-même (erreur, agent endormi, contrôle échoué). Regroupé par empreinte."""
+    __tablename__ = "incidents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(24), default="error")      # error | sleeping | check | tool
+    source: Mapped[str] = mapped_column(String(120), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[str] = mapped_column(Text, default="")                # trace (sans secret)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="open")     # open | fixing | fixed | ignored
+    fix_url: Mapped[str] = mapped_column(String(300), default="")       # correctif proposé (pull request)
+    first_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RepairJob(Base):
+    """Correctif ou nouvelle fonction codé par UniC : proposé en pull request, fusionné seulement au clic du patron."""
+    __tablename__ = "repair_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(16), default="fix")        # fix | feature
+    request: Mapped[str] = mapped_column(Text, default="")
+    incident_id: Mapped[str] = mapped_column(String(36), default="")
+    status: Mapped[str] = mapped_column(String(16), default="working")  # working | proposed | merged | failed | closed
+    summary: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[str] = mapped_column(Text, default="[]")
+    branch: Mapped[str] = mapped_column(String(120), default="")
+    pr_number: Mapped[int] = mapped_column(Integer, default=0)
+    pr_url: Mapped[str] = mapped_column(String(300), default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomAgent(Base):
+    """Agent créé par UniC (ou le patron) : une mission qui tourne seule à heure fixe, avec les outils autorisés."""
+    __tablename__ = "custom_agents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    mission: Mapped[str] = mapped_column(Text, default="")
+    every_hours: Mapped[int] = mapped_column(Integer, default=24)
+    status: Mapped[str] = mapped_column(String(16), default="active")   # active | paused | proposed
+    created_by: Mapped[str] = mapped_column(String(16), default="ai")   # ai | owner
+    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_result: Mapped[str] = mapped_column(Text, default="")
+    last_ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

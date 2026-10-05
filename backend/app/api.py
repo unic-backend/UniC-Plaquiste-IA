@@ -1478,3 +1478,191 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     if body.kind == "ceiling" and body.length_m and body.width_m:
         return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"]).to_dict()
     raise HTTPException(400, "Paramètres insuffisants")
+
+
+# ---------- Atelier : UniC se surveille, se corrige, crée ses agents ----------
+
+ADMIN = require_roles("admin", "manager")
+
+
+class RepairIn(BaseModel):
+    kind: str = "fix"
+    request: str = ""
+    incident_id: str = ""
+
+
+class GithubIn(BaseModel):
+    token: str = ""
+    repo: str = ""
+    base: str = ""
+    deploy_hook: str = ""
+
+
+class AgentIn(BaseModel):
+    name: str
+    mission: str
+    every_hours: int = 24
+
+
+class StatusIn(BaseModel):
+    status: str
+
+
+def _repair_call(fn, *a):
+    from app import repair
+    try:
+        return fn(*a)
+    except repair.RepairError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+@router.get("/selfcare")
+def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents, repair, selfcare
+    from app.models import AppSetting, CustomAgent, RepairJob
+    selfcare.ensure_running()
+    last = db.get(AppSetting, "selfcheck_last")
+    return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
+            "last_check": last.value if last else None, "github": repair.status(db),
+            "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
+            "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
+
+
+@router.post("/selfcare/check")
+def selfcare_check(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    selfcare.wake_sleepers()
+    return selfcare.self_check(db)
+
+
+@router.get("/selfcare/incidents/{iid}")
+def selfcare_incident(iid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    from app.models import Incident
+    i = db.get(Incident, iid)
+    if i is None:
+        raise HTTPException(404, "Incident introuvable")
+    return selfcare.to_dict(i, detail=True)
+
+
+@router.patch("/selfcare/incidents/{iid}")
+def selfcare_incident_status(iid: str, body: StatusIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    from app.models import Incident
+    i = db.get(Incident, iid)
+    if i is None:
+        raise HTTPException(404, "Incident introuvable")
+    if body.status not in ("open", "ignored", "fixed"):
+        raise HTTPException(400, "Statut inconnu")
+    i.status = body.status
+    db.commit()
+    return selfcare.to_dict(i)
+
+
+@router.post("/selfcare/repair")
+def selfcare_repair(body: RepairIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    job = _repair_call(repair.start_job, db, body.kind, body.request, body.incident_id)
+    return repair.to_dict(job)
+
+
+@router.get("/selfcare/jobs/{jid}")
+def selfcare_job(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    out = repair.to_dict(j)
+    if j.status == "proposed":
+        try:
+            out["checks"] = repair.checks(db, j)
+        except repair.RepairError as exc:
+            out["checks"] = {"state": "unknown", "detail": str(exc)}
+    return out
+
+
+@router.post("/selfcare/jobs/{jid}/merge")
+def selfcare_merge(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    out = _repair_call(repair.merge, db, j)
+    audit(db, user.id, "repair_merge", "repair_job", j.id, j.pr_url)
+    db.commit()
+    return out
+
+
+@router.post("/selfcare/jobs/{jid}/close")
+def selfcare_close(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    _repair_call(repair.close, db, j)
+    return repair.to_dict(j)
+
+
+@router.get("/selfcare/github")
+def selfcare_github(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    return repair.status(db)
+
+
+@router.put("/selfcare/github")
+def selfcare_github_connect(body: GithubIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    return _repair_call(repair.connect, db, body.token, body.repo, body.base, body.deploy_hook)
+
+
+@router.delete("/selfcare/github")
+def selfcare_github_disconnect(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    repair.disconnect(db)
+    return repair.status(db)
+
+
+@router.post("/agents")
+def agents_create(body: AgentIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    try:
+        return agents.to_dict(agents.create(db, body.name, body.mission, body.every_hours, by="owner"))
+    except agents.AgentError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.patch("/agents/{aid}")
+def agents_status(aid: str, body: StatusIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    try:
+        return agents.to_dict(agents.set_status(db, a, body.status))
+    except agents.AgentError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/agents/{aid}/run")
+def agents_run(aid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    return {"started": agents.start(a.id)}
+
+
+@router.delete("/agents/{aid}")
+def agents_delete(aid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}

@@ -153,6 +153,8 @@ TOOL_LABELS = {
     "revise_document": "Je corrige le document…", "list_documents": "Je cherche dans tes documents…",
     "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "read_email": "Je lis le mail…",
     "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
+    "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
+    "create_agent": "Je crée l'agent…",
 }
 
 
@@ -284,6 +286,8 @@ class ClaudeAIProvider(AIProvider):
             params["system"] = system
         if kwargs.get("effort"):
             params["output_config"] = {"effort": kwargs["effort"]}
+        if kwargs.get("thinking"):
+            params["thinking"] = {"type": "adaptive"}   # raisonnement profond (ex. atelier de réparation)
         web = bool(kwargs.get("web")) and settings.web_search_enabled
         client_tools = list(kwargs.get("tools") or [])
         handler = kwargs.get("tool_handler")

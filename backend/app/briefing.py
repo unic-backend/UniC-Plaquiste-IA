@@ -151,11 +151,38 @@ def _memory(db: Session) -> Section | None:
     return Section("Mémoire", OK, " ; ".join(parts) + ". (Paramètres → Mémoire)")
 
 
+def _agents(db: Session) -> Section | None:
+    from app import agents
+    rows = agents.recent_reports(db)
+    if not rows:
+        return None
+    return Section("Mes agents", OK, "\n".join(f"- {r['agent']}{'' if r['ok'] else ' (en échec)'} : {r['rapport'][:300]}" for r in rows[:6]))
+
+
+def _health(db: Session) -> Section | None:
+    """Ce que la surveillance a vu : seulement s'il y a quelque chose."""
+    from app import selfcare
+    from app.models import RepairJob
+    open_rows = selfcare.incidents(db, "open", 5)
+    sleepers = selfcare.sleeping()
+    ready = db.query(RepairJob).filter(RepairJob.status == "proposed").count()
+    if not open_rows and not sleepers and not ready:
+        return None
+    parts = []
+    if open_rows:
+        parts.append(f"{len(open_rows)} problème(s) vu(s) : " + " ; ".join(r["message"][:80] for r in open_rows[:3]))
+    if sleepers:
+        parts.append("agent(s) endormi(s) : " + ", ".join(s["agent"] for s in sleepers))
+    if ready:
+        parts.append(f"{ready} correction(s) prête(s) à fusionner")
+    return Section("Santé d'UniC", OK, " · ".join(parts) + ". (Paramètres → Atelier)")
+
+
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
     for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
-               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db)):
+               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db), lambda: _agents(db), lambda: _health(db)):
         try:
             s = fn()
         except Exception as exc:   # une rubrique en panne n'arrête pas les autres
