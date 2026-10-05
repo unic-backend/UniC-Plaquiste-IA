@@ -30,9 +30,44 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+class UploadRejected(ValueError):
+    pass
+
+
+ALLOWED_EXT = {".pdf", ".txt", ".csv", ".md", ".docx", ".xlsx", ".xlsm", ".dxf", ".ifc", ".dwg",
+               ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+_TEXT_EXT = {".txt", ".csv", ".md", ".dxf", ".ifc"}
+_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    ".pdf": (b"%PDF",), ".docx": (b"PK\x03\x04",), ".xlsx": (b"PK\x03\x04",), ".xlsm": (b"PK\x03\x04",),
+    ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",), ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".gif": (b"GIF87a", b"GIF89a"), ".dwg": (b"AC10",),
+}
+_EXECUTABLE_HEADS = (b"MZ", b"\x7fELF", b"#!", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe")
+
+
+def validate_upload(data: bytes, filename: str) -> str:
+    """Contrôle réel d'un envoi : extension autorisée + contenu cohérent (signature) + pas d'exécutable. Rend l'extension."""
+    ext = Path(filename or "").suffix.lower()
+    if ext not in ALLOWED_EXT:
+        raise UploadRejected(f"Type de fichier non autorisé ({ext or 'sans extension'}).")
+    if not data:
+        raise UploadRejected("Fichier vide.")
+    head = data[:16]
+    if head.startswith(_EXECUTABLE_HEADS):
+        raise UploadRejected("Fichier exécutable refusé.")
+    if ext in _SIGNATURES and not head.startswith(_SIGNATURES[ext]):
+        raise UploadRejected(f"Le contenu ne correspond pas à l'extension {ext}.")
+    if ext == ".webp" and not (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+        raise UploadRejected("Le contenu ne correspond pas à l'extension .webp.")
+    if ext in _TEXT_EXT and b"\x00" in data[:4096]:
+        raise UploadRejected(f"Le contenu ne ressemble pas à du texte ({ext}).")
+    return ext
+
+
 def save_upload(data: bytes, filename: str, mime: str, user_id: str | None, project_id: str | None, db: Session) -> StoredFile:
     fid = new_id()
-    ext = Path(filename).suffix.lower() or ""
+    filename = Path(filename or "fichier").name[:200] or "fichier"
+    ext = validate_upload(data, filename)
     dest_dir = settings.uploads_path / fid[:2]
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{fid}{ext}"

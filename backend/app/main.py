@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import logging
 import secrets
-import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -16,6 +15,7 @@ from app.api import router
 from app.api_reseaux import router as reseaux_router
 from app.api_voice import router as voice_router
 from app.api_website import router as website_router
+from app import ratelimit
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_columns
 from app.seed import seed_if_empty
@@ -27,7 +27,6 @@ app = FastAPI(
 )
 
 logger = logging.getLogger("unic.main")
-_fails: dict[str, list[float]] = {}
 _MAX_FAILS, _WINDOW = 10, 600.0
 
 
@@ -54,15 +53,13 @@ async def access_code_guard(request: Request, call_next):
                                                           "/api/auth/login", "/api/auth/status") \
             and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
         ip = request.client.host if request.client else "?"
-        now = time.time()
-        recent = [t for t in _fails.get(ip, []) if now - t < _WINDOW]
-        if len(recent) >= _MAX_FAILS:
+        if ratelimit.blocked(ip, _MAX_FAILS, _WINDOW):
             return JSONResponse({"detail": "Trop d'essais. Réessayez dans 10 minutes."}, status_code=429)
         given = request.headers.get("x-access-code", "")
         if not secrets.compare_digest(given.encode(), code.encode()) and not _token_ok(given):
-            _fails[ip] = recent + [now]
+            ratelimit.fail(ip, _WINDOW)
             return JSONResponse({"detail": "Code d'accès requis"}, status_code=401)
-        _fails.pop(ip, None)
+        ratelimit.reset(ip)
     return await call_next(request)
 
 
@@ -80,6 +77,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
+    if settings.unic_env == "production":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
 
 
 @app.exception_handler(Exception)

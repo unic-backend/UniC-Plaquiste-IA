@@ -622,7 +622,7 @@ def test_access_code_guard(client, monkeypatch):
     from app import main
     from app.config import settings
     monkeypatch.setattr(settings, "unic_access_code", "s3cret-code")
-    main._fails.clear()
+    main.ratelimit._mem.clear()
     assert client.get("/api/ping").status_code == 200                      # santé publique
     r = client.get("/api/auth/me")
     assert r.status_code == 401
@@ -632,11 +632,11 @@ def test_access_code_guard(client, monkeypatch):
     pre = client.get("/api/auth/me", headers={"Origin": "https://localhost"})
     assert pre.status_code == 401 and pre.headers.get("access-control-allow-origin") in ("*", "https://localhost")
     # blocage après 10 échecs
-    main._fails.clear()
+    main.ratelimit._mem.clear()
     for _ in range(10):
         client.get("/api/auth/me", headers={"x-access-code": "x"})
     assert client.get("/api/auth/me", headers={"x-access-code": "s3cret-code"}).status_code == 429
-    main._fails.clear()
+    main.ratelimit._mem.clear()
 
 
 def test_no_access_code_means_open_local(client):

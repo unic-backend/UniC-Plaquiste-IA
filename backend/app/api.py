@@ -16,7 +16,7 @@ from app import learned
 from app.capabilities import _connectors, health_dashboard, registry_snapshot, release_memory
 from app.config import settings
 from app.database import get_db
-from app.documents import process_file, save_upload, search_pages
+from app.documents import UploadRejected, process_file, save_upload, search_pages
 from app.models import (
     LearnedAnswer,
     Artifact,
@@ -429,7 +429,10 @@ async def upload_file(
     max_b = settings.max_upload_mb * 1024 * 1024
     if len(data) > max_b:
         raise HTTPException(413, f"Fichier trop volumineux (max {settings.max_upload_mb} Mo)")
-    rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
+    try:
+        rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
+    except UploadRejected as exc:
+        raise HTTPException(415, str(exc))
     info = process_file(rec, db)
     audit(db, user.id, "upload", "file", rec.id, rec.filename)
     db.commit()

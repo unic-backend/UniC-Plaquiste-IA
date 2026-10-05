@@ -22,3 +22,4 @@ pytesseract==0.3.13
 pypdfium2==5.13.0
 anthropic==1.11.0
 cryptography>=43,<51
+redis>=5,<7
