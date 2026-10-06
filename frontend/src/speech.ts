@@ -1,5 +1,6 @@
 import { apiUrl, getCode, isNative } from "./api";
 import { useEffect, useState } from "react";
+import { SpeechPipeline } from "./sentences";
 
 /** Lecture à voix haute des réponses. Moteurs : voix du téléphone (gratuit) ou voix ElevenLabs (serveur, voix clonée possible). */
 export type VoicePref = { engine: "device" | "eleven"; deviceVoice: string; rate: number };
@@ -96,6 +97,50 @@ export async function toggle(id: string, text: string): Promise<string> {
     loading = null; playing = null; emit();
     return e?.message || "Lecture impossible.";
   }
+}
+
+/** Une phrase dans la file : ne coupe pas ce qui est déjà en train d'être dit (parole au fil de l'eau). */
+function sayQueued(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    const spoken = speakable(text);
+    if (!spoken) return resolve();
+    const pref = getPref();
+    const device = () => {
+      try {
+        const synth = window.speechSynthesis;
+        if (!synth || typeof SpeechSynthesisUtterance === "undefined") return resolve();
+        const u = new SpeechSynthesisUtterance(spoken);
+        u.lang = "fr-FR"; u.rate = pref.rate;
+        const v = deviceVoices().find((x) => x.voiceURI === pref.deviceVoice);
+        if (v) u.voice = v;
+        u.onend = () => resolve(); u.onerror = () => resolve();
+        synth.speak(u);   // sans cancel() : la phrase précédente finit d'abord
+      } catch { resolve(); }
+    };
+    if (pref.engine === "device") { device(); return; }
+    elevenBlob(spoken).then((url) => {
+      audio = new Audio(url);
+      audio.onended = () => resolve(); audio.onerror = () => resolve();
+      audio.play().catch(() => resolve());
+    }).catch(device);
+  });
+}
+
+export function createSpeaker(): SpeechPipeline { stop(); return new SpeechPipeline(sayQueued, stop); }
+
+let ctx: AudioContext | null = null;
+/** Petit « ding » discret : UniC a fini d'écouter, il réfléchit (retour immédiat, la réponse met parfois un instant). */
+export function ding(freq = 880): void {
+  try {
+    ctx = ctx || new (window.AudioContext || (window as any).webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = freq; o.type = "sine";
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.14);
+    o.connect(g).connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.15);
+  } catch { /* son indisponible : sans importance */ }
 }
 
 /** Lit un texte à voix haute et rend la main quand la lecture est finie (mode vocal : on enchaîne l'écoute). */

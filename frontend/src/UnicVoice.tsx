@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { api, isNative } from "./api";
 import * as I from "./Icons";
 import { getReadWhenLocked, notifApi, phone } from "./phone";
-import { runNotifCommand, type Notif } from "./notifs";
-import { say, stop as stopSpeech } from "./speech";
+import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
+import { createSpeaker, ding, say, stop as stopSpeech } from "./speech";
 import { runPhoneIntent, type Intent } from "./unicPhone";
 
 /** UniC vocal : on lui parle, il répond à voix haute. Rien n'est écrit à l'écran. Dire « stop » ou « merci » termine. */
@@ -14,19 +14,23 @@ const LABEL: Record<Phase, string> = { idle: "Touche pour parler", listening: "J
 const END_RE = /^(stop|arr[êe]te|merci|c'est bon|c est bon|au revoir|ça suffit|ca suffit|fini|termin[ée])\b/i;
 
 /** Une écoute : rend ce que le patron a dit ("" si silence). Plugin Android ou reconnaissance du navigateur. */
+let micReady = false;   // disponibilité et autorisation vérifiées une seule fois : chaque tour gagne un instant
 async function listenOnce(): Promise<string> {
   if (isNative) {
     const { SpeechRecognition } = await import("@capacitor-community/speech-recognition");
-    const { available } = await SpeechRecognition.available();
-    if (!available) throw new Error("Reconnaissance vocale absente sur ce téléphone.");
-    const perm = await SpeechRecognition.requestPermissions();
-    if (perm.speechRecognition !== "granted") throw new Error("Micro refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.");
+    if (!micReady) {
+      const { available } = await SpeechRecognition.available();
+      if (!available) throw new Error("Reconnaissance vocale absente sur ce téléphone.");
+      const perm = await SpeechRecognition.requestPermissions();
+      if (perm.speechRecognition !== "granted") throw new Error("Micro refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.");
+      micReady = true;
+    }
     await SpeechRecognition.removeAllListeners();
     return new Promise<string>((resolve) => {
       let heard = "", done = false;
       const finish = () => { if (done) return; done = true; SpeechRecognition.removeAllListeners().catch(() => {}); resolve(heard.trim()); };
       SpeechRecognition.addListener("partialResults", (d: { matches: string[] }) => { if (d.matches?.[0]) heard = d.matches[0]; });
-      SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => { if (d.status === "stopped") setTimeout(finish, 700); });
+      SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => { if (d.status === "stopped") setTimeout(finish, 300); });
       SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 }).catch(finish);
       setTimeout(finish, 15000);
     });
@@ -64,6 +68,7 @@ export function UnicVoice() {
       if (!active.current) return;
       if (!heard) { if (++silent >= 2) { await say("Je suis là si tu as besoin."); return; } continue; }
       silent = 0;
+      ding();   // « j'ai entendu » : retour immédiat pendant que UniC réfléchit
       if (END_RE.test(heard.trim())) { await say("D'accord. À tout de suite."); return; }
       setPhase("thinking");
       let reply = "";
@@ -76,7 +81,7 @@ export function UnicVoice() {
           if (handled) continue;
           setPhase("thinking");
         }
-        const it = await api.unicIntent(heard).catch(() => null);
+        const it = looksLikePhoneTask(heard) ? await api.unicIntent(heard).catch(() => null) : null;   // pas d'aller-retour serveur si la phrase ne parle ni d'appel ni de message
         if (it && (it.action === "call" || it.action === "sms")) {   // tâche du téléphone : toujours confirmée à voix haute avant d'agir
           if (!isNative) { await say("Appeler et envoyer des messages marche seulement dans l'application Android."); continue; }
           setPhase("speaking");
@@ -86,9 +91,18 @@ export function UnicVoice() {
           } catch (e: any) { await say(e?.message || "Je n'ai pas pu le faire."); }
           continue;
         }
-        const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true }, () => {});
+        let speaker = createSpeaker();
+        let started = false;
+        const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true }, (ev) => {
+          if (!active.current) { speaker.cancel(); return; }
+          if (ev.t === "delta") { if (!started) { started = true; setPhase("speaking"); } speaker.push(ev.text || ""); }   // il parle dès la première phrase
+          else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); started = false; }
+        });
         cid.current = out.conversation_id;
-        reply = out.message?.content || "";
+        if (!out.streamed) speaker.push(out.message?.content || "");
+        setPhase("speaking");
+        await speaker.finish();
+        continue;
       } catch (e: any) { reply = e?.message || "Je n'arrive pas à joindre le serveur."; }
       if (!active.current) return;
       setPhase("speaking");

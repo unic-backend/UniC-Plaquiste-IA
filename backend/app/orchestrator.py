@@ -58,6 +58,11 @@ VOICE_RULES = (
     "attends son « oui ». N'invente rien."
 )
 
+# Tâches de bureau (documents, calculs, chantiers) : le modèle courant, plus sûr ; tout le reste de la conversation vocale : le plus rapide.
+VOICE_HEAVY_RE = re.compile(
+    r"devis|facture|bon de|calcul|m[ée]tr[ée]|plan\b|plaque|cloison|plafond|prix|surface|fourrure|montant|rail|peinture|enduit|chantier|rapport|bilan|impay|"
+    r"cr[ée]e|corrige|modifie|retire|ajoute|mail|courrier|avis|google|publi|r[ée]seaux", re.I)
+
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
 SYSTEM_RULES = """Tu es UniC, l'assistant personnel du patron d'UniC Plaquiste. Tu es une intelligence universelle : tu réponds à TOUTE question, sur n'importe quel sujet (sciences, droit, santé générale, informatique, cuisine, voyage, langues, histoire, actualité générale, maths, rédaction, conseils, discussion libre). Rien n'est « hors sujet ».
@@ -954,9 +959,19 @@ def handle_turn(
                                            "autre document → réponds d'après son contenu indexé. Ne réponds jamais hors sujet.")
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT + agent.availability_note(db)
+                voice_kw: dict = {}
+                if voice and not deep:   # vitesse : réponses courtes, modèle rapide pour la conversation, effort réduit pour le reste
+                    if settings.anthropic_voice_model and not VOICE_HEAVY_RE.search(text):
+                        voice_kw = {"model": settings.anthropic_voice_model, "effort": "", "max_tokens": 700}
+                    else:
+                        voice_kw = {"effort": "low", "max_tokens": 1200}
                 with live_stream():
                     ai = chat_complete(msgs, deep=deep, web=can_search,
-                                       tools=agent.TOOLS if tools_on else None, tool_handler=session)
+                                       tools=agent.TOOLS if tools_on else None, tool_handler=session, **voice_kw)
+                    if voice_kw.get("model") and not (ai.available and ai.text) and ai.error != "refusal":
+                        # le modèle rapide n'a pas répondu : on retombe sur le modèle courant, sans bruit
+                        ai = chat_complete(msgs, deep=deep, web=can_search, tools=agent.TOOLS if tools_on else None,
+                                           tool_handler=session, effort="low", max_tokens=1200)
                 if ai.provider == "claude" and ai.raw:
                     usage.record(db, ai.raw.get("usage"), ai.model)
                 if session is not None and session.used:

@@ -3029,3 +3029,34 @@ def test_voice_mode_adds_spoken_rules_and_the_assistant_is_called_unic(client, c
     assert "Tu es UniC" in system and "JARVIS" not in system
     client.post("/api/chat", json={"message": "dis moi bonjour encore"})
     assert "MODE VOIX" not in fake.calls[-1][1]["system"]               # le mode écrit reste inchangé
+
+
+def test_voice_mode_is_fast_light_chat_uses_the_fast_model_business_keeps_the_regular_one(client, claude):
+    from app.config import settings
+    fake = claude(lambda kind, kw: _resp("Ça va très bien, merci."))
+    client.post("/api/chat", json={"message": "salut UniC, comment tu vas aujourd'hui", "voice": True})
+    kw = fake.calls[0][1]                                                  # 1er appel = la réponse (les suivants : mémoire en fond)
+    assert kw["model"] == settings.anthropic_voice_model and "output_config" not in kw and kw["max_tokens"] == 700
+    from app.orchestrator import VOICE_HEAVY_RE
+    for heavy in ("fais le devis de madame Diop", "combien de plaques", "montre mes impayés", "corrige le prix", "lis mes mails"):
+        assert VOICE_HEAVY_RE.search(heavy), heavy
+    for light in ("raconte moi une blague", "quelle heure est-il", "comment tu vas"):
+        assert not VOICE_HEAVY_RE.search(light), light
+    before = len(fake.calls)
+    client.post("/api/chat", json={"message": "dis moi bonjour sans rien d'autre", "voice": False})
+    assert fake.calls[before][1]["max_tokens"] == 8000                   # le chat écrit n'est pas touché
+
+
+def test_voice_falls_back_to_the_regular_model_when_the_fast_one_fails(client, claude):
+    from app.config import settings
+    seen = []
+
+    def reply(kind, kw):
+        seen.append(kw["model"])
+        if kw["model"] == settings.anthropic_voice_model:
+            raise RuntimeError("modèle indisponible")
+        return _resp("Réponse de secours.")
+    claude(reply)
+    r = client.post("/api/chat", json={"message": "raconte moi une histoire courte", "voice": True})
+    assert "Réponse de secours." in r.json()["message"]["content"]
+    assert seen[0] == settings.anthropic_voice_model and settings.anthropic_fast_model in seen
