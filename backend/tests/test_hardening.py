@@ -365,3 +365,54 @@ def test_atelier_branch_follows_the_deployed_code(monkeypatch):
         assert repair.deployed_branch() == ""
     finally:
         db.close()
+
+
+# ---------- UniC vocal : appels et SMS (intention seulement) ----------
+
+@pytest.mark.parametrize("said,action,name,number,message", [
+    ("Appelle Awa Fall", "call", "Awa Fall", "", ""),
+    ("appelle madame Diop s'il te plaît", "call", "madame Diop", "", ""),
+    ("Passe-moi un appel à Moussa", "call", "Moussa", "", ""),
+    ("appelle le 77 708 50 92", "call", "", "777085092", ""),
+    ("Envoie un message à Awa Fall que je suis en retard", "sms", "Awa Fall", "", "je suis en retard"),
+    ("envoie un sms à Moussa : je passe demain matin", "sms", "Moussa", "", "je passe demain matin"),
+    ("écris à papa en disant bonne nuit", "sms", "papa", "", "bonne nuit"),
+    ("dis à Ibou que le chantier commence lundi", "sms", "Ibou", "", "le chantier commence lundi"),
+    ("envoie un message à Awa", "sms", "Awa", "", ""),
+])
+def test_phone_intent_rules(said, action, name, number, message):
+    from app import phone_intent
+    r = phone_intent.parse_rules(said)
+    assert r == {"action": action, "name": name, "number": number, "message": message}, r
+
+
+@pytest.mark.parametrize("said", ["fais le devis de madame Diop", "quels sont mes impayés", "combien de plaques pour 134 m²", "bonjour UniC", ""])
+def test_phone_intent_rules_ignore_normal_requests(said):
+    from app import phone_intent
+    assert phone_intent.parse_rules(said) is None
+
+
+def test_phone_intent_endpoint_and_claude_fallback(client, monkeypatch):
+    from app import phone_intent
+    from app.ai import AIResult
+    assert client.post("/api/unic/intent", json={"text": "Appelle Awa Fall"}).json()["action"] == "call"
+    assert client.post("/api/unic/intent", json={"text": "fais le devis"}).json()["action"] == "chat"
+    monkeypatch.setattr(phone_intent, "provider_chain", lambda *a, **k: [object()])
+    monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult(
+        '{"action":"sms","name":"Ibrahima","message":"je suis la"}', "claude", "m", True))
+    r = client.post("/api/unic/intent", json={"text": "tu peux prévenir Ibrahima que je suis là"}).json()
+    assert r["action"] == "sms" and r["name"] == "Ibrahima" and r["message"] == "je suis la"
+    monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult("n'importe quoi", "claude", "m", True))
+    assert client.post("/api/unic/intent", json={"text": "appelle moi un taxi"}).json()["action"] in ("call", "chat")
+
+
+def test_polish_keeps_meaning_and_falls_back(client, monkeypatch):
+    from app import phone_intent
+    from app.ai import AIResult
+    assert phone_intent.polish("je sui en retar") == "je sui en retar"          # sans IA : tel quel
+    monkeypatch.setattr(phone_intent, "provider_chain", lambda *a, **k: [object()])
+    monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult("Je suis en retard.", "claude", "m", True))
+    assert phone_intent.polish("je sui en retar") == "Je suis en retard."
+    monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult("x" * 500, "claude", "m", True))
+    assert phone_intent.polish("je sui en retar") == "je sui en retar"          # réponse démesurée : on garde l'original
+    assert client.post("/api/unic/polish", json={"text": "a"}).status_code == 200

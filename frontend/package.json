@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "cap:sync": "vite build && cap sync android",
-    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug"
+    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug",
+    "test:phone": "esbuild tests/phone.check.ts --bundle --platform=node --format=esm --outfile=.phone-check.mjs --log-level=error && node .phone-check.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",

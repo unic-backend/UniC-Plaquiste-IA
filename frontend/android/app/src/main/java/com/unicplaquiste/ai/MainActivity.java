@@ -11,6 +11,12 @@ import com.getcapacitor.BridgeActivity;
  */
 public class MainActivity extends BridgeActivity {
 
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        registerPlugin(UnicPhonePlugin.class);   // appels, SMS et contacts pour UniC vocal
+        super.onCreate(savedInstanceState);
+    }
+
     private boolean isNight() {
         int mode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         return mode == Configuration.UI_MODE_NIGHT_YES;

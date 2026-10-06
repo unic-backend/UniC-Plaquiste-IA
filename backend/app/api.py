@@ -170,6 +170,24 @@ class ChatIn(BaseModel):
     voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
 
 
+class IntentIn(BaseModel):
+    text: str = Field(default="", max_length=800)
+
+
+@router.post("/unic/intent")
+def unic_intent(body: IntentIn, user: User = Depends(get_current_user)):
+    """UniC vocal : ce que le patron a dit est-il « appelle X » ou « envoie un SMS à X » ? Le serveur n'exécute rien."""
+    from app import phone_intent
+    return phone_intent.parse(body.text)
+
+
+@router.post("/unic/polish")
+def unic_polish(body: IntentIn, user: User = Depends(get_current_user)):
+    """SMS dicté : orthographe et grammaire corrigées, sens inchangé (le patron l'entend avant d'envoyer)."""
+    from app import phone_intent
+    return {"message": phone_intent.polish(body.text)}
+
+
 @router.get("/conversations")
 def list_conversations(
     q: str = "",

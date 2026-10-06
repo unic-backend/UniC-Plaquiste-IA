@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { api, isNative } from "./api";
 import * as I from "./Icons";
+import { phone } from "./phone";
 import { say, stop as stopSpeech } from "./speech";
+import { runPhoneIntent, type Intent } from "./unicPhone";
 
 /** UniC vocal : on lui parle, il répond à voix haute. Rien n'est écrit à l'écran. Dire « stop » ou « merci » termine. */
 type Phase = "idle" | "listening" | "thinking" | "speaking";
@@ -64,6 +66,16 @@ export function UnicVoice() {
       setPhase("thinking");
       let reply = "";
       try {
+        const it = await api.unicIntent(heard).catch(() => null);
+        if (it && (it.action === "call" || it.action === "sms")) {   // tâche du téléphone : toujours confirmée à voix haute avant d'agir
+          if (!isNative) { await say("Appeler et envoyer des messages marche seulement dans l'application Android."); continue; }
+          setPhase("speaking");
+          try {
+            await runPhoneIntent(it as Intent, { say, listen: async () => { setPhase("listening"); const h = await listenOnce(); setPhase("speaking"); return h; }, phone,
+              polish: async (t) => (await api.unicPolish(t).catch(() => ({ message: t }))).message });
+          } catch (e: any) { await say(e?.message || "Je n'ai pas pu le faire."); }
+          continue;
+        }
         const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true }, () => {});
         cid.current = out.conversation_id;
         reply = out.message?.content || "";

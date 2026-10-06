@@ -60,3 +60,5 @@ jobs:
       - run: npm ci
       - name: Types et construction de l'appli
         run: npx tsc --noEmit -p . && npm run build
+      - name: Contacts, oui/non, appels et SMS vocaux
+        run: npm run test:phone
