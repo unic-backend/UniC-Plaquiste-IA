@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import * as I from "./Icons";
 import { api, fetchBlobUrl, shareDocument } from "./api";
 
@@ -73,5 +74,46 @@ export function DiagramCard({ id, filename, title }: { id: string; filename: str
         <ShareButton url={url} filename={filename} />
       </figcaption>
     </figure>
+  );
+}
+
+/** Fichier modifié par l'assistant (PDF, Word, Excel) : aperçu des pages pour un PDF, téléchargement et partage. L'original reste intact. */
+export function FileCard({ id, filename, mime, size }: { id: string; filename: string; mime: string; size?: number }) {
+  const [imgs, setImgs] = useState<string[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  const url = `/api/artifacts/${id}/download`;
+  const isPdf = mime === "application/pdf";
+  const kb = size ? (size > 1048576 ? `${(size / 1048576).toFixed(1)} Mo` : `${Math.max(1, Math.round(size / 1024))} Ko`) : "";
+  const show = () => {
+    setOpen(true);
+    if (!imgs) api.preview(id).then((r) => setImgs(r.images)).catch((e: Error) => setErr(e.message));
+  };
+  return (
+    <div className="art file-card">
+      <div>
+        <b>{filename}</b>
+        <span>Modifié par UniC · l'original est intact{kb ? ` · ${kb}` : ""}</span>
+      </div>
+      <div className="art-actions">
+        {isPdf && <button className="btn btn-line btn-small" onClick={show}>Aperçu</button>}
+        <ShareButton url={url} filename={filename} />
+      </div>
+      {open && createPortal(
+        <div className="preview-back" role="dialog" aria-label={`Aperçu ${filename}`}>
+          <div className="preview-head">
+            <button className="tool" aria-label="Fermer l'aperçu" onClick={() => setOpen(false)}>✕</button>
+            <b>{filename}</b>
+            <span />
+          </div>
+          <div className="preview-body">
+            {!imgs && !err && <p className="hint">Chargement de l'aperçu…</p>}
+            {err && <p className="error">{err}</p>}
+            {imgs?.map((src, i) => <img key={i} src={src} alt={`Page ${i + 1}`} />)}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }

@@ -3152,3 +3152,99 @@ def test_a_document_is_shown_once_even_if_two_tools_return_it():
     s._doc("quote", Row())
     s._doc("quote", Row())
     assert s.documents == [{"kind": "quote", "id": "abc"}]
+
+
+# ---------- modifier un fichier reçu (PDF, Word, Excel) ----------
+def _upload(client, name, data, mime):
+    r = client.post("/api/files", files={"file": (name, data, mime)})
+    assert r.status_code == 200, r.text
+    return r.json()["id"] if "id" in r.json() else r.json()["file"]["id"]
+
+
+def _session_for(fid):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    return AgentSession(SessionLocal(), None, {"last_file_id": fid})
+
+
+def test_ai_edits_a_received_pdf_and_verifies_it(client, tmp_path):
+    import hashlib
+    import pypdfium2 as pdfium
+    pdf_path = _labour_quote_pdf(tmp_path)
+    original = pdf_path.read_bytes()
+    fid = _upload(client, "devis_externe.pdf", original, "application/pdf")
+    s = _session_for(fid)
+    info = s("inspect_file", {})
+    assert info["texte_modifiable"] and any("4 000 FCFA" in b["text"] for b in info["blocs"])
+    res = s("edit_file", {"edits": [
+        {"op": "replace", "find": "4 000 FCFA", "replace": "4 500 FCFA"},
+        {"op": "replace", "find": "536 000 FCFA", "replace": "603 000 FCFA"},
+        {"op": "replace", "find": "Faux plafond", "replace": "Faux plafond hydrofuge — œuvre"},
+        {"op": "add_text", "text": "Prix de pose revu le 06/10/2026.", "page": 1},
+    ]})
+    assert res["ok"] and all(r["ok"] for r in res["rapport"])
+    assert all(c["nouveau_present"] in (True, None) and not c["ancien_encore_present"] for c in res["verification"])
+    assert len(s.files) == 1 and s.files[0]["filename"] == "devis_externe (modifié).pdf"
+    new = client.get(f"/api/artifacts/{s.files[0]['id']}/download").content
+    pdf = pdfium.PdfDocument(new)
+    text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+    assert "603 000 FCFA" in text and "536 000 FCFA" not in text                  # l'ancien montant est vraiment retiré
+    assert "hydrofuge — œuvre" in text and "Prix de pose revu" in text
+    from app.database import SessionLocal
+    from app.models import StoredFile
+    assert hashlib.sha256(Path(SessionLocal().get(StoredFile, fid).path).read_bytes()).hexdigest() == hashlib.sha256(original).hexdigest()   # l'original reste intact
+    miss = s("edit_file", {"edits": [{"op": "replace", "find": "INTROUVABLE", "replace": "x"}]})
+    assert miss["ok"] is False and "inspect_file" in miss["note"]
+
+
+def test_ai_edits_word_and_excel_files(client):
+    import io
+    import docx
+    import openpyxl
+    d = docx.Document()
+    d.add_paragraph("Devis pour Madame Diop")
+    d.add_paragraph("Total : 450 000 FCFA")
+    tbl = d.add_table(rows=1, cols=2)
+    tbl.rows[0].cells[0].text, tbl.rows[0].cells[1].text = "Pose", "450 000 FCFA"
+    buf = io.BytesIO()
+    d.save(buf)
+    fid = _upload(client, "devis.docx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    s = _session_for(fid)
+    res = s("edit_file", {"edits": [{"op": "replace", "find": "450 000 FCFA", "replace": "500 000 FCFA"},
+                                    {"op": "replace", "find": "Madame Diop", "replace": "Madame Ndiaye"},
+                                    {"op": "add_paragraph", "text": "Validité : 30 jours", "after": "Total"}]})
+    assert res["ok"], res
+    out = docx.Document(io.BytesIO(client.get(f"/api/artifacts/{s.files[0]['id']}/download").content))
+    full = " ".join(p.text for p in out.paragraphs) + " ".join(c.text for r in out.tables[0].rows for c in r.cells)
+    assert "500 000 FCFA" in full and "450 000" not in full and "Madame Ndiaye" in full and "Validité : 30 jours" in full
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Devis"
+    ws["A1"], ws["B1"] = "Plaques", 77
+    ws["A2"], ws["B2"] = "Total", "=B1*4500"
+    buf = io.BytesIO()
+    wb.save(buf)
+    fid = _upload(client, "devis.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    s = _session_for(fid)
+    res = s("edit_file", {"edits": [{"op": "set_cell", "sheet": "Devis", "cell": "B1", "value": 80},
+                                    {"op": "replace", "find": "Plaques", "replace": "Plaques BA13"},
+                                    {"op": "add_row", "sheet": "Devis", "values": ["Livraison", 0]}]})
+    assert res["ok"], res
+    out = openpyxl.load_workbook(io.BytesIO(client.get(f"/api/artifacts/{s.files[0]['id']}/download").content))["Devis"]
+    assert out["B1"].value == 80 and out["A1"].value == "Plaques BA13" and out["B2"].value == "=B1*4500" and out["A3"].value == "Livraison"
+
+
+def test_scanned_or_unknown_files_get_an_honest_answer(client):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (400, 300), "white").save(buf, "PDF")
+    fid = _upload(client, "scan.pdf", buf.getvalue(), "application/pdf")
+    s = _session_for(fid)
+    assert s("inspect_file", {})["texte_modifiable"] is False
+    err = s("edit_file", {"edits": [{"op": "replace", "find": "a", "replace": "b"}]})
+    assert "scanné" in err["error"] and "create_quote" in err["error"]
+    fid2 = _upload(client, "photo.png", b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
+    assert "Format non modifiable" in _session_for(fid2)("edit_file", {"edits": [{"op": "replace", "find": "a", "replace": "b"}]})["error"]
+    assert "Aucun" in _session_for("")("inspect_file", {})["error"] or "introuvable" in _session_for("")("inspect_file", {})["error"]
