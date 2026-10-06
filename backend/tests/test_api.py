@@ -3089,3 +3089,17 @@ def test_interpreter_translates_without_tools_or_company_data(client, claude):
     assert client.post("/api/unic/translate", json={"text": "x", "source": "fr", "target": "klingon"}).status_code in (400, 422)
     assert client.post("/api/unic/translate", json={"text": "  ", "source": "fr", "target": "en"}).json()["text"] == ""
     assert client.get("/api/unic/languages").json()["ar"] == "arabe"
+
+
+def test_new_quote_conversation_does_not_import_other_conversations(client, claude):
+    fake = claude(lambda kind, kw: _resp("D'accord. Quel est le nom du client ?"))
+    client.post("/api/chat", json={"message": "Note : le devis de madame Ribeiro au Point E est validé, plaques BA13"})
+    n = len(fake.calls)
+    r = client.post("/api/chat", json={"message": "Fais moi un devis sur ces plaques BA13 Ribeiro"})
+    assert r.status_code == 200
+    system = fake.calls[n][1]["system"]                       # 1er appel du tour = la réponse (les suivants : mémoire en fond)
+    assert "ÉCHANGES PASSÉS" not in system                     # nouvelle conversation + demande de devis : rien des autres conversations
+    assert "DEVIS (et facture, bon) : chaque document est indépendant" in system
+    n = len(fake.calls)
+    client.post("/api/chat", json={"message": "plaques BA13 Ribeiro Point E"})   # autre conversation, pas une demande de document
+    assert "ÉCHANGES PASSÉS" in fake.calls[n][1]["system"]     # le rappel du passé reste actif ailleurs

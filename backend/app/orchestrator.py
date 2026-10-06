@@ -60,6 +60,8 @@ VOICE_RULES = (
     "attends son « oui ». N'invente rien."
 )
 
+DOC_REQUEST_RE = re.compile(r"\b(devis|facture|bon de (?:commande|livraison)|proforma)\b", re.I)
+
 LOCKED_RULES = (
     "\n\nTÉLÉPHONE VERROUILLÉ : tu n'as accès à AUCUNE donnée de l'entreprise (clients, devis, factures, prix, chantiers, mémoire). "
     "Si le patron en demande, réponds en une phrase qu'il doit déverrouiller le téléphone ; pour le reste (questions générales, conseils), réponds normalement."
@@ -87,6 +89,7 @@ RÈGLES ABSOLUES
 5. Tu ne dis jamais qu'une action est faite si elle ne l'est pas. Connecteur absent = « NON DISPONIBLE ».
 6. Santé, droit, finance : donne des informations utiles et prudentes, rappelle de consulter un professionnel quand l'enjeu est réel.
 7. Tu réponds dans la langue du patron (français par défaut).
+8. DEVIS (et facture, bon) : chaque document est indépendant. Dans une conversation neuve, ne reprends JAMAIS le client, le chantier, la TVA, la présentation ou les montants d'une autre conversation ou d'un devis précédent, et ne propose pas de réponses déduites (« comme les devis précédents ? »). Demande seulement ce qui manque, en questions simples et courtes, une ou deux à la fois (jamais une liste de quatre), dans cet ordre : le nom du client, puis le lieu du chantier, puis seulement le reste s'il est vraiment nécessaire.
 """
 
 
@@ -943,7 +946,8 @@ def handle_turn(
                 else:
                     kb_text, doc_text, doc_flags = ctx.knowledge_and_documents(db, text)
                     memory_block = mem.block(db, text)
-                    past_block = mem.recall_past(db, text, conv.id)
+                    fresh_doc = bool(DOC_REQUEST_RE.search(text)) and db.query(Message).filter(Message.conversation_id == conv.id).count() <= 1
+                    past_block = "" if fresh_doc else mem.recall_past(db, text, conv.id)   # nouveau devis : rien des autres conversations (clients, chantiers, montants)
                 msgs = [{"role": "system", "content": SYSTEM_RULES + (VOICE_RULES if voice else "") + (LOCKED_RULES if locked else "")
                          + (f"\n\n{memory_block}" if memory_block else "")
                          + (f"\n\n{past_block}" if past_block else "")

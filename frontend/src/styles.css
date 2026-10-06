@@ -1148,3 +1148,11 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .interp-end { min-width: 160px; }
 .interp.speaking .interp-text { animation: unicBreath 2.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .interp.speaking .interp-text { animation: none; } }
+
+/* Flèche « tout en bas » de la conversation */
+.composer-wrap { position: relative; }
+.scroll-down { position: absolute; right: 18px; top: -52px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--g-edge); display: grid; place-items: center; cursor: pointer;
+  background: var(--g-base); color: var(--ink); box-shadow: 0 6px 18px rgba(0,0,0,.18); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: sdIn .2s var(--spring); z-index: 5; }
+.scroll-down:active { transform: scale(.94); }
+@keyframes sdIn { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .scroll-down { animation: none; } }

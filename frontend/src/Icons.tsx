@@ -9,6 +9,7 @@ const base = (size = 22): SVGProps<SVGSVGElement> => ({
 const mk = (d: React.ReactNode) => ({ size, ...rest }: P) => <svg {...base(size)} {...rest}>{d}</svg>;
 
 export const Mic = mk(<><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></>);
+export const ArrowDown = mk(<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5" strokeWidth={2.2} />);
 export const Plus = mk(<path d="M12 5v14M5 12h14" />);
 export const ArrowUp = mk(<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" strokeWidth={2.2} />);
 export const Stop = mk(<rect x="7" y="7" width="10" height="10" rx="2.5" fill="currentColor" stroke="none" />);

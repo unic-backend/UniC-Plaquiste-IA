@@ -651,6 +651,14 @@ function Chat({ initialId }: { initialId?: string }) {
   }, []);
   const sendRef = useRef<(m?: string) => void>();
   const end = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [showDown, setShowDown] = useState(false);   // flèche « tout en bas » : visible quand on est remonté dans la conversation
+  useEffect(() => {   // le champ grandit avec le texte (les retours à la ligne restent visibles)
+    const t = taRef.current;
+    if (!t) return;
+    t.style.height = "auto";
+    t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
+  }, [text]);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
 
@@ -870,7 +878,7 @@ function Chat({ initialId }: { initialId?: string }) {
 
   return (
     <>
-      <div className="chat">
+      <div className="chat" onScroll={(e) => { const c = e.currentTarget; setShowDown(c.scrollHeight - c.scrollTop - c.clientHeight > 260); }}>
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
@@ -897,17 +905,25 @@ function Chat({ initialId }: { initialId?: string }) {
         </div>
       </div>
       <div className="composer-wrap">
+        {showDown && (
+          <button className="scroll-down" aria-label="Aller tout en bas de la conversation" onClick={() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" })}>
+            <I.ArrowDown size={20} />
+          </button>
+        )}
         <QuickChips show={messages.length === 0 && !busy && !text && pending.length === 0} onAsk={(p) => send(p)} />
         <div className="composer">
           <AttachRow items={pending.map((f) => ({ name: f.name, mime: f.type, file: f }))} className="pending"
             onRemove={(i) => setPending((p) => p.filter((_, j) => j !== i))} />
           <textarea
+            ref={taRef}
             rows={1}
             placeholder="Écris ou dicte un message…"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              // téléphone / tablette : « Entrée » du clavier = retour à la ligne ; l'envoi se fait avec la flèche. Ordinateur : Entrée envoie, Maj+Entrée = ligne.
+              const touch = isNative || window.matchMedia?.("(pointer: coarse)").matches;
+              if (e.key === "Enter" && !e.shiftKey && !touch) {
                 e.preventDefault();
                 send();
               }
