@@ -168,6 +168,7 @@ class ChatIn(BaseModel):
     project_id: str | None = None
     deep: bool = False  # raisonnement profond (Claude) à la demande
     voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
+    locked: bool = False  # téléphone verrouillé (Hey UniC) : aucune donnée de l'entreprise, aucun outil
 
 
 class IntentIn(BaseModel):
@@ -323,7 +324,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
         on_start(conv.id)
     RUNNING.add(conv.id)
     try:
-        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice)
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice, body.locked)
     except HTTPException:
         raise
     except Exception:

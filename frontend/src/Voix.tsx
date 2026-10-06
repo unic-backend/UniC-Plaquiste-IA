@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import * as I from "./Icons";
 import { isNative, net } from "./api";
-import { getReadWhenLocked, notifApi, setReadWhenLocked } from "./phone";
+import { getPhoneWhenLocked, getReadWhenLocked, notifApi, setPhoneWhenLocked, setReadWhenLocked, wakeApi } from "./phone";
+import type { WakeInfo } from "./phone";
+
+const WAKE_STATE: Record<string, string> = {
+  loading: "Préparation du moteur d'écoute…", listening: "UniC écoute le mot d'appel.", busy: "UniC est ouvert.",
+  missing: "Moteur d'écoute absent de cette version.", error: "L'écoute s'est arrêtée (micro occupé ?). Réactive-la.", off: "Écoute arrêtée.",
+};
 import { canSpeakOnDevice, clearCache, deviceVoices, getPref, getVocalRate, setPref, setVocalRate, speakDevice, stop, type VoicePref } from "./speech";
 
 const SAMPLE = "Bonjour patron, voici ma voix. Le devis est prêt, je te lis les détails.";
@@ -20,10 +26,15 @@ export function Voix() {
   const upd = (p: Partial<VoicePref>) => setP(setPref(p));
   const [notifOn, setNotifOn] = useState<boolean | null>(null);
   const [lockRead, setLockRead] = useState(getReadWhenLocked());
+  const [wake, setWake] = useState<WakeInfo | null>(null);
+  const [phoneLock, setPhoneLock] = useState(getPhoneWhenLocked());
   const [vocal, setVocal] = useState(getVocalRate());
   useEffect(() => {
     if (!isNative) return;
-    const check = () => notifApi.enabled().then(setNotifOn).catch(() => setNotifOn(false));
+    const check = () => {
+      notifApi.enabled().then(setNotifOn).catch(() => setNotifOn(false));
+      wakeApi.status().then(setWake).catch(() => setWake(null));
+    };
     check();
     document.addEventListener("visibilitychange", check);   // retour des réglages Android : on relit l'état
     return () => document.removeEventListener("visibilitychange", check);
@@ -63,6 +74,23 @@ export function Voix() {
             {!notifOn && <button className="btn btn-copper btn-small" onClick={() => notifApi.openSettings().catch((e) => say(e.message))}>Autoriser l'accès</button>}
             {!notifOn && <p className="hint">Si Android refuse (« paramètre restreint ») : Réglages › Applis › UniC AI › menu ⋮ › « Autoriser les paramètres restreints », puis recommence.</p>}
             <label><input type="checkbox" checked={lockRead} onChange={(e) => { setReadWhenLocked(e.target.checked); setLockRead(e.target.checked); }} /> Lire même quand le téléphone est verrouillé</label>
+          </section>
+        )}
+
+        {isNative && wake && (
+          <section className="card-box">
+            <h3>« Hey UniC » : sans ouvrir l'appli</h3>
+            <p className="hint">Dis « Hey UniC » (ou « OK UniC ») : UniC s'ouvre et t'écoute, même écran verrouillé. L'écoute du mot d'appel reste sur le téléphone : rien n'est enregistré ni envoyé avant le mot d'appel.</p>
+            {!wake.modelBundled
+              ? <p className="error">Cette version n'embarque pas le moteur du mot d'appel.</p>
+              : <label><input type="checkbox" checked={wake.enabled} disabled={busy} onChange={(e) => run(async () => setWake(e.target.checked ? await wakeApi.start() : await wakeApi.stop()))} /> Activer « Hey UniC » (une notification reste affichée : c'est normal)</label>}
+            {wake.enabled && <p className={wake.state === "listening" ? "hint ic" : "hint"}>{WAKE_STATE[wake.state] || wake.state}</p>}
+            <p className={wake.overlay ? "hint ic" : "error"}>{wake.overlay ? <><I.Check size={16} /> Ouverture automatique autorisée</> : "Ouverture automatique non autorisée : UniC ne pourra s'ouvrir seul que via une notification à toucher."}</p>
+            {!wake.overlay && <button className="btn btn-copper btn-small" onClick={() => wakeApi.openOverlay().catch((e) => say(e.message))}>Autoriser « Afficher par-dessus les autres applis »</button>}
+            <p className={wake.battery ? "hint ic" : "error"}>{wake.battery ? <><I.Check size={16} /> Batterie : pas de mise en veille d'UniC</> : "Batterie : Android peut couper l'écoute. Choisis « Sans restriction » pour UniC."}</p>
+            {!wake.battery && <button className="btn btn-copper btn-small" onClick={() => wakeApi.openBattery().catch((e) => say(e.message))}>Autoriser en arrière-plan</button>}
+            <label><input type="checkbox" checked={phoneLock} onChange={(e) => { setPhoneWhenLocked(e.target.checked); setPhoneLock(e.target.checked); }} /> Appeler et écrire des SMS même téléphone verrouillé (déconseillé : n'importe qui près de toi peut le dire)</label>
+            <p className="hint">Verrouillé, UniC n'a jamais accès aux clients, devis, factures ni prix. Après un redémarrage, ouvre l'appli une fois pour relancer l'écoute (Android l'impose).</p>
           </section>
         )}
 

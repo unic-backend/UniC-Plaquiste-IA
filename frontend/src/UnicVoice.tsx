@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { api, isNative } from "./api";
 import * as I from "./Icons";
-import { getReadWhenLocked, notifApi, phone } from "./phone";
+import { getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
 import { createSpeaker, ding, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
 import { runPhoneIntent, type Intent } from "./unicPhone";
@@ -69,6 +69,7 @@ export function UnicVoice() {
   const active = useRef(false);
   const cid = useRef<string | undefined>(undefined);
   const queue = useRef<{ items: Notif[]; index: number }>({ items: [], index: 0 });
+  const wake = useRef(!!(window as unknown as { __unicWake?: boolean }).__unicWake);   // ouvert par « Hey UniC »
 
   const end = () => { active.current = false; stopSpeech(); setPhase("idle"); };
 
@@ -86,6 +87,7 @@ export function UnicVoice() {
       ding();   // « j'ai entendu » : retour immédiat pendant que UniC réfléchit
       if (END_RE.test(heard.trim())) { await say("D'accord. À tout de suite."); return; }
       setPhase("thinking");
+      const locked = isNative ? await notifApi.locked().catch(() => true) : false;   // en cas de doute : verrouillé
       let reply = "";
       try {
         if (isNative) {   // notifications : « qu'est-ce que j'ai reçu », « lis-moi le message » (tout reste sur le téléphone)
@@ -98,6 +100,7 @@ export function UnicVoice() {
         }
         const it = looksLikePhoneTask(heard) ? await api.unicIntent(heard).catch(() => null) : null;   // pas d'aller-retour serveur si la phrase ne parle ni d'appel ni de message
         if (it && (it.action === "call" || it.action === "sms")) {   // tâche du téléphone : toujours confirmée à voix haute avant d'agir
+          if (locked && !getPhoneWhenLocked()) { setPhase("speaking"); await say("Déverrouille le téléphone pour ça."); continue; }
           if (!isNative) { await say("Appeler et envoyer des messages marche seulement dans l'application Android."); continue; }
           setPhase("speaking");
           try {
@@ -108,7 +111,7 @@ export function UnicVoice() {
         }
         let speaker = createSpeaker();
         let started = false;
-        const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true }, (ev) => {
+        const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true, locked }, (ev) => {
           if (!active.current) { speaker.cancel(); return; }
           if (ev.t === "delta") { if (!started) { started = true; setPhase("speaking"); } speaker.push(ev.text || ""); }   // il parle dès la première phrase
           else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); started = false; }
@@ -125,22 +128,24 @@ export function UnicVoice() {
     }
   }
 
-  const loop = async () => { try { await conversation(); } finally { end(); } };
-
-  const toggle = () => {
-    if (active.current) { end(); return; }
-    setErr(""); active.current = true; loop().catch((e) => setErr(e?.message || "Erreur"));
+  const loop = async () => {
+    try { await conversation(); } finally { end(); if (wake.current) wakeApi.finish().catch(() => {}); }   // « Hey UniC » : on referme et on remet l'écoute
   };
+
+  const begin = () => { setErr(""); active.current = true; loop().catch((e) => setErr(e?.message || "Erreur")); };
+  const toggle = () => { if (active.current) end(); else begin(); };
+  const close = () => { end(); if (wake.current) wakeApi.finish().catch(() => {}); else nav(-1); };
 
   useEffect(() => {
     // téléphone verrouillé : cet écran (seulement lui) peut s'afficher par-dessus l'écran de verrouillage
     if (isNative) notifApi.lockScreenMode(true).catch(() => {});
-    return () => { active.current = false; stopSpeech(); if (isNative) notifApi.lockScreenMode(false).catch(() => {}); };
+    const auto = wake.current ? window.setTimeout(() => { if (!active.current) begin(); }, 350) : 0;   // « Hey UniC » : il écoute tout de suite
+    return () => { window.clearTimeout(auto); active.current = false; stopSpeech(); if (isNative) notifApi.lockScreenMode(false).catch(() => {}); };
   }, []);
 
   return createPortal(
     <div className={`unic-voice ${phase}${hearing ? " hearing" : ""}`} role="application" aria-label="UniC vocal">
-      <button className="unic-close" onClick={() => { end(); nav(-1); }} aria-label="Fermer"><I.Close size={24} /></button>
+      <button className="unic-close" onClick={close} aria-label="Fermer"><I.Close size={24} /></button>
       <button className="unic-orb" onClick={toggle} aria-label={LABEL[phase]}>
         <span className="unic-ring r1" /><span className="unic-ring r2" /><span className="unic-core"><I.Mic size={44} /></span>
       </button>

@@ -60,6 +60,11 @@ VOICE_RULES = (
     "attends son « oui ». N'invente rien."
 )
 
+LOCKED_RULES = (
+    "\n\nTÉLÉPHONE VERROUILLÉ : tu n'as accès à AUCUNE donnée de l'entreprise (clients, devis, factures, prix, chantiers, mémoire). "
+    "Si le patron en demande, réponds en une phrase qu'il doit déverrouiller le téléphone ; pour le reste (questions générales, conseils), réponds normalement."
+)
+
 # Tâches de bureau (documents, calculs, chantiers) : le modèle courant, plus sûr ; tout le reste de la conversation vocale : le plus rapide.
 VOICE_HEAVY_RE = re.compile(
     r"devis|facture|bon de|calcul|m[ée]tr[ée]|plan\b|plaque|cloison|plafond|prix|surface|fourrure|montant|rail|peinture|enduit|chantier|rapport|bilan|impay|"
@@ -450,6 +455,7 @@ def handle_turn(
     file_ids: list[str] | None = None,
     deep: bool = False,
     voice: bool = False,
+    locked: bool = False,
 ) -> AssistantReply:
     state = _state(conv)
     file_ids = file_ids or []
@@ -478,7 +484,7 @@ def handle_turn(
             + "."
         )
 
-    intent = _intent(text, state)
+    intent = "chat" if locked else _intent(text, state)   # téléphone verrouillé : conversation simple, jamais d'action métier
     reply_text = ""
 
     # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
@@ -932,10 +938,13 @@ def handle_turn(
                     .limit(8)
                     .all()
                 )
-                kb_text, doc_text, doc_flags = ctx.knowledge_and_documents(db, text)
-                memory_block = mem.block(db, text)
-                past_block = mem.recall_past(db, text, conv.id)
-                msgs = [{"role": "system", "content": SYSTEM_RULES + (VOICE_RULES if voice else "")
+                if locked:   # téléphone verrouillé : aucune donnée de l'entreprise (base, mémoire, anciennes conversations) ni outil
+                    kb_text, doc_text, doc_flags, memory_block, past_block = "", "", [], "", ""
+                else:
+                    kb_text, doc_text, doc_flags = ctx.knowledge_and_documents(db, text)
+                    memory_block = mem.block(db, text)
+                    past_block = mem.recall_past(db, text, conv.id)
+                msgs = [{"role": "system", "content": SYSTEM_RULES + (VOICE_RULES if voice else "") + (LOCKED_RULES if locked else "")
                          + (f"\n\n{memory_block}" if memory_block else "")
                          + (f"\n\n{past_block}" if past_block else "")
                          + (f"\n\nBASE UNIC (seule source pour les infos entreprise) :\n{kb_text}" if kb_text else "")
@@ -951,7 +960,7 @@ def handle_turn(
                         "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
                     )
-                tools_on = bool(chain) and chain[0].id == "claude"
+                tools_on = bool(chain) and chain[0].id == "claude" and not locked
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 if attached:
@@ -990,7 +999,8 @@ def handle_turn(
                     if session is not None and session.alerts:
                         reply_text += ("\n\n⚠️ Tentative de manipulation détectée dans : "
                                        + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")
-                    mem.defer_extract(db, text)
+                    if not locked:
+                        mem.defer_extract(db, text)
                     if deep and ai.provider != "claude":
                         reply_text += (
                             "\n\n_Raisonnement profond Claude NON DISPONIBLE"

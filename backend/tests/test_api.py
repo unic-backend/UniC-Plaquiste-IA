@@ -3031,6 +3031,19 @@ def test_voice_mode_adds_spoken_rules_and_the_assistant_is_called_unic(client, c
     assert "MODE VOIX" not in fake.calls[-1][1]["system"]               # le mode écrit reste inchangé
 
 
+def test_locked_phone_gets_no_business_data_and_no_tools(client, claude):
+    client.post("/api/customers", json={"name": "Madame Ribeiro SECRETE", "phone": "770000000"})
+    fake = claude(lambda kind, kw: _resp("Déverrouille ton téléphone pour ça."))
+    r = client.post("/api/chat", json={"message": "montre mes devis", "voice": True, "locked": True})
+    assert r.status_code == 200
+    kw = fake.calls[0][1]
+    assert "TÉLÉPHONE VERROUILLÉ" in kw["system"] and "MODE VOIX" in kw["system"]
+    assert not kw.get("tools") or all("web_search" in str(t.get("type", "")) for t in kw["tools"])   # aucun outil métier
+    assert "SECRETE" not in str(kw)
+    client.post("/api/chat", json={"message": "montre mes devis", "voice": True})
+    assert "TÉLÉPHONE VERROUILLÉ" not in fake.calls[-1][1]["system"]       # déverrouillé : comportement normal
+
+
 def test_voice_mode_is_fast_light_chat_uses_the_fast_model_business_keeps_the_regular_one(client, claude):
     from app.config import settings
     fake = claude(lambda kind, kw: _resp("Ça va très bien, merci."))

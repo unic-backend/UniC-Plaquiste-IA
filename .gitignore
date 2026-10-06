@@ -39,3 +39,6 @@ backups/
 # Desktop
 desktop/node_modules/
 desktop/dist/
+
+# Hey UniC : modèle de voix téléchargé par la CI (jamais commité)
+frontend/android/app/src/main/assets/model-fr/

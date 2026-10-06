@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.telephony.SmsManager;
@@ -39,7 +40,8 @@ import java.util.Set;
     permissions = {
         @Permission(strings = {Manifest.permission.READ_CONTACTS}, alias = "contacts"),
         @Permission(strings = {Manifest.permission.CALL_PHONE}, alias = "call"),
-        @Permission(strings = {Manifest.permission.SEND_SMS}, alias = "sms")
+        @Permission(strings = {Manifest.permission.SEND_SMS}, alias = "sms"),
+        @Permission(strings = {Manifest.permission.RECORD_AUDIO}, alias = "mic")
     }
 )
 public class UnicPhonePlugin extends Plugin {
@@ -268,6 +270,101 @@ public class UnicPhonePlugin extends Plugin {
             }
             call.resolve();
         });
+    }
+
+    // ---------- « Hey UniC » (mot d'appel) ----------
+
+    private JSObject wakeInfo() {
+        Context c = getContext();
+        PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+        JSObject res = new JSObject();
+        res.put("enabled", UnicWakeService.enabled(c));
+        res.put("state", UnicWakeService.state);
+        res.put("modelBundled", UnicWakeService.modelBundled(c));
+        res.put("overlay", Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(c));
+        res.put("battery", pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName()));
+        res.put("mic", getPermissionState("mic") == PermissionState.GRANTED);
+        return res;
+    }
+
+    @PluginMethod
+    public void wakeStatus(PluginCall call) {
+        call.resolve(wakeInfo());
+    }
+
+    @PluginMethod
+    public void startWake(PluginCall call) {
+        if (!UnicWakeService.modelBundled(getContext())) {
+            call.reject("Cette version n'embarque pas le moteur du mot d'appel.");
+            return;
+        }
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            requestPermissionForAlias("mic", call, "wakeMicPermission");
+            return;
+        }
+        launchWake(call);
+    }
+
+    @PermissionCallback
+    private void wakeMicPermission(PluginCall call) {
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            call.reject("Micro refusé.");
+            return;
+        }
+        launchWake(call);
+    }
+
+    private void launchWake(PluginCall call) {
+        UnicWakeService.setEnabled(getContext(), true);
+        if (!UnicWakeService.start(getContext())) {
+            UnicWakeService.setEnabled(getContext(), false);
+            call.reject("Android a refusé de lancer l'écoute. Ouvre UniC puis réessaie.");
+            return;
+        }
+        call.resolve(wakeInfo());
+    }
+
+    @PluginMethod
+    public void stopWake(PluginCall call) {
+        UnicWakeService.setEnabled(getContext(), false);
+        UnicWakeService.stop(getContext());
+        call.resolve(wakeInfo());
+    }
+
+    @PluginMethod
+    public void openOverlaySettings(PluginCall call) {
+        openSettings(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getContext().getPackageName())), call);
+    }
+
+    @PluginMethod
+    public void openBatterySettings(PluginCall call) {
+        openSettings(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName())), call);
+    }
+
+    private void openSettings(Intent i, PluginCall call) {
+        try {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Réglages indisponibles.");
+        }
+    }
+
+    /** Vrai quand la page a été ouverte par « Hey UniC » (écran verrouillé possible). */
+    @PluginMethod
+    public void launchMode(PluginCall call) {
+        JSObject res = new JSObject();
+        res.put("wake", getActivity() instanceof WakeActivity);
+        call.resolve(res);
+    }
+
+    /** Fin de la conversation lancée par « Hey UniC » : ferme l'écran, remet l'écoute. */
+    @PluginMethod
+    public void finishWake(PluginCall call) {
+        Activity act = getActivity();
+        if (act instanceof WakeActivity) ((WakeActivity) act).finishAndResume();
+        call.resolve();
     }
 
     private static String cleanNumber(String raw) {

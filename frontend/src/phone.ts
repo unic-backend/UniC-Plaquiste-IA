@@ -2,6 +2,9 @@ import { registerPlugin } from "@capacitor/core";
 import type { Contact } from "./phoneMatch";
 import type { Notif } from "./notifs";
 
+/** État de « Hey UniC » (mot d'appel) : off | loading | listening | busy | missing | error. */
+export type WakeInfo = { enabled: boolean; state: string; modelBundled: boolean; overlay: boolean; battery: boolean; mic: boolean };
+
 /** Pont vers le code Android (UnicPhonePlugin.java) : contacts, appel, SMS. Absent sur le web. */
 const Native = registerPlugin<{
   listContacts(): Promise<{ contacts: Contact[] }>;
@@ -12,6 +15,13 @@ const Native = registerPlugin<{
   listNotifications(): Promise<{ notifications: Notif[] }>;
   isLocked(): Promise<{ locked: boolean }>;
   setLockScreenMode(o: { on: boolean }): Promise<void>;
+  wakeStatus(): Promise<WakeInfo>;
+  startWake(): Promise<WakeInfo>;
+  stopWake(): Promise<WakeInfo>;
+  openOverlaySettings(): Promise<void>;
+  openBatterySettings(): Promise<void>;
+  launchMode(): Promise<{ wake: boolean }>;
+  finishWake(): Promise<void>;
 }>("UnicPhone");
 
 export const phone = {
@@ -28,6 +38,22 @@ export const notifApi = {
   locked: async (): Promise<boolean> => (await Native.isLocked()).locked,
   lockScreenMode: async (on: boolean): Promise<void> => { await Native.setLockScreenMode({ on }); },
 };
+
+export const wakeApi = {
+  status: async (): Promise<WakeInfo> => Native.wakeStatus(),
+  start: async (): Promise<WakeInfo> => Native.startWake(),
+  stop: async (): Promise<WakeInfo> => Native.stopWake(),
+  openOverlay: async (): Promise<void> => { await Native.openOverlaySettings(); },
+  openBattery: async (): Promise<void> => { await Native.openBatterySettings(); },
+  /** Vrai si l'écran a été ouvert par « Hey UniC ». */
+  isWakeLaunch: async (): Promise<boolean> => (await Native.launchMode()).wake,
+  finish: async (): Promise<void> => { await Native.finishWake(); },
+};
+
+const PHONE_LOCK_KEY = "unic.phoneWhenLocked";
+/** Appeler / écrire un SMS par la voix téléphone verrouillé : NON par défaut (n'importe qui près du téléphone pourrait le dire). */
+export const getPhoneWhenLocked = (): boolean => { try { return localStorage.getItem(PHONE_LOCK_KEY) === "1"; } catch { return false; } };
+export const setPhoneWhenLocked = (on: boolean): void => { try { localStorage.setItem(PHONE_LOCK_KEY, on ? "1" : "0"); } catch { /* ignoré */ } };
 
 const LOCK_KEY = "unic.readWhenLocked";
 /** Lire les notifications même téléphone verrouillé : oui par défaut (demande du patron), réglable dans Voix. */
