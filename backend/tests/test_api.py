@@ -1167,10 +1167,32 @@ def test_revise_quote_edits_in_place_and_recomputes(client):
         revise.revise(db, "quote", q, user_id=None, remove=["inconnu"])
     q.status = "approved"
     db.commit()
+    ch = revise.revise(db, "quote", q, user_id=None, add=[{"description": "Livraison", "quantity": 1, "unit": "forfait", "unit_price": 500000}])
+    q = db.get(Quotation, q.id)                                           # un devis approuvé se corrige sur ordre du patron
+    assert q.status == "draft" and q.approved_at is None and any("à ré-approuver" in c for c in ch)
+    assert any(i.description == "Livraison" and i.total == 500000 for i in q.items)
+    d = revise.dump(db, "quote", q)
+    assert d["statut"] == "draft" and d["lignes"][-1]["designation"] == "Livraison" and d["total"] == q.total
+    q.status = "approved"
+    db.commit()
     with pytest.raises(revise.ReviseError):
-        revise.revise(db, "quote", q, user_id=None, remove=[1])
-    with pytest.raises(revise.ReviseError):
-        revise.discard(db, "quote", q, None)
+        revise.discard(db, "quote", q, None)                              # on corrige, on ne supprime pas un document approuvé
+    db.close()
+
+
+def test_paid_invoice_can_be_revised_but_keeps_its_state_with_a_warning(client):
+    from app import revise
+    from app.models import Invoice
+    db, q = _mk_quote(client)
+    inv = Invoice(number="UC-2026-TEST-F", quotation_id=q.id, status="partial", vat_rate=0.18, paid=1000, subtotal=0, total=0, remaining=0)
+    db.add(inv)
+    db.flush()
+    from app.models import InvoiceItem
+    db.add(InvoiceItem(invoice_id=inv.id, position=1, description="Plaque", quantity=2, unit="u", unit_price=5000, total=10000))
+    db.commit()
+    ch = revise.revise(db, "invoice", inv, user_id=None, update=[{"line": 1, "quantity": 3}])
+    inv = db.get(Invoice, inv.id)
+    assert inv.status == "partial" and any("ATTENTION" in c for c in ch) and inv.subtotal == 15000
     db.close()
 
 
@@ -3248,3 +3270,18 @@ def test_scanned_or_unknown_files_get_an_honest_answer(client):
     fid2 = _upload(client, "photo.png", b"\x89PNG\r\n\x1a\n" + b"0" * 64, "image/png")
     assert "Format non modifiable" in _session_for(fid2)("edit_file", {"edits": [{"op": "replace", "find": "a", "replace": "b"}]})["error"]
     assert "Aucun" in _session_for("")("inspect_file", {})["error"] or "introuvable" in _session_for("")("inspect_file", {})["error"]
+
+
+def test_assistant_can_find_earlier_uploaded_files(client):
+    fid = _upload(client, "devis_ancien_Diop.pdf", _labour_quote_pdf_bytes(), "application/pdf")
+    s = _session_for("")
+    res = s("list_files", {"query": "diop"})
+    assert any(f["file_id"] == fid for f in res["fichiers"]) and "inspect_file" in res["note"]
+    assert s("list_files", {"query": "introuvable-xyz"})["fichiers"] == []
+
+
+def _labour_quote_pdf_bytes():
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        return _labour_quote_pdf(Path(d)).read_bytes()
