@@ -98,6 +98,24 @@ export async function toggle(id: string, text: string): Promise<string> {
   }
 }
 
+/** Lit un texte à voix haute et rend la main quand la lecture est finie (mode vocal : on enchaîne l'écoute). */
+export function say(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    const spoken = speakable(text);
+    if (!spoken) return resolve();
+    stop();
+    const pref = getPref();
+    const device = () => { try { if (!speakDevice(spoken, pref.deviceVoice, pref.rate, resolve)) resolve(); } catch { resolve(); } };
+    if (pref.engine === "device") { device(); return; }
+    elevenBlob(spoken).then((url) => {
+      audio = new Audio(url);
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      audio.play().catch(() => resolve());
+    }).catch(device);   // voix ElevenLabs indisponible : voix du téléphone
+  });
+}
+
 export function clearCache(): void { cache.forEach((u) => URL.revokeObjectURL(u)); cache.clear(); }
 
 export function useSpeech(id: string): "idle" | "loading" | "playing" {

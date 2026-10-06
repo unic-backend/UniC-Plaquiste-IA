@@ -832,7 +832,7 @@ class AgentSession:
         q = quotation_from_quantities(
             self.db, title=title or "Devis plaquisterie", quantities=qty, customer_id=cust.id if cust else None,
             project_id=self.project_id, user_id=self.user_id, client_name=None if cust else client_name or None,
-            notes="Devis préparé par JARVIS à partir du métré de la conversation.",
+            notes="Devis préparé par UniC à partir du métré de la conversation.",
             assumptions=(self.state.get("last_calc") or {}).get("assumptions"),
             missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, lieu=lieu, **kwargs)
         anomalies = pricecheck.check_quote(q)

@@ -354,7 +354,7 @@ def recall_past(db: Session, query: str, exclude_conversation_id: str | None = N
     lines, used = [], 0
     for i in picked:
         m, title = by_id[i]
-        who = "Patron" if m.role == "user" else "JARVIS"
+        who = "Patron" if m.role == "user" else "UniC"
         d = _aware(m.created_at)
         line = f"- [{d.strftime('%d/%m') if d else '?'} · « {(title or '')[:40]} »] {who} : {' '.join((m.content or '').split())[:280]}"
         if used + len(line) > budget:

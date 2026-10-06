@@ -14,6 +14,7 @@ import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { AppsList, QuickChips } from "./Shortcuts";
 import { Pointage, SignaturePanel } from "./Terrain";
+import { UnicVoice } from "./UnicVoice";
 import { Atelier } from "./Atelier";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
@@ -558,6 +559,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         }}>
           <I.Sun size={18} /> Briefing du jour
         </button>
+        <Link to="/unic" className="side-brief side-code" onClick={() => setOpen(false)}>
+          <I.Mic size={18} /> UniC vocal
+        </Link>
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
           {work > 0 && <span className="side-badge" aria-label={`${work} élément(s) à voir`}>{work}</span>}
@@ -2030,6 +2034,7 @@ export default function App() {
         <Route path="/sante" element={<Sante />} />
         <Route path="/atelier" element={<Atelier />} />
         <Route path="/pointage" element={<Pointage />} />
+        <Route path="/unic" element={<UnicVoice />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       )}

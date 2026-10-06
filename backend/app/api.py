@@ -167,6 +167,7 @@ class ChatIn(BaseModel):
     file_ids: list[str] = Field(default_factory=list)
     project_id: str | None = None
     deep: bool = False  # raisonnement profond (Claude) à la demande
+    voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
 
 
 @router.get("/conversations")
@@ -303,7 +304,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
         on_start(conv.id)
     RUNNING.add(conv.id)
     try:
-        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice)
     except HTTPException:
         raise
     except Exception:

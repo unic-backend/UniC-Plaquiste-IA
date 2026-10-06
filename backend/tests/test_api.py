@@ -3018,3 +3018,14 @@ def test_ai_only_proposes_agents_owner_activates_and_agents_only_use_safe_tools(
     assert "non autorisé" in second["content"]                          # outil hors liste refusé
     assert "Tri du courrier" in client.post("/api/chat", json={"message": "briefing"}).json()["message"]["content"]
     db.close()
+
+
+def test_voice_mode_adds_spoken_rules_and_the_assistant_is_called_unic(client, claude):
+    fake = claude(lambda kind, kw: _resp("D'accord, je m'en occupe."))
+    r = client.post("/api/chat", json={"message": "dis moi bonjour", "voice": True})
+    assert r.status_code == 200
+    system = fake.calls[-1][1]["system"]
+    assert "MODE VOIX" in system and "français approximatif" in system and "attends son « oui »" in system
+    assert "Tu es UniC" in system and "JARVIS" not in system
+    client.post("/api/chat", json={"message": "dis moi bonjour encore"})
+    assert "MODE VOIX" not in fake.calls[-1][1]["system"]               # le mode écrit reste inchangé
