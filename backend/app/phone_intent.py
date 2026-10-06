@@ -12,8 +12,10 @@ import re
 from app.ai import chat_complete, provider_chain
 
 CALL_RE = re.compile(
-    r"^(?:s'il (?:te|vous) pla[iî]t[, ]+)?(?:peux[- ]tu\s+)?(?:appelle|appeler|t[ée]l[ée]phone(?:\s+[àa])?|passe(?:-moi)?\s+un\s+appel\s+[àa]|"
-    r"fais?\s+un\s+appel\s+[àa]|je\s+veux\s+appeler|appel(?:le)?\s+[àa])\s+(?:le\s+num[ée]ro\s+)?(?P<who>.+?)\s*[.!?]*$", re.I)
+    r"^(?:s'il (?:te|vous) pla[iî]t[, ]+)?(?:(?:je\s+(?:veux|voudrais|aimerais|dois)|il\s+faut\s+que\s+je|peux[- ]tu|pouvez[- ]vous|tu\s+peux)\s+)?"
+    r"(?:appelle|appeler|appelles|t[ée]l[ée]phone[rz]?|(?:passe|passer|passes|fais|faire|fait|donne|lance|lancer)(?:-moi)?\s+(?:un|des|l')\s*appels?)"
+    r"(?:\s+(?:[àa]|au|aux|pour|vers|chez))?(?:\s+(?:le\s+num[ée]ro\s+)?(?P<who>.+?))?\s*[.!?]*$", re.I)
+NOT_A_CALL = re.compile(r"^(?:d['’ ]\s*offres?|d['’ ]\s*d[ée]marche|commercial|publicitaire)", re.I)   # « appel d'offres » n'est pas un coup de téléphone
 SMS_RE = re.compile(
     r"^(?:s'il (?:te|vous) pla[iî]t[, ]+)?(?:envoie|envoi|envoyer|[ée]cris|[ée]crire|manda|mande|texte|dis|pr[ée]viens|previens)\s+"
     r"(?:(?:un|une|le)\s+)?(?:sms|message|texto|mail|mess)?\s*(?:[àa]|au|aux)?\s*(?P<rest>.+?)\s*[.!?]*$", re.I)
@@ -40,7 +42,9 @@ def parse_rules(text: str) -> dict | None:
         return None
     m = CALL_RE.match(t)
     if m:
-        who = _clean_name(m.group("who"))
+        who = _clean_name(m.group("who") or "")
+        if NOT_A_CALL.match(who) or len(who.split()) > 5:
+            return None
         num = _digits(who)
         return {"action": "call", "name": "" if num else who, "number": num, "message": ""}
     m = SMS_RE.match(t)
@@ -59,7 +63,7 @@ def parse_rules(text: str) -> dict | None:
 def _ask_claude(text: str) -> dict | None:
     system = (
         "Tu lis ce que dit un patron de plaquisterie à son assistant vocal (français approximatif, mots déformés par l'accent). "
-        "Dis s'il demande d'APPELER quelqu'un ou d'ENVOYER un SMS/message à quelqu'un. Réponds par un JSON seul, sans texte autour : "
+        "Dis s'il demande d'APPELER quelqu'un (« passer un appel », « téléphoner ») ou d'ENVOYER un SMS/message à quelqu'un, même sans dire le nom. Réponds par un JSON seul, sans texte autour : "
         '{"action":"call"|"sms"|"chat","name":"nom de la personne tel que dit","message":"texte à envoyer, vide si non dit"}. '
         'Tout le reste (devis, factures, questions, discussion) = "chat". N\'invente ni nom ni message.')
     res = chat_complete([{"role": "system", "content": system}, {"role": "user", "content": text}], deep=False, max_tokens=300)
@@ -74,18 +78,17 @@ def _ask_claude(text: str) -> dict | None:
         return None
     if d.get("action") not in ("call", "sms"):
         return None
-    name = _clean_name(str(d.get("name") or ""))
-    if not name:
-        return None
+    name = _clean_name(str(d.get("name") or ""))   # sans nom : le téléphone demande « à qui ? »
     num = _digits(name)
     return {"action": d["action"], "name": "" if num else name, "number": num,
             "message": _clean_name(str(d.get("message") or ""))[:MAX_MESSAGE] if d["action"] == "sms" else ""}
 
 
-def parse(text: str) -> dict:
-    """{action: call|sms|chat, name, number, message}. Règles d'abord ; Claude seulement si un mot-clé du téléphone apparaît."""
+def parse(text: str, hint: bool = False) -> dict:
+    """{action: call|sms|chat, name, number, message}. Règles d'abord ; Claude si un mot-clé du téléphone apparaît, ou si le
+    téléphone a déjà repéré (mots mal dits compris) que la phrase parle d'appeler ou d'écrire (hint)."""
     found = parse_rules(text)
-    if found is None and TRIGGERS.search(text or "") and provider_chain():
+    if found is None and (hint or TRIGGERS.search(text or "")) and provider_chain():
         found = _ask_claude(text)
     return found or {"action": "chat", "name": "", "number": "", "message": ""}
 

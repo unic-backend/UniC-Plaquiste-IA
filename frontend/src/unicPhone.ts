@@ -20,7 +20,16 @@ async function confirm(d: Deps, question: string): Promise<boolean> {
   return false;
 }
 
+/** « Appelle Awa », « à Awa », « c'est Awa » → « Awa » : on retire les mots de liaison dits avant le nom. */
+export const cleanName = (s: string): string => s.replace(/^(?:\s*(?:c['’ ]est|appelle|appeler|à|a|au|pour|le|la|ecris|écris|dis|envoie|madame\s+la)\s+)+/i, "").replace(/[.!?]+$/, "").trim();
+
 export async function runPhoneIntent(it: Intent, d: Deps): Promise<void> {
+  if (!it.name && !it.number) {   // « passe un appel » sans dire à qui : on demande
+    await d.say(it.action === "call" ? "Qui veux-tu appeler ?" : "À qui j'écris ?");
+    const who = cleanName(await d.listen());
+    if (!who) { await d.say("Je n'ai rien entendu, j'annule."); return; }
+    it = { ...it, name: who };
+  }
   let number = it.number, label = it.number ? "ce numéro" : it.name;
   if (!number) {
     const cands = matchContacts(await d.phone.listContacts(), it.name);

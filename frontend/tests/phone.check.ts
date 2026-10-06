@@ -50,6 +50,14 @@ r = await run({ action: "call", name: "", number: "777085092", message: "" }, ["
 eq("numéro dicté", r.actions, ["CALL 777085092"]);
 r = await run({ action: "sms", name: "Moussa", number: "", message: "" }, [""]);
 eq("silence = rien", r.actions, []);
+r = await run({ action: "call", name: "", number: "", message: "" }, ["Dialo", "oui"]);
+eq("appel sans nom : UniC demande, puis appelle", [r.said[0], r.actions], ["Qui veux-tu appeler ?", ["CALL +221774444444"]]);
+r = await run({ action: "call", name: "", number: "", message: "" }, ["appelle Moussa", "oui"]);
+eq("nom précédé de « appelle »", r.actions, ["CALL +221773333333"]);
+r = await run({ action: "call", name: "", number: "", message: "" }, [""]);
+eq("appel sans nom ni réponse = rien", r.actions, []);
+r = await run({ action: "sms", name: "", number: "", message: "" }, ["Moussa", "je viens demain", "oui"]);
+eq("sms sans nom : demande, puis message", [r.said[0], r.actions], ["À qui j'écris ?", ["SMS +221773333333 | je viens demain"]]);
 composerOnly = true;
 r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens" }, ["oui"]);
 eq("SMS bloqué par Android : plan B annoncé", r.said[r.said.length - 1].startsWith("Android bloque l'envoi direct"), true);

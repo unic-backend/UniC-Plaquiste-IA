@@ -172,13 +172,14 @@ class ChatIn(BaseModel):
 
 class IntentIn(BaseModel):
     text: str = Field(default="", max_length=800)
+    hint: bool = False   # le téléphone a déjà repéré (même mal prononcé) un mot d'appel ou de message
 
 
 @router.post("/unic/intent")
 def unic_intent(body: IntentIn, user: User = Depends(get_current_user)):
     """UniC vocal : ce que le patron a dit est-il « appelle X » ou « envoie un SMS à X » ? Le serveur n'exécute rien."""
     from app import phone_intent
-    return phone_intent.parse(body.text)
+    return phone_intent.parse(body.text, body.hint)
 
 
 @router.post("/unic/polish")

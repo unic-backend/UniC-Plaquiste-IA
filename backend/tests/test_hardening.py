@@ -379,6 +379,13 @@ def test_atelier_branch_follows_the_deployed_code(monkeypatch):
     ("écris à papa en disant bonne nuit", "sms", "papa", "", "bonne nuit"),
     ("dis à Ibou que le chantier commence lundi", "sms", "Ibou", "", "le chantier commence lundi"),
     ("envoie un message à Awa", "sms", "Awa", "", ""),
+    ("passer un appel", "call", "", "", ""),
+    ("passe un appel", "call", "", "", ""),
+    ("Je veux passer un appel à Moussa Ndiaye", "call", "Moussa Ndiaye", "", ""),
+    ("peux-tu passer un appel à Awa", "call", "Awa", "", ""),
+    ("fais un appel à papa", "call", "papa", "", ""),
+    ("téléphoner à Awa Fall", "call", "Awa Fall", "", ""),
+    ("appelle", "call", "", "", ""),
 ])
 def test_phone_intent_rules(said, action, name, number, message):
     from app import phone_intent
@@ -386,7 +393,7 @@ def test_phone_intent_rules(said, action, name, number, message):
     assert r == {"action": action, "name": name, "number": number, "message": message}, r
 
 
-@pytest.mark.parametrize("said", ["fais le devis de madame Diop", "quels sont mes impayés", "combien de plaques pour 134 m²", "bonjour UniC", ""])
+@pytest.mark.parametrize("said", ["faire un appel d'offres pour le chantier", "je prépare un appel d'offre", "fais le devis de madame Diop", "quels sont mes impayés", "combien de plaques pour 134 m²", "bonjour UniC", ""])
 def test_phone_intent_rules_ignore_normal_requests(said):
     from app import phone_intent
     assert phone_intent.parse_rules(said) is None
@@ -416,3 +423,17 @@ def test_polish_keeps_meaning_and_falls_back(client, monkeypatch):
     monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult("x" * 500, "claude", "m", True))
     assert phone_intent.polish("je sui en retar") == "je sui en retar"          # réponse démesurée : on garde l'original
     assert client.post("/api/unic/polish", json={"text": "a"}).status_code == 200
+
+
+def test_phone_intent_claude_fallback_accepts_missing_name(client, monkeypatch):
+    from app import phone_intent
+    from app.ai import AIResult
+    monkeypatch.setattr(phone_intent, "provider_chain", lambda *a, **k: [object()])
+    monkeypatch.setattr(phone_intent, "chat_complete", lambda *a, **k: AIResult('{"action":"call","name":"","message":""}', "claude", "m", True))
+    r = client.post("/api/unic/intent", json={"text": "pase un apelle s'il te plait", "hint": True}).json()
+    assert r["action"] == "call" and r["name"] == ""                    # le téléphone demandera « Qui veux-tu appeler ? »
+
+
+def test_voice_prompt_says_unic_can_call_and_never_offers_a_script():
+    from app.orchestrator import VOICE_RULES
+    assert "Qui veux-tu appeler" in VOICE_RULES and "JAMAIS" in VOICE_RULES and "script" in VOICE_RULES
