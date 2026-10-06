@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as I from "./Icons";
-import { net } from "./api";
+import { isNative, net } from "./api";
+import { getReadWhenLocked, notifApi, setReadWhenLocked } from "./phone";
 import { canSpeakOnDevice, clearCache, deviceVoices, getPref, setPref, speakDevice, stop, type VoicePref } from "./speech";
 
 const SAMPLE = "Bonjour patron, voici ma voix. Le devis est prêt, je te lis les détails.";
@@ -17,6 +18,15 @@ export function Voix() {
   const [msg, setMsg] = useState("");
   const say = (m: string) => { setMsg(m); setTimeout(() => setMsg(""), 4000); };
   const upd = (p: Partial<VoicePref>) => setP(setPref(p));
+  const [notifOn, setNotifOn] = useState<boolean | null>(null);
+  const [lockRead, setLockRead] = useState(getReadWhenLocked());
+  useEffect(() => {
+    if (!isNative) return;
+    const check = () => notifApi.enabled().then(setNotifOn).catch(() => setNotifOn(false));
+    check();
+    document.addEventListener("visibilitychange", check);   // retour des réglages Android : on relit l'état
+    return () => document.removeEventListener("visibilitychange", check);
+  }, []);
 
   useEffect(() => {
     const load = () => setVoices(deviceVoices());
@@ -43,6 +53,17 @@ export function Voix() {
       <div className="page-inner">
         <h1>Voix</h1>
         <p className="lede">Le bouton <I.Speaker size={14} /> sous chaque réponse la lit à voix haute.</p>
+
+        {isNative && (
+          <section className="card-box">
+            <h3>UniC vocal : lire mes notifications</h3>
+            <p className="hint">Dis « qu'est-ce que j'ai reçu ? » puis « lis-moi le message ». WhatsApp, SMS, Instagram, Facebook, Reddit… Tout reste sur ton téléphone.</p>
+            <p className={notifOn ? "hint ic" : "error"}>{notifOn === null ? "Vérification…" : notifOn ? <><I.Check size={16} /> Accès aux notifications accordé</> : "Accès aux notifications non accordé."}</p>
+            {!notifOn && <button className="btn btn-copper btn-small" onClick={() => notifApi.openSettings().catch((e) => say(e.message))}>Autoriser l'accès</button>}
+            {!notifOn && <p className="hint">Si Android refuse (« paramètre restreint ») : Réglages › Applis › UniC AI › menu ⋮ › « Autoriser les paramètres restreints », puis recommence.</p>}
+            <label><input type="checkbox" checked={lockRead} onChange={(e) => { setReadWhenLocked(e.target.checked); setLockRead(e.target.checked); }} /> Lire même quand le téléphone est verrouillé</label>
+          </section>
+        )}
 
         <section className="card-box">
           <label>Moteur de lecture</label>

@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { api, isNative } from "./api";
 import * as I from "./Icons";
-import { phone } from "./phone";
+import { getReadWhenLocked, notifApi, phone } from "./phone";
+import { runNotifCommand, type Notif } from "./notifs";
 import { say, stop as stopSpeech } from "./speech";
 import { runPhoneIntent, type Intent } from "./unicPhone";
 
@@ -50,6 +51,7 @@ export function UnicVoice() {
   const [err, setErr] = useState("");
   const active = useRef(false);
   const cid = useRef<string | undefined>(undefined);
+  const queue = useRef<{ items: Notif[]; index: number }>({ items: [], index: 0 });
 
   const end = () => { active.current = false; stopSpeech(); setPhase("idle"); };
 
@@ -66,6 +68,14 @@ export function UnicVoice() {
       setPhase("thinking");
       let reply = "";
       try {
+        if (isNative) {   // notifications : « qu'est-ce que j'ai reçu », « lis-moi le message » (tout reste sur le téléphone)
+          let handled = false;
+          setPhase("speaking");
+          try { handled = await runNotifCommand(heard, { say, api: notifApi, readWhenLocked: getReadWhenLocked(), queue: queue.current }); }
+          catch (e: any) { await say(e?.message || "Je n'ai pas pu lire tes notifications."); handled = true; }
+          if (handled) continue;
+          setPhase("thinking");
+        }
         const it = await api.unicIntent(heard).catch(() => null);
         if (it && (it.action === "call" || it.action === "sms")) {   // tâche du téléphone : toujours confirmée à voix haute avant d'agir
           if (!isNative) { await say("Appeler et envoyer des messages marche seulement dans l'application Android."); continue; }
@@ -93,7 +103,11 @@ export function UnicVoice() {
     setErr(""); active.current = true; loop().catch((e) => setErr(e?.message || "Erreur"));
   };
 
-  useEffect(() => () => { active.current = false; stopSpeech(); }, []);
+  useEffect(() => {
+    // téléphone verrouillé : cet écran (seulement lui) peut s'afficher par-dessus l'écran de verrouillage
+    if (isNative) notifApi.lockScreenMode(true).catch(() => {});
+    return () => { active.current = false; stopSpeech(); if (isNative) notifApi.lockScreenMode(false).catch(() => {}); };
+  }, []);
 
   return createPortal(
     <div className={`unic-voice ${phase}`} role="application" aria-label="UniC vocal">

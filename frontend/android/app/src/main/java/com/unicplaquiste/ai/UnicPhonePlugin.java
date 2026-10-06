@@ -1,11 +1,15 @@
 package com.unicplaquiste.ai;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.ContactsContract;
+import android.provider.Settings;
 import android.telephony.SmsManager;
 
 import com.getcapacitor.JSArray;
@@ -18,7 +22,10 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import androidx.core.app.NotificationManagerCompat;
+
 import java.util.ArrayList;
+import java.util.List;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -177,6 +184,75 @@ public class UnicPhonePlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Envoi du SMS impossible.");
         }
+    }
+
+    // ---------- notifications (lecture à voix haute) ----------
+
+    @PluginMethod
+    public void notificationAccess(PluginCall call) {
+        boolean on = NotificationManagerCompat.getEnabledListenerPackages(getContext()).contains(getContext().getPackageName());
+        JSObject res = new JSObject();
+        res.put("enabled", on);
+        call.resolve(res);
+    }
+
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        try {
+            Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Réglages indisponibles.");
+        }
+    }
+
+    @PluginMethod
+    public void listNotifications(PluginCall call) {
+        JSArray out = new JSArray();
+        List<UnicNotificationService.Item> items = UnicNotificationService.snapshot(true);
+        for (UnicNotificationService.Item it : items) {
+            JSObject o = new JSObject();
+            o.put("id", it.key);
+            o.put("pkg", it.pkg);
+            o.put("app", it.app);
+            o.put("title", it.title);
+            o.put("text", it.text);
+            o.put("category", it.category);
+            o.put("time", it.time);
+            o.put("removed", it.removed);
+            out.put(o);
+        }
+        JSObject res = new JSObject();
+        res.put("notifications", out);
+        call.resolve(res);
+    }
+
+    @PluginMethod
+    public void isLocked(PluginCall call) {
+        KeyguardManager km = (KeyguardManager) getContext().getSystemService(Context.KEYGUARD_SERVICE);
+        JSObject res = new JSObject();
+        res.put("locked", km != null && km.isKeyguardLocked());
+        call.resolve(res);
+    }
+
+    /** L'écran UniC vocal peut s'afficher par-dessus l'écran de verrouillage tant qu'il est ouvert (jamais le reste de l'appli). */
+    @PluginMethod
+    public void setLockScreenMode(PluginCall call) {
+        final boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        final Activity act = getActivity();
+        if (act == null) {
+            call.resolve();
+            return;
+        }
+        act.runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                act.setShowWhenLocked(on);
+                act.setTurnScreenOn(on);
+            }
+            call.resolve();
+        });
     }
 
     private static String cleanNumber(String raw) {

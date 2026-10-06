@@ -33,6 +33,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+        <!-- UniC vocal : lire les notifications reçues (WhatsApp, SMS, Instagram…) ; le patron accorde l'accès dans Réglages -->
+        <service
+            android:name=".UnicNotificationService"
+            android:exported="true"
+            android:label="UniC AI"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
     <!-- Dictée vocale : Android 11+ doit voir le service de reconnaissance -->
