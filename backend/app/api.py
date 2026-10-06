@@ -171,6 +171,13 @@ class ChatIn(BaseModel):
     locked: bool = False  # téléphone verrouillé (Hey UniC) : aucune donnée de l'entreprise, aucun outil
 
 
+class TranslateIn(BaseModel):
+    text: str = Field(default="", max_length=1200)
+    source: str = Field(default="fr", max_length=5)
+    target: str = Field(default="en", max_length=5)
+    context: list[dict] = Field(default_factory=list, max_length=12)
+
+
 class IntentIn(BaseModel):
     text: str = Field(default="", max_length=800)
     hint: bool = False   # le téléphone a déjà repéré (même mal prononcé) un mot d'appel ou de message
@@ -181,6 +188,22 @@ def unic_intent(body: IntentIn, user: User = Depends(get_current_user)):
     """UniC vocal : ce que le patron a dit est-il « appelle X » ou « envoie un SMS à X » ? Le serveur n'exécute rien."""
     from app import phone_intent
     return phone_intent.parse(body.text, body.hint)
+
+
+@router.post("/unic/translate")
+def unic_translate(body: TranslateIn, user: User = Depends(get_current_user)):
+    """Interprète : traduit une phrase. Aucun outil, aucune donnée de l'entreprise, rien d'enregistré."""
+    from app import translate as tr
+    try:
+        return {"text": tr.translate(body.text, body.source, body.target, body.context)}
+    except tr.TranslateError as exc:
+        raise HTTPException(503 if "IA" in str(exc) or "pour le moment" in str(exc) else 400, str(exc))
+
+
+@router.get("/unic/languages")
+def unic_languages(user: User = Depends(get_current_user)):
+    from app import translate as tr
+    return tr.LANGUAGES
 
 
 @router.post("/unic/polish")

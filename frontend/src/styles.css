@@ -1127,3 +1127,24 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 
 .unic-voice.listening.hearing .unic-core { transform: scale(1.14); }
 .unic-voice.listening.hearing .unic-ring { animation-duration: .9s; }
+
+/* Interprète : écran plein, deux gros boutons, traduction en grand pour la montrer à l'autre personne */
+.interp { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: calc(64px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  background: radial-gradient(70% 50% at 50% 30%, var(--amb-1), transparent 70%), radial-gradient(60% 40% at 50% 100%, var(--amb-2), transparent 72%), var(--paper); overflow-y: auto; }
+.interp-title { position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 16px; margin: 0; font-size: 20px; display: flex; align-items: center; gap: 8px; }
+.interp-setup { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 14px; }
+.interp-langs { display: flex; flex-wrap: wrap; gap: 8px; }
+.interp-langs button { padding: 10px 14px; border-radius: 999px; border: 1px solid var(--g-edge); background: var(--g-base); color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+.interp-langs button.on { background: linear-gradient(145deg, #e08a52, var(--copper)); color: #fff; border-color: transparent; }
+.interp-chain { font-size: 15px; display: flex; gap: 8px; align-items: flex-start; }
+.interp-start { width: 100%; padding: 16px; font-size: 18px; }
+.interp-out { width: 100%; max-width: 520px; min-height: 140px; display: flex; flex-direction: column; justify-content: center; gap: 10px; text-align: center; }
+.interp-src { margin: 0; opacity: .7; font-size: 15px; }
+.interp-text { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.25; word-break: break-word; }
+.interp .unic-state { font-size: 18px; text-align: center; }
+.interp-btns { display: flex; gap: 12px; width: 100%; max-width: 520px; }
+.interp-btn { flex: 1; min-height: 76px; border-radius: 22px; border: 1px solid var(--g-edge); background: var(--g-base); color: inherit; font: inherit; font-weight: 800; font-size: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; transition: transform .2s var(--spring), background .2s; }
+.interp-btn.live { background: linear-gradient(145deg, #e08a52, var(--copper)); color: #fff; transform: scale(1.04); border-color: transparent; }
+.interp-end { min-width: 160px; }
+.interp.speaking .interp-text { animation: unicBreath 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .interp.speaking .interp-text { animation: none; } }

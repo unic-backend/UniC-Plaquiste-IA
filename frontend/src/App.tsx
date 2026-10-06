@@ -15,6 +15,7 @@ import * as I from "./Icons";
 import { AppsList, QuickChips } from "./Shortcuts";
 import { Pointage, SignaturePanel } from "./Terrain";
 import { UnicVoice } from "./UnicVoice";
+import { Interpreter } from "./Interpreter";
 import { Atelier } from "./Atelier";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
@@ -561,6 +562,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         </button>
         <Link to="/unic" className="side-brief side-code" onClick={() => setOpen(false)}>
           <I.Mic size={18} /> UniC vocal
+        </Link>
+        <Link to="/interprete" className="side-brief side-code" onClick={() => setOpen(false)}>
+          <I.Globe size={18} /> Interprète
         </Link>
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
@@ -2035,6 +2039,7 @@ export default function App() {
         <Route path="/atelier" element={<Atelier />} />
         <Route path="/pointage" element={<Pointage />} />
         <Route path="/unic" element={<UnicVoice />} />
+        <Route path="/interprete" element={<Interpreter />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       )}

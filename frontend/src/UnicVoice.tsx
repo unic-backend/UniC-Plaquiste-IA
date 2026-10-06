@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { api, isNative } from "./api";
 import * as I from "./Icons";
-import { audioRoute, ear, getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
+import { listenOnce } from "./listen";
+import { audioRoute, getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
 import { createSpeaker, ding, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
 import { HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
@@ -13,55 +14,12 @@ type Phase = "idle" | "listening" | "thinking" | "speaking";
 const LABEL: Record<Phase, string> = { idle: "Touche pour parler", listening: "Je t'écoute", thinking: "Je réfléchis…", speaking: "Je parle" };
 const HEARING = "Je t'entends…";
 const WAITING = "Un instant…";   // le micro n'est pas encore ouvert : on n'affiche « Je t'écoute » qu'au signal sonore
+/** « mode interprète », « active la traduction en anglais » → ouvre l'interprète (la langue citée est préchoisie). */
+const INTERP_RE = /interpr[èe]te|traducteur|mode traduction|(?:active|lance|ouvre|d[ée]marre)\s+(?:la\s+)?traduction/i;
+const INTERP_LANGS: [RegExp, string][] = [[/anglais|english/i, "en"], [/arabe/i, "ar"], [/espagnol/i, "es"], [/portugais/i, "pt"], [/allemand/i, "de"], [/italien/i, "it"], [/turc/i, "tr"], [/chinois/i, "zh"], [/russe/i, "ru"], [/n[ée]erlandais|hollandais/i, "nl"], [/japonais/i, "ja"], [/hindi/i, "hi"]];
 const END_RE = /^(stop|arr[êe]te|merci|c'est bon|c est bon|au revoir|ça suffit|ca suffit|fini|termin[ée])\b/i;
 
 const say = (t: string) => sayRate(t, getVocalRate());   // UniC vocal parle à la vitesse choisie (1,25 par défaut)
-
-/** Une écoute : rend ce que le patron a dit ("" si silence). Écoute native Android (signaux exacts) ou reconnaissance du navigateur. */
-const ERR_TEXT: Record<number, string> = {
-  1: "Pas de réseau pour la reconnaissance vocale.", 2: "Pas de réseau pour la reconnaissance vocale.", 3: "Le micro est occupé par une autre appli.",
-  5: "La reconnaissance vocale s'est arrêtée.", 8: "Le moteur de dictée est occupé.", 9: "Micro refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.",
-  10: "Le moteur de dictée est surchargé.", 11: "Le moteur de dictée du téléphone est indisponible.", 12: "Langue française non disponible pour la dictée.", 13: "Langue française non disponible pour la dictée.",
-};
-async function listenOnce(onHear?: (text: string) => void, onReady?: () => void): Promise<string> {
-  if (isNative) {
-    return new Promise<string>((resolve, reject) => {
-      let heard = "", done = false, retries = 0, timer: ReturnType<typeof setTimeout> | undefined, openTimer: ReturnType<typeof setTimeout> | undefined;
-      const handles: { remove(): Promise<void> }[] = [];
-      const cleanup = () => { clearTimeout(timer); clearTimeout(openTimer); handles.forEach((h) => h.remove().catch(() => {})); ear.stop(); };
-      const finish = () => { if (done) return; done = true; cleanup(); resolve(heard.trim()); };
-      const fail = (m: string) => { if (done) return; done = true; cleanup(); reject(new Error(m)); };
-      const arm = (ms: number) => { clearTimeout(timer); timer = setTimeout(finish, ms); };
-      const begin = () => ear.start("fr-FR").catch((e) => fail(e?.message || "Le micro n'a pas pu s'ouvrir."));
-      (async () => {
-        handles.push(await ear.on("ready", () => { clearTimeout(openTimer); onReady?.(); ding(660, 0.05); arm(15000); }));   // le micro est réellement ouvert : écran et signal sonore ensemble
-        handles.push(await ear.on("partial", (d) => { if (d.text) { heard = d.text; onHear?.(heard); } }));
-        handles.push(await ear.on("final", (d) => { if (d.text) heard = d.text; finish(); }));
-        handles.push(await ear.on("error", (d) => {
-          const c = d.code ?? 0;
-          if (c === 6 || c === 7) { finish(); return; }                                          // silence ou rien compris : on rend ce qu'on a
-          if ((c === 3 || c === 5 || c === 8) && retries++ < 2) { setTimeout(() => { if (!done) begin(); }, 450); return; }   // micro pas encore libre : on réessaie
-          fail(ERR_TEXT[c] || `La dictée a échoué (code ${c}).`);
-        }));
-        openTimer = setTimeout(() => fail("Le micro ne s'ouvre pas. Ferme les autres applis qui l'utilisent, puis touche la bille."), 6000);   // le micro ne s'est jamais ouvert : on le dit, on ne reste pas bloqué
-        await begin();
-      })().catch((e) => fail(e?.message || "Micro indisponible"));
-    });
-  }
-  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  if (!SR) throw new Error("Dictée indisponible sur ce navigateur.");
-  return new Promise<string>((resolve) => {
-    const r = new SR();
-    r.lang = "fr-FR"; r.interimResults = false; r.maxAlternatives = 1;
-    let text = "";
-    r.onresult = (e: any) => { text = Array.from(e.results).map((x: any) => x[0].transcript).join(" "); onHear?.(text); };
-    r.onend = () => resolve(text.trim());
-    r.onerror = () => resolve(text.trim());
-    r.onstart = () => { onReady?.(); };
-    r.start();
-    setTimeout(() => { try { r.stop(); } catch { /* déjà arrêté */ } }, 15000);
-  });
-}
 
 export function UnicVoice() {
   const nav = useNavigate();
@@ -74,6 +32,7 @@ export function UnicVoice() {
   const queue = useRef<{ items: Notif[]; index: number }>({ items: [], index: 0 });
   const failed = useRef(false);   // erreur affichée : l'écran reste ouvert pour qu'on la lise
   const manual = useRef(false);   // arrêt par un toucher : on ne ferme pas
+  const interp = useRef("");   // l'interprète a été demandé à voix haute : on y va quand la conversation se termine
   const wake = useRef(!!(window as unknown as { __unicWake?: boolean }).__unicWake);   // ouvert par « Hey UniC »
 
   const end = () => { active.current = false; stopSpeech(); setPhase("idle"); };
@@ -92,6 +51,13 @@ export function UnicVoice() {
       silent = 0;
       ding();   // « j'ai entendu » : retour immédiat pendant que UniC réfléchit
       if (END_RE.test(heard.trim())) { await say("D'accord. À tout de suite."); return; }
+      if (INTERP_RE.test(heard)) {   // l'interprète a son propre écran : il s'active seulement ici, sur demande
+        if (wake.current) { setPhase("speaking"); await say("Ouvre l'application pour l'interprète."); continue; }
+        const l = INTERP_LANGS.find(([re]) => re.test(heard))?.[1];
+        setPhase("speaking"); await say("J'ouvre l'interprète. Touche qui parle.");
+        interp.current = l ? `/interprete?lang=${l}` : "/interprete";
+        return;
+      }
       if (isNative && HANGUP_RE.test(heard)) {   // « coupe l'appel » : raccrocher tout de suite
         setPhase("speaking");
         try { await say((await phone.endCall()) ? "C'est fait, appel terminé." : "Il n'y a pas d'appel en cours."); }
@@ -141,7 +107,7 @@ export function UnicVoice() {
   }
 
   const loop = async () => {
-    try { await conversation(); } finally { end(); if (wake.current && !failed.current && !manual.current) wakeApi.finish().catch(() => {}); }   // « Hey UniC » : on referme et on remet l'écoute
+    try { await conversation(); } finally { end(); if (interp.current) { const to = interp.current; interp.current = ""; nav(to); return; } if (wake.current && !failed.current && !manual.current) wakeApi.finish().catch(() => {}); }   // « Hey UniC » : on referme et on remet l'écoute
   };
 
   const begin = () => { setErr(""); failed.current = false; manual.current = false; active.current = true; loop().catch((e) => setErr(e?.message || "Erreur")); };

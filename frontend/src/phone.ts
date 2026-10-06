@@ -9,7 +9,7 @@ export type WakeInfo = { enabled: boolean; state: string; modelBundled: boolean;
 const Native = registerPlugin<{
   listContacts(): Promise<{ contacts: Contact[] }>;
   call(o: { number: string }): Promise<{ dialedOnly?: boolean } | void>;
-  sendSms(o: { number: string; text: string }): Promise<{ composerOnly?: boolean } | void>;
+  sendSms(o: { number: string; text: string; composer?: boolean }): Promise<{ composerOnly?: boolean } | void>;
   notificationAccess(): Promise<{ enabled: boolean }>;
   openNotificationSettings(): Promise<void>;
   listNotifications(): Promise<{ notifications: Notif[] }>;
@@ -22,6 +22,9 @@ const Native = registerPlugin<{
   openBatterySettings(): Promise<void>;
   launchMode(): Promise<{ wake: boolean }>;
   finishWake(): Promise<void>;
+  pauseWake(): Promise<void>;
+  resumeWake(): Promise<void>;
+  keepScreenOn(o: { on: boolean }): Promise<void>;
   endCall(): Promise<{ ended: boolean }>;
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
   listen(o: { language: string }): Promise<void>;
@@ -36,7 +39,7 @@ export const phone = {
   call: async (number: string): Promise<void> => { await Native.call({ number }); },
   /** Rend true si le SMS est seulement préparé dans l'appli Messages (autorisation SMS bloquée) : le patron touche « Envoyer ». */
   endCall: async (): Promise<boolean> => (await Native.endCall()).ended,
-  sendSms: async (number: string, text: string): Promise<boolean> => !!((await Native.sendSms({ number, text })) as { composerOnly?: boolean } | undefined)?.composerOnly,
+  sendSms: async (number: string, text: string, composer = false): Promise<boolean> => !!((await Native.sendSms({ number, text, composer })) as { composerOnly?: boolean } | undefined)?.composerOnly,
 };
 
 /** Casque / AirPods : le micro passe par le casque pendant la conversation (sans casque : aucun effet). */
@@ -72,6 +75,10 @@ export const wakeApi = {
   /** Vrai si l'écran a été ouvert par « Hey UniC ». */
   isWakeLaunch: async (): Promise<boolean> => (await Native.launchMode()).wake,
   finish: async (): Promise<void> => { await Native.finishWake(); },
+  /** L'interprète est ouvert : « Hey UniC » se tait (puis reprend). */
+  pause: async (): Promise<void> => { await Native.pauseWake(); },
+  resume: async (): Promise<void> => { await Native.resumeWake(); },
+  keepScreenOn: async (on: boolean): Promise<void> => { await Native.keepScreenOn({ on }); },
 };
 
 const PHONE_LOCK_KEY = "unic.phoneWhenLocked";

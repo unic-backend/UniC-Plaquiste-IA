@@ -137,6 +137,40 @@ function sayQueued(text: string, rate = getVocalRate()): Promise<void> {
 
 export function createSpeaker(): SpeechPipeline { stop(); elevenChain = Promise.resolve(); return new SpeechPipeline((t) => sayQueued(t), stop); }
 
+/** Voix du téléphone pour une langue (« en-US », « ar-SA »…) : exacte d'abord, sinon même langue de base. */
+export function voiceForLang(lang: string): SpeechSynthesisVoice | undefined {
+  try {
+    const l = lang.toLowerCase().replace("_", "-"), base = l.split("-")[0];
+    const all = window.speechSynthesis?.getVoices() || [];
+    return all.find((v) => v.lang.toLowerCase().replace("_", "-") === l) || all.find((v) => v.lang.toLowerCase().replace("_", "-").startsWith(base));
+  } catch { return undefined; }
+}
+
+/** Dit une phrase dans une autre langue (interprète). Rend { voice: false } si le téléphone n'a pas de voix pour cette langue. */
+export function sayIn(text: string, lang: string, rate = 1): Promise<{ voice: boolean }> {
+  return new Promise((resolve) => {
+    const spoken = speakable(text);
+    if (!spoken) return resolve({ voice: true });
+    const pref = getPref();
+    if (pref.engine === "eleven") {   // voix ElevenLabs multilingue : lit n'importe quelle langue
+      elevenBlob(spoken).then((url) => { stop(); audio = new Audio(url); audio.playbackRate = rate; audio.onended = () => resolve({ voice: true }); audio.onerror = () => resolve({ voice: true }); return audio.play(); })
+        .catch(() => resolve({ voice: false }));
+      return;
+    }
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth || typeof SpeechSynthesisUtterance === "undefined") return resolve({ voice: false });
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(spoken);
+      const v = voiceForLang(lang);
+      u.lang = lang; u.rate = rate;
+      if (v) u.voice = v;
+      u.onend = () => resolve({ voice: !!v }); u.onerror = () => resolve({ voice: !!v });
+      synth.speak(u);
+    } catch { resolve({ voice: false }); }
+  });
+}
+
 let ctx: AudioContext | null = null;
 /** Petit « ding » discret : UniC a fini d'écouter, il réfléchit (retour immédiat, la réponse met parfois un instant). */
 export function ding(freq = 880, vol = 0.06): void {

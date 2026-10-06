@@ -16,12 +16,17 @@ CALL_RE = re.compile(
     r"(?:appelle|appeler|appelles|t[ée]l[ée]phone[rz]?|(?:passe|passer|passes|fais|faire|fait|donne|lance|lancer)(?:-moi)?\s+(?:un|des|l')\s*appels?)"
     r"(?:\s+(?:[àa]|au|aux|pour|vers|chez))?(?:\s+(?:le\s+num[ée]ro\s+)?(?P<who>.+?))?\s*[.!?]*$", re.I)
 NOT_A_CALL = re.compile(r"^(?:d['’ ]\s*offres?|d['’ ]\s*d[ée]marche|commercial|publicitaire)", re.I)   # « appel d'offres » n'est pas un coup de téléphone
+_POLITE = r"(?:s'il (?:te|vous) pla[iî]t[, ]+)?(?:(?:je\s+(?:veux|voudrais|aimerais|dois)|il\s+faut\s+que\s+je|peux[- ]tu|pouvez[- ]vous|tu\s+peux)\s+)?"
 SMS_RE = re.compile(
-    r"^(?:s'il (?:te|vous) pla[iî]t[, ]+)?(?:envoie|envoi|envoyer|[ée]cris|[ée]crire|manda|mande|texte|dis|pr[ée]viens|previens)\s+"
-    r"(?:(?:un|une|le)\s+)?(?:sms|message|texto|mail|mess)?\s*(?:[àa]|au|aux)?\s*(?P<rest>.+?)\s*[.!?]*$", re.I)
+    _POLITE + r"(?:envoie|envoi|envoyer|envoies|[ée]cris|[ée]crire|[ée]cris-moi|manda|mande|texte|dis|pr[ée]viens|previens)\s*"
+    r"(?:(?:un|une|le)\s+)?(?:sms|message|texto|mail|mess)?\s*(?:[àa]|au|aux)?\s*(?P<rest>.*?)\s*[.!?]*$", re.I)
+# « prépare un SMS pour Awa » : le message est PRÉPARÉ (Messages s'ouvre, texte prêt), pas envoyé
+SMS_DRAFT_RE = re.compile(
+    _POLITE + r"(?:pr[ée]pare|pr[ée]parer|pr[ée]pares|r[ée]dige|r[ée]diger|r[ée]diges|compose|composer|fais|faire|fait|laisse|laisser)(?:-moi)?\s+"
+    r"(?:(?:un|une|le)\s+)?(?:sms|message|texto|mess)\s*(?:[àa]|au|aux|pour)?\s*(?P<rest>.*?)\s*[.!?]*$", re.I)
 SPLIT_RE = re.compile(r"\s*(?:,|:)\s+|\s+(?:que|qu'|en disant|disant|pour dire|pour lui dire|comme quoi|:)\s*", re.I)
 LEAD_RE = re.compile(r"^(?:madame|monsieur|mme|mr|m\.)\s+", re.I)
-TRIGGERS = re.compile(r"appel|t[ée]l[ée]phon|message|sms|texto|envoie|[ée]cris|dis\s+[àa]|pr[ée]ven|texte\s+[àa]|contacte|rappelle", re.I)
+TRIGGERS = re.compile(r"appel|t[ée]l[ée]phon|message|sms|texto|envoie|[ée]cris|dis\s+[àa]|pr[ée]ven|texte\s+[àa]|contacte|rappelle|pr[ée]par|r[ée]dig|compos", re.I)
 MAX_MESSAGE = 600
 
 
@@ -46,17 +51,24 @@ def parse_rules(text: str) -> dict | None:
         if NOT_A_CALL.match(who) or len(who.split()) > 5:
             return None
         num = _digits(who)
-        return {"action": "call", "name": "" if num else who, "number": num, "message": ""}
-    m = SMS_RE.match(t)
+        return {"action": "call", "name": "" if num else who, "number": num, "message": "", "draft": False}
+    draft = False
+    m = SMS_DRAFT_RE.match(t)
+    if m:
+        draft = True
+    else:
+        m = SMS_RE.match(t)
     if m and TRIGGERS.search(t):
         rest = m.group("rest")
+        if not rest and not re.search(r"sms|message|texto", t, re.I):
+            return None   # « envoie » tout seul n'est pas un message
         parts = SPLIT_RE.split(rest, maxsplit=1)
         who = _clean_name(parts[0])
         msg = _clean_name(parts[1]) if len(parts) > 1 else ""
-        if not who or len(who.split()) > 5:
+        if len(who.split()) > 5:
             return None
         num = _digits(who)
-        return {"action": "sms", "name": "" if num else who, "number": num, "message": msg[:MAX_MESSAGE]}
+        return {"action": "sms", "name": "" if num else who, "number": num, "message": msg[:MAX_MESSAGE], "draft": draft}   # sans nom : le téléphone demande « à qui ? »
     return None
 
 
@@ -64,7 +76,7 @@ def _ask_claude(text: str) -> dict | None:
     system = (
         "Tu lis ce que dit un patron de plaquisterie à son assistant vocal (français approximatif, mots déformés par l'accent). "
         "Dis s'il demande d'APPELER quelqu'un (« passer un appel », « téléphoner ») ou d'ENVOYER un SMS/message à quelqu'un, même sans dire le nom. Réponds par un JSON seul, sans texte autour : "
-        '{"action":"call"|"sms"|"chat","name":"nom de la personne tel que dit","message":"texte à envoyer, vide si non dit"}. '
+        '{"action":"call"|"sms"|"chat","name":"nom de la personne tel que dit","message":"texte à envoyer, vide si non dit","draft":true si il demande de PRÉPARER/RÉDIGER/COMPOSER le message sans dire de l\'envoyer}. '
         'Tout le reste (devis, factures, questions, discussion) = "chat". N\'invente ni nom ni message.')
     res = chat_complete([{"role": "system", "content": system}, {"role": "user", "content": text}], deep=False, max_tokens=300)
     if not (res.available and res.text):
@@ -81,7 +93,8 @@ def _ask_claude(text: str) -> dict | None:
     name = _clean_name(str(d.get("name") or ""))   # sans nom : le téléphone demande « à qui ? »
     num = _digits(name)
     return {"action": d["action"], "name": "" if num else name, "number": num,
-            "message": _clean_name(str(d.get("message") or ""))[:MAX_MESSAGE] if d["action"] == "sms" else ""}
+            "message": _clean_name(str(d.get("message") or ""))[:MAX_MESSAGE] if d["action"] == "sms" else "",
+            "draft": bool(d.get("draft")) and d["action"] == "sms"}
 
 
 def parse(text: str, hint: bool = False) -> dict:
@@ -90,7 +103,7 @@ def parse(text: str, hint: bool = False) -> dict:
     found = parse_rules(text)
     if found is None and (hint or TRIGGERS.search(text or "")) and provider_chain():
         found = _ask_claude(text)
-    return found or {"action": "chat", "name": "", "number": "", "message": ""}
+    return found or {"action": "chat", "name": "", "number": "", "message": "", "draft": False}
 
 
 def polish(text: str) -> str:

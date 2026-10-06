@@ -3073,3 +3073,19 @@ def test_voice_falls_back_to_the_regular_model_when_the_fast_one_fails(client, c
     r = client.post("/api/chat", json={"message": "raconte moi une histoire courte", "voice": True})
     assert "Réponse de secours." in r.json()["message"]["content"]
     assert seen[0] == settings.anthropic_voice_model and settings.anthropic_fast_model in seen
+
+
+def test_interpreter_translates_without_tools_or_company_data(client, claude):
+    client.post("/api/customers", json={"name": "Madame Ribeiro SECRETE", "phone": "770000000"})
+    fake = claude(lambda kind, kw: _resp("Good morning, I would like a quote."))
+    r = client.post("/api/unic/translate", json={"text": "Bonjour, je voudrais un devis.", "source": "fr", "target": "en",
+                                                 "context": [{"who": "me", "text": "Bonjour"}, {"who": "them", "text": "Hello"}]})
+    assert r.status_code == 200 and r.json()["text"] == "Good morning, I would like a quote."
+    kw = fake.calls[0][1]
+    assert "interprète" in kw["system"] and "anglais" in kw["system"] and "SECRETE" not in str(kw)
+    assert not kw.get("tools")                                   # aucun outil
+    assert "<parole>Bonjour, je voudrais un devis.</parole>" in str(kw["messages"])
+    assert client.post("/api/unic/translate", json={"text": "x", "source": "fr", "target": "fr"}).status_code == 400
+    assert client.post("/api/unic/translate", json={"text": "x", "source": "fr", "target": "klingon"}).status_code in (400, 422)
+    assert client.post("/api/unic/translate", json={"text": "  ", "source": "fr", "target": "en"}).json()["text"] == ""
+    assert client.get("/api/unic/languages").json()["ar"] == "arabe"

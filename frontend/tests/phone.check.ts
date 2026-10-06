@@ -25,7 +25,7 @@ async function run(intent: any, answers: string[]) {
   const said: string[] = [], actions: string[] = [];
   await runPhoneIntent(intent, {
     say: async (t) => { said.push(t); }, listen: async () => answers.shift() ?? "",
-    phone: { listContacts: async () => contacts, call: async (n) => { actions.push("CALL " + n); }, sendSms: async (n, t) => { actions.push("SMS " + n + " | " + t); return composerOnly; } },
+    phone: { listContacts: async () => contacts, call: async (n) => { actions.push("CALL " + n); }, sendSms: async (n, t, c) => { actions.push((c ? "PRÊT " : "SMS ") + n + " | " + t); return composerOnly; } },
     polish: async (t) => t.replace("sui", "suis"),
   });
   return { said, actions };
@@ -62,6 +62,10 @@ composerOnly = true;
 r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens" }, ["oui"]);
 eq("SMS bloqué par Android : plan B annoncé", r.said[r.said.length - 1].startsWith("Android bloque l'envoi direct"), true);
 composerOnly = false;
+r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens", draft: true }, ["oui"]);
+eq("SMS préparé : ouvert dans Messages, jamais envoyé", r.actions, ["PRÊT +221773333333 | je viens"]);
+r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens", draft: true }, ["non"]);
+eq("SMS préparé refusé = rien", r.actions, []);
 for (const t of ["coupe l'appel", "Hey UniC coupe l'appel", "raccroche", "raccrocher s'il te plaît", "termine la communication", "coupe la communication", "arrête l'appel", "coupe cet appel"]) eq("raccrocher : " + t, HANGUP_RE.test(t), true);
 for (const t of ["appelle Moussa", "coupe le son", "passe un appel à Awa", "arrête de parler", "merci", "coupe la musique"]) eq("pas raccrocher : " + t, HANGUP_RE.test(t), false);
 console.log(`OK ${ok}  ÉCHECS ${ko}`);

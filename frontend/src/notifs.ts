@@ -29,7 +29,7 @@ export const appName = (n: Notif): string => (isSms(n) ? "SMS" : n.app);
 /** La phrase parle-t-elle d'appeler ou d'écrire à quelqu'un ? (mots mal dits compris) — évite un aller-retour serveur à chaque tour. */
 export function looksLikePhoneTask(heard: string): boolean {
   const words = fold(heard).split(" ").filter(Boolean);
-  return ["appelle", "appeler", "telephone", "telephoner", "sms", "texto", "message", "envoie", "envoyer", "ecris", "ecrire", "previens", "prevenir", "contacte", "rappelle"]
+  return ["appelle", "appeler", "telephone", "telephoner", "sms", "texto", "message", "envoie", "envoyer", "ecris", "ecrire", "prepare", "preparer", "redige", "rediger", "compose", "previens", "prevenir", "contacte", "rappelle"]
     .some((k) => hasWord(words, k, 0.8)) || /\bdis a\b/.test(fold(heard));
 }
 

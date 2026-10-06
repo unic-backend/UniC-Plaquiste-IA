@@ -169,6 +169,10 @@ public class UnicPhonePlugin extends Plugin {
             call.reject("Message trop long.");
             return;
         }
+        if (Boolean.TRUE.equals(call.getBoolean("composer", false))) {   // « prépare un SMS » : texte prêt dans Messages, jamais envoyé ici
+            openComposer(call, number, text.trim());
+            return;
+        }
         if (getPermissionState("sms") != PermissionState.GRANTED) {
             requestPermissionForAlias("sms", call, "smsPermission");
             return;
@@ -339,6 +343,33 @@ public class UnicPhonePlugin extends Plugin {
         UnicWakeService.setEnabled(getContext(), false);
         UnicWakeService.stop(getContext());
         call.resolve(wakeInfo());
+    }
+
+    /** L'interprète est ouvert : « Hey UniC » se tait (un mot anglais comme « unique » ne doit pas le réveiller). Le réglage reste « activé ». */
+    @PluginMethod
+    public void pauseWake(PluginCall call) {
+        UnicWakeService.stop(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void resumeWake(PluginCall call) {
+        if (UnicWakeService.enabled(getContext())) UnicWakeService.start(getContext());
+        call.resolve();
+    }
+
+    /** L'écran reste allumé pendant l'interprète. */
+    @PluginMethod
+    public void keepScreenOn(PluginCall call) {
+        final boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        final Activity act = getActivity();
+        if (act != null) {
+            act.runOnUiThread(() -> {
+                if (on) act.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                else act.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            });
+        }
+        call.resolve();
     }
 
     @PluginMethod

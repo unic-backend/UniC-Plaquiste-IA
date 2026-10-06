@@ -416,6 +416,7 @@ export const api = {
   quoteSignatures: (id: string) => request<any[]>(`/api/quotes/${id}/signature`),
   setAutoWork: (enabled: boolean) => request<any>("/api/selfcare/auto", { method: "POST", body: JSON.stringify({ enabled }) }),
   unicIntent: (text: string) => request<{ action: "call" | "sms" | "chat"; name: string; number: string; message: string }>("/api/unic/intent", { method: "POST", body: JSON.stringify({ text, hint: true }) }),
+  unicTranslate: (text: string, source: string, target: string, context: { who: "me" | "them"; text: string }[]) => request<{ text: string }>("/api/unic/translate", { method: "POST", body: JSON.stringify({ text, source, target, context }) }),
   unicPolish: (text: string) => request<{ message: string }>("/api/unic/polish", { method: "POST", body: JSON.stringify({ text }) }),
   selfCheck: () => request<any>("/api/selfcare/check", { method: "POST" }),
   incident: (id: string) => request<any>(`/api/selfcare/incidents/${id}`),

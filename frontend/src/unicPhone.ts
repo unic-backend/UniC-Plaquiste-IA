@@ -2,11 +2,11 @@ import { matchContacts, pickAmong, yesNo, type Contact } from "./phoneMatch";
 
 /** Déroulé d'un appel ou d'un SMS demandé à voix haute. Rien ne part sans le « oui » entendu juste avant.
  *  Les dépendances sont injectées (voix, écoute, téléphone) : le même code marche dans l'appli et dans les tests. */
-export type Intent = { action: "call" | "sms"; name: string; number: string; message: string };
+export type Intent = { action: "call" | "sms"; name: string; number: string; message: string; draft?: boolean };
 export type Deps = {
   say: (t: string) => Promise<void>;
   listen: () => Promise<string>;
-  phone: { listContacts: () => Promise<Contact[]>; call: (n: string) => Promise<void>; sendSms: (n: string, t: string) => Promise<boolean | void> };
+  phone: { listContacts: () => Promise<Contact[]>; call: (n: string) => Promise<void>; sendSms: (n: string, t: string, composer?: boolean) => Promise<boolean | void> };
   polish: (t: string) => Promise<string>;
 };
 
@@ -58,6 +58,11 @@ export async function runPhoneIntent(it: Intent, d: Deps): Promise<void> {
     if (!msg) { await d.say("Je n'ai rien entendu, j'annule."); return; }
   }
   const text = (await d.polish(msg)) || msg;
+  if (it.draft) {   // « prépare un SMS » : le message est préparé dans Messages, jamais envoyé sans que le patron touche « Envoyer »
+    if (await confirm(d, `Je prépare pour ${label} : ${text}. J'ouvre tes messages ?`)) { await d.phone.sendSms(number, text, true); await d.say("C'est prêt dans tes messages. Touche Envoyer quand tu veux."); }
+    else await d.say("D'accord, je ne prépare rien.");
+    return;
+  }
   if (await confirm(d, `J'envoie à ${label} : ${text}. Je confirme ?`)) {
     const composerOnly = await d.phone.sendSms(number, text);
     await d.say(composerOnly ? "Android bloque l'envoi direct. J'ai ouvert tes messages avec le texte prêt : touche Envoyer." : "C'est envoyé.");

@@ -390,10 +390,27 @@ def test_atelier_branch_follows_the_deployed_code(monkeypatch):
 def test_phone_intent_rules(said, action, name, number, message):
     from app import phone_intent
     r = phone_intent.parse_rules(said)
-    assert r == {"action": action, "name": name, "number": number, "message": message}, r
+    assert r == {"action": action, "name": name, "number": number, "message": message, "draft": False}, r
 
 
-@pytest.mark.parametrize("said", ["faire un appel d'offres pour le chantier", "je prépare un appel d'offre", "fais le devis de madame Diop", "quels sont mes impayés", "combien de plaques pour 134 m²", "bonjour UniC", ""])
+@pytest.mark.parametrize("said,name,message,draft", [
+    ("prépare un SMS pour Awa", "Awa", "", True),
+    ("Prépare-moi un message à Moussa Ndiaye : je viens demain", "Moussa Ndiaye", "je viens demain", True),
+    ("rédige un message pour papa en disant bonne nuit", "papa", "bonne nuit", True),
+    ("je veux préparer un texto à Ibou", "Ibou", "", True),
+    ("fais un message à Awa", "Awa", "", True),
+    ("prépare un sms", "", "", True),
+    ("envoie un sms", "", "", False),
+    ("je veux envoyer un message à Awa Fall", "Awa Fall", "", False),
+    ("peux-tu envoyer un sms à Moussa : j'arrive", "Moussa", "j'arrive", False),
+])
+def test_phone_intent_sms_prepare_and_polite_forms(said, name, message, draft):
+    from app import phone_intent
+    r = phone_intent.parse_rules(said)
+    assert r == {"action": "sms", "name": name, "number": "", "message": message, "draft": draft}, r
+
+
+@pytest.mark.parametrize("said", ["faire un appel d'offres pour le chantier", "je prépare un appel d'offre", "fais le devis de madame Diop", "prépare le devis de madame Diop", "rédige la facture", "envoie", "quels sont mes impayés", "combien de plaques pour 134 m²", "bonjour UniC", ""])
 def test_phone_intent_rules_ignore_normal_requests(said):
     from app import phone_intent
     assert phone_intent.parse_rules(said) is None
