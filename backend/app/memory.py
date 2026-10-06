@@ -447,8 +447,15 @@ OWNER_RULES_V8 = (
     "Moulures : 1 colle pour 5 barres de moulure, arrondi au-dessus (⌈ barres / 5 ⌉). Colle silicone par défaut, colle à pompe si je la demande.",
 )
 
+OWNER_RULES_V9 = (
+    "Devis : le tableau des matériaux ne contient QUE des fournitures. La livraison en fait partie et s'écrit « Livraison : à la charge du client » "
+    "(0 FCFA, 1 forfait) sauf si je donne un prix. La main-d'œuvre n'est jamais mélangée aux matériaux : elle a son propre tableau séparé, en bas, "
+    "avec la surface en m², le prix unitaire du m² puis le prix total (ligne dont la désignation commence par « Main-d'œuvre »).",
+    "Un travail = un seul devis. Jamais deux devis à la fois ; une correction modifie le devis existant.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
-              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8}
+              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9}
 
 
 def seed_owner_rules(db: Session) -> int:

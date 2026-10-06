@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -283,6 +285,44 @@ def _strip(html: str) -> str:
     return re.sub(r"<[^>]+>", "", html or "").strip()
 
 
+_LABOUR_RE = re.compile(r"main[\s\-]*d['’ ]?\s*(?:œ|oe)uvre|^\s*pose\b|\bpose complète\b|^\s*façon\b", re.I)
+
+
+def _is_labour(designation: str) -> bool:
+    return bool(_LABOUR_RE.search(designation or ""))
+
+
+def _amount(cell: str) -> float:
+    """« 346 500 FCFA » -> 346500.0 (0 si illisible)."""
+    m = re.sub(r"[^\d,]", "", _strip(cell)).replace(",", ".")
+    try:
+        return float(m)
+    except ValueError:
+        return 0.0
+
+
+def _sum_lines(lines: list[list[str]]) -> str:
+    total = sum(_amount(l[-1]) for l in lines)
+    cur = " FCFA" if any("FCFA" in _strip(l[-1]) for l in lines) else ""
+    return f"{round(total):,}".replace(",", " ") + cur
+
+
+def _labour_table(heads: list[str], lines: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """Tableau de la main-d'œuvre : Désignation | Surface (m²) | Prix unitaire (par m²) | Prix Total."""
+    qi = heads.index("Quantité")
+    pi = heads.index("Prix Unitaire") if "Prix Unitaire" in heads else None
+    ti = heads.index("Prix Total") if "Prix Total" in heads else None
+    per_m2 = all(_strip(l[qi]).lower().endswith(("m²", "m2")) for l in lines)
+    hd = ["Désignation", "Surface (m²)" if per_m2 else "Quantité"] + (["Prix unitaire (par m²)" if per_m2 else "Prix Unitaire"] if pi is not None else []) + (["Prix Total"] if ti is not None else [])
+    out = []
+    for l in lines:
+        q = _strip(l[qi])
+        if per_m2:
+            q = re.sub(r"\s*m(²|2)$", "", q) + " m²"
+        out.append([l[0], q] + ([l[pi]] if pi is not None else []) + ([l[ti]] if ti is not None else []))
+    return hd, out
+
+
 def _columns(headers: list[str], rows: list[list[str]]):
     """Tableau à la charte : Désignation | Prix Unitaire | Quantité | Prix Total (colonnes absentes omises)."""
     low = [h.lower() for h in headers]
@@ -390,33 +430,55 @@ def _render(
 
     # --- tableau
     mapped = _columns(headers, rows)
+    split_labour = False
     if mapped:
         heads, body, has_pu = mapped
         if has_pu:
             story += [Paragraph("Important — Prix unitaires :", _st("imp", textColor=BLUE, leading=12)),
                       Paragraph(MENTION_PU, txt), Spacer(1, P(8))]
-        story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3))]
-        ncol = len(heads)
-        widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in heads else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
+        mat_body, lab_body = body, []
+        if is_quote:   # règle du patron : la main-d'œuvre n'est JAMAIS dans le tableau des matériaux ; elle a son propre tableau en dessous
+            mat_body = [l for l in body if not _is_labour(_strip(l[0]))]
+            lab_body = [l for l in body if _is_labour(_strip(l[0]))]
+            if not mat_body:   # un devis de main-d'œuvre seule : un seul tableau, inchangé
+                mat_body, lab_body = body, []
+        split_labour = bool(lab_body)
         cellr = _st("cellr", fontSize=8.5, leading=11, alignment=TA_RIGHT)
         cellwr = _st("cellwr", fontSize=8.5, leading=11, textColor=colors.white, alignment=TA_RIGHT)
-        data = [[Paragraph(h, cellw if n == 0 else cellwr) for n, h in enumerate(heads)]]
-        for line in body:
-            data.append([Paragraph(str(c), cell if n == 0 else cellr) for n, c in enumerate(line)])
+
+        def grid(hd: list[str], lines: list[list[str]], sub: tuple[str, str] | None) -> Table:
+            ncol = len(hd)
+            widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in hd else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
+            if hd[0] == "Désignation" and "Surface (m²)" in hd:
+                widths = {4: [66, 30, 44, 40], 3: [98, 40, 42]}.get(ncol, widths)
+            data = [[Paragraph(h, cellw if n == 0 else cellwr) for n, h in enumerate(hd)]]
+            for line in lines:
+                data.append([Paragraph(str(c), cell if n == 0 else cellr) for n, c in enumerate(line)])
+            has_sub = bool(sub) and hd[-1] == "Prix Total"
+            if has_sub:
+                data.append([Paragraph(sub[0], cellw)] + [""] * (ncol - 2) + [Paragraph(_clean(sub[1]), cellwr)])
+            t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
+            st = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
+                  ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                  ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
+            if has_sub:
+                st += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
+            for r in range(1, len(data) - (1 if has_sub else 0)):
+                if r % 2 == 0:
+                    st.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
+            t.setStyle(TableStyle(st))
+            return t
+
         first_total = totals[0] if totals else None
-        if first_total and heads[-1] == "Prix Total":
-            data.append([Paragraph(first_total[0], cellw)] + [""] * (ncol - 2) + [Paragraph(_clean(first_total[1]), cellwr)])
-        t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
-        style = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
-                 ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                 ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
-        if first_total and heads[-1] == "Prix Total":
-            style += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
-        for r in range(1, len(data) - (1 if first_total and heads[-1] == "Prix Total" else 0)):
-            if r % 2 == 0:
-                style.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
-        t.setStyle(TableStyle(style))
-        story += [t, Spacer(1, P(8))]
+        if split_labour:
+            story += [_bar("Tableau des matériaux (fournitures)"), Spacer(1, P(3)),
+                      grid(heads, mat_body, ("Sous-total matériaux HT", _sum_lines(mat_body))), Spacer(1, P(8))]
+            lab_heads, lab_rows = _labour_table(heads, lab_body)
+            story += [_bar("Main-d'œuvre (pose)"), Spacer(1, P(3)),
+                      grid(lab_heads, lab_rows, ("Sous-total main-d'œuvre HT", _sum_lines(lab_body))), Spacer(1, P(8))]
+        else:
+            story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3)),
+                      grid(heads, mat_body, first_total), Spacer(1, P(8))]
     else:
         story += [_bar("Détail"), Spacer(1, P(3))]
         data = [[Paragraph(h, cellw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
@@ -430,7 +492,7 @@ def _render(
     if totals:
         labels = [a for a, _ in totals]
         final = next(((a, b) for a, b in totals if a == "Total"), None)
-        middle = [(a, b) for a, b in totals[1:] if (a, b) != final] if mapped and mapped[0][-1] == "Prix Total" else \
+        middle = [(a, b) for a, b in totals[1:] if (a, b) != final] if mapped and mapped[0][-1] == "Prix Total" and not split_labour else \
                  [(a, b) for a, b in totals if (a, b) != final]
         if middle:
             mt = Table([[Paragraph(a, _st("ml", alignment=TA_RIGHT)), Paragraph(_clean(b), _st("mv", alignment=TA_RIGHT))] for a, b in middle],
@@ -456,7 +518,7 @@ def _render(
 
     # --- conditions et exclusions (devis), comme sur le devis de référence
     if is_quote:
-        labour = any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
+        labour = split_labour or any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
         important = [b.strip() for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
         important += [
             "Les prix indiqués dans la colonne « Prix Unitaire » sont des prix à l'unité, et non des montants totaux.",

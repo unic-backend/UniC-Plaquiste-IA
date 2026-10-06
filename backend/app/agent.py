@@ -797,7 +797,8 @@ class AgentSession:
         return None
 
     def _doc(self, kind: str, row) -> None:
-        self.documents.append({"kind": kind, "id": row.id})
+        if not any(d["kind"] == kind and d["id"] == row.id for d in self.documents):   # une seule carte par document, même si deux outils le renvoient
+            self.documents.append({"kind": kind, "id": row.id})
 
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
                         checks: str = "", objet: str = "", lines: list | None = None, lieu: str = "",

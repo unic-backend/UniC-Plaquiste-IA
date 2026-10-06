@@ -3103,3 +3103,52 @@ def test_new_quote_conversation_does_not_import_other_conversations(client, clau
     n = len(fake.calls)
     client.post("/api/chat", json={"message": "plaques BA13 Ribeiro Point E"})   # autre conversation, pas une demande de document
     assert "ÉCHANGES PASSÉS" in fake.calls[n][1]["system"]     # le rappel du passé reste actif ailleurs
+
+
+def _labour_quote_pdf(tmp_path, with_labour=True):
+    from app.pdfs import build_document_pdf
+    rows = [["1", "Plaque de plâtre BA13 2000x1200", "77", "u", "4 500 FCFA", "346 500 FCFA"],
+            ["2", "Fourrure (paquet)", "14", "paquet", "12 000 FCFA", "168 000 FCFA"],
+            ["3", "Livraison : à la charge du client", "1", "forfait", "0 FCFA", "0 FCFA"]]
+    total = 514500
+    if with_labour:
+        rows.append(["4", "Main-d'œuvre — pose complète", "134", "m²", "4 000 FCFA", "536 000 FCFA"])
+        total += 536000
+    t = f"{total:,}".replace(",", " ") + " FCFA"
+    return build_document_pdf(tmp_path / "q.pdf", company={"name": "UniC Plaquiste"}, doc_label="DEVIS", number="UC-T-CAD", title="Faux plafond",
+                              status="draft", meta_lines=["N° UC-T-CAD"], party_left=("É", "x"), party_right=("Client", "CADD"),
+                              headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"], rows=rows, col_widths=[1] * 6,
+                              totals=[("Sous-total HT", t), ("Total", t)])
+
+
+def test_quote_pdf_keeps_labour_out_of_the_materials_table(tmp_path):
+    import pypdfium2 as pdfium
+    out = _labour_quote_pdf(tmp_path)
+    pdf = pdfium.PdfDocument(str(out))
+    text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+    i_mat, i_deliv, i_sub_mat = text.index("Tableau des matériaux"), text.index("Livraison : à la charge du client"), text.index("Sous-total matériaux HT")
+    i_lab_bar, i_lab_row, i_sub_lab = text.index("Main-d'œuvre (pose)"), text.index("Main-d'œuvre — pose complète"), text.index("Sous-total main-d'œuvre HT")
+    assert i_mat < i_deliv < i_sub_mat < i_lab_bar < i_lab_row < i_sub_lab       # livraison dans les matériaux ; main-d'œuvre dans son tableau, dessous
+    assert "Surface (m²)" in text and "Prix unitaire (par m²)" in text and "134 m²" in text and "4 000 FCFA" in text and "536 000 FCFA" in text
+    assert "514 500 FCFA" in text and "1 050 500 FCFA" in text                    # sous-total matériaux, total général
+    assert text.count("Main-d'œuvre — pose complète") == 1
+
+
+def test_quote_pdf_without_labour_has_a_single_table(tmp_path):
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(str(_labour_quote_pdf(tmp_path, with_labour=False)))
+    text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+    assert "Tableau des matériaux" in text and "Main-d'œuvre (pose)" not in text and "Sous-total matériaux" not in text
+    assert "Ce devis porte uniquement sur les fournitures" in text
+
+
+def test_a_document_is_shown_once_even_if_two_tools_return_it():
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    s = AgentSession(SessionLocal(), None, {})
+
+    class Row:
+        id = "abc"
+    s._doc("quote", Row())
+    s._doc("quote", Row())
+    assert s.documents == [{"kind": "quote", "id": "abc"}]
