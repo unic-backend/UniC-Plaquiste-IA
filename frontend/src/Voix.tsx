@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as I from "./Icons";
 import { isNative, net } from "./api";
 import { getReadWhenLocked, notifApi, setReadWhenLocked } from "./phone";
-import { canSpeakOnDevice, clearCache, deviceVoices, getPref, setPref, speakDevice, stop, type VoicePref } from "./speech";
+import { canSpeakOnDevice, clearCache, deviceVoices, getPref, getVocalRate, setPref, setVocalRate, speakDevice, stop, type VoicePref } from "./speech";
 
 const SAMPLE = "Bonjour patron, voici ma voix. Le devis est prêt, je te lis les détails.";
 type EVoice = Awaited<ReturnType<typeof net.voiceList>>[number];
@@ -20,6 +20,7 @@ export function Voix() {
   const upd = (p: Partial<VoicePref>) => setP(setPref(p));
   const [notifOn, setNotifOn] = useState<boolean | null>(null);
   const [lockRead, setLockRead] = useState(getReadWhenLocked());
+  const [vocal, setVocal] = useState(getVocalRate());
   useEffect(() => {
     if (!isNative) return;
     const check = () => notifApi.enabled().then(setNotifOn).catch(() => setNotifOn(false));
@@ -64,6 +65,12 @@ export function Voix() {
             <label><input type="checkbox" checked={lockRead} onChange={(e) => { setReadWhenLocked(e.target.checked); setLockRead(e.target.checked); }} /> Lire même quand le téléphone est verrouillé</label>
           </section>
         )}
+
+        <section className="card-box">
+          <label>Vitesse de UniC vocal</label>
+          <input type="range" min={0.8} max={1.6} step={0.05} value={vocal} onChange={(e) => { const v = Number(e.target.value); setVocal(v); setVocalRate(v); }} aria-label="Vitesse de UniC vocal" />
+          <p className="hint">{vocal.toFixed(2).replace(/0$/, "")} fois la vitesse normale{vocal === 1.25 ? " (réglage conseillé)" : ""}</p>
+        </section>
 
         <section className="card-box">
           <label>Moteur de lecture</label>

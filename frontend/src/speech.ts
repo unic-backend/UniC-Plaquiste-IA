@@ -99,8 +99,15 @@ export async function toggle(id: string, text: string): Promise<string> {
   }
 }
 
+const VOCAL_KEY = "unic.vocalRate";
+/** Vitesse de parole de UniC vocal : 1,25 par défaut (plus vif que la lecture des réponses écrites). */
+export function getVocalRate(): number { try { const v = Number(localStorage.getItem(VOCAL_KEY)); return v >= 0.8 && v <= 1.6 ? v : 1.25; } catch { return 1.25; } }
+export function setVocalRate(v: number): void { try { localStorage.setItem(VOCAL_KEY, String(Math.min(1.6, Math.max(0.8, v)))); } catch { /* ignoré */ } }
+
+let elevenChain: Promise<void> = Promise.resolve();   // ElevenLabs : une voix après l'autre, mais le téléchargement de la phrase suivante démarre tout de suite
+
 /** Une phrase dans la file : ne coupe pas ce qui est déjà en train d'être dit (parole au fil de l'eau). */
-function sayQueued(text: string): Promise<void> {
+function sayQueued(text: string, rate = getVocalRate()): Promise<void> {
   return new Promise((resolve) => {
     const spoken = speakable(text);
     if (!spoken) return resolve();
@@ -110,7 +117,7 @@ function sayQueued(text: string): Promise<void> {
         const synth = window.speechSynthesis;
         if (!synth || typeof SpeechSynthesisUtterance === "undefined") return resolve();
         const u = new SpeechSynthesisUtterance(spoken);
-        u.lang = "fr-FR"; u.rate = pref.rate;
+        u.lang = "fr-FR"; u.rate = rate;
         const v = deviceVoices().find((x) => x.voiceURI === pref.deviceVoice);
         if (v) u.voice = v;
         u.onend = () => resolve(); u.onerror = () => resolve();
@@ -118,25 +125,27 @@ function sayQueued(text: string): Promise<void> {
       } catch { resolve(); }
     };
     if (pref.engine === "device") { device(); return; }
-    elevenBlob(spoken).then((url) => {
+    const blob = elevenBlob(spoken);   // téléchargement lancé maintenant, lecture quand la phrase précédente est finie
+    elevenChain = elevenChain.then(() => blob.then((url) => new Promise<void>((done) => {
       audio = new Audio(url);
-      audio.onended = () => resolve(); audio.onerror = () => resolve();
-      audio.play().catch(() => resolve());
-    }).catch(device);
+      audio.playbackRate = rate;
+      audio.onended = () => done(); audio.onerror = () => done();
+      audio.play().catch(() => done());
+    })).catch(() => {})).then(() => resolve());
   });
 }
 
-export function createSpeaker(): SpeechPipeline { stop(); return new SpeechPipeline(sayQueued, stop); }
+export function createSpeaker(): SpeechPipeline { stop(); elevenChain = Promise.resolve(); return new SpeechPipeline((t) => sayQueued(t), stop); }
 
 let ctx: AudioContext | null = null;
 /** Petit « ding » discret : UniC a fini d'écouter, il réfléchit (retour immédiat, la réponse met parfois un instant). */
-export function ding(freq = 880): void {
+export function ding(freq = 880, vol = 0.06): void {
   try {
     ctx = ctx || new (window.AudioContext || (window as any).webkitAudioContext)();
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.frequency.value = freq; o.type = "sine";
     g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + 0.015);
+    g.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + 0.015);
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.14);
     o.connect(g).connect(ctx.destination);
     o.start(); o.stop(ctx.currentTime + 0.15);
@@ -144,16 +153,18 @@ export function ding(freq = 880): void {
 }
 
 /** Lit un texte à voix haute et rend la main quand la lecture est finie (mode vocal : on enchaîne l'écoute). */
-export function say(text: string): Promise<void> {
+export function say(text: string, rate?: number): Promise<void> {
   return new Promise((resolve) => {
     const spoken = speakable(text);
     if (!spoken) return resolve();
     stop();
     const pref = getPref();
-    const device = () => { try { if (!speakDevice(spoken, pref.deviceVoice, pref.rate, resolve)) resolve(); } catch { resolve(); } };
+    const r = rate ?? pref.rate;
+    const device = () => { try { if (!speakDevice(spoken, pref.deviceVoice, r, resolve)) resolve(); } catch { resolve(); } };
     if (pref.engine === "device") { device(); return; }
     elevenBlob(spoken).then((url) => {
       audio = new Audio(url);
+      audio.playbackRate = r;
       audio.onended = () => resolve();
       audio.onerror = () => resolve();
       audio.play().catch(() => resolve());

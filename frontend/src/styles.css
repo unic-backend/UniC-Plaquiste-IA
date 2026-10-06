@@ -1124,3 +1124,6 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 @keyframes unicRing { from { transform: scale(.9); opacity: .6; } to { transform: scale(1.55); opacity: 0; } }
 @keyframes unicBreath { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
 @media (prefers-reduced-motion: reduce) { .unic-ring, .unic-core { animation: none !important; } }
+
+.unic-voice.listening.hearing .unic-core { transform: scale(1.14); }
+.unic-voice.listening.hearing .unic-ring { animation-duration: .9s; }

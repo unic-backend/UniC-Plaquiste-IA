@@ -13,17 +13,21 @@ eq("décimale ne coupe pas", takeSentences("Il te faut 3.5 mètres carrés de pl
 eq("phrase trop courte regroupée", takeSentences("Oui. Je regarde ça tout de suite pour toi. ").ready, ["Oui. Je regarde ça tout de suite pour toi."]);
 eq("rien de complet", takeSentences("Je cherche").ready, []);
 
-// pipeline : la 1re phrase part avant la fin de la réponse, dans l'ordre, sans chevauchement
+// pipeline : chaque phrase est envoyée AU MOTEUR tout de suite (il les enchaîne sans temps mort), dans l'ordre
 async function pipe() {
-  const log: string[] = []; let busy = 0, overlap = false;
-  const p = new SpeechPipeline(async (t) => { busy++; if (busy > 1) overlap = true; log.push("dit:" + t); await new Promise((r) => setTimeout(r, 20)); busy--; }, () => log.push("stop"));
+  const log: string[] = [];
+  let chain: Promise<void> = Promise.resolve();   // le moteur de voix : file d'attente interne
+  const engine = (t: string) => { log.push("envoyé:" + t); chain = chain.then(async () => { log.push("dit:" + t); await new Promise((r) => setTimeout(r, 20)); }); return chain; };
+  const p = new SpeechPipeline(engine, () => log.push("stop"));
   p.push("Bonjour patron, je m'en occupe tout de suite. ");
-  await new Promise((r) => setTimeout(r, 5));
+  p.push("Le devis est prêt pour toi, il fait cent cinquante mille francs. ");
   log.push("encore en train d'écrire…");
-  p.push("Le devis est prêt pour toi, il fait cent cinquante mille francs.");
+  p.push("Dernière phrase pour finir la réponse.");
   await p.finish();
-  eq("ordre et parole anticipée", log, ["dit:Bonjour patron, je m'en occupe tout de suite.", "encore en train d'écrire…", "dit:Le devis est prêt pour toi, il fait cent cinquante mille francs."]);
-  eq("jamais deux phrases en même temps", overlap, false);
+  eq("1re phrase envoyée avant la fin de la réponse", log.indexOf("envoyé:Bonjour patron, je m'en occupe tout de suite.") < log.indexOf("encore en train d'écrire…"), true);
+  eq("2e phrase envoyée sans attendre la fin de la 1re", log.indexOf("envoyé:Le devis est prêt pour toi, il fait cent cinquante mille francs.") < log.indexOf("dit:Bonjour patron, je m'en occupe tout de suite.") + 3, true);
+  eq("ordre de lecture", log.filter((x) => x.startsWith("dit:")).map((x) => x.slice(4)),
+    ["Bonjour patron, je m'en occupe tout de suite.", "Le devis est prêt pour toi, il fait cent cinquante mille francs.", "Dernière phrase pour finir la réponse."]);
   const log2: string[] = [];
   const q = new SpeechPipeline(async (t) => { log2.push(t); }, () => log2.push("stop"));
   q.push("Une première phrase assez longue pour partir tout de suite. Suite");
