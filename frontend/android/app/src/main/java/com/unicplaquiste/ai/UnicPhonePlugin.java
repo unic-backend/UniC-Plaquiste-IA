@@ -169,7 +169,22 @@ public class UnicPhonePlugin extends Plugin {
         if (getPermissionState("sms") == PermissionState.GRANTED) {
             sendNow(call, cleanNumber(call.getString("number")), call.getString("text").trim());
         } else {
-            call.reject("Envoi de SMS refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.");
+            openComposer(call, cleanNumber(call.getString("number")), call.getString("text").trim());   // plan B : le patron touche « Envoyer »
+        }
+    }
+
+    /** Sans l'autorisation SMS (Android la bloque pour une appli installée à la main) : l'appli Messages s'ouvre, texte prêt. */
+    private void openComposer(PluginCall call, String number, String text) {
+        try {
+            Intent i = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(number)));
+            i.putExtra("sms_body", text);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            JSObject res = new JSObject();
+            res.put("composerOnly", true);
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Envoi du SMS impossible.");
         }
     }
 

@@ -6,7 +6,7 @@ export type Intent = { action: "call" | "sms"; name: string; number: string; mes
 export type Deps = {
   say: (t: string) => Promise<void>;
   listen: () => Promise<string>;
-  phone: { listContacts: () => Promise<Contact[]>; call: (n: string) => Promise<void>; sendSms: (n: string, t: string) => Promise<void> };
+  phone: { listContacts: () => Promise<Contact[]>; call: (n: string) => Promise<void>; sendSms: (n: string, t: string) => Promise<boolean | void> };
   polish: (t: string) => Promise<string>;
 };
 
@@ -46,6 +46,9 @@ export async function runPhoneIntent(it: Intent, d: Deps): Promise<void> {
     if (!msg) { await d.say("Je n'ai rien entendu, j'annule."); return; }
   }
   const text = (await d.polish(msg)) || msg;
-  if (await confirm(d, `J'envoie à ${label} : ${text}. Je confirme ?`)) { await d.phone.sendSms(number, text); await d.say("C'est envoyé."); }
+  if (await confirm(d, `J'envoie à ${label} : ${text}. Je confirme ?`)) {
+    const composerOnly = await d.phone.sendSms(number, text);
+    await d.say(composerOnly ? "Android bloque l'envoi direct. J'ai ouvert tes messages avec le texte prêt : touche Envoyer." : "C'est envoyé.");
+  }
   else await d.say("D'accord, je n'envoie rien.");
 }

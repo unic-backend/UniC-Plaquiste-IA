@@ -20,11 +20,12 @@ eq("pick deuxième", pickAmong(matchContacts(contacts, "Awa").slice(0, 2), "le d
 for (const [a, w] of [["oui", "yes"], ["Ouais vas-y", "yes"], ["d'accord", "yes"], ["non", "no"], ["annule", "no"], ["euh peut-être", "unclear"], ["", "unclear"]] as const) eq("yesNo " + a, yesNo(a), w);
 
 // déroulés
+let composerOnly = false;
 async function run(intent: any, answers: string[]) {
   const said: string[] = [], actions: string[] = [];
   await runPhoneIntent(intent, {
     say: async (t) => { said.push(t); }, listen: async () => answers.shift() ?? "",
-    phone: { listContacts: async () => contacts, call: async (n) => { actions.push("CALL " + n); }, sendSms: async (n, t) => { actions.push("SMS " + n + " | " + t); } },
+    phone: { listContacts: async () => contacts, call: async (n) => { actions.push("CALL " + n); }, sendSms: async (n, t) => { actions.push("SMS " + n + " | " + t); return composerOnly; } },
     polish: async (t) => t.replace("sui", "suis"),
   });
   return { said, actions };
@@ -49,5 +50,9 @@ r = await run({ action: "call", name: "", number: "777085092", message: "" }, ["
 eq("numéro dicté", r.actions, ["CALL 777085092"]);
 r = await run({ action: "sms", name: "Moussa", number: "", message: "" }, [""]);
 eq("silence = rien", r.actions, []);
+composerOnly = true;
+r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens" }, ["oui"]);
+eq("SMS bloqué par Android : plan B annoncé", r.said[r.said.length - 1].startsWith("Android bloque l'envoi direct"), true);
+composerOnly = false;
 console.log(`OK ${ok}  ÉCHECS ${ko}`);
 if (ko) process.exit(1);

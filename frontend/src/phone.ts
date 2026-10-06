@@ -6,7 +6,7 @@ import type { Notif } from "./notifs";
 const Native = registerPlugin<{
   listContacts(): Promise<{ contacts: Contact[] }>;
   call(o: { number: string }): Promise<{ dialedOnly?: boolean } | void>;
-  sendSms(o: { number: string; text: string }): Promise<void>;
+  sendSms(o: { number: string; text: string }): Promise<{ composerOnly?: boolean } | void>;
   notificationAccess(): Promise<{ enabled: boolean }>;
   openNotificationSettings(): Promise<void>;
   listNotifications(): Promise<{ notifications: Notif[] }>;
@@ -17,7 +17,8 @@ const Native = registerPlugin<{
 export const phone = {
   listContacts: async (): Promise<Contact[]> => (await Native.listContacts()).contacts || [],
   call: async (number: string): Promise<void> => { await Native.call({ number }); },
-  sendSms: async (number: string, text: string): Promise<void> => { await Native.sendSms({ number, text }); },
+  /** Rend true si le SMS est seulement préparé dans l'appli Messages (autorisation SMS bloquée) : le patron touche « Envoyer ». */
+  sendSms: async (number: string, text: string): Promise<boolean> => !!((await Native.sendSms({ number, text })) as { composerOnly?: boolean } | undefined)?.composerOnly,
 };
 
 export const notifApi = {
