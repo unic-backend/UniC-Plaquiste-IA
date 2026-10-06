@@ -11,7 +11,13 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
 import android.telecom.TelecomManager;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.telephony.SmsManager;
@@ -445,6 +451,98 @@ public class UnicPhonePlugin extends Plugin {
             }
         } catch (Exception ignored) { /* pas de casque ou refus : le micro du téléphone sert */ }
         call.resolve(res);
+    }
+
+    // ---------- écoute (dictée) : signaux exacts « micro ouvert » et erreurs visibles ----------
+
+    private SpeechRecognizer recognizer;
+    private final Handler ui = new Handler(Looper.getMainLooper());
+
+    /** Ouvre le micro pour UNE phrase. Événements : ready (micro vraiment ouvert), speech, partial, final, error. */
+    @PluginMethod
+    public void listen(PluginCall call) {
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            requestPermissionForAlias("mic", call, "listenPermission");
+            return;
+        }
+        startListen(call);
+    }
+
+    @PermissionCallback
+    private void listenPermission(PluginCall call) {
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            call.reject("Micro refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.");
+            return;
+        }
+        startListen(call);
+    }
+
+    private void startListen(final PluginCall call) {
+        final String lang = call.getString("language", "fr-FR");
+        ui.post(() -> {
+            try {
+                destroyRecognizer();
+                if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+                    call.reject("Reconnaissance vocale absente sur ce téléphone.");
+                    return;
+                }
+                recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
+                recognizer.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle p) { emit("ready", null); }
+                    @Override public void onBeginningOfSpeech() { emit("speech", null); }
+                    @Override public void onRmsChanged(float v) { }
+                    @Override public void onBufferReceived(byte[] b) { }
+                    @Override public void onEndOfSpeech() { emit("endSpeech", null); }
+                    @Override public void onEvent(int t, Bundle p) { }
+                    @Override public void onPartialResults(Bundle b) { emit("partial", firstText(b)); }
+                    @Override public void onResults(Bundle b) { emit("final", firstText(b)); }
+                    @Override public void onError(int code) {
+                        JSObject o = new JSObject();
+                        o.put("code", code);
+                        notifyListeners("error", o);
+                    }
+                });
+                Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+                i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+                recognizer.startListening(i);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Le micro n'a pas pu s'ouvrir.");
+            }
+        });
+    }
+
+    private void emit(String event, String text) {
+        JSObject o = new JSObject();
+        if (text != null) o.put("text", text);
+        notifyListeners(event, o);
+    }
+
+    private static String firstText(Bundle b) {
+        ArrayList<String> m = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        return m == null || m.isEmpty() ? "" : m.get(0);
+    }
+
+    private void destroyRecognizer() {
+        if (recognizer != null) {
+            try { recognizer.cancel(); recognizer.destroy(); } catch (Exception ignored) { /* déjà détruit */ }
+            recognizer = null;
+        }
+    }
+
+    @PluginMethod
+    public void stopListen(PluginCall call) {
+        ui.post(() -> { destroyRecognizer(); call.resolve(); });
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        ui.post(this::destroyRecognizer);
+        super.handleOnDestroy();
     }
 
     private static String cleanNumber(String raw) {

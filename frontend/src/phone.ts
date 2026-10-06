@@ -24,6 +24,9 @@ const Native = registerPlugin<{
   finishWake(): Promise<void>;
   endCall(): Promise<{ ended: boolean }>;
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
+  listen(o: { language: string }): Promise<void>;
+  stopListen(): Promise<void>;
+  addListener(event: string, cb: (d: { text?: string; code?: number }) => void): Promise<{ remove(): Promise<void> }>;
 }>("UnicPhone");
 
 export const phone = {
@@ -36,6 +39,13 @@ export const phone = {
 
 /** Casque / AirPods : le micro passe par le casque pendant la conversation (sans casque : aucun effet). */
 export const audioRoute = (on: boolean): Promise<unknown> => Native.audioRoute({ on }).catch(() => null);
+
+/** Écoute native (une phrase) : « ready » = micro vraiment ouvert ; les erreurs arrivent avec leur code. */
+export const ear = {
+  start: (language = "fr-FR"): Promise<void> => Native.listen({ language }),
+  stop: (): Promise<void> => Native.stopListen().catch(() => {}),
+  on: (event: "ready" | "speech" | "partial" | "final" | "endSpeech" | "error", cb: (d: { text?: string; code?: number }) => void) => Native.addListener(event, cb),
+};
 
 export const notifApi = {
   list: async (): Promise<Notif[]> => (await Native.listNotifications()).notifications || [],
