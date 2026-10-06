@@ -545,6 +545,22 @@ public class UnicPhonePlugin extends Plugin {
         super.handleOnDestroy();
     }
 
+    /** Dernier plantage de l'appli (texte + heure), pour le diagnostic dans Voix. */
+    @PluginMethod
+    public void lastCrash(PluginCall call) {
+        android.content.SharedPreferences sp = UnicApp.prefs(getContext());
+        JSObject res = new JSObject();
+        res.put("text", sp.getString("text", ""));
+        res.put("time", sp.getLong("time", 0));
+        call.resolve(res);
+    }
+
+    @PluginMethod
+    public void clearCrash(PluginCall call) {
+        UnicApp.prefs(getContext()).edit().clear().apply();
+        call.resolve();
+    }
+
     private static String cleanNumber(String raw) {
         return raw == null ? "" : raw.replaceAll("[^0-9+]", "");
     }

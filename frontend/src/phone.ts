@@ -26,6 +26,8 @@ const Native = registerPlugin<{
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
   listen(o: { language: string }): Promise<void>;
   stopListen(): Promise<void>;
+  lastCrash(): Promise<{ text: string; time: number }>;
+  clearCrash(): Promise<void>;
   addListener(event: string, cb: (d: { text?: string; code?: number }) => void): Promise<{ remove(): Promise<void> }>;
 }>("UnicPhone");
 
@@ -45,6 +47,12 @@ export const ear = {
   start: (language = "fr-FR"): Promise<void> => Native.listen({ language }),
   stop: (): Promise<void> => Native.stopListen().catch(() => {}),
   on: (event: "ready" | "speech" | "partial" | "final" | "endSpeech" | "error", cb: (d: { text?: string; code?: number }) => void) => Native.addListener(event, cb),
+};
+
+/** Dernier plantage de l'appli (diagnostic). */
+export const crashApi = {
+  last: async (): Promise<{ text: string; time: number }> => Native.lastCrash(),
+  clear: async (): Promise<void> => { await Native.clearCrash(); },
 };
 
 export const notifApi = {

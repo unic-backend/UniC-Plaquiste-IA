@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as I from "./Icons";
 import { isNative, net } from "./api";
-import { getPhoneWhenLocked, getReadWhenLocked, notifApi, setPhoneWhenLocked, setReadWhenLocked, wakeApi } from "./phone";
+import { crashApi, getPhoneWhenLocked, getReadWhenLocked, notifApi, setPhoneWhenLocked, setReadWhenLocked, wakeApi } from "./phone";
 import type { WakeInfo } from "./phone";
 
 const WAKE_STATE: Record<string, string> = {
@@ -27,6 +27,7 @@ export function Voix() {
   const [notifOn, setNotifOn] = useState<boolean | null>(null);
   const [lockRead, setLockRead] = useState(getReadWhenLocked());
   const [wake, setWake] = useState<WakeInfo | null>(null);
+  const [crash, setCrash] = useState<{ text: string; time: number } | null>(null);
   const [phoneLock, setPhoneLock] = useState(getPhoneWhenLocked());
   const [vocal, setVocal] = useState(getVocalRate());
   useEffect(() => {
@@ -34,6 +35,7 @@ export function Voix() {
     const check = () => {
       notifApi.enabled().then(setNotifOn).catch(() => setNotifOn(false));
       wakeApi.status().then(setWake).catch(() => setWake(null));
+      crashApi.last().then((c) => setCrash(c.text ? c : null)).catch(() => setCrash(null));
     };
     check();
     document.addEventListener("visibilitychange", check);   // retour des réglages Android : on relit l'état
@@ -74,6 +76,15 @@ export function Voix() {
             {!notifOn && <button className="btn btn-copper btn-small" onClick={() => notifApi.openSettings().catch((e) => say(e.message))}>Autoriser l'accès</button>}
             {!notifOn && <p className="hint">Si Android refuse (« paramètre restreint ») : Réglages › Applis › UniC AI › menu ⋮ › « Autoriser les paramètres restreints », puis recommence.</p>}
             <label><input type="checkbox" checked={lockRead} onChange={(e) => { setReadWhenLocked(e.target.checked); setLockRead(e.target.checked); }} /> Lire même quand le téléphone est verrouillé</label>
+          </section>
+        )}
+
+        {isNative && crash && (
+          <section className="card-box">
+            <h3>Dernier plantage de l'appli</h3>
+            <p className="hint">{new Date(crash.time).toLocaleString("fr-FR")} — envoie une capture de ce texte à l'assistant pour qu'il corrige.</p>
+            <pre className="hint" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11, maxHeight: 220, overflow: "auto" }}>{crash.text}</pre>
+            <button className="btn btn-small" onClick={() => crashApi.clear().then(() => setCrash(null)).catch((e) => say(e.message))}>Effacer</button>
           </section>
         )}
 

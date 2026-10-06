@@ -110,14 +110,21 @@ public class UnicWakeService extends Service implements RecognitionListener {
             stopSelf();
             return START_NOT_STICKY;
         }
-        goForeground("Dis « Hey UniC » pour me parler");
+        try {
+            goForeground("Dis « Hey UniC » pour me parler");
+        } catch (Throwable e) {   // Android refuse le micro en arrière-plan : on s'arrête proprement au lieu de planter l'appli
+            state = "error";
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (ACTION_RESUME.equals(action)) {
+            state = "loading";
             main.postDelayed(this::listen, 600);
         } else if (speech == null) {
             state = "loading";
             new Thread(this::prepareAndListen, "unic-wake-init").start();
         }
-        return START_STICKY;
+        return START_NOT_STICKY;   // jamais relancé tout seul en arrière-plan (Android interdit alors le micro et ferait planter l'appli)
     }
 
     private void goForeground(String text) {
@@ -167,7 +174,7 @@ public class UnicWakeService extends Service implements RecognitionListener {
     }
 
     private void listen() {
-        if (stopped || model == null) return;
+        if (stopped || model == null || "busy".equals(state)) return;   // UniC est ouvert : le micro est à lui
         try {
             if (speech != null) { speech.shutdown(); speech = null; }
             Recognizer rec = new Recognizer(model, 16000f, WakeMatcher.grammarJson());
@@ -191,11 +198,13 @@ public class UnicWakeService extends Service implements RecognitionListener {
 
     @Override
     public void onPartialResult(String hypothesis) {
+        if ("busy".equals(state)) return;
         if (WakeMatcher.matches(hypothesis, true, MIN_CONF)) onWake();
     }
 
     @Override
     public void onResult(String hypothesis) {
+        if ("busy".equals(state)) return;
         if (WakeMatcher.matches(hypothesis, false, MIN_CONF)) onWake();
     }
 
@@ -204,6 +213,7 @@ public class UnicWakeService extends Service implements RecognitionListener {
 
     @Override
     public void onError(Exception e) {
+        if ("busy".equals(state) || stopped) return;   // arrêt voulu (UniC ouvert) : pas de réessai, le micro n'est pas à nous
         state = "error";
         main.postDelayed(this::listen, 3000);   // micro pris par un appel, etc. : on réessaie
     }
