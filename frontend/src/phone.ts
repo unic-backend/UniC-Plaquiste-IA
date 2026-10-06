@@ -22,14 +22,20 @@ const Native = registerPlugin<{
   openBatterySettings(): Promise<void>;
   launchMode(): Promise<{ wake: boolean }>;
   finishWake(): Promise<void>;
+  endCall(): Promise<{ ended: boolean }>;
+  audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
 }>("UnicPhone");
 
 export const phone = {
   listContacts: async (): Promise<Contact[]> => (await Native.listContacts()).contacts || [],
   call: async (number: string): Promise<void> => { await Native.call({ number }); },
   /** Rend true si le SMS est seulement préparé dans l'appli Messages (autorisation SMS bloquée) : le patron touche « Envoyer ». */
+  endCall: async (): Promise<boolean> => (await Native.endCall()).ended,
   sendSms: async (number: string, text: string): Promise<boolean> => !!((await Native.sendSms({ number, text })) as { composerOnly?: boolean } | undefined)?.composerOnly,
 };
+
+/** Casque / AirPods : le micro passe par le casque pendant la conversation (sans casque : aucun effet). */
+export const audioRoute = (on: boolean): Promise<unknown> => Native.audioRoute({ on }).catch(() => null);
 
 export const notifApi = {
   list: async (): Promise<Notif[]> => (await Native.listNotifications()).notifications || [],

@@ -21,6 +21,9 @@ async function confirm(d: Deps, question: string): Promise<boolean> {
 }
 
 /** « Appelle Awa », « à Awa », « c'est Awa » → « Awa » : on retire les mots de liaison dits avant le nom. */
+/** « coupe l'appel », « raccroche », « termine la communication » : raccrocher l'appel en cours (le patron l'a demandé, pas de confirmation : il faut aller vite). */
+export const HANGUP_RE = /\b(raccroch\w*|(?:coupe|coupez|couper|termine|terminez|terminer|arr[êe]te|arr[êe]tez|stoppe)\s+(?:moi\s+)?(?:l['’ ]\s*|la\s+|cet\s+|cette\s+|mon\s+|ce\s+)?(?:appel|communication|t[ée]l[ée]phone|conversation))\b/i;
+
 export const cleanName = (s: string): string => s.replace(/^(?:\s*(?:c['’ ]est|appelle|appeler|à|a|au|pour|le|la|ecris|écris|dis|envoie|madame\s+la)\s+)+/i, "").replace(/[.!?]+$/, "").trim();
 
 export async function runPhoneIntent(it: Intent, d: Deps): Promise<void> {

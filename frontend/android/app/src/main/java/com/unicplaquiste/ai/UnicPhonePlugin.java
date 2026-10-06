@@ -7,7 +7,10 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
+import android.telecom.TelecomManager;
 import android.os.PowerManager;
 import android.provider.ContactsContract;
 import android.provider.Settings;
@@ -41,7 +44,8 @@ import java.util.Set;
         @Permission(strings = {Manifest.permission.READ_CONTACTS}, alias = "contacts"),
         @Permission(strings = {Manifest.permission.CALL_PHONE}, alias = "call"),
         @Permission(strings = {Manifest.permission.SEND_SMS}, alias = "sms"),
-        @Permission(strings = {Manifest.permission.RECORD_AUDIO}, alias = "mic")
+        @Permission(strings = {Manifest.permission.RECORD_AUDIO}, alias = "mic"),
+        @Permission(strings = {Manifest.permission.ANSWER_PHONE_CALLS}, alias = "answer")
     }
 )
 public class UnicPhonePlugin extends Plugin {
@@ -365,6 +369,82 @@ public class UnicPhonePlugin extends Plugin {
         Activity act = getActivity();
         if (act instanceof WakeActivity) ((WakeActivity) act).finishAndResume();
         call.resolve();
+    }
+
+    // ---------- raccrocher, casque Bluetooth ----------
+
+    /** Raccroche l'appel en cours (demandé à voix haute par le patron). */
+    @PluginMethod
+    public void endCall(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            call.reject("Raccrocher par la voix demande Android 9 ou plus.");
+            return;
+        }
+        if (getPermissionState("answer") != PermissionState.GRANTED) {
+            requestPermissionForAlias("answer", call, "answerPermission");
+            return;
+        }
+        doEndCall(call);
+    }
+
+    @PermissionCallback
+    private void answerPermission(PluginCall call) {
+        if (getPermissionState("answer") != PermissionState.GRANTED) {
+            call.reject("Autorisation refusée : je ne peux pas raccrocher. Raccroche avec le bouton.");
+            return;
+        }
+        doEndCall(call);
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void doEndCall(PluginCall call) {
+        try {
+            TelecomManager tm = (TelecomManager) getContext().getSystemService(Context.TELECOM_SERVICE);
+            boolean ended = tm != null && tm.endCall();
+            JSObject res = new JSObject();
+            res.put("ended", ended);
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Je n'ai pas pu raccrocher.");
+        }
+    }
+
+    /**
+     * Casque / AirPods : si un casque Bluetooth est connecté, le micro passe par lui pendant la conversation
+     * (sans cela Android écoute le micro du téléphone). Sans casque : rien ne change.
+     */
+    @PluginMethod
+    @SuppressWarnings("deprecation")
+    public void audioRoute(PluginCall call) {
+        final boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        JSObject res = new JSObject();
+        res.put("bluetooth", false);
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) { call.resolve(res); return; }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (on) {
+                    for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                        if (d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || d.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET) {
+                            res.put("bluetooth", am.setCommunicationDevice(d));
+                            break;
+                        }
+                    }
+                } else {
+                    am.clearCommunicationDevice();
+                }
+            } else if (am.isBluetoothScoAvailableOffCall()) {
+                if (on) {
+                    am.startBluetoothSco();
+                    am.setBluetoothScoOn(true);
+                    res.put("bluetooth", am.isBluetoothScoOn());
+                } else {
+                    am.setBluetoothScoOn(false);
+                    am.stopBluetoothSco();
+                }
+            }
+        } catch (Exception ignored) { /* pas de casque ou refus : le micro du téléphone sert */ }
+        call.resolve(res);
     }
 
     private static String cleanNumber(String raw) {
