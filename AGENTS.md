@@ -38,6 +38,8 @@ Architecture et points d'extension : **`ARCHITECTURE.md`** (à lire AVANT d'écr
 3. Un test pour chaque comportement ajouté (valeurs vérifiées à la main pour les calculs) ; une option facultative = un réglage qui la coupe.
 4. Vérifier avant de livrer : `make test` et `make lint` (serveur) ; `cd frontend && npx tsc --noEmit && npm run test:phone && npm run build` ; Android : `./gradlew :app:testDebugUnitTest`.
 5. Branche dédiée, commits « Conventional Commits », pull request. La CI (dont le job **guardrails**) doit être verte. Dire honnêtement ce qui n'a pas été testé.
+   Le propriétaire n'a pas le temps de fusionner : la pull request **se fusionne toute seule** (workflow `automerge.yml`) dès que les contrôles sont verts ; les zones protégées attendent sa relecture.
+   Pour la retenir : brouillon (draft) ou étiquette `hold`. Tu peux pousser et committer sur ta branche sans demander ; tu ne fusionnes jamais toi-même hors de ce circuit.
 6. En cas de doute (zone protégée, suppression, nouvelle dépendance, changement d'architecture) : **demander au propriétaire**, ne pas décider seul.
 
 ## Contrôle automatique (honnêteté)

@@ -108,7 +108,7 @@ def _read(path: str) -> str:
 def _core_files(tree: list[str]) -> list[str]:
     keep = ("backend/app/", "backend/tests/", "frontend/src/", "frontend/android/app/src/main/java/", "desktop/main.cjs", "desktop/preload.cjs", "scripts/")
     top = ("AGENTS.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "README.md", "Dockerfile", "docker-compose.yml", "render.yaml", "Makefile",
-           ".github/workflows/tests.yml", ".github/workflows/android.yml", ".github/workflows/desktop.yml", ".github/CODEOWNERS")
+           ".github/workflows/tests.yml", ".github/workflows/android.yml", ".github/workflows/desktop.yml", ".github/workflows/automerge.yml", ".github/CODEOWNERS")
     return sorted(p for p in tree if p.startswith(keep) or p in top)
 
 
