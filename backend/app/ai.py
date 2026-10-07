@@ -278,11 +278,16 @@ class ClaudeAIProvider(AIProvider):
         model = kwargs.get("model") or settings.anthropic_model
         if not settings.anthropic_api_key:
             return AIResult("", self.id, model, False, "not_configured")
-        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        sys_msgs = [m for m in messages if m["role"] == "system"]
         turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
         params: dict = {"model": model, "max_tokens": kwargs.get("max_tokens", 8000), "messages": turns}
-        if system:
-            params["system"] = system
+        if any(m.get("cache") for m in sys_msgs):
+            # Cache de prompt (réduit le prix des textes qui se répètent à chaque message ; le contenu lu par l'IA ne change pas) :
+            # la partie stable (règles) est marquée ; la partie qui varie (mémoire, base, fichiers) vient après, sans marque.
+            params["system"] = [{"type": "text", "text": m["content"], **({"cache_control": {"type": "ephemeral"}} if m.get("cache") else {})}
+                                for m in sys_msgs if m["content"]]
+        elif sys_msgs:
+            params["system"] = "\n\n".join(m["content"] for m in sys_msgs)
         if kwargs.get("effort"):
             params["output_config"] = {"effort": kwargs["effort"]}
         if kwargs.get("thinking"):
@@ -432,6 +437,12 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
     last = AIResult("", "none", "", False, "not_configured")
     for provider in provider_chain(deep):
+        if provider.id != "claude":   # les autres moteurs ne connaissent ni le cache ni plusieurs messages « system » : un seul, sans marque
+            sysm = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+            rest = [{k: v for k, v in m.items() if k != "cache"} for m in messages if m["role"] != "system"]
+            plain = ([{"role": "system", "content": sysm}] if sysm else []) + rest
+        else:
+            plain = messages
         opts = dict(kwargs)
         if provider.id == "claude":
             opts.setdefault("model", settings.anthropic_model if deep else settings.anthropic_fast_model)
@@ -439,7 +450,7 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             opts["web"] = web
             opts["tools"], opts["tool_handler"] = tools, tool_handler
             opts.setdefault("max_tokens", 16000 if deep else 8000)
-        res = provider.complete(messages, **opts)
+        res = provider.complete(plain, **opts)
         if res.available and res.text:
             return res
         last = res

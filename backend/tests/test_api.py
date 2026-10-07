@@ -34,6 +34,13 @@ def auth(token):
     return {}
 
 
+
+def _sysstr(kw):
+    """Le « system » envoyé à Claude : texte simple ou liste de blocs (cache de prompt) -> un seul texte."""
+    s = kw["system"]
+    return s if isinstance(s, str) else "\n\n".join(b["text"] for b in s)
+
+
 def test_no_login_needed(client):
     assert client.get("/api/auth/me").status_code == 200
 
@@ -477,7 +484,7 @@ def test_chat_uses_web_search_and_mentions_it_in_the_prompt(claude, client):
     out = client.post("/api/chat", json={"message": "Quel temps fait-il à Paris aujourd'hui ?"}).json()["message"]["content"]
     assert "Sources" in out and "https://x.org/a" in out
     chat_call = [kw for _, kw in fake.calls if "tools" in kw][0]
-    assert "OUTIL DE RECHERCHE INTERNET" in chat_call["system"]
+    assert "OUTIL DE RECHERCHE INTERNET" in _sysstr(chat_call)
 
 
 def test_memory_persists_across_conversations(client, claude):
@@ -489,7 +496,7 @@ def test_memory_persists_across_conversations(client, claude):
     out = client.post("/api/chat", json={"message": "Quel type de plaque pour une salle de bain, dis-moi"}).json()
     assert "ok salle de bain" in out["message"]["content"]
     first = fake.calls[0][1]
-    assert "hydrofuge" in first["system"] and "MÉMOIRE UNIC" in first["system"]
+    assert "hydrofuge" in _sysstr(first) and "MÉMOIRE UNIC" in _sysstr(first)
 
 
 def test_memory_auto_extract_dedupe_and_delete(client, claude):
@@ -969,7 +976,7 @@ def test_ai_recalls_past_conversations_by_words_and_by_date(client, claude):
     first = client.post("/api/chat", json={"message": "Pour le salon de coiffure de Madame Coumba il faut du BA13 hydrofuge au plafond"}).json()
     fake = claude(lambda kind, kw: _resp("[]" if "Extrais" in kw.get("system", "") else "Oui je m'en souviens."))
     client.post("/api/chat", json={"message": "Tu te souviens du salon de Madame Coumba ?"})
-    sys_prompt = [kw for _, kw in fake.calls if kw.get("tools")][0]["system"]
+    sys_prompt = _sysstr([kw for _, kw in fake.calls if kw.get("tools")][0])
     assert "ÉCHANGES PASSÉS PERTINENTS" in sys_prompt and "hydrofuge" in sys_prompt
     assert first["conversation_id"] not in sys_prompt        # jamais la conversation en cours
     from app import retrieval
@@ -990,7 +997,7 @@ def test_documents_are_searched_with_their_source_and_flagged_when_hostile(clien
     assert client.post("/api/files", files={"file": ("cahier_salon.pdf", buf.getvalue(), "application/pdf")}).status_code == 200
     fake = claude(lambda kind, kw: _resp("[]" if "Extrais" in kw.get("system", "") else "La hauteur est 2,80 m."))
     client.post("/api/chat", json={"message": "Quelle hauteur dans le cahier des charges du salon ?"})
-    system = [kw for _, kw in fake.calls if kw.get("tools")][0]["system"]
+    system = _sysstr([kw for _, kw in fake.calls if kw.get("tools")][0])
     assert "cahier_salon.pdf" in system and "DONNÉES" in system.upper().replace("DONNÉES", "DONNÉES")
 
 
@@ -2374,7 +2381,7 @@ def test_claude_is_told_about_attached_file(client, monkeypatch):
     class R:
         text, provider, model, available, error, raw = "ok", "claude", "m", True, "", None
     def fake(msgs, **kw):
-        seen["system"] = msgs[0]["content"]
+        seen["system"] = "\n".join(m["content"] for m in msgs if m["role"] == "system")
         return R()
     monkeypatch.setattr(orchestrator, "chat_complete", fake)
     monkeypatch.setattr(orchestrator, "provider_chain", lambda deep=False: [type("P", (), {"id": "claude"})()])
@@ -3046,11 +3053,11 @@ def test_voice_mode_adds_spoken_rules_and_the_assistant_is_called_unic(client, c
     fake = claude(lambda kind, kw: _resp("D'accord, je m'en occupe."))
     r = client.post("/api/chat", json={"message": "dis moi bonjour", "voice": True})
     assert r.status_code == 200
-    system = fake.calls[-1][1]["system"]
+    system = _sysstr(fake.calls[-1][1])
     assert "MODE VOIX" in system and "français approximatif" in system and "attends son « oui »" in system
     assert "Tu es UniC" in system and "JARVIS" not in system
     client.post("/api/chat", json={"message": "dis moi bonjour encore"})
-    assert "MODE VOIX" not in fake.calls[-1][1]["system"]               # le mode écrit reste inchangé
+    assert "MODE VOIX" not in _sysstr(fake.calls[-1][1])               # le mode écrit reste inchangé
 
 
 def test_locked_phone_gets_no_business_data_and_no_tools(client, claude):
@@ -3059,11 +3066,11 @@ def test_locked_phone_gets_no_business_data_and_no_tools(client, claude):
     r = client.post("/api/chat", json={"message": "montre mes devis", "voice": True, "locked": True})
     assert r.status_code == 200
     kw = fake.calls[0][1]
-    assert "TÉLÉPHONE VERROUILLÉ" in kw["system"] and "MODE VOIX" in kw["system"]
+    assert "TÉLÉPHONE VERROUILLÉ" in _sysstr(kw) and "MODE VOIX" in _sysstr(kw)
     assert not kw.get("tools") or all("web_search" in str(t.get("type", "")) for t in kw["tools"])   # aucun outil métier
     assert "SECRETE" not in str(kw)
     client.post("/api/chat", json={"message": "montre mes devis", "voice": True})
-    assert "TÉLÉPHONE VERROUILLÉ" not in fake.calls[-1][1]["system"]       # déverrouillé : comportement normal
+    assert "TÉLÉPHONE VERROUILLÉ" not in _sysstr(fake.calls[-1][1])       # déverrouillé : comportement normal
 
 
 def test_voice_mode_is_fast_light_chat_uses_the_fast_model_business_keeps_the_regular_one(client, claude):
@@ -3104,7 +3111,7 @@ def test_interpreter_translates_without_tools_or_company_data(client, claude):
                                                  "context": [{"who": "me", "text": "Bonjour"}, {"who": "them", "text": "Hello"}]})
     assert r.status_code == 200 and r.json()["text"] == "Good morning, I would like a quote."
     kw = fake.calls[0][1]
-    assert "interprète" in kw["system"] and "anglais" in kw["system"] and "SECRETE" not in str(kw)
+    assert "interprète" in _sysstr(kw) and "anglais" in _sysstr(kw) and "SECRETE" not in str(kw)
     assert not kw.get("tools")                                   # aucun outil
     assert "<parole>Bonjour, je voudrais un devis.</parole>" in str(kw["messages"])
     assert client.post("/api/unic/translate", json={"text": "x", "source": "fr", "target": "fr"}).status_code == 400
@@ -3119,12 +3126,12 @@ def test_new_quote_conversation_does_not_import_other_conversations(client, clau
     n = len(fake.calls)
     r = client.post("/api/chat", json={"message": "Fais moi un devis sur ces plaques BA13 Ribeiro"})
     assert r.status_code == 200
-    system = fake.calls[n][1]["system"]                       # 1er appel du tour = la réponse (les suivants : mémoire en fond)
+    system = _sysstr(fake.calls[n][1])                       # 1er appel du tour = la réponse (les suivants : mémoire en fond)
     assert "ÉCHANGES PASSÉS" not in system                     # nouvelle conversation + demande de devis : rien des autres conversations
     assert "DEVIS (et facture, bon) : chaque document est indépendant" in system
     n = len(fake.calls)
     client.post("/api/chat", json={"message": "plaques BA13 Ribeiro Point E"})   # autre conversation, pas une demande de document
-    assert "ÉCHANGES PASSÉS" in fake.calls[n][1]["system"]     # le rappel du passé reste actif ailleurs
+    assert "ÉCHANGES PASSÉS" in _sysstr(fake.calls[n][1])     # le rappel du passé reste actif ailleurs
 
 
 def _labour_quote_pdf(tmp_path, with_labour=True):
@@ -3285,3 +3292,31 @@ def _labour_quote_pdf_bytes():
     from pathlib import Path
     with tempfile.TemporaryDirectory() as d:
         return _labour_quote_pdf(Path(d)).read_bytes()
+
+
+def test_prompt_cache_marks_only_the_stable_rules_and_keeps_the_same_text(client, claude):
+    fake = claude(lambda kind, kw: _resp("Bonjour."))
+    n = len(fake.calls)
+    client.post("/api/chat", json={"message": "salut, tu vas bien ?"})
+    kw = fake.calls[n][1]
+    blocks = kw["system"]
+    assert isinstance(blocks, list) and blocks[0].get("cache_control") == {"type": "ephemeral"}
+    assert all("cache_control" not in b for b in blocks[1:])               # la partie qui varie n'est jamais mise en cache
+    assert "RÈGLES ABSOLUES" in blocks[0]["text"]                           # les règles stables sont dans la partie en cache
+    assert "MÉMOIRE UNIC" not in blocks[0]["text"]                               # mémoire / base / fichiers viennent après
+
+
+def test_non_claude_engines_get_one_plain_system_message(monkeypatch):
+    from app import ai
+
+    seen = {}
+
+    class P:
+        id = "pc"
+
+        def complete(self, messages, **kw):
+            seen["m"] = messages
+            return ai.AIResult("ok", "pc", "m", True)
+    monkeypatch.setattr(ai, "provider_chain", lambda deep=False: [P()])
+    ai.chat_complete([{"role": "system", "content": "A", "cache": True}, {"role": "system", "content": "B"}, {"role": "user", "content": "q"}])
+    assert seen["m"] == [{"role": "system", "content": "A\n\nB"}, {"role": "user", "content": "q"}]
