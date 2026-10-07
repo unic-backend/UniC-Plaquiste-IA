@@ -328,6 +328,13 @@ TOOLS: list[dict] = [
                          "additionalProperties": False},
     },
     {
+        "name": "set_collect_reminder",
+        "description": ("SUIVI : fixe la date du prochain encaissement attendu d'un devis accepté (« rappelle-moi de relancer Awa le 15 »). "
+                        "date = AAAA-MM-JJ ; vide = supprimer le rappel. L'appli prévient le patron ce jour-là ; rien n'est envoyé au client."),
+        "input_schema": {"type": "object", "properties": {"date": {"type": "string"}, "client": {"type": "string"}, "quote_number": {"type": "string"}},
+                         "additionalProperties": False},
+    },
+    {
         "name": "mail_signals",
         "description": ("SUIVI : e-mails récents de clients qui semblent dire « j'accepte » ou « j'ai payé ». Ce sont des SUGGESTIONS : montre-les au "
                         "patron et demande-lui de confirmer avant d'utiliser mark_quote_decision ou record_receipt. Ne synchronise pas la boîte seul."),
@@ -450,7 +457,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -710,6 +717,10 @@ class AgentSession:
         self._doc("invoice", inv)
         return {"numero": inv.number, "depuis": q.number, "total": round(inv.total or 0), "deja_recu": round(inv.paid or 0),
                 "reste_du": round(inv.remaining or 0), "statut": inv.status}
+
+    def _t_set_collect_reminder(self, date: str = "", client: str = "", quote_number: str = "") -> dict:
+        q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))
+        return self._tracked(lambda: tracking.set_collect_date(self.db, q, date.strip() or None, self.user_id))
 
     def _t_mail_signals(self, refresh: bool = False) -> dict:
         if refresh:

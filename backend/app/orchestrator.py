@@ -971,6 +971,15 @@ def handle_turn(
                 tools_on = bool(chain) and chain[0].id == "claude" and not locked
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
+                focus = state.get("focus") or {}
+                if focus and not locked:   # conversation ouverte depuis le suivi des encaissements
+                    who = focus.get("client") or ""
+                    msgs[1]["content"] += (
+                        "\n\nCONVERSATION DU SUIVI DES ENCAISSEMENTS (argent seulement, jamais l'avancement du chantier). "
+                        + (f"Dossier ouvert : le client « {who} » : « il », « son devis », « l'avance » = ce client ; passe-le à tes outils de suivi. "
+                           f"Au début, appelle list_tracking(client=\"{who}\") si tu as besoin de ses chiffres. "
+                           if who else "Vue d'ensemble de tous les clients : appelle list_tracking. ")
+                        + "Réponds court ; annonce toujours le reste et les pourcentages donnés par les outils.")
                 if attached:
                     msgs[1]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)
                                            + ". Le patron parle de CE fichier : plan, métré, photo, tableur ou document. "

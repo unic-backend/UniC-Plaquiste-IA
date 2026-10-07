@@ -241,6 +241,7 @@ class Quotation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     client_decision: Mapped[str] = mapped_column(String(16), default="pending")   # suivi : pending / accepted / declined
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    collect_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # prochain encaissement prévu (rappel)
 
     customer: Mapped[Customer | None] = relationship()
     project: Mapped[Project | None] = relationship()
@@ -475,6 +476,7 @@ class Conversation(Base):
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     state_json: Mapped[str] = mapped_column(Text, default="{}")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(16), default="")   # « suivi » : conversation intégrée au suivi des encaissements (hors liste)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -855,3 +857,14 @@ class MailSeen(Base):
     mail_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     action: Mapped[str] = mapped_column(String(16), default="dismissed")
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TrackingClient(Base):
+    """Fiche d'un client du suivi : téléphone et note du patron (les montants viennent des devis, jamais d'ici)."""
+
+    __tablename__ = "tracking_clients"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
