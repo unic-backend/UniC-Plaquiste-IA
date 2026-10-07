@@ -3,6 +3,7 @@ name: Tests
 # Chaque proposition d'UniC AI (branches unic-ai/*) et chaque changement passent ici avant toute fusion.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]   # poser l'étiquette core-change-approved relance les contrôles
   push:
     paths: ["backend/**", "frontend/src/**", "scripts/**", "AGENTS.md", ".github/workflows/tests.yml"]
   workflow_dispatch:
