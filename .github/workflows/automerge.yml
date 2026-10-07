@@ -1,0 +1,28 @@
+name: Auto-merge
+
+# Le propriétaire n'a pas le temps de fusionner chaque pull request : une pull request du dépôt (outil IA ou humain) se fusionne TOUTE SEULE
+# dès que les contrôles obligatoires sont verts (tests, qualité, garde-fous). Les zones protégées (CODEOWNERS) attendent la relecture du propriétaire.
+# Pour retenir une pull request : brouillon (draft) ou étiquette « hold ». Rien n'est déployé par cette fusion : Render reste en « Manual Deploy ».
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'hold')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Activer la fusion automatique (attend les contrôles obligatoires)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge --auto --squash "$PR_URL" || echo "::warning::Fusion automatique non activée (Settings, General, Pull Requests, Allow auto-merge ; Settings, Actions, General, Workflow permissions, Read and write)."

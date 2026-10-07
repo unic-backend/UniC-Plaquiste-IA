@@ -66,13 +66,13 @@ npm run build   # ou npm run dev (proxy /api → :8000)
 
 En production locale, compiler le frontend puis servir uniquement uvicorn : l’API sert l’interface.
 
-Application **solo** : aucune connexion. Écoute sur `127.0.0.1` seulement. Pour l’exposer sur Internet, protège-la (VPN, Tailscale ou proxy avec mot de passe).
+Application **mono-propriétaire**. Sur Internet, définis `UNIC_ACCESS_CODE` (et un mot de passe dans l'appli) : sans code, l'API est ouverte. Voir `ARCHITECTURE.md`, `CONTRIBUTING.md`, `TROUBLESHOOTING.md`.
 
 ---
 
 ## Ce qui fonctionne vraiment
 
-- Authentification, rôles, sessions JWT
+- Connexion par e-mail + mot de passe (ou code d'accès), jetons de session révocables
 - Interface conversation (desktop + smartphone)
 - Téléversement PDF / Office / images, photo chantier (appareil)
 - Lecture PDF page par page, recherche (« trouve les portes »)

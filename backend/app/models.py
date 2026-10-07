@@ -55,11 +55,12 @@ class CompanySettings(Base):
     currency: Mapped[str] = mapped_column(String(8), default="")
     vat_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     quote_validity_days: Mapped[int] = mapped_column(Integer, default=30)
+    invoice_due_days: Mapped[int] = mapped_column(Integer, default=15)   # échéance des factures, en jours après approbation
     payment_terms: Mapped[str] = mapped_column(Text, default="")
     default_waste: Mapped[float] = mapped_column(Float, default=0.08)
     default_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     board_width_m: Mapped[float] = mapped_column(Float, default=1.20)
-    board_height_m: Mapped[float] = mapped_column(Float, default=2.50)
+    board_height_m: Mapped[float] = mapped_column(Float, default=2.00)
     stud_spacing_m: Mapped[float] = mapped_column(Float, default=0.60)
     notes: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -103,7 +104,7 @@ class Material(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     category: Mapped[str] = mapped_column(String(64), index=True)
     unit: Mapped[str] = mapped_column(String(32))
-    supplier_id: Mapped[str | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
+    supplier_id: Mapped[str | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
     waste_coefficient: Mapped[float] = mapped_column(Float, default=0.08)
     availability: Mapped[str] = mapped_column(String(64), default="unknown")
     notes: Mapped[str] = mapped_column(Text, default="")
@@ -151,7 +152,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255), index=True)
-    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     location: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(32), default="draft")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -198,7 +199,7 @@ class Expense(Base):
     __tablename__ = "expenses"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     label: Mapped[str] = mapped_column(String(255))
     amount: Mapped[float] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(8), default="")
@@ -213,12 +214,13 @@ class Quotation(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     client_label: Mapped[str] = mapped_column(String(255), default="")  # nom du client cité, sans fiche client
-    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     object_text: Mapped[str] = mapped_column(Text, default="")   # « Objet du devis » rédigé par l'IA (nature des travaux)
     site_location: Mapped[str] = mapped_column(String(255), default="")   # lieu du chantier, sous le client sur le PDF
-    status: Mapped[str] = mapped_column(String(32), default="draft")
+    cover_letter: Mapped[str] = mapped_column(Text, default="")   # lettre d'accompagnement (250 mots maximum), préparée à l'approbation
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     currency: Mapped[str] = mapped_column(String(8), default="")
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)
     vat_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -235,7 +237,7 @@ class Quotation(Base):
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     customer: Mapped[Customer | None] = relationship()
@@ -270,11 +272,11 @@ class Invoice(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     kind: Mapped[str] = mapped_column(String(32), default="invoice")
-    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
-    quotation_id: Mapped[str | None] = mapped_column(ForeignKey("quotations.id"), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    quotation_id: Mapped[str | None] = mapped_column(ForeignKey("quotations.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
-    status: Mapped[str] = mapped_column(String(32), default="draft")
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     currency: Mapped[str] = mapped_column(String(8), default="")
     subtotal: Mapped[float | None] = mapped_column(Float, nullable=True)
     vat_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -289,7 +291,7 @@ class Invoice(Base):
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     customer: Mapped[Customer | None] = relationship()
     items: Mapped[list["InvoiceItem"]] = relationship(
@@ -333,8 +335,8 @@ class PurchaseOrder(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    supplier_id: Mapped[str | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    supplier_id: Mapped[str | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(32), default="draft")
     currency: Mapped[str] = mapped_column(String(8), default="")
@@ -374,8 +376,8 @@ class DeliveryNote(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
-    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     purchase_order_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(32), default="draft")
@@ -470,6 +472,7 @@ class Conversation(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     state_json: Mapped[str] = mapped_column(Text, default="{}")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -594,6 +597,7 @@ class SocialPost(Base):
     status: Mapped[str] = mapped_column(String(16), default="draft")
     external_url: Mapped[str] = mapped_column(String(512), default="")
     external_id: Mapped[str] = mapped_column(String(512), default="")  # ex. avis Google visé / post créé
+    photo_brief: Mapped[str] = mapped_column(Text, default="")  # quelle photo prendre pour cette publication
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -661,3 +665,163 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class LearnedAnswer(Base):
+    """Réponse de Claude validée par le patron (👍) : le moteur local ne répond QUE depuis elles quand Claude est indisponible."""
+    __tablename__ = "learned_answers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    message_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    hits: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Appointment(Base):
+    """Agenda : visite, métré, pose, livraison, rendez-vous. Heures stockées en UTC (Dakar = UTC, sans heure d'été)."""
+    __tablename__ = "appointments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(32), default="rdv")   # visite | metre | pose | livraison | rdv | autre
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    location: Mapped[str] = mapped_column(String(255), default="")
+    client_name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    customer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="planned")   # planned | done | cancelled
+    remind_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebChatSession(Base):
+    """Conversation d'un visiteur du site (anonyme). Séparée de tout le reste : aucune donnée de l'entreprise n'y est lisible."""
+    __tablename__ = "web_chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ip_hash: Mapped[str] = mapped_column(String(64), index=True, default="")
+    messages_json: Mapped[str] = mapped_column(Text, default="[]")
+    msg_count: Mapped[int] = mapped_column(Integer, default=0)
+    page: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebLead(Base):
+    """Prospect laissé par un visiteur du site : le patron le rappelle."""
+    __tablename__ = "web_leads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(String(36), index=True, default="")
+    name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    area: Mapped[str] = mapped_column(String(255), default="")
+    need: Mapped[str] = mapped_column(Text, default="")
+    surface: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(16), default="new")   # new | contacted | done
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+
+class AuthSession(Base):
+    """Connexion e-mail + mot de passe : un jeton par appareil (téléphone, PC). Seul son empreinte est stockée."""
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    device: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Incident(Base):
+    """Problème vu par UniC lui-même (erreur, agent endormi, contrôle échoué). Regroupé par empreinte."""
+    __tablename__ = "incidents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(24), default="error")      # error | sleeping | check | tool
+    source: Mapped[str] = mapped_column(String(120), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[str] = mapped_column(Text, default="")                # trace (sans secret)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="open")     # open | fixing | fixed | ignored
+    fix_url: Mapped[str] = mapped_column(String(300), default="")       # correctif proposé (pull request)
+    first_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RepairJob(Base):
+    """Correctif ou nouvelle fonction codé par UniC : proposé en pull request, fusionné seulement au clic du patron."""
+    __tablename__ = "repair_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(16), default="fix")        # fix | feature
+    request: Mapped[str] = mapped_column(Text, default="")
+    incident_id: Mapped[str] = mapped_column(String(36), default="")
+    status: Mapped[str] = mapped_column(String(16), default="working")  # working | proposed | merged | failed | closed
+    summary: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[str] = mapped_column(Text, default="[]")
+    branch: Mapped[str] = mapped_column(String(120), default="")
+    pr_number: Mapped[int] = mapped_column(Integer, default=0)
+    pr_url: Mapped[str] = mapped_column(String(300), default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomAgent(Base):
+    """Agent créé par UniC (ou le patron) : une mission qui tourne seule à heure fixe, avec les outils autorisés."""
+    __tablename__ = "custom_agents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    mission: Mapped[str] = mapped_column(Text, default="")
+    every_hours: Mapped[int] = mapped_column(Integer, default=24)
+    status: Mapped[str] = mapped_column(String(16), default="active")   # active | paused | proposed
+    created_by: Mapped[str] = mapped_column(String(16), default="ai")   # ai | owner
+    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_result: Mapped[str] = mapped_column(Text, default="")
+    last_ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SiteCheckin(Base):
+    """Pointage chantier : arrivée ou départ, heure réelle de l'appareil, position GPS si accordée (jamais inventée)."""
+    __tablename__ = "site_checkins"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    client_id: Mapped[str] = mapped_column(String(64), unique=True)   # fourni par l'appareil : un pointage rejoué n'est jamais doublé
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(8))   # in | out
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class QuoteAcceptance(Base):
+    """Bon pour accord capturé sur l'appareil : nom, dessin de la signature, empreinte du devis au moment de signer."""
+    __tablename__ = "quote_acceptances"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quotation_id: Mapped[str] = mapped_column(ForeignKey("quotations.id"), index=True)
+    signer_name: Mapped[str] = mapped_column(String(255))
+    image_path: Mapped[str] = mapped_column(String(500))
+    quote_number: Mapped[str] = mapped_column(String(32))
+    quote_version: Mapped[int] = mapped_column(Integer, default=1)
+    quote_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64))   # SHA-256 du contenu du devis signé : preuve qu'il n'a pas changé depuis
+    signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(255), default="")

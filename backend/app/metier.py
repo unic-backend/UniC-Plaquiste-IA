@@ -27,6 +27,8 @@ PRECISION = 6
 EXISTING_SKU = {
     "Plaque standard BA13": "BA13-2500x1200",
     "Plaque hydrofuge": "BA13-2500x1200-H",
+    "Plaque BA13 standard 2 m": "BA13-2000x1200",
+    "Plaque BA13 hydrofuge 2 m": "BA13-2000x1200-H",
     "Montant 48 mm": "MONTANT-M48",
     "Montant 7 cm (70 mm)": "MONTANT-M70",
 }
@@ -49,7 +51,7 @@ def sku_for(article: str) -> str:
 
 def _unit(article: str) -> str:
     low = article.lower()
-    for word, unit in (("paquet", "paquet"), ("sac", "sac"), ("seau", "seau"), ("feuille", "feuille"),
+    for word, unit in (("barre", "barre"), ("paquet", "paquet"), ("sac", "sac"), ("seau", "seau"), ("feuille", "feuille"),
                        ("planche", "planche"), ("rails", "barre"), ("tiges", "u")):
         if word in low:
             return unit

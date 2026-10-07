@@ -1,0 +1,62 @@
+{
+  "name": "unic-ai-desktop",
+  "productName": "UniC AI",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UniC AI pour Windows",
+  "author": "UniC Plaquiste",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.unicplaquiste.ai.desktop",
+    "productName": "UniC AI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "app-dist"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "UniC-AI-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "UniC-AI-${version}-mac.${ext}",
+      "identity": null
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office",
+      "artifactName": "UniC-AI-${version}-linux.${ext}"
+    }
+  }
+}

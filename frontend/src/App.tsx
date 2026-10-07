@@ -1,11 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
+import { FicheGoogle } from "./Google";
+import { Voix } from "./Voix";
+import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
+import { AttachRow, type Attach } from "./Attach";
+import { Agenda } from "./Agenda";
+import { Prospects } from "./Prospects";
+import { prepareFile } from "./compress";
+import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
+import { AppsList, QuickChips } from "./Shortcuts";
+import { Pointage, SignaturePanel } from "./Terrain";
+import { UnicVoice } from "./UnicVoice";
+import { Interpreter } from "./Interpreter";
+import { Atelier } from "./Atelier";
+import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
+import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
-import { api, net, AuthError, clearConnection, downloadAuth, getCode, getServer, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type User } from "./api";
+import { queueMessage, readOutbox, takeQueued, useOnline } from "./offline";
+import { api, net, AuthError, Interrupted, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -80,9 +96,16 @@ function revealHtml(html: string, totalMs = 3200): string {
   return tpl.innerHTML;
 }
 
+const STATUS_FR: Record<string, string> = {
+  draft: "À valider", approved: "Approuvé", sent: "Envoyé", paid: "Payé", partial: "Partiel", cancelled: "Annulé", review: "En revue",
+};
+/** Le mot « brouillon » n'apparaît jamais sur un devis : un document pas encore approuvé est simplement « à valider ». */
+const statusFr = (s?: string) => STATUS_FR[(s || "").toLowerCase()] ?? (s || "—");
+
 function Badge({ s }: { s?: string }) {
   const v = (s || "").toLowerCase();
-  return <span className={`badge ${v}`}>{v || "—"}</span>;
+  if (v === "draft") return null;   // rien à afficher : l'état normal d'un document en préparation
+  return <span className={`badge ${v}`}>{statusFr(v)}</span>;
 }
 
 function fmt(n: number | null | undefined, cur = ""): string {
@@ -132,6 +155,7 @@ function PreviewModal({ kind, d, onClose, onChanged, onDownload }: {
           }}><I.Check size={16} /> Approuver</button>
         )}
         {d.status === "approved" && <span className="hint ic"><I.Check size={16} /> Approuvé</span>}
+        {aid && <ShareButton url={`/api/artifacts/${aid}/download`} filename={`${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="btn btn-line" />}
         {onDownload && <button className="btn btn-copper" onClick={onDownload}>Télécharger</button>}
       </div>
     </div>,
@@ -158,64 +182,46 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
     : d.artifact_id
       ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
       : null;
+  const shareUrl: string | null = d.download_url || (d.artifact_id ? `/api/artifacts/${d.artifact_id}/download` : null);
+  const who = d.customer_name || d.client_label || d.client_name || "";
+  const total = d.total === null || d.total === undefined ? "total incomplet" : fmt(d.total, cur);
+  const sub = [who, d.site_location, priced ? total : ""].filter(Boolean).join(" · ");
+  const open = () => (artifactIdOf(d) ? setPreview(true) : undefined);
   return (
-    <div className="doc-card">
-      <div className="doc-card-head">
-        <div>
+    <div className="doc-card doc-mini">
+      <button className="doc-open" onClick={open} aria-label={`Ouvrir ${DOC_LABEL[kind]} ${d.number}`} disabled={!artifactIdOf(d)}>
+        <span className="doc-thumb"><I.File size={26} /></span>
+        <span className="doc-meta">
           <b>{DOC_LABEL[kind]} {d.number}</b>
-          <div className="hint">{d.customer_name || d.client_label ? `Client : ${d.customer_name || d.client_label} · ` : ""}{d.title}</div>
-        </div>
-        <Badge s={d.status} />
-      </div>
-      {d.object_text && <p className="hint">{d.object_text}</p>}
-      <div className="doc-lines">
-        {(d.items || []).map((it: any) => (
-          <div className="doc-line" key={it.id || it.position}>
-            <div className="doc-line-main">
-              <span>{it.description}</span>
-              <span className="doc-qty">{it.quantity} {it.unit}</span>
-            </div>
-            {priced && (
-              <div className="doc-line-price">
-                <span>{it.unit_price === null || it.unit_price === undefined ? "prix non renseigné" : `${fmt(it.unit_price)} / u.`}</span>
-                <b>{fmt(it.total)}</b>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      {priced && (
-        <div className="doc-totals">
-          {d.subtotal !== null && d.subtotal !== undefined && d.vat_amount ? <div><span>Sous-total</span><span>{fmt(d.subtotal, cur)}</span></div> : null}
-          {d.vat_amount ? <div><span>TVA</span><span>{fmt(d.vat_amount, cur)}</span></div> : null}
-          <div className="doc-total"><span>Total</span><b>{d.total === null || d.total === undefined ? "incomplet" : fmt(d.total, cur)}</b></div>
-          {kind === "quote" && Array.isArray(d.price_check) && (
-            d.price_check.length === 0
-              ? <p className="hint ic"><I.Check size={16} /> Prix et totaux conformes à la grille</p>
-              : <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) : {d.price_check.map((x: any) => `${x.ligne} (attendu ${x.attendu}, trouvé ${x.trouve})`).join(" ; ")}</p>
-          )}
-          {kind === "quote" && d.prices_complete === false && (
-            <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
-          )}
-        </div>
+          <span className="doc-sub">{sub || d.title}</span>
+          <span className="doc-sub">{DOC_LABEL[kind]} · PDF{d.status === "approved" ? " · approuvé" : ""}</span>
+        </span>
+      </button>
+      {priced && kind === "quote" && Array.isArray(d.price_check) && d.price_check.length > 0 && (
+        <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) de prix : ouvre le détail.</p>
       )}
-      <div className="toolbar">
-        {artifactIdOf(d) && <button className="btn btn-line btn-small" onClick={() => setPreview(true)}><I.Eye size={15} /> Aperçu</button>}
-        {dl && <button className="btn btn-copper btn-small" onClick={dl}>Télécharger le PDF</button>}
+      {kind === "quote" && d.prices_complete === false && (
+        <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
+      )}
+      <div className="doc-actions">
+        {dl && <button className="doc-act" onClick={dl} aria-label="Télécharger le PDF" title="Télécharger"><I.File size={18} /><span>PDF</span></button>}
+        {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="doc-act" />}
         {kind === "quote" && d.status !== "approved" && (
-          <button className="btn btn-line btn-small" onClick={async () => { await api.approveQuote(d.id); load(); }}>Approuver</button>
+          <button className="doc-act" onClick={async () => { await api.approveQuote(d.id); load(); }}><I.Check size={18} /><span>Approuver</span></button>
         )}
-        <Link className="btn btn-ghost btn-small" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}>Détail</Link>
+        {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reliquat_${d.number}.pdf`} text={d.balance_message || ""} label="Reliquat" className="doc-act" />}
+        <Link className="doc-act" to={`/${{ quote: "devis", invoice: "factures", po: "commandes", dn: "livraisons" }[kind]}/${d.id}`}><I.Note size={18} /><span>Détail</span></Link>
         {d.status === "draft" && (
-          <button className="btn btn-ghost btn-small"
+          <button className="doc-act"
             onClick={async () => {
               if (!window.confirm("Retirer ce brouillon de la bibliothèque ?")) return;
               try { await net.discardDoc(kind, d.id); setD(null); setErr("Brouillon retiré."); } catch (e: any) { setErr(e.message); }
             }}>
-            Retirer
+            <I.Trash size={18} /><span>Retirer</span>
           </button>
         )}
       </div>
+      {kind === "quote" && d.status === "approved" && <CoverLetterBox quote={d} url={shareUrl} filename={d.filename || `${d.number}.pdf`} onChanged={load} />}
       {preview && <PreviewModal kind={kind} d={d} onClose={() => setPreview(false)} onChanged={load} onDownload={dl} />}
     </div>
   );
@@ -254,13 +260,21 @@ function GreetingTyper({ g }: { g: Greeting }) {
 
 function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate?: () => void; onEdit?: (t: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [speakErr, setSpeakErr] = useState("");
+  const [kept, setKept] = useState(!!m.validated);
+  const [keepErr, setKeepErr] = useState("");
+  const speech = useSpeech(m.id);
   const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
   const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
+  // fichiers joints : cartes séparées, au-dessus de la question (aperçu de la photo ou du plan)
+  const sent: Attach[] = m.files || (m.meta?.files || []).map((f: any) => ({ name: f.filename, mime: f.mime, id: f.id }));
   return (
     <div className={`msg ${m.role} enter`}>
       <div className="avatar">{m.role === "user" ? "Vous" : "U"}</div>
+      <div className="msg-col">
+      {m.role === "user" && <AttachRow items={sent} className="sent" />}
       <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
         <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
         {m.role === "user" && (
@@ -276,7 +290,21 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>
               {copied ? <><I.Check size={15} /> Copié</> : <><I.Copy size={15} /> Copier</>}
             </button>
+            {tw.done && (
+              <button className={`speak-btn ${speech !== "idle" ? "on" : ""}`} aria-pressed={speech === "playing"}
+                onClick={async () => setSpeakErr(await toggleSpeech(m.id, m.content))}>
+                {speech === "idle" ? <><I.Speaker size={15} /> Écouter</> : speech === "loading" ? <>… Chargement</> : <><I.Stop size={15} /> Arrêter</>}
+              </button>
+            )}
             {onRegenerate && tw.done && <button onClick={onRegenerate}><I.Refresh size={15} /> Régénérer</button>}
+            {tw.done && (
+              <button aria-pressed={kept} className={kept ? "on" : ""} title="Bonne réponse : l'IA la retient et la réutilise si Claude est indisponible"
+                onClick={async () => { setKeepErr(""); try { await api.validateMessage(m.id, !kept); setKept(!kept); } catch (e: any) { setKeepErr(e?.message || "Impossible"); } }}>
+                <I.Check size={15} /> {kept ? "Retenu" : "Retenir"}
+              </button>
+            )}
+            {keepErr && <span className="error">{keepErr}</span>}
+            {speakErr && <span className="error">{speakErr}</span>}
           </div>
         )}
         {structured?.steps?.length ? (
@@ -307,6 +335,8 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
         <DraftCards drafts={structured?.drafts} />
         {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
         {(structured?.documents || []).map((d: any) => <DocCard key={d.id} kind={d.kind} id={d.id} />)}
+        {(structured?.images || []).map((d: any) => <DiagramCard key={d.id} id={d.id} filename={d.filename} title={d.title} />)}
+        {(structured?.files || []).map((f: any) => <FileCard key={f.id} id={f.id} filename={f.filename} mime={f.mime} size={f.size} />)}
         {arts.length && !structured?.document && !structured?.documents ? (
           <div className="arts">
             {arts.map((a: any) => (
@@ -324,6 +354,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
             ))}
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );
@@ -360,63 +391,154 @@ function useOwner() {
 }
 
 function Connexion({ onDone }: { onDone: () => void }) {
-  const [server, setServer] = useState(getServer());
-  const [code, setCode] = useState(getCode());
+  const [server, setServer] = useState(getServer() || DEFAULT_SERVER);
+  const [editServer, setEditServer] = useState(false);
+  const [mode, setMode] = useState<"password" | "code" | "create">("password");
+  const [email, setEmail] = useState(getSavedEmail());
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  async function go() {
-    setBusy(true);
-    setMsg("");
-    const url = server.trim();
-    if (isNative && !/^https:\/\/[^\s/]+/i.test(url)) {
-      setMsg("Adresse invalide : elle doit commencer par https://");
-      setBusy(false);
-      return;
-    }
-    saveConnection(isNative ? url : "", code);
-    try {
-      await api.me();
-      onDone();
-    } catch (e: any) {
-      setMsg(e instanceof AuthError ? "Code d'accès incorrect." : e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const base = (hasServerField ? server : "").trim().replace(/\/+$/, "");
+
+  // Pas encore d'e-mail / mot de passe sur ce serveur : première connexion avec le code d'accès.
+  useEffect(() => {
+    if (hasServerField && !/^https:\/\//i.test(base)) return;
+    authStatus(base).then((st) => { if (!st.account) setMode("code"); }).catch(() => {});
+  }, [base]);
+
+  const run = async (fn: () => Promise<void>) => {
+    if (hasServerField && !/^https:\/\/[^\s/]+/i.test(base)) { setMsg("Adresse du serveur invalide : elle commence par https://"); return; }
+    setBusy(true); setMsg("");
+    try { await fn(); } catch (e: any) { setMsg(e?.message || "Connexion impossible"); } finally { setBusy(false); }
+  };
+  const withPassword = () => run(async () => { await loginWithPassword(base, email, password); onDone(); });
+  const withCode = () => run(async () => {
+    saveConnection(base, code.trim());
+    try { await api.me(); } catch (e) { throw e instanceof AuthError ? new Error("Code d'accès incorrect.") : e; }
+    setMode("create"); setPassword("");
+  });
+  const create = () => run(async () => { await setAccount(email, password); onDone(); });
+
   return (
     <div className="login">
-      <div className="login-card">
+      <form className="login-card" onSubmit={(e) => { e.preventDefault(); (mode === "password" ? withPassword : mode === "code" ? withCode : create)(); }}>
         <h1>UniC AI</h1>
-        <p className="hint">{isNative ? "Connectez l'application à votre serveur UniC." : "Code d'accès requis."}</p>
-        {isNative && (
+        {mode === "password" && <p className="hint">Connecte-toi avec ton e-mail et ton mot de passe.</p>}
+        {mode === "code" && <p className="hint">Première connexion ou mot de passe oublié : entre le code d'accès de ton serveur.</p>}
+        {mode === "create" && <p className="hint">Choisis l'e-mail et le mot de passe que tu utiliseras désormais (8 caractères minimum).</p>}
+
+        {mode !== "code" && (
           <>
-            <label>Adresse du serveur</label>
-            <input value={server} placeholder="https://unic.exemple.com" autoCapitalize="none" autoCorrect="off"
-              inputMode="url" onChange={(e) => setServer(e.target.value)} />
+            <label>E-mail</label>
+            <input type="email" value={email} autoComplete="username" inputMode="email" autoCapitalize="none" autoCorrect="off"
+              onChange={(e) => setEmail(e.target.value)} />
+            <label>{mode === "create" ? "Nouveau mot de passe" : "Mot de passe"}</label>
+            <input type="password" value={password} autoComplete={mode === "create" ? "new-password" : "current-password"}
+              onChange={(e) => setPassword(e.target.value)} />
           </>
         )}
-        <label>Code d'accès</label>
-        <input type="password" value={code} autoComplete="current-password" onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && go()} />
+        {mode === "code" && (
+          <>
+            <label>Code d'accès</label>
+            <input type="password" value={code} autoComplete="off" onChange={(e) => setCode(e.target.value)} />
+          </>
+        )}
         {msg && <p className="error">{msg}</p>}
-        <button className="btn btn-copper" disabled={busy || (isNative && !server.trim())} onClick={go}>
-          {busy ? "Connexion…" : "Se connecter"}
+        <button className="btn btn-copper" type="submit" disabled={busy || (mode === "code" ? !code.trim() : !email.trim() || !password)}>
+          {busy ? "Connexion…" : mode === "create" ? "Enregistrer et entrer" : "Se connecter"}
         </button>
-      </div>
+
+        {mode === "password" && <button type="button" className="link-btn" onClick={() => { setMode("code"); setMsg(""); }}>Mot de passe oublié ? Utiliser le code d'accès</button>}
+        {mode === "code" && <button type="button" className="link-btn" onClick={() => { setMode("password"); setMsg(""); }}>J'ai déjà un e-mail et un mot de passe</button>}
+
+        {hasServerField && (editServer ? (
+          <>
+            <label>Adresse du serveur</label>
+            <input value={server} autoCapitalize="none" autoCorrect="off" inputMode="url" onChange={(e) => setServer(e.target.value)} />
+          </>
+        ) : (
+          <button type="button" className="link-btn muted" onClick={() => setEditServer(true)}>Serveur : {base.replace(/^https:\/\//, "")} · changer</button>
+        ))}
+      </form>
     </div>
   );
 }
 
+
+/** Une conversation du menu : ouvrir, ⋯ → épingler, renommer, supprimer (avec confirmation). */
+function ConvItem({ c, active, onClose, onChange, onRemove }: {
+  c: Conv; active: boolean; onClose: () => void; onChange: (n: Partial<Conv>) => void; onRemove: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const [mode, setMode] = useState<"view" | "rename" | "confirm">("view");
+  const [name, setName] = useState(c.title);
+  const [err, setErr] = useState("");
+  const done = () => { setMenu(false); setMode("view"); setErr(""); };
+  const save = async () => {
+    const t = name.trim();
+    if (!t || t === c.title) return done();
+    try { const r = await api.patchConversation(c.id, { title: t }); onChange({ title: r.title }); done(); } catch (e: any) { setErr(e.message); }
+  };
+  if (mode === "rename")
+    return (
+      <div className="conv-item editing">
+        <input autoFocus value={name} maxLength={80} aria-label="Nouveau nom" onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") done(); }} />
+        <button aria-label="Enregistrer le nom" onClick={save}><I.Check size={18} /></button>
+        <button aria-label="Annuler" onClick={done}><I.Close size={18} /></button>
+        {err && <span className="conv-err">{err}</span>}
+      </div>
+    );
+  if (mode === "confirm")
+    return (
+      <div className="conv-item confirming">
+        <span>Supprimer « {c.title.length > 22 ? c.title.slice(0, 22) + "…" : c.title} » ?</span>
+        <button className="danger" onClick={async () => { try { await api.deleteConversation(c.id); onRemove(); } catch (e: any) { setErr(e.message); } }}>Confirmer</button>
+        <button onClick={done}>Annuler</button>
+        {err && <span className="conv-err">{err}</span>}
+      </div>
+    );
+  return (
+    <div className={`conv-item ${menu ? "menu-open" : ""}`}>
+      <Link to={`/c/${c.id}`} className={active ? "active" : ""} onClick={onClose}>
+        {c.pinned && <I.Pin size={13} />} {c.title}
+      </Link>
+      <button aria-label="Options de la conversation" aria-expanded={menu} onClick={() => setMenu((m) => !m)}><I.More size={20} /></button>
+      {menu && (
+        <div className="conv-menu" role="menu">
+          <button role="menuitem" onClick={async () => { const r = await api.patchConversation(c.id, { pinned: !c.pinned }); onChange({ pinned: r.pinned }); done(); }}>
+            <I.Pin size={16} /> {c.pinned ? "Désépingler" : "Épingler"}
+          </button>
+          <button role="menuitem" onClick={() => { setName(c.title); setMode("rename"); }}><I.Pencil size={16} /> Renommer</button>
+          <button role="menuitem" className="danger" onClick={() => setMode("confirm")}><I.Trash size={16} /> Supprimer</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [convs, setConvs] = useState<Conv[]>([]);
   const [q, setQ] = useState("");
   const loc = useLocation();
+  const nav = useNavigate();
   useEffect(() => {
     api.conversations(q).then(setConvs).catch(() => setConvs([]));
   }, [q, loc.pathname]);
   useEffect(() => setOpen(false), [loc.pathname]);
+  const [work, setWork] = useState(0);   // erreurs à corriger + propositions prêtes (pastille de l'Atelier)
+  useEffect(() => {
+    if (!open) return;
+    api.selfcare().then((d) => setWork(d.incidents.filter((i: any) => i.kind === "error" || i.kind === "tool").length
+      + d.jobs.filter((j: any) => j.status === "proposed").length)).catch(() => {});
+  }, [open]);
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    listenBriefingTap(() => nav("/")).then((f) => { off = f; }).catch(() => {});
+    return () => off?.();
+  }, []);
   return (
     <div className="app">
       <div className={`overlay ${open ? "show" : ""}`} onClick={() => setOpen(false)} />
@@ -431,6 +553,24 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/" className="btn new-chat" onClick={() => setOpen(false)}>
           + Nouvelle conversation
         </Link>
+        <button className="side-brief" onClick={() => {
+          try { sessionStorage.setItem(AUTO_KEY, "briefing"); } catch { /* ignoré */ }
+          setOpen(false);
+          nav("/");
+          window.dispatchEvent(new Event("unic:autosend"));   // déjà sur une conversation vide : lancé tout de suite
+        }}>
+          <I.Sun size={18} /> Briefing du jour
+        </button>
+        <Link to="/unic" className="side-brief side-code" onClick={() => setOpen(false)}>
+          <I.Mic size={18} /> UniC vocal
+        </Link>
+        <Link to="/interprete" className="side-brief side-code" onClick={() => setOpen(false)}>
+          <I.Globe size={18} /> Interprète
+        </Link>
+        <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
+          <I.Code size={18} /> Atelier · Code
+          {work > 0 && <span className="side-badge" aria-label={`${work} élément(s) à voir`}>{work}</span>}
+        </Link>
         <input
           placeholder="Rechercher…"
           value={q}
@@ -439,24 +579,16 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         />
         <div className="conv-list">
           {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
-          {groupByDate(convs).map((g) => (
+          {[
+            ...(convs.some((c) => c.pinned) ? [{ label: "Épinglées", rows: convs.filter((c) => c.pinned) }] : []),
+            ...groupByDate(convs.filter((c) => !c.pinned)),
+          ].map((g) => (
             <div key={g.label}>
-              <div className="conv-label">{g.label}</div>
+              <div className="conv-label">{g.label === "Épinglées" && <I.Pin size={12} />} {g.label}</div>
               {g.rows.map((c) => (
-                <div className="conv-item" key={c.id}>
-                  <Link to={`/c/${c.id}`} className={loc.pathname === `/c/${c.id}` ? "active" : ""}>
-                    {c.title}
-                  </Link>
-                  <button
-                    title="Supprimer"
-                    onClick={async () => {
-                      await api.deleteConversation(c.id);
-                      setConvs((x) => x.filter((i) => i.id !== c.id));
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
+                <ConvItem key={c.id} c={c} active={loc.pathname === `/c/${c.id}`} onClose={() => setOpen(false)}
+                  onChange={(next) => setConvs((x) => x.map((i) => (i.id === c.id ? { ...i, ...next } : i)))}
+                  onRemove={() => { setConvs((x) => x.filter((i) => i.id !== c.id)); if (loc.pathname === `/c/${c.id}`) nav("/"); }} />
               ))}
             </div>
           ))}
@@ -490,10 +622,13 @@ function Chat({ initialId }: { initialId?: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [live, setLive] = useState<{ status: string; text: string }>({ status: "", text: "" });
   const [pending, setPending] = useState<File[]>([]);
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
   const [sheet, setSheet] = useState(false);
+  const [apps, setApps] = useState(false);
+  useEffect(() => { if (!sheet) setApps(false); }, [sheet]);
   const [notice, setNotice] = useState("");
   useEffect(() => {
     if (!notice) return;
@@ -515,15 +650,31 @@ function Chat({ initialId }: { initialId?: string }) {
     })().catch(() => {});
     return () => off?.();
   }, []);
+  const sendRef = useRef<(m?: string) => void>();
   const end = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [showDown, setShowDown] = useState(false);   // flèche « tout en bas » : visible quand on est remonté dans la conversation
+  useEffect(() => {   // le champ grandit avec le texte (les retours à la ligne restent visibles)
+    const t = taRef.current;
+    if (!t) return;
+    t.style.height = "auto";
+    t.style.height = `${Math.min(t.scrollHeight, 180)}px`;
+  }, [text]);
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
 
   const justCreated = useRef<string | undefined>(undefined);
+  const turn = useRef(0);                                  // chaque envoi / reprise a son numéro : seul le dernier écrit à l'écran
+  const inflight = useRef<string | undefined>(undefined);  // conversation dont la réponse est en route
+  const busyRef = useRef(false);
+  busyRef.current = busy;
   useEffect(() => {
     setCid(initialId);
     if (!initialId) {
+      ++turn.current;   // nouvelle conversation : l'attente précédente s'arrête (le serveur finit quand même)
+      setBusy(false);
       setMessages([]);
+      setPending([]);   // les fichiers en attente appartiennent à la discussion quittée
       return;
     }
     // conversation créée à l'instant : l'écran est déjà à jour (et garde ses animations), on ne recharge pas
@@ -531,45 +682,137 @@ function Chat({ initialId }: { initialId?: string }) {
       justCreated.current = undefined;
       return;
     }
-    api.getConversation(initialId).then((c) => setMessages(c.messages || []));
+    setPending([]);
+    ++turn.current;   // une autre conversation : l'attente précédente s'arrête
+    setBusy(false);
+    api.getConversation(initialId).then((c) => {
+      setMessages(c.messages || []);
+      if (c.working) follow(initialId);   // UniC travaille encore dessus : la réponse arrivera ici
+    });
   }, [initialId]);
 
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  sendRef.current = (m) => { void send(m); };
+  const online = useOnline();
+  const [queued, setQueued] = useState(() => readOutbox().length);
+  useEffect(() => {   // réseau revenu : on envoie la première demande gardée (les suivantes partent à la fin de chaque réponse)
+    if (!online || busy) return;
+    const next = takeQueued();
+    setQueued(readOutbox().length);
+    if (next) {
+      setMessages((m) => { const i = m.findIndex((x) => String(x.id).startsWith("q")); return i < 0 ? m : m.filter((_, k) => k !== i); });   // la bulle « en attente » cède la place à l'envoi réel
+      setTimeout(() => sendRef.current?.(next), 300);
+    }
+  }, [online, busy]);
+  useEffect(() => {
+    if (initialId) return;
+    let go: string | null = null;
+    try { go = sessionStorage.getItem(AUTO_KEY); sessionStorage.removeItem(AUTO_KEY); } catch { /* ignoré */ }
+    if (go) setTimeout(() => sendRef.current?.(go!), 300);
+  }, [initialId]);
+  const idRef = useRef(initialId);
+  idRef.current = initialId;
+  useEffect(() => {   // retour dans l'appli : si une réponse était en route, on va la chercher sur le serveur
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const id = inflight.current || idRef.current;
+      if (busyRef.current && id) follow(id);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+  useEffect(() => {   // briefing demandé depuis le menu alors que la conversation vide est déjà ouverte
+    const onAuto = () => setTimeout(() => {
+      if (idRef.current) return;   // changement de conversation : l'effet ci-dessus s'en charge
+      let go: string | null = null;
+      try { go = sessionStorage.getItem(AUTO_KEY); sessionStorage.removeItem(AUTO_KEY); } catch { /* ignoré */ }
+      if (go) sendRef.current?.(go);
+    }, 0);
+    window.addEventListener("unic:autosend", onAuto);
+    return () => window.removeEventListener("unic:autosend", onAuto);
+  }, []);
   async function send(override?: string) {
     const msg = (override ?? text).trim();
     if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
     if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
     if (busy) return;
+    if (!navigator.onLine) {   // sans réseau : texte gardé sur l'appareil, envoyé au retour ; fichiers impossibles
+      if (pending.length) { setNotice("Pas de réseau : les fichiers ne peuvent pas partir. Réessayez avec du réseau."); return; }
+      const n = queueMessage(msg);
+      setText("");
+      setMessages((m) => [...m, { id: `q${Date.now()}`, role: "user", content: msg }]);
+      setQueued(n);
+      setNotice("Pas de réseau : demande gardée, envoyée dès le retour.");
+      return;
+    }
+    const my = ++turn.current;
     setBusy(true);
     setText("");
-    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || pending.map((f) => f.name).join(", ") };
+    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || "Analyse le fichier.", files: pending.map((f) => ({ name: f.name, mime: f.type, file: f })) };
     setMessages((m) => [...m, local]);
     try {
       const file_ids: string[] = [];
       for (const f of pending) {
-        const up = await api.upload(f);
-        file_ids.push(up.id);
+        setLive({ status: "Préparation du fichier…", text: "" });
+        const prep = await prepareFile(f);   // allège avant l'envoi (photos, gros PDF)
+        for (const p of prep.files) {
+          const up = await api.upload(p);
+          file_ids.push(up.id);
+        }
+        if (prep.note) setNotice("Allégé : " + prep.note);
       }
       setPending([]);
-      const out = await api.chat({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep });
+      setLive({ status: "", text: "" });
+      const out = await api.chatStream({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep }, (ev) => {
+        if (ev.t === "conv") inflight.current = ev.conversation_id;
+        else if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "" }));
+        else if (ev.t === "delta") setLive((l) => ({ ...l, text: l.text + (ev.text || "") }));
+        else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
+      });
+      if (turn.current !== my) return;   // la reprise après coupure a déjà affiché la réponse
       setDeep(false);
       if (!cid) {
         setCid(out.conversation_id);
         justCreated.current = out.conversation_id;
         nav(`/c/${out.conversation_id}`, { replace: true });
       }
-      setMessages((m) => [...m, { ...out.message, fresh: true }]);   // le message de l'utilisateur est déjà affiché
+      setMessages((m) => [...m, { ...out.message, fresh: !out.streamed }]);   // déjà lu en direct : pas de seconde animation   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
+      if (turn.current !== my) return;
+      const id = e instanceof Interrupted ? e.conversationId || cid : undefined;
+      if (id) { follow(id); return; }   // le serveur continue : on attend sa réponse
       setMessages((m) => [
         ...m,
         { id: "err", role: "assistant", content: e.message || "Erreur" },
       ]);
     } finally {
-      setBusy(false);
+      if (turn.current === my) { setBusy(false); inflight.current = undefined; }
     }
+  }
+
+  /** Reprend une réponse que le serveur termine seul (appli quittée, réseau coupé, conversation rouverte). */
+  async function follow(id: string) {
+    const my = ++turn.current;
+    inflight.current = id;
+    setBusy(true);
+    setLive({ status: "UniC termine le travail…", text: "" });
+    if (!idRef.current) { setCid(id); justCreated.current = id; nav(`/c/${id}`, { replace: true }); }
+    const until = Date.now() + 20 * 60_000;
+    while (turn.current === my && Date.now() < until) {
+      try {
+        const c = await api.getConversation(id);
+        if (turn.current !== my) return;
+        if (!c.working) {
+          setMessages(c.messages || []);
+          break;
+        }
+      } catch { /* réseau encore absent : on réessaie */ }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    if (turn.current === my) { setBusy(false); setLive({ status: "", text: "" }); inflight.current = undefined; }
   }
 
   async function voice() {
@@ -636,7 +879,7 @@ function Chat({ initialId }: { initialId?: string }) {
 
   return (
     <>
-      <div className="chat">
+      <div className="chat" onScroll={(e) => { const c = e.currentTarget; setShowDown(c.scrollHeight - c.scrollTop - c.clientHeight > 260); }}>
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
@@ -658,28 +901,30 @@ function Chat({ initialId }: { initialId?: string }) {
               }
             />
           ))}
-          {busy && <Typing deep={deep} web />}
+          {busy && <Typing deep={deep} web status={live.status} liveHtml={live.text ? md(live.text) : undefined} />}
           <div ref={end} />
         </div>
       </div>
       <div className="composer-wrap">
+        {showDown && (
+          <button className="scroll-down" aria-label="Aller tout en bas de la conversation" onClick={() => end.current?.scrollIntoView({ behavior: "smooth", block: "end" })}>
+            <I.ArrowDown size={20} />
+          </button>
+        )}
+        <QuickChips show={messages.length === 0 && !busy && !text && pending.length === 0} onAsk={(p) => send(p)} />
         <div className="composer">
-          {pending.length > 0 && (
-            <div className="files-pending">
-              {pending.map((f, i) => (
-                <span className="file-chip" key={i}>
-                  {f.name}
-                </span>
-              ))}
-            </div>
-          )}
+          <AttachRow items={pending.map((f) => ({ name: f.name, mime: f.type, file: f }))} className="pending"
+            onRemove={(i) => setPending((p) => p.filter((_, j) => j !== i))} />
           <textarea
+            ref={taRef}
             rows={1}
-            placeholder="Écrire un message… « Analyse ce plan », « Fais le devis »"
+            placeholder="Écris ou dicte un message…"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              // téléphone / tablette : « Entrée » du clavier = retour à la ligne ; l'envoi se fait avec la flèche. Ordinateur : Entrée envoie, Maj+Entrée = ligne.
+              const touch = isNative || window.matchMedia?.("(pointer: coarse)").matches;
+              if (e.key === "Enter" && !e.shiftKey && !touch) {
                 e.preventDefault();
                 send();
               }
@@ -706,7 +951,7 @@ function Chat({ initialId }: { initialId?: string }) {
             className="sr-only"
             type="file"
             multiple
-            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp"
+            accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp,.dxf,.ifc,.dwg"
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
           <input
@@ -727,6 +972,11 @@ function Chat({ initialId }: { initialId?: string }) {
             onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; setPending((p) => [...p, ...fs]); }}
           />
         </div>
+        {(!online || queued > 0) && (
+          <div className="toast" role="status">
+            {online ? `Envoi de ${queued} demande(s) gardée(s)…` : `Hors ligne${queued ? ` · ${queued} en attente` : ""} : vos demandes écrites partiront au retour du réseau.`}
+          </div>
+        )}
         {notice && <div className="toast" role="status">{notice}</div>}
       </div>
       {sheet && (
@@ -738,8 +988,11 @@ function Chat({ initialId }: { initialId?: string }) {
               <label htmlFor="chat-cam" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Camera /></span>Caméra</label>
               <label htmlFor="chat-photo" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.Image /></span>Photos</label>
               <label htmlFor="chat-file" className="sheet-btn" onClick={() => setTimeout(() => setSheet(false), 50)}><span><I.File /></span>Fichiers</label>
+              <button className={`sheet-btn ${apps ? "on" : ""}`} aria-expanded={apps} onClick={() => setApps((a) => !a)}><span><I.Apps /></span>Plus</button>
             </div>
-            <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>
+            {apps
+              ? <AppsList onAsk={(p) => send(p)} onClose={() => setSheet(false)} />
+              : <p className="hint">Plans, PDF, photos de chantier : l'IA les lit pour répondre.</p>}
           </div>
         </div>
       )}
@@ -840,7 +1093,7 @@ function TablePage({
                 {rows.map((r, i) => (
                   <tr key={i} onClick={() => onRow?.(i)} style={{ cursor: onRow ? "pointer" : "default" }}>
                     {r.map((c, j) => (
-                      <td key={j}>{c ?? "—"}</td>
+                      <td key={j} data-label={columns[j]}>{c ?? "—"}</td>
                     ))}
                   </tr>
                 ))}
@@ -970,11 +1223,11 @@ function Materiaux() {
             <tbody>
               {rows.map((m) => (
                 <tr key={m.id}>
-                  <td>{m.sku}</td>
-                  <td>{m.name}</td>
-                  <td>{m.unit}</td>
-                  <td>{m.selling_price ?? "non renseigné"}</td>
-                  <td>{m.purchase_price ?? "non renseigné"}</td>
+                  <td data-label="SKU">{m.sku}</td>
+                  <td data-label="Nom">{m.name}</td>
+                  <td data-label="Unité">{m.unit}</td>
+                  <td data-label="Vente">{m.selling_price ?? "non renseigné"}</td>
+                  <td data-label="Achat">{m.purchase_price ?? "non renseigné"}</td>
                 </tr>
               ))}
             </tbody>
@@ -1060,7 +1313,7 @@ function ChantierDetail() {
           {(p.quotations || []).map((q: any) => (
             <li key={q.id}>
               <Link to={`/devis/${q.id}`}>
-                {q.number} — {q.status} — {q.total ?? "total incomplet"}
+                {q.number} — {statusFr(q.status)} — {q.total ?? "total incomplet"}
               </Link>
             </li>
           ))}
@@ -1070,12 +1323,25 @@ function ChantierDetail() {
           {(p.invoices || []).map((q: any) => (
             <li key={q.id}>
               <Link to={`/factures/${q.id}`}>
-                {q.number} — {q.status} — payé {q.paid}
+                {q.number} — {statusFr(q.status)} — payé {q.paid}
               </Link>
             </li>
           ))}
         </ul>
       </div>
+    </div>
+  );
+}
+
+function ExportButtons({ kind }: { kind: "quotes" | "invoices" }) {
+  const [err, setErr] = useState("");
+  const go = (fmt: "csv" | "xlsx") =>
+    downloadAuth(`/api/export/${kind}.${fmt}`, `unic-${kind === "quotes" ? "devis" : "factures"}.${fmt}`).catch((e) => setErr(e?.message || "Export impossible"));
+  return (
+    <div className="row-actions">
+      <button className="btn btn-line btn-small" onClick={() => go("xlsx")}>Exporter Excel</button>
+      <button className="btn btn-line btn-small" onClick={() => go("csv")}>Exporter CSV</button>
+      {err && <span className="error" role="alert">{err}</span>}
     </div>
   );
 }
@@ -1087,9 +1353,9 @@ function DevisList() {
     <TablePage
       title="Devis"
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
-      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
+      extra={<><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, q.status, q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
       onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
@@ -1113,6 +1379,7 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
     : d.artifact_id
       ? () => downloadAuth(`/api/artifacts/${d.artifact_id}/download`, `${d.number}.pdf`)
       : null;
+  const shareUrl: string | null = d.download_url || (d.artifact_id ? `/api/artifacts/${d.artifact_id}/download` : null);
   return (
     <div className="page">
       <div className="page-inner">
@@ -1132,6 +1399,8 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
                 Télécharger le PDF
               </button>
             )}
+            {shareUrl && <ShareButton url={shareUrl} filename={d.filename || `${d.number}.pdf`} text={kind === "quote" ? d.cover_letter || "" : ""} className="btn btn-line" />}
+            {kind === "invoice" && d.balance_url && <ShareButton url={d.balance_url} filename={`Reliquat_${d.number}.pdf`} text={d.balance_message || ""} className="btn btn-copper" label="Partager le reliquat" />}
             {kind === "quote" && d.status !== "approved" && (
               <button
                 className="btn btn-line"
@@ -1148,6 +1417,8 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
         {!d.prices_complete && kind === "quote" && (
           <p className="hint">Prix UniC manquants — rien n'a été inventé. Total incomplet.</p>
         )}
+        {kind === "quote" && d.status === "approved" && <CoverLetterBox quote={d} url={shareUrl} filename={d.filename || `${d.number}.pdf`} onChanged={load} />}
+        {kind === "quote" && <SignaturePanel quoteId={d.id} />}
         <div className="table-wrap">
           <table>
             <thead>
@@ -1218,15 +1489,45 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
   );
 }
 
+const fcfa = (n: number) => `${Math.round(n).toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ")}`;
+
+/** Impayés : retards d'abord, relance prête à envoyer (WhatsApp, SMS…) par la feuille de partage. */
+function UnpaidPanel() {
+  const [u, setU] = useState<any>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.unpaid().then(setU).catch(() => setU(null)); }, []);
+  if (!u || (!u.en_retard.length && !u.a_venir.length)) return null;
+  const row = (r: any, late: boolean) => (
+    <li key={r.numero} className={late ? "late" : ""}>
+      <div>
+        <b>{r.client}</b> · {r.numero}
+        <span>{fcfa(r.reste)} {r.devise} · {late ? `${r.jours_retard} j de retard` : `échéance ${new Date(r.echeance).toLocaleDateString("fr-FR")}`}</span>
+      </div>
+      <button className="btn btn-line btn-small" onClick={async () => {
+        try { await shareText(r.relance, `Relance ${r.numero}`); setMsg(""); } catch (e: any) { if (!/cancel|abort/i.test(String(e?.message))) setMsg(e?.message || "Partage impossible"); }
+      }}>Relancer</button>
+    </li>
+  );
+  return (
+    <section className="card-box unpaid">
+      {u.en_retard.length > 0 && <h3>⚠️ En retard · {fcfa(u.total_retard)} FCFA</h3>}
+      <ul>{u.en_retard.map((r: any) => row(r, true))}</ul>
+      {u.a_venir.length > 0 && <h3>À venir · {fcfa(u.total_a_venir)} FCFA</h3>}
+      <ul>{u.a_venir.slice(0, 5).map((r: any) => row(r, false))}</ul>
+      {msg && <p className="error">{msg}</p>}
+    </section>
+  );
+}
+
 function Factures() {
   const nav = useNavigate();
   const { rows, shown, f, setF } = useDocLibrary(api.invoices);
   return (
     <TablePage
       title="Factures"
-      extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
+      extra={<><UnpaidPanel /><ExportButtons kind="invoices" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, q.status, q.total, q.paid, q.remaining])}
+      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, statusFr(q.status), q.total, q.paid, q.remaining])}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
@@ -1239,7 +1540,7 @@ function Commandes() {
       title="Bons de commande"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client / fournisseur", "Statut", "Total"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, q.status, q.total ?? "incomplet"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, statusFr(q.status), q.total ?? "incomplet"])}
       onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
@@ -1252,7 +1553,7 @@ function Livraisons() {
       title="Bons de livraison"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, q.status])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, statusFr(q.status)])}
       onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );
@@ -1296,7 +1597,9 @@ const HUB: { title: string; items: HubItem[] }[] = [
     title: "Connecteurs",
     items: [
       { to: "/courrier", title: "Courrier", text: "Boîte mail : lire, comprendre, répondre" },
-      { to: "/reseaux", title: "Réseaux & Google", text: "Publications, avis, fiche Google, site" },
+      { to: "/google", title: "Fiche Google", text: "Publier tous les 4 jours, mots-clés, fiche complète" },
+      { to: "/reseaux", title: "Réseaux & avis", text: "Publications, avis Google, site" },
+      { to: "/voix", title: "Voix", text: "Écouter les réponses : voix du téléphone, ElevenLabs, ta voix" },
     ],
   },
   {
@@ -1306,6 +1609,8 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
       { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
+      { to: "/atelier", title: "Atelier", text: "UniC se vérifie, se corrige et crée ses agents" },
+      { to: "/pointage", title: "Pointage", text: "Arrivée et départ du chantier, heures travaillées" },
     ],
   },
   {
@@ -1324,11 +1629,57 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/factures", title: "Factures", text: "Factures et paiements" },
       { to: "/commandes", title: "Bons de commande", text: "Bibliothèque des bons de commande" },
       { to: "/livraisons", title: "Bons de livraison", text: "Bibliothèque des bons de livraison" },
+      { to: "/agenda", title: "Agenda", text: "Visites, métrés, poses, livraisons" },
+      { to: "/prospects", title: "Prospects du site", text: "Demandes laissées sur unicplaquiste.com" },
       { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
       { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
     ],
   },
 ];
+
+/** Crédit Claude restant, en tête des Paramètres (touche pour le détail). */
+function CreditBadge() {
+  const [u, setU] = useState<Usage | null>(null);
+  useEffect(() => { net.usage().then(setU).catch(() => {}); }, []);
+  return (
+    <Link to="/couts" className="credit-badge">
+      <span>Crédit Claude</span>
+      <b>{u === null ? "…" : u.reste_usd !== null ? `${Math.max(0, u.reste_usd).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} $ restants` : "À renseigner"}</b>
+      <i>{u ? `${u.aujourdhui_usd.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} $ aujourd'hui · ${u.messages_total} messages` : ""}</i>
+    </Link>
+  );
+}
+
+/** Apparence (jour / nuit / auto) et briefing quotidien. */
+function PrefsCard() {
+  const [mode, setMode] = useTheme();
+  const [time, setTime] = useState(getBriefingTime() ?? "");
+  const [note, setNote] = useState("");
+  const opts: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
+    { id: "light", label: "Jour", icon: <I.Sun size={16} /> },
+    { id: "dark", label: "Nuit", icon: <I.Moon size={16} /> },
+    { id: "auto", label: "Auto", icon: null },
+  ];
+  const plan = async (t: string | null) => { setTime(t ?? ""); setNote(await scheduleBriefing(t)); };
+  return (
+    <section className="card-box prefs">
+      <label>Apparence</label>
+      <div className="seg" role="group" aria-label="Apparence">
+        {opts.map((o) => (
+          <button key={o.id} className={mode === o.id ? "on" : ""} aria-pressed={mode === o.id} onClick={() => setMode(o.id)}>
+            {o.icon}{o.label}
+          </button>
+        ))}
+      </div>
+      <label><I.Bell size={14} /> Briefing chaque jour</label>
+      <div className="row">
+        <input type="time" value={time} onChange={(e) => e.target.value && plan(e.target.value)} aria-label="Heure du briefing" />
+        {time && <button className="btn btn-line btn-small" onClick={() => plan(null)}>Désactiver</button>}
+      </div>
+      <p className="hint">{note || (time ? `Actif chaque jour à ${time.replace(":", " h ")}.` : "Choisis une heure : une notification t'ouvre le briefing.")}</p>
+    </section>
+  );
+}
 
 function SettingsHub() {
   return (
@@ -1336,9 +1687,10 @@ function SettingsHub() {
       <div className="page-inner">
         <h1>Paramètres</h1>
         <p className="lede">
-          Vous n'avez pas besoin d'ouvrir ces pages pour travailler : dites à l'IA ce que vous voulez
-          (« fais le devis », « crée le bon de commande », « montre mes devis »). Ici : réglages, connecteurs et consultation.
+          Tout se fait dans la conversation. Ici : réglages, connecteurs, consultation.
         </p>
+        <CreditBadge />
+        <PrefsCard />
         {HUB.map((g) => (
           <section key={g.title}>
             <h3>{g.title}</h3>
@@ -1355,7 +1707,7 @@ function SettingsHub() {
         {(isNative || getCode()) && (
           <section>
             <h3>Session</h3>
-            <button className="btn btn-line" onClick={() => { clearConnection(); window.location.reload(); }}>
+            <button className="btn btn-line" onClick={async () => { await signOut(); window.location.reload(); }}>
               Se déconnecter
             </button>
           </section>
@@ -1413,6 +1765,11 @@ function CompanyPage() {
             />
           </label>
           <label>
+            Échéance des factures (jours après approbation)
+            <input type="number" min={0} max={365} value={s.invoice_due_days ?? 15}
+              onChange={(e) => setS({ ...s, invoice_due_days: e.target.value === "" ? null : Number(e.target.value) })} />
+          </label>
+          <label>
             Conditions de paiement
             <textarea value={s.payment_terms || ""} onChange={(e) => setS({ ...s, payment_terms: e.target.value })} />
           </label>
@@ -1426,8 +1783,144 @@ function CompanyPage() {
         >
           Enregistrer
         </button>
+        <AccountCard />
+        <SignatureCard />
       </div>
     </div>
+  );
+}
+
+/** Mon compte : e-mail + mot de passe de connexion, appareils connectés. */
+function AccountCard() {
+  const [d, setD] = useState<any>(null);
+  const [email, setEmail] = useState("");
+  const [cur, setCur] = useState("");
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = () => api.devices().then((x) => { setD(x); setEmail(x.email || getSavedEmail()); }).catch(() => setD(null));
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setMsg("");
+    try { await setAccount(email, pw, cur); setCur(""); setPw(""); setMsg("Enregistré. Les autres appareils devront se reconnecter."); load(); }
+    catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  return (
+    <section className="card-box account-card">
+      <h2>Mon compte</h2>
+      <p className="hint">{d?.account ? "Connexion par e-mail et mot de passe active." : "Choisis ton e-mail et ton mot de passe : tu n'auras plus besoin du code d'accès."}</p>
+      <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <label>E-mail<input type="email" value={email} autoComplete="username" onChange={(e) => setEmail(e.target.value)} /></label>
+        {d?.account && <label>Mot de passe actuel<input type="password" value={cur} autoComplete="current-password" onChange={(e) => setCur(e.target.value)} /></label>}
+        <label>{d?.account ? "Nouveau mot de passe" : "Mot de passe"}<input type="password" value={pw} autoComplete="new-password" onChange={(e) => setPw(e.target.value)} /></label>
+        <button className="btn btn-copper" type="submit" disabled={!email.trim() || pw.length < 8}>Enregistrer</button>
+      </form>
+      {msg && <p className="hint">{msg}</p>}
+      {d?.devices?.length > 0 && (
+        <ul className="backup-list">{d.devices.map((x: any, i: number) => (
+          <li key={i}><span>{x.device}</span><span>{x.last_used ? new Date(x.last_used).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}</span></li>
+        ))}</ul>
+      )}
+    </section>
+  );
+}
+
+/** Image de marque (signature, cachet) : photo sur papier blanc, fond retiré, posée sur chaque nouveau document. */
+function BrandImageCard({ title, hint, url, upload, remove, alt }: {
+  title: string; hint: string; url: string; alt: string; upload: (f: File) => Promise<unknown>; remove: () => Promise<unknown> }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const load = () => fetchBlobUrl(`${url}?t=${Date.now()}`).then(setSrc).catch(() => setSrc(null));
+  useEffect(() => { load(); }, []);
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true); setMsg("");
+    try { await fn(); setMsg(ok); await load(); } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card-box sig-card">
+      <h2>{title}</h2>
+      <p className="hint">{hint}</p>
+      <div className="sig-preview">{src ? <img src={src} alt={alt} /> : <span className="hint">Rien d'enregistré.</span>}</div>
+      <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (f) run(() => upload(f), "Enregistré.");
+      }} />
+      <div className="row-actions">
+        <button className="btn btn-copper" disabled={busy} onClick={() => ref.current?.click()}>{busy ? "Traitement…" : src ? "Remplacer" : "Ajouter"}</button>
+        {src && <button className="btn btn-line" disabled={busy} onClick={() => run(remove, "Retiré.")}>Retirer</button>}
+      </div>
+      {msg && <p className="hint">{msg}</p>}
+    </section>
+  );
+}
+
+function SignatureCard() {
+  return (
+    <>
+      <BrandImageCard title="Ma signature" alt="Ma signature" url="/api/settings/signature" upload={api.uploadSignature} remove={api.deleteSignature}
+        hint="Signe en foncé sur une feuille blanche, puis prends-la en photo. Le fond est retiré. Elle apparaît dans le cadre « UniC Plaquiste » des nouveaux devis, factures, bons et reliquats." />
+      <BrandImageCard title="Mon cachet" alt="Mon cachet" url="/api/settings/stamp" upload={api.uploadStamp} remove={api.deleteStamp}
+        hint="Ton cachet UniC Plaquiste est déjà intégré : il se place à côté de ta signature. Ajoute une photo seulement pour le remplacer (Retirer = retour au cachet intégré)." />
+    </>
+  );
+}
+
+const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "jamais");
+
+/** Sauvegardes : chaque jour sur le serveur et dans la boîte Gmail ; téléchargement et restauration. */
+function BackupCard() {
+  const [d, setD] = useState<any>(null);
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  const load = () => api.backups().then(setD).catch((e) => setMsg(e?.message || "Erreur"));
+  useEffect(() => { load(); }, []);
+  const st = d?.status || {};
+  return (
+    <section className="card-box backup-card">
+      <h2>Sauvegardes</h2>
+      <p className="hint">Chaque jour, tout seul : devis, factures, clients, mémoire, signature.
+        Gardées sur le serveur (14 dernières) et dans ta boîte Gmail, dossier « {d?.folder || "UniC-Sauvegardes"} » (30 dernières).</p>
+      {d && (
+        <ul className="backup-status">
+          <li>Dernière sauvegarde : <b>{when(st.last_local)}</b></li>
+          <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b></li>
+          {st.last_remote_error && <li className="error">{st.last_remote_error}</li>}
+          {st.last_error && <li className="error">{st.last_error}</li>}
+        </ul>
+      )}
+      <div className="row-actions">
+        <button className="btn btn-copper" disabled={!!busy} onClick={async () => {
+          setBusy("save"); setMsg("");
+          try {
+            const r = await api.backupNow();
+            setMsg(r.offsite?.ok ? "Sauvegardé ici et dans Gmail." : r.offsite?.error ? `Sauvegardé sur le serveur. ${r.offsite.error}` : "Sauvegardé sur le serveur.");
+            await load();
+          } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
+        }}>{busy === "save" ? "Sauvegarde…" : "Sauvegarder maintenant"}</button>
+        <button className="btn btn-line" disabled={!!busy} onClick={() => ref.current?.click()}>Restaurer…</button>
+      </div>
+      <input ref={ref} type="file" accept=".zip,application/zip" hidden onChange={async (e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (!f) return;
+        if (!window.confirm(`Remplacer toutes les données par la sauvegarde « ${f.name} » ? Une copie de l'état actuel est faite avant.`)) return;
+        setBusy("restore"); setMsg("");
+        try { const r = await api.restoreBackup(f); setMsg(`Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`); await load(); }
+        catch (err: any) { setMsg(err?.message || "Erreur"); } finally { setBusy(""); }
+      }} />
+      {msg && <p className="hint">{msg}</p>}
+      {d?.backups?.length > 0 && (
+        <ul className="backup-list">
+          {d.backups.slice(0, 5).map((b: any) => (
+            <li key={b.name}>
+              <span>{when(b.created_at)} · {b.size < 1048576 ? `${Math.max(1, Math.round(b.size / 1024))} Ko` : `${(b.size / 1048576).toFixed(1)} Mo`}</span>
+              <button className="btn btn-line btn-small" onClick={() => downloadAuth(`/api/backups/${b.name}/download`, b.name)}>Télécharger</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -1442,6 +1935,7 @@ function Sante() {
       <div className="page-inner">
         <h1>Santé du système</h1>
         <p className="lede">{h.note}</p>
+        <BackupCard />
         <div className="health-grid">
           <div className="stat">
             <h3>Application</h3>
@@ -1507,6 +2001,12 @@ export default function App() {
   const chatMatch = useMatch("/c/:id");
   // la conversation reste montée entre « / » et « /c/:id » : pas de rechargement, animations conservées
   const isChat = loc.pathname === "/" || !!chatMatch;
+  // les mails relevés ne survivent pas à la fermeture complète de l'appli (une fois par lancement)
+  useEffect(() => {
+    if (!user) return;
+    try { if (sessionStorage.getItem("unic.boot")) return; sessionStorage.setItem("unic.boot", "1"); } catch { /* ignoré */ }
+    net.mailPurge().catch(() => {});
+  }, [user]);
   if (gate === "connect") return <Connexion onDone={check} />;
   if (gate === "error")
     return (
@@ -1535,6 +2035,8 @@ export default function App() {
         <Route path="/devis" element={<DevisList />} />
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />
         <Route path="/factures" element={<Factures />} />
+        <Route path="/agenda" element={<Agenda />} />
+        <Route path="/prospects" element={<Prospects />} />
         <Route path="/factures/:id" element={<DocDetail kind="invoice" />} />
         <Route path="/commandes" element={<Commandes />} />
         <Route path="/commandes/:id" element={<DocDetail kind="po" />} />
@@ -1542,13 +2044,19 @@ export default function App() {
         <Route path="/livraisons/:id" element={<DocDetail kind="dn" />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/memoire" element={<Memoire />} />
+        <Route path="/voix" element={<Voix />} />
         <Route path="/journal" element={<Journal />} />
         <Route path="/couts" element={<Couts />} />
+        <Route path="/google" element={<FicheGoogle />} />
         <Route path="/courrier" element={<Courrier />} />
         <Route path="/reseaux" element={<Reseaux />} />
         <Route path="/parametres" element={<SettingsHub />} />
         <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
+        <Route path="/atelier" element={<Atelier />} />
+        <Route path="/pointage" element={<Pointage />} />
+        <Route path="/unic" element={<UnicVoice />} />
+        <Route path="/interprete" element={<Interpreter />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       )}

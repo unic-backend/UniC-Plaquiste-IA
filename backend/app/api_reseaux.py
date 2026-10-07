@@ -6,9 +6,12 @@ absents répondent NON DISPONIBLE.
 from __future__ import annotations
 
 import logging
+import re
 
 from app import trust
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from app.config import settings
+from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -28,7 +31,7 @@ NO_AI = "IA NON DISPONIBLE : aucun fournisseur IA configuré (OPENAI_API_KEY ou 
 def _post_out(p: SocialPost) -> dict:
     return {
         "id": p.id, "platform": p.platform, "kind": p.kind, "title": p.title, "body": p.body,
-        "hashtags": p.hashtags, "in_reply_to": p.in_reply_to, "status": p.status,
+        "hashtags": p.hashtags, "in_reply_to": p.in_reply_to, "status": p.status, "photo_brief": p.photo_brief,
         "external_url": p.external_url, "external_id": p.external_id, "created_at": p.created_at.isoformat() if p.created_at else None,
         "published_at": p.published_at.isoformat() if p.published_at else None,
     }
@@ -241,8 +244,41 @@ def mail_status(user: User = Depends(get_current_user)):
     return {
         "read": mailbox.imap_configured(), "send": mailbox.smtp_configured(),
         "ai": assistant.ai_available(),
-        "note": "" if mailbox.imap_configured() else "Lecture NON DISPONIBLE : IMAP_HOST / SMTP_USER non configurés.",
+        "note": "" if mailbox.imap_configured() else "Lecture NON DISPONIBLE : connecte ton compte Gmail ci-dessous.",
     }
+
+
+class GmailIn(BaseModel):
+    address: str = Field(max_length=255)
+    password: str = Field(max_length=64)
+
+
+@router.get("/mail/account")
+def mail_account_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import mail_account
+    return {**mail_account.status(db), "env_override": bool(settings.imap_host)}
+
+
+@router.put("/mail/account")
+def mail_account_connect(body: GmailIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Connecte Gmail : l'identifiant est testé AVANT d'être gardé (chiffré)."""
+    from app import mail_account
+    try:
+        out = mail_account.connect(db, body.address, body.password)
+    except mail_account.MailAccountError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "mail_connect", "mail", out["address"])
+    db.commit()
+    return out
+
+
+@router.delete("/mail/account")
+def mail_account_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import mail_account
+    out = mail_account.disconnect(db)
+    audit(db, user.id, "mail_disconnect", "mail", "")
+    db.commit()
+    return out
 
 
 @router.post("/mail/sync")
@@ -251,6 +287,14 @@ def mail_sync(limit: int = 20, db: Session = Depends(get_db), user: User = Depen
         return connectors.sync_inbox(db, limit)
     except connectors.ConnectorError as exc:
         raise HTTPException(exc.status, str(exc))
+
+
+@router.post("/mail/purge")
+def mail_purge(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Efface les mails relevés (copie locale) : appelé à chaque ouverture de l'appli. Gmail, lui, n'est pas touché."""
+    n = db.query(InboxMessage).delete()
+    db.commit()
+    return {"purged": n}
 
 
 @router.get("/mail")
@@ -579,3 +623,352 @@ def usage_budget(body: BudgetIn, db: Session = Depends(get_db), user: User = Dep
     from app import usage
     usage.set_budget(db, body.amount_usd)
     return usage.summary(db)
+
+
+# ---------- fiche Google : rythme de publication, mots-clés, optimisation ----------
+
+class PlanDraftIn(BaseModel):
+    topic: str = Field("", max_length=300)
+
+
+class DoneIn(BaseModel):
+    url: str = Field("", max_length=512)
+
+
+class CheckIn(BaseModel):
+    done: bool
+
+
+@router.get("/google/plan")
+def google_plan(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import gbp_plan
+    return {**gbp_plan.plan(db), "api_configured": gbp.configured(), "ai": assistant.ai_available()}
+
+
+@router.post("/google/plan/draft")
+def google_plan_draft(body: PlanDraftIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon de la publication du jour + photo à prendre. Rien n'est publié."""
+    from app import gbp_plan
+    try:
+        post = gbp_plan.generate_draft(db, body.topic, memory=mem.block(db, body.topic or "fiche Google publication"))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    audit(db, user.id, "google_plan_draft", "social_post", post.id)
+    db.commit()
+    return _post_out(post)
+
+
+@router.post("/google/plan/{pid}/done")
+def google_plan_done(pid: str, body: DoneIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """« J'ai publié » : relance le compteur de 4 jours."""
+    from app import gbp_plan
+    try:
+        post = gbp_plan.mark_done(db, pid, body.url)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit(db, user.id, "social_published", "social_post", post.id, "google_business")
+    db.commit()
+    return {"post": _post_out(post), "plan": gbp_plan.plan(db)}
+
+
+@router.put("/google/plan/checklist/{item_id}")
+def google_plan_check(item_id: str, body: CheckIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import gbp_plan
+    try:
+        return gbp_plan.set_check(db, item_id, body.done)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/google/optimize")
+def google_optimize(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Description, services, questions-réponses et catégories à coller dans la fiche. Rien n'est modifié chez Google."""
+    from app import gbp_plan
+    try:
+        data = gbp_plan.optimize(db, memory=mem.block(db, "fiche Google référencement"))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    audit(db, user.id, "google_optimize", "google", "")
+    db.commit()
+    return data
+
+
+# ---------- LinkedIn ----------
+
+def _redirect_uri(request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/api/linkedin/callback"
+
+
+def _li(fn, *a, **k):
+    from app import linkedin
+    try:
+        return fn(*a, **k)
+    except linkedin.LinkedInError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+class LinkedInAppIn(BaseModel):
+    client_id: str
+    client_secret: str = ""
+    page_id: str = ""
+
+
+@router.get("/linkedin")
+def linkedin_status(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    return linkedin.status(db, _redirect_uri(request))
+
+
+@router.put("/linkedin/app")
+def linkedin_app(body: LinkedInAppIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    _li(linkedin.save_app, db, body.client_id, body.client_secret, body.page_id)
+    audit(db, user.id, "linkedin_app", "linkedin", "")
+    db.commit()
+    return linkedin.status(db, _redirect_uri(request))
+
+
+@router.get("/linkedin/auth-url")
+def linkedin_auth_url(request: Request, page: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    url = _li(linkedin.auth_url, db, _redirect_uri(request), page)
+    db.commit()
+    return {"url": url}
+
+
+@router.get("/linkedin/callback", include_in_schema=False)
+def linkedin_callback(request: Request, code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+    """Retour de LinkedIn (navigateur, sans en-tête d'accès) : protégé par le `state` à usage unique."""
+    from fastapi.responses import HTMLResponse
+    from app import linkedin
+    page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='font-family:system-ui;padding:32px;text-align:center'><h2>{t}</h2><p>{m}</p></body>")
+    if error or not code:
+        return HTMLResponse(page.format(t="Connexion annulée", m="Retourne dans l'appli UniC AI et recommence."), status_code=400)
+    try:
+        name = linkedin.finish(db, code, state, _redirect_uri(request))
+        db.commit()
+    except linkedin.LinkedInError as exc:
+        db.commit()
+        return HTMLResponse(page.format(t="Connexion impossible", m=str(exc).replace("<", "")), status_code=400)
+    return HTMLResponse(page.format(t="LinkedIn connecté ✓", m=f"{name or 'Compte'} est relié. Retourne dans l'appli UniC AI."))
+
+
+@router.delete("/linkedin")
+def linkedin_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import linkedin
+    linkedin.disconnect(db)
+    audit(db, user.id, "linkedin_disconnect", "linkedin", "")
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/reseaux/posts/{pid}/publish-linkedin")
+async def publish_linkedin(pid: str, target: str = Form("profile"), photo: UploadFile | None = File(None),
+                           db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publication réelle sur LinkedIn : texte approuvé uniquement, photo facultative, cible = profil ou Page."""
+    from app import linkedin
+    p = _get_post(db, pid)
+    if p.platform != "linkedin" or p.kind != "post":
+        raise HTTPException(400, "Ce n'est pas une publication LinkedIn.")
+    if p.status != "approved":
+        raise HTTPException(409, "Approuve le texte avant la publication.")
+    err = check_post(p.platform, p.body, p.hashtags)
+    if err:
+        raise HTTPException(400, err)
+    data = await photo.read() if photo is not None else None
+    if data is not None and len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Photo trop lourde (8 Mo maximum).")
+    out = _li(linkedin.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), data or None,
+              "page" if target == "page" else "profile")
+    p.status, p.published_at = "published", utcnow()
+    p.external_id, p.external_url = out["id"][:500], out["url"][:500]
+    audit(db, user.id, "linkedin_publish", "social_post", p.id, target)
+    db.commit()
+    return _post_out(p)
+
+
+# ---------- Instagram ----------
+
+def _ig_redirect(request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/api/instagram/callback"
+
+
+def _ig(fn, *a, **k):
+    from app import instagram
+    try:
+        return fn(*a, **k)
+    except instagram.InstagramError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+class InstagramAppIn(BaseModel):
+    app_id: str
+    app_secret: str = ""
+
+
+@router.get("/instagram")
+def instagram_status(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    return instagram.status(db, _ig_redirect(request))
+
+
+@router.put("/instagram/app")
+def instagram_app(body: InstagramAppIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    _ig(instagram.save_app, db, body.app_id, body.app_secret)
+    audit(db, user.id, "instagram_app", "instagram", "")
+    db.commit()
+    return instagram.status(db, _ig_redirect(request))
+
+
+@router.get("/instagram/auth-url")
+def instagram_auth_url(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    url = _ig(instagram.auth_url, db, _ig_redirect(request))
+    db.commit()
+    return {"url": url}
+
+
+@router.get("/instagram/callback", include_in_schema=False)
+def instagram_callback(request: Request, code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+    """Retour d'Instagram (navigateur, sans en-tête d'accès) : protégé par le `state` à usage unique."""
+    from fastapi.responses import HTMLResponse
+    from app import instagram
+    page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<body style='font-family:system-ui;padding:32px;text-align:center'><h2>{t}</h2><p>{m}</p></body>")
+    if error or not code:
+        return HTMLResponse(page.format(t="Connexion annulée", m="Retourne dans l'appli UniC AI et recommence."), status_code=400)
+    try:
+        name = instagram.finish(db, code, state, _ig_redirect(request))
+        db.commit()
+    except instagram.InstagramError as exc:
+        db.commit()
+        return HTMLResponse(page.format(t="Connexion impossible", m=str(exc).replace("<", "")), status_code=400)
+    return HTMLResponse(page.format(t="Instagram connecté ✓", m=f"@{name or 'compte'} est relié. Retourne dans l'appli UniC AI."))
+
+
+@router.delete("/instagram")
+def instagram_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import instagram
+    instagram.disconnect(db)
+    audit(db, user.id, "instagram_disconnect", "instagram", "")
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/public-media/{token}.jpg", include_in_schema=False)
+def public_media(token: str):
+    """Photo servie à Instagram le temps de la publication (nom aléatoire, effacée ensuite)."""
+    from app import instagram
+    p = instagram.photo_path(token)
+    if p is None:
+        raise HTTPException(404, "Introuvable")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/reseaux/posts/{pid}/publish-instagram")
+async def publish_instagram(pid: str, request: Request, photo: UploadFile = File(...),
+                            db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publication réelle sur Instagram : texte approuvé + photo obligatoire."""
+    from app import instagram
+    p = _get_post(db, pid)
+    if p.platform != "instagram" or p.kind != "post":
+        raise HTTPException(400, "Ce n'est pas une publication Instagram.")
+    if p.status != "approved":
+        raise HTTPException(409, "Approuve le texte avant la publication.")
+    err = check_post(p.platform, p.body, p.hashtags)
+    if err:
+        raise HTTPException(400, err)
+    raw = await photo.read()
+    if len(raw) > 12 * 1024 * 1024:
+        raise HTTPException(400, "Photo trop lourde (12 Mo maximum).")
+    jpeg = _ig(instagram.prepare_photo, raw)
+    token = instagram.host_photo(jpeg)
+    base = _ig_redirect(request).rsplit("/instagram/", 1)[0]
+    try:
+        out = _ig(instagram.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), f"{base}/public-media/{token}.jpg")
+    finally:
+        pth = instagram.photo_path(token)
+        if pth:
+            pth.unlink(missing_ok=True)
+    p.status, p.published_at = "published", utcnow()
+    p.external_id, p.external_url = out["id"][:500], out["url"][:500]
+    audit(db, user.id, "instagram_publish", "social_post", p.id, "")
+    db.commit()
+    return _post_out(p)
+
+
+# ---------- TikTok : scripts de vidéos ----------
+
+class TikTokScriptIn(BaseModel):
+    topic: str = Field(..., min_length=5, max_length=300)
+    details: str = Field("", max_length=3000)
+
+
+@router.post("/tiktok/script")
+def tiktok_script(body: TikTokScriptIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon TikTok : la légende (publiable) puis, après « --- », le script de tournage. Rien ne part vers TikTok."""
+    from app import memory as mem
+    if not assistant.ai_available():
+        raise HTTPException(503, "IA non disponible : impossible d'écrire le script.")
+    d = assistant.draft_tiktok_script(body.topic, body.details, memory=mem.block(db, body.topic))
+    if d is None:
+        raise HTTPException(502, "L'écriture du script a échoué. Réessaie.")
+    text = f"{d['caption']}\n---\nSCRIPT À FILMER\n{d['script']}"
+    p = SocialPost(platform="tiktok", kind="post", title=d["title"], body=text, hashtags=d["hashtags"], status="draft")
+    db.add(p)
+    audit(db, user.id, "tiktok_script", "social_post", p.id)
+    db.commit()
+    return _post_out(p)
+
+
+# ---------- WhatsApp : messages clients et statuts (envoi par le patron lui-même) ----------
+
+def whatsapp_number(raw: str) -> str:
+    """Numéro pour wa.me : chiffres seulement, indicatif Sénégal (221) ajouté aux numéros locaux à 9 chiffres. Vide si douteux."""
+    d = re.sub(r"\D", "", raw or "")
+    if d.startswith("00"):
+        d = d[2:]
+    if len(d) == 9 and d[0] == "7":
+        d = "221" + d
+    return d if 10 <= len(d) <= 15 else ""
+
+
+class WhatsAppIn(BaseModel):
+    kind: str = Field(..., max_length=16)
+    customer_id: str = ""
+    phone: str = Field("", max_length=64)
+    details: str = Field("", max_length=2000)
+
+
+@router.post("/whatsapp/message")
+def whatsapp_message(body: WhatsAppIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Brouillon de message WhatsApp ; le numéro nettoyé est gardé dans external_id. Rien n'est envoyé : le patron touche « Ouvrir WhatsApp »."""
+    from app import memory as mem
+    from app.models import Customer
+    if body.kind not in assistant.WHATSAPP_KINDS:
+        raise HTTPException(400, "Type de message inconnu.")
+    if not assistant.ai_available():
+        raise HTTPException(503, "IA non disponible : impossible de rédiger le message.")
+    name, phone = "", whatsapp_number(body.phone)
+    if body.customer_id:
+        c = db.get(Customer, body.customer_id)
+        if c is None:
+            raise HTTPException(404, "Client introuvable")
+        name, phone = c.contact_name or c.name, phone or whatsapp_number(c.phone)
+    text = assistant.draft_whatsapp_message(body.kind, name, body.details, memory=mem.block(db, body.details or body.kind))
+    if text is None:
+        raise HTTPException(502, "La rédaction a échoué. Réessaie.")
+    p = SocialPost(platform="whatsapp", kind="post", title=name or ("Statut WhatsApp" if body.kind == "statut" else "Message WhatsApp"),
+                   body=text[:1000], status="draft", external_id=phone)
+    db.add(p)
+    audit(db, user.id, "whatsapp_draft", "social_post", p.id, body.kind)
+    db.commit()
+    return _post_out(p)

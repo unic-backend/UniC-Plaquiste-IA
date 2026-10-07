@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import re
-import shutil
 from pathlib import Path
 
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
-from app import ocr
+from app import cad, ocr, pdfjob, vision
 from app.config import settings
-from app.models import DocumentChunk, ExtractedPage, StoredFile, utcnow, new_id
+from app.models import DocumentChunk, ExtractedPage, StoredFile, new_id
 
 DIM_RE = re.compile(
     r"(\d+(?:[.,]\d+)?)\s*(?:m|mm|cm)\b|"
@@ -30,9 +28,44 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+class UploadRejected(ValueError):
+    pass
+
+
+ALLOWED_EXT = {".pdf", ".txt", ".csv", ".md", ".docx", ".xlsx", ".xlsm", ".dxf", ".ifc", ".dwg",
+               ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+_TEXT_EXT = {".txt", ".csv", ".md", ".dxf", ".ifc"}
+_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    ".pdf": (b"%PDF",), ".docx": (b"PK\x03\x04",), ".xlsx": (b"PK\x03\x04",), ".xlsm": (b"PK\x03\x04",),
+    ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",), ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".gif": (b"GIF87a", b"GIF89a"), ".dwg": (b"AC10",),
+}
+_EXECUTABLE_HEADS = (b"MZ", b"\x7fELF", b"#!", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe")
+
+
+def validate_upload(data: bytes, filename: str) -> str:
+    """Contrôle réel d'un envoi : extension autorisée + contenu cohérent (signature) + pas d'exécutable. Rend l'extension."""
+    ext = Path(filename or "").suffix.lower()
+    if ext not in ALLOWED_EXT:
+        raise UploadRejected(f"Type de fichier non autorisé ({ext or 'sans extension'}).")
+    if not data:
+        raise UploadRejected("Fichier vide.")
+    head = data[:16]
+    if head.startswith(_EXECUTABLE_HEADS):
+        raise UploadRejected("Fichier exécutable refusé.")
+    if ext in _SIGNATURES and not head.startswith(_SIGNATURES[ext]):
+        raise UploadRejected(f"Le contenu ne correspond pas à l'extension {ext}.")
+    if ext == ".webp" and not (head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+        raise UploadRejected("Le contenu ne correspond pas à l'extension .webp.")
+    if ext in _TEXT_EXT and b"\x00" in data[:4096]:
+        raise UploadRejected(f"Le contenu ne ressemble pas à du texte ({ext}).")
+    return ext
+
+
 def save_upload(data: bytes, filename: str, mime: str, user_id: str | None, project_id: str | None, db: Session) -> StoredFile:
     fid = new_id()
-    ext = Path(filename).suffix.lower() or ""
+    filename = Path(filename or "fichier").name[:200] or "fichier"
+    ext = validate_upload(data, filename)
     dest_dir = settings.uploads_path / fid[:2]
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{fid}{ext}"
@@ -70,55 +103,58 @@ def classify_page(text: str) -> str:
     return "document"
 
 
+MAX_OCR_PAGES = 15
+
+
+OCR_BUDGET_S = 40   # temps total d'OCR par fichier : un gros scan ne bloque jamais l'envoi
+
+
 def extract_pdf(file_rec: StoredFile, db: Session, max_pages: int = 2000) -> dict:
+    import time
+
     path = Path(file_rec.path)
-    reader = PdfReader(str(path))
-    n = min(len(reader.pages), max_pages)
-    file_rec.page_count = len(reader.pages)
+    heavy = ""
+    try:   # texte lu dans un processus séparé à mémoire bornée (un plan lourd ne fait plus tomber le serveur)
+        res = pdfjob.run("text", timeout=60, path=str(path), max_pages=max_pages)
+        total, items = res["total"], res["pages"]
+    except pdfjob.PdfJobError as exc:
+        heavy = str(exc)
+        try:
+            total = len(PdfReader(str(path)).pages)
+        except Exception:
+            total = 0
+        items = [{"t": "", "w": None, "h": None} for _ in range(min(total, max_pages))]
+    n = len(items)
+    file_rec.page_count = total
     db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).delete()
     db.query(DocumentChunk).filter(DocumentChunk.file_id == file_rec.id).delete()
 
     pages_out = []
     empty_pages = 0
-    for i in range(n):
-        page = reader.pages[i]
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
-        text = text.replace("\x00", " ").strip()
-        if len(text) < 20:
-            text = ocr.ocr_pdf_page(path, i) or text
+    started = time.monotonic()
+    for i, item in enumerate(items):
+        text = (item.get("t") or "").strip()
+        if len(text) < 20 and not heavy and i < MAX_OCR_PAGES and time.monotonic() - started < OCR_BUDGET_S:
+            text = ocr.ocr_pdf_page(path, i) or text   # la lecture visuelle (Claude) se fait à la demande : outil read_plan
         if len(text) < 20:
             empty_pages += 1
-        box = page.mediabox
-        width = float(box.width) if box else None
-        height = float(box.height) if box else None
         klass = classify_page(text)
-        rec = ExtractedPage(
-            file_id=file_rec.id,
-            page_number=i + 1,
-            text=text,
-            classification=klass,
-            width=width,
-            height=height,
-        )
-        db.add(rec)
+        db.add(ExtractedPage(file_id=file_rec.id, page_number=i + 1, text=text, classification=klass,
+                             width=item.get("w"), height=item.get("h")))
         pages_out.append({"page": i + 1, "classification": klass, "chars": len(text)})
         for chunk in chunk_text(text, 900):
             db.add(DocumentChunk(file_id=file_rec.id, page_number=i + 1, text=chunk))
 
     ocr_needed = file_rec.page_count and empty_pages / max(n, 1) > 0.6
     file_rec.processing_status = "completed"
+    if heavy:
+        file_rec.processing_error = heavy + " Envoie une capture d'écran ou une photo du plan : je la lirai."
     if ocr_needed:
         file_rec.processing_status = "completed_no_ocr"
-        file_rec.processing_error = (
-            "La majorité des pages n'ont pas de calque texte. "
-            + (
-                "L'OCR n'a rien pu lire sur ces pages."
-                if ocr.disponible()
-                else "OCR NON DISPONIBLE (Tesseract non installé). Fournissez un PDF vectoriel."
-            )
+        file_rec.processing_error = file_rec.processing_error if heavy else (
+            "La majorité des pages n'ont pas de texte lisible (plan dessiné ou scan). "
+            + ("Demande « lis le plan » : je le regarde page par page." if vision.disponible()
+               else "OCR et vision IA NON DISPONIBLES. Fournissez un PDF avec texte.")
         )
     db.commit()
     return {
@@ -278,6 +314,13 @@ def read_xlsx(path: Path) -> str:
 
 
 def process_file(file_rec: StoredFile, db: Session) -> dict:
+    # Déjà lu (à l'envoi du fichier) : on ne relit pas au moment du message. Évite doubles coûts OCR/vision et conflits de pages.
+    if file_rec.processing_status in ("completed", "completed_no_ocr") and \
+            db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).first() is not None:
+        return {"file_id": file_rec.id, "status": file_rec.processing_status, "pages": file_rec.page_count,
+                "warning": file_rec.processing_error or None, "cached": True}
+    db.query(ExtractedPage).filter(ExtractedPage.file_id == file_rec.id).delete()
+    db.query(DocumentChunk).filter(DocumentChunk.file_id == file_rec.id).delete()
     path = Path(file_rec.path)
     mime = (file_rec.mime_type or "").lower()
     ext = path.suffix.lower()
@@ -291,10 +334,15 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
             text = read_docx(path)
         elif ext in {".xlsx", ".xlsm"}:
             text = read_xlsx(path)
+        elif ext in cad.CAD_EXT:
+            text = cad.read_dxf(path) if ext == ".dxf" else cad.read_ifc(path)
         elif ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
             file_rec.processing_status = "completed"
             file_rec.page_count = 1
             read = ocr.ocr_image(path)
+            seen = vision.describe_image(path)
+            if seen:
+                read = f"[Lecture visuelle IA] {seen}" + (f"\n\n[OCR]\n{read}" if read else "")
             db.add(ExtractedPage(
                 file_id=file_rec.id, page_number=1,
                 text=read or "[Image] Aucun texte lu. Analyse visuelle NON DISPONIBLE sans IA vision.",
@@ -310,18 +358,19 @@ def process_file(file_rec: StoredFile, db: Session) -> dict:
                 "chars": len(read),
                 "warning": None if read else (
                     "Image stockée. Aucun texte lu : "
-                    + ("pas de texte détecté." if ocr.disponible() else "OCR NON DISPONIBLE et pas de modèle vision.")
+                    + ("pas de texte détecté." if ocr.disponible() or vision.disponible() else "OCR et vision IA NON DISPONIBLES (clé Claude absente).")
                 ),
             }
         else:
             file_rec.processing_status = "unsupported"
-            file_rec.processing_error = f"Type de fichier non pris en charge: {ext or mime}"
+            file_rec.processing_error = cad.DWG_MESSAGE if ext == ".dwg" else f"Type de fichier non pris en charge: {ext or mime}"
             db.commit()
             return {"file_id": file_rec.id, "status": "unsupported", "error": file_rec.processing_error}
 
         file_rec.page_count = 1
         file_rec.processing_status = "completed"
-        db.add(ExtractedPage(file_id=file_rec.id, page_number=1, text=text, classification=classify_page(text)))
+        db.add(ExtractedPage(file_id=file_rec.id, page_number=1, text=text,
+                             classification="plan" if ext in cad.CAD_EXT else classify_page(text)))
         for chunk in chunk_text(text):
             db.add(DocumentChunk(file_id=file_rec.id, page_number=1, text=chunk))
         db.commit()

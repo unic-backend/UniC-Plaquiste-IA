@@ -9,6 +9,7 @@ const base = (size = 22): SVGProps<SVGSVGElement> => ({
 const mk = (d: React.ReactNode) => ({ size, ...rest }: P) => <svg {...base(size)} {...rest}>{d}</svg>;
 
 export const Mic = mk(<><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" /></>);
+export const ArrowDown = mk(<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5" strokeWidth={2.2} />);
 export const Plus = mk(<path d="M12 5v14M5 12h14" />);
 export const ArrowUp = mk(<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" strokeWidth={2.2} />);
 export const Stop = mk(<rect x="7" y="7" width="10" height="10" rx="2.5" fill="currentColor" stroke="none" />);
@@ -31,3 +32,20 @@ export const Circle = mk(<circle cx="12" cy="12" r="4.5" />);
 export const Refresh = mk(<><path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5" /><path d="M19.5 4.5v4h-4" /></>);
 export const Pencil = mk(<><path d="M4.5 19.5 5.3 15 15.8 4.5a2 2 0 0 1 2.9 0l.8.8a2 2 0 0 1 0 2.9L9 18.7z" /><path d="m14 6.5 3.5 3.5" /></>);
 export const Eye = mk(<><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>);
+export const More = mk(<><circle cx="5.5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="18.5" cy="12" r="1.4" fill="currentColor" /></>);
+export const Pin = mk(<><path d="M9 4h6l-1 5.5 3 3H7l3-3z" /><path d="M12 12.5V20" /></>);
+export const Trash = mk(<><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /><path d="M10 11v5M14 11v5" /></>);
+export const Sun = mk(<><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>);
+export const Moon = mk(<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />);
+export const Bell = mk(<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9zM10 20a2 2 0 0 0 4 0" />);
+export const Speaker = mk(<><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /></>);
+export const Send = mk(<path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5z" />);
+export const Mail = mk(<><rect x="3.5" y="5.5" width="17" height="13" rx="2.5" /><path d="m4.5 7.5 7.5 5.5 7.5-5.5" /></>);
+export const Calendar = mk(<><rect x="4" y="5.5" width="16" height="14.5" rx="2.5" /><path d="M8 3.5v4M16 3.5v4M4 10h16" /></>);
+export const Note = mk(<><path d="M6.5 4h11A1.5 1.5 0 0 1 19 5.5V15l-5 5H6.5A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z" /><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4" /></>);
+export const Receipt = mk(<><path d="M6 3.5h12V20.5l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3-2 1.3z" /><path d="M9 8.5h6M9 12h6M9 15.5h3.5" /></>);
+export const Globe = mk(<><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5Z" /></>);
+export const Star = mk(<path d="m12 4 2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" />);
+export const Apps = mk(<><rect x="4" y="4" width="6.5" height="6.5" rx="2" /><rect x="13.5" y="4" width="6.5" height="6.5" rx="2" /><rect x="4" y="13.5" width="6.5" height="6.5" rx="2" /><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2" /></>);
+export const Palette = mk(<><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.6 0-1 .8-1.7 1.8-1.7H17a3.5 3.5 0 0 0 3.5-3.5c0-4.2-3.8-7.5-8.5-7.5Z" /><circle cx="8" cy="11" r="1" /><circle cx="11" cy="7.5" r="1" /><circle cx="15.5" cy="8.5" r="1" /></>);
+export const Code = mk(<><path d="m8.5 8-4 4 4 4M15.5 8l4 4-4 4M13.5 5.5l-3 13" /></>);

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     unic_env: str = "production"
     unic_data_dir: str = "./data"
-    unic_host: str = "0.0.0.0"
+    unic_host: str = "0.0.0.0"  # nosec B104 - serveur conteneurisé
     unic_port: int = 8000
     unic_public_url: str = ""
 
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-5-5"  # raisonnement profond
     anthropic_fast_model: str = "claude-sonnet-5-5"  # usage courant quand Claude est le seul moteur
+    anthropic_voice_model: str = "claude-haiku-4-5-20251001"  # UniC vocal : conversation courante, la plus rapide (vide = modèle courant)
     anthropic_base_url: str = ""  # vide = adresse officielle du SDK
     web_search_enabled: bool = True  # recherche Internet par Claude (facturée à l'usage par Anthropic)
     web_search_max_uses: int = 3
@@ -61,7 +62,16 @@ class Settings(BaseSettings):
     gbp_account_id: str = ""
     gbp_location_id: str = ""
 
+    # Coupe-circuit : LLM_ENABLED=false désactive tout appel IA ; l'appli continue en mode calcul/documents.
+    llm_enabled: bool = True
+
     max_upload_mb: int = 250
+
+    # CORS : origines autorisées (liste séparée par virgules). Vide = seulement l'origine du frontend servi.
+    allowed_origins: str = ""
+
+    # Redis (optionnel) : limite d'essais partagée. Vide = mémoire du processus.
+    redis_url: str = ""
 
     @property
     def data_path(self) -> Path:

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app import connectors, google_business as gbp, mailbox, memory as mem, trust
-from app.models import EmailDraft, InboxMessage, Invoice, Memory, Quotation, SocialPost
+from app.models import EmailDraft, InboxMessage, Memory, Quotation, SocialPost
 
 logger = logging.getLogger("unic.briefing")
 OK, NOT_CONFIGURED, UNAVAILABLE = "OK", "NON_CONFIGURE", "INDISPONIBLE"
@@ -42,12 +42,21 @@ def _quotes(db: Session) -> Section:
 
 
 def _invoices(db: Session) -> Section:
-    rows = [i for i in db.query(Invoice).filter(Invoice.status != "draft").all() if (i.remaining or 0) > 0]
-    if not rows:
+    from app import unpaid
+    u = unpaid.unpaid(db)
+    late, soon = u["en_retard"], u["a_venir"]
+    if not late and not soon:
         return Section("Factures à encaisser", OK, "Aucune facture en attente de paiement.")
-    total = sum(i.remaining or 0 for i in rows)
-    lines = [f"- {i.number} — reste {i.remaining:,.0f} {i.currency}".replace(",", " ") for i in rows[:6]]
-    return Section("Factures à encaisser", OK, f"{len(rows)} facture(s), {total:,.0f} à encaisser :\n".replace(",", " ") + "\n".join(lines))
+    lines = []
+    if late:
+        lines.append(f"⚠️ {len(late)} en retard, {unpaid.fmt(u['total_retard'])} :")
+        lines += [f"- {r['numero']} — {r['client']} — {unpaid.fmt(r['reste'])} {r['devise']}, {r['jours_retard']} j de retard" for r in late[:6]]
+    if soon:
+        lines.append(f"À venir : {len(soon)}, {unpaid.fmt(u['total_a_venir'])} :")
+        lines += [f"- {r['numero']} — {r['client']} — {unpaid.fmt(r['reste'])} {r['devise']}, échéance {r['echeance']}" for r in soon[:4]]
+    if late:
+        lines.append("Dis « relance les impayés » : je prépare les messages, tu les envoies.")
+    return Section("Factures à encaisser", OK, "\n".join(lines))
 
 
 def _mail(db: Session) -> Section:
@@ -79,12 +88,47 @@ def _reviews() -> Section:
         f"- {'★' * r['stars']} {r['author']} : {(r['comment'] or '(sans commentaire)')[:80]}" for r in todo[:5]))
 
 
+def _google_plan(db: Session) -> Section:
+    from app import gbp_plan
+    p = gbp_plan.plan(db)
+    if p["due"]:
+        since = "aucune publication encore" if p["days_since"] is None else f"dernière il y a {p['days_since']} jour(s)"
+        return Section("Fiche Google", OK, f"Publication avec photo à faire aujourd'hui ({since}). Thème conseillé : {p['theme']['label']}.")
+    return Section("Fiche Google", OK, f"Publication à jour : la prochaine est attendue le {p['next_due_at'][:10]}.")
+
+
 def _drafts(db: Session) -> Section:
     posts = db.query(SocialPost).filter(SocialPost.status != "published").count()
     mails = db.query(EmailDraft).filter(EmailDraft.status.in_(("draft", "approved"))).count()
     if not posts and not mails:
         return Section("Brouillons à valider", OK, "Aucun brouillon en attente.")
     return Section("Brouillons à valider", OK, f"{posts} publication(s) et {mails} e-mail(s) en attente d'approbation ou de publication.")
+
+
+def _agenda(db: Session) -> Section:
+    from datetime import timedelta
+    from app import agenda
+    now = datetime.now(timezone.utc)
+    rows = agenda.upcoming(db, days=2, now=now)
+    today = [r for r in rows if agenda._aware(r.start_at).date() == now.date()]
+    tomorrow = [r for r in rows if agenda._aware(r.start_at).date() == (now + timedelta(days=1)).date()]
+    if not today and not tomorrow:
+        return Section("Agenda", OK, "Rien de prévu aujourd'hui ni demain. Dis « note un métré jeudi à 10 h chez… ».")
+    out = []
+    if today:
+        out += ["Aujourd'hui :"] + [f"- {agenda.line(r)}" for r in today]
+    if tomorrow:
+        out += ["Demain :"] + [f"- {agenda.line(r)}" for r in tomorrow]
+    return Section("Agenda", OK, "\n".join(out))
+
+
+def _leads(db: Session) -> Section | None:
+    from app.models import WebLead
+    rows = db.query(WebLead).filter(WebLead.status == "new").order_by(WebLead.created_at.desc()).all()
+    if not rows:
+        return None
+    lines = [f"- {l.name} — {l.phone}" + (f" — {l.area}" if l.area else "") + (f" : {l.need[:80]}" if l.need else "") for l in rows[:6]]
+    return Section("Prospects du site", OK, f"{len(rows)} à rappeler :\n" + "\n".join(lines))
 
 
 def _tasks(db: Session) -> Section:
@@ -107,11 +151,38 @@ def _memory(db: Session) -> Section | None:
     return Section("Mémoire", OK, " ; ".join(parts) + ". (Paramètres → Mémoire)")
 
 
+def _agents(db: Session) -> Section | None:
+    from app import agents
+    rows = agents.recent_reports(db)
+    if not rows:
+        return None
+    return Section("Mes agents", OK, "\n".join(f"- {r['agent']}{'' if r['ok'] else ' (en échec)'} : {r['rapport'][:300]}" for r in rows[:6]))
+
+
+def _health(db: Session) -> Section | None:
+    """Ce que la surveillance a vu : seulement s'il y a quelque chose."""
+    from app import selfcare
+    from app.models import RepairJob
+    open_rows = selfcare.incidents(db, "open", 5)
+    sleepers = selfcare.sleeping()
+    ready = db.query(RepairJob).filter(RepairJob.status == "proposed").count()
+    if not open_rows and not sleepers and not ready:
+        return None
+    parts = []
+    if open_rows:
+        parts.append(f"{len(open_rows)} problème(s) vu(s) : " + " ; ".join(r["message"][:80] for r in open_rows[:3]))
+    if sleepers:
+        parts.append("agent(s) endormi(s) : " + ", ".join(s["agent"] for s in sleepers))
+    if ready:
+        parts.append(f"{ready} correction(s) prête(s) à fusionner")
+    return Section("Santé d'UniC", OK, " · ".join(parts) + ". (Paramètres → Atelier)")
+
+
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
-    for fn in (lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
-               lambda: _drafts(db), lambda: _memory(db)):
+    for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
+               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db), lambda: _agents(db), lambda: _health(db)):
         try:
             s = fn()
         except Exception as exc:   # une rubrique en panne n'arrête pas les autres

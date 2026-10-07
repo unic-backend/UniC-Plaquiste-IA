@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import json
-import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
-from sqlalchemy.orm import object_session, Session
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
-from app.capabilities import health_dashboard, registry_snapshot
+from app import learned
+from app.capabilities import _connectors, health_dashboard, registry_snapshot, release_memory
 from app.config import settings
-from app.database import get_db
-from app.documents import process_file, save_upload, search_pages
+from app.database import SLOW_QUERIES, get_db
+from app.documents import UploadRejected, process_file, save_upload, search_pages
 from app.models import (
+    LearnedAnswer,
     Artifact,
     AuditLog,
     CompanySettings,
@@ -41,17 +40,20 @@ from app.models import (
     utcnow,
 )
 from app import pricecheck
+from app.cover import ensure_cover_letter, make_cover_letter
 from app.orchestrator import handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
+    NUMBER_RE,
+    _taken_numbers,
     client_name_of,
     apply_payment,
     approve_entity,
+    balance_message,
+    build_balance_pdf,
+    reliquat_data,
     audit,
     company_dict,
-    create_delivery_note,
-    create_purchase_order,
-    generate_dn_pdf,
     generate_invoice_pdf,
     generate_po_pdf,
     generate_quote_pdf,
@@ -59,9 +61,8 @@ from app.services import (
     client_initials,
     document_number,
     next_number,
-    quotation_from_quantities,
 )
-from app.models import InvoiceItem, Payment, QuotationItem
+from app.models import QuotationItem
 
 router = APIRouter()
 
@@ -75,8 +76,86 @@ class UserOut(BaseModel):
     role: str
 
 
+class LoginIn(BaseModel):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+    device: str = Field(default="", max_length=120)
+
+
+class AccountIn(BaseModel):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+    current_password: str = Field(default="", max_length=200)
+
+
+_login_fails: dict[str, list[float]] = {}
+
+
+@router.get("/auth/status")
+def auth_status(db: Session = Depends(get_db)):
+    from app import auth
+    return {"account": auth.account_ready(db), "code_required": bool(settings.unic_access_code)}
+
+
+@router.post("/auth/login")
+def auth_login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    import time as _time
+    from app import auth
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    recent = [t for t in _login_fails.get(ip, []) if _time.time() - t < 900]
+    if len(recent) >= 8:
+        raise HTTPException(429, "Trop d'essais. Réessaie dans 15 minutes.")
+    try:
+        token = auth.login(db, body.email, body.password, body.device)
+    except auth.AuthError as exc:
+        _login_fails[ip] = recent + [_time.time()]
+        raise HTTPException(401, str(exc))
+    _login_fails.pop(ip, None)
+    db.commit()
+    return {"token": token}
+
+
+@router.post("/auth/logout")
+def auth_logout(request: Request, db: Session = Depends(get_db)):
+    from app import auth
+    auth.logout(db, request.headers.get("x-access-code", ""))
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/auth/account")
+def auth_account(body: AccountIn, request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Choisir / changer son e-mail et son mot de passe. Avec le code d'accès (mot de passe oublié), l'ancien n'est pas demandé."""
+    import secrets as _secrets
+    from app import auth
+    given = request.headers.get("x-access-code", "")
+    code = settings.unic_access_code
+    by_code = bool(code) and _secrets.compare_digest(given.encode(), code.encode())
+    if not code:
+        by_code = not given.startswith("uat_")
+    try:
+        auth.set_account(db, body.email, body.password, body.current_password, by_access_code=by_code)
+        token = auth.login(db, body.email, body.password, "Cet appareil")
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"ok": True, "token": token}
+
+
+@router.get("/auth/devices")
+def auth_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import auth
+    return {"devices": auth.devices(db), "account": auth.account_ready(db), "email": user.email if auth.account_ready(db) else ""}
+
+
 @router.get("/auth/me")
-def me(user: User = Depends(get_current_user)):
+def me(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app import auth
+    try:
+        auth.touch(db, request.headers.get("x-access-code", ""))
+        db.commit()
+    except Exception:
+        db.rollback()
     return UserOut(id=user.id, email=user.email, name=user.name, role=user.role)
 
 
@@ -88,6 +167,50 @@ class ChatIn(BaseModel):
     file_ids: list[str] = Field(default_factory=list)
     project_id: str | None = None
     deep: bool = False  # raisonnement profond (Claude) à la demande
+    voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
+    locked: bool = False  # téléphone verrouillé (Hey UniC) : aucune donnée de l'entreprise, aucun outil
+
+
+class TranslateIn(BaseModel):
+    text: str = Field(default="", max_length=1200)
+    source: str = Field(default="fr", max_length=5)
+    target: str = Field(default="en", max_length=5)
+    context: list[dict] = Field(default_factory=list, max_length=12)
+
+
+class IntentIn(BaseModel):
+    text: str = Field(default="", max_length=800)
+    hint: bool = False   # le téléphone a déjà repéré (même mal prononcé) un mot d'appel ou de message
+
+
+@router.post("/unic/intent")
+def unic_intent(body: IntentIn, user: User = Depends(get_current_user)):
+    """UniC vocal : ce que le patron a dit est-il « appelle X » ou « envoie un SMS à X » ? Le serveur n'exécute rien."""
+    from app import phone_intent
+    return phone_intent.parse(body.text, body.hint)
+
+
+@router.post("/unic/translate")
+def unic_translate(body: TranslateIn, user: User = Depends(get_current_user)):
+    """Interprète : traduit une phrase. Aucun outil, aucune donnée de l'entreprise, rien d'enregistré."""
+    from app import translate as tr
+    try:
+        return {"text": tr.translate(body.text, body.source, body.target, body.context)}
+    except tr.TranslateError as exc:
+        raise HTTPException(503 if "IA" in str(exc) or "pour le moment" in str(exc) else 400, str(exc))
+
+
+@router.get("/unic/languages")
+def unic_languages(user: User = Depends(get_current_user)):
+    from app import translate as tr
+    return tr.LANGUAGES
+
+
+@router.post("/unic/polish")
+def unic_polish(body: IntentIn, user: User = Depends(get_current_user)):
+    """SMS dicté : orthographe et grammaire corrigées, sens inchangé (le patron l'entend avant d'envoyer)."""
+    from app import phone_intent
+    return {"message": phone_intent.polish(body.text)}
 
 
 @router.get("/conversations")
@@ -99,11 +222,34 @@ def list_conversations(
     query = db.query(Conversation).filter(Conversation.user_id == user.id)
     if q:
         query = query.filter(Conversation.title.ilike(f"%{q}%"))
-    rows = query.order_by(Conversation.updated_at.desc()).limit(80).all()
+    rows = query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc()).limit(80).all()
     return [
-        {"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat() if c.updated_at else None}
+        {"id": c.id, "title": c.title, "pinned": bool(c.pinned),
+         "updated_at": c.updated_at.isoformat() if c.updated_at else None}
         for c in rows
     ]
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+    pinned: bool | None = None
+
+
+@router.patch("/conversations/{cid}")
+def patch_conversation(cid: str, body: ConversationPatch, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Épingler / renommer : l'ordre par date de dernière activité n'est pas touché."""
+    c = db.get(Conversation, cid)
+    if c is None or c.user_id != user.id:
+        raise HTTPException(404, "Conversation introuvable")
+    if body.title is not None:
+        title = " ".join(body.title.split())
+        if not title:
+            raise HTTPException(422, "Le nom ne peut pas être vide")
+        c.title = title
+    if body.pinned is not None:
+        c.pinned = body.pinned
+    db.commit()
+    return {"id": c.id, "title": c.title, "pinned": bool(c.pinned)}
 
 
 @router.post("/conversations")
@@ -125,21 +271,42 @@ def get_conversation(cid: str, db: Session = Depends(get_db), user: User = Depen
         .order_by(Message.created_at.asc())
         .all()
     )
+    ok_ids = learned.validated_ids(db, [m.id for m in msgs if m.role == "assistant"])
     return {
         "id": c.id,
         "title": c.title,
         "project_id": c.project_id,
+        "working": c.id in RUNNING,   # UniC travaille encore sur la dernière demande
         "messages": [
             {
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
+                "validated": m.id in ok_ids,
                 "meta": json.loads(m.meta_json or "{}"),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in msgs
         ],
     }
+
+
+@router.post("/messages/{mid}/validate")
+def validate_message(mid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """👍 : la réponse devient du savoir validé, réutilisable quand Claude est indisponible."""
+    try:
+        learned.validate(db, mid)
+    except learned.LearnError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"validated": True, "total": db.query(LearnedAnswer).count()}
+
+
+@router.delete("/messages/{mid}/validate")
+def unvalidate_message(mid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    learned.forget(db, mid)
+    db.commit()
+    return {"validated": False, "total": db.query(LearnedAnswer).count()}
 
 
 @router.delete("/conversations/{cid}")
@@ -152,8 +319,11 @@ def delete_conversation(cid: str, db: Session = Depends(get_db), user: User = De
     return {"ok": True}
 
 
-@router.post("/chat")
-def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+# Conversations dont la réponse est en cours : le travail continue sur le serveur même si l'appli est quittée.
+RUNNING: set[str] = set()
+
+
+def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
     if body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if conv is None or conv.user_id != user.id:
@@ -165,12 +335,30 @@ def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_c
     text = (body.message or "").strip()
     if not text and not body.file_ids:
         raise HTTPException(400, "Message vide")
-    user_msg = Message(conversation_id=conv.id, role="user", content=text or "[fichier]")
+    names = [{"id": f.id, "filename": f.filename, "mime": f.mime_type} for f in (db.get(StoredFile, i) for i in body.file_ids) if f is not None]
+    user_msg = Message(conversation_id=conv.id, role="user", content=text or "[fichier]",
+                       meta_json=json.dumps({"files": names}, ensure_ascii=False) if names else "{}")
     db.add(user_msg)
     db.flush()
     if conv.title == "Nouvelle conversation" and text:
         conv.title = text[:80]
-    reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep)
+    db.commit()   # la demande est enregistrée tout de suite : retrouvable même si l'appli est fermée pendant le travail
+    if on_start:
+        on_start(conv.id)
+    RUNNING.add(conv.id)
+    try:
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice, body.locked)
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()   # la demande reste ; une réponse claire remplace le silence
+        db.add(Message(conversation_id=conv.id, role="assistant",
+                       content="Je n'ai pas pu terminer cette tâche (erreur interne). Redemande-la et je la reprends.", meta_json="{}"))
+        db.commit()
+        raise
+    finally:
+        RUNNING.discard(conv.id)
+        release_memory()
     meta = {
         "structured": reply.structured,
         "artifacts": reply.artifacts,
@@ -195,6 +383,78 @@ def chat(body: ChatIn, db: Session = Depends(get_db), user: User = Depends(get_c
     }
 
 
+@router.post("/chat")
+def chat(body: ChatIn, background: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import memory as mem
+
+    pending: list[str] = []
+    tok = mem.AFTER_REPLY.set(pending)
+    try:
+        out = _chat_turn(db, user, body)
+    finally:
+        mem.AFTER_REPLY.reset(tok)
+    for t in pending:
+        background.add_task(mem.extract_in_background, t)   # après l'envoi de la réponse
+    return out
+
+
+@router.post("/chat/stream")
+def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
+    """Même réponse que /chat, mais en flux (une ligne JSON par événement) : statut, texte au fil de l'eau, puis « done »."""
+    import logging
+    import queue
+    import threading
+
+    from fastapi.responses import StreamingResponse
+
+    from app import ai
+    from app.database import SessionLocal
+
+    from app import memory as mem
+
+    q: queue.Queue = queue.Queue()
+    uid = user.id
+    pending: list[str] = []
+
+    def worker():
+        db = SessionLocal()
+        tok = ai.STREAM_SINK.set(q.put)
+        mtok = mem.AFTER_REPLY.set(pending)
+        try:
+            q.put({"t": "status", "text": "Je réfléchis…"})
+            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body,
+                                             on_start=lambda cid: q.put({"t": "conv", "conversation_id": cid}))})
+            q.put(None)   # flux fermé : l'écran n'attend plus
+            for t in pending:
+                mem.extract_in_background(t)   # la mémoire se met à jour ensuite
+        except HTTPException as exc:
+            q.put({"t": "error", "message": str(exc.detail)})
+        except Exception:
+            logging.getLogger("unic.chat").exception("chat stream")
+            q.put({"t": "error", "message": "Erreur interne. Réessaie dans un instant."})
+        finally:
+            ai.STREAM_SINK.reset(tok)
+            mem.AFTER_REPLY.reset(mtok)
+            db.close()
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def gen():
+        while True:
+            try:
+                ev = q.get(timeout=10)
+            except queue.Empty:
+                yield "\n"  # signal de vie : garde la connexion ouverte pendant les longues recherches
+                continue
+            if ev is None:
+                return
+            yield json.dumps(ev, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # ---------- files ----------
 
 @router.post("/files")
@@ -208,10 +468,15 @@ async def upload_file(
     max_b = settings.max_upload_mb * 1024 * 1024
     if len(data) > max_b:
         raise HTTPException(413, f"Fichier trop volumineux (max {settings.max_upload_mb} Mo)")
-    rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
+    try:
+        rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
+    except UploadRejected as exc:
+        raise HTTPException(415, str(exc))
     info = process_file(rec, db)
     audit(db, user.id, "upload", "file", rec.id, rec.filename)
     db.commit()
+    del data
+    release_memory()
     return {
         "id": rec.id,
         "filename": rec.filename,
@@ -277,6 +542,43 @@ def preview_artifact(aid: str, db: Session = Depends(get_db), user: User = Depen
         raise HTTPException(503, f"Aperçu indisponible ({type(exc).__name__}). Utilisez Télécharger.")
 
 
+@router.get("/files/{fid}/thumb")
+def file_thumb(fid: str, size: int = 600, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Aperçu JPEG d'une photo ou de la 1re page d'un PDF (plan) : affiché en carte dans la conversation. Mis en cache."""
+    import base64
+    from app import pdfjob
+
+    f = db.get(StoredFile, fid)
+    if f is None or not Path(f.path).exists():
+        raise HTTPException(404, "Fichier introuvable")
+    size = 1600 if size > 600 else 600
+    src = Path(f.path)
+    thumb = src.with_name(f"{src.stem}.thumb{size}.jpg")
+    if not thumb.exists():
+        ext = src.suffix.lower()
+        try:
+            if ext == ".pdf":
+                data = pdfjob.run("images", timeout=60, path=str(src), pages=[0], max_side=size, quality=80)["images"]
+                if not data:
+                    raise ValueError("vide")
+                thumb.write_bytes(base64.b64decode(data[0]))
+            elif ext in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+                from PIL import Image
+                with Image.open(src) as img:
+                    im = img.convert("RGB")
+                    im.thumbnail((size, size))
+                    im.save(thumb, "JPEG", quality=80)
+            else:
+                raise HTTPException(415, "Pas d'aperçu pour ce type de fichier")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(422, "Aperçu impossible")
+        finally:
+            release_memory()
+    return FileResponse(thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.get("/files/{fid}/download")
 def download_file(fid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     f = db.get(StoredFile, fid)
@@ -304,12 +606,24 @@ class CustomerIn(BaseModel):
     notes: str = ""
 
 
+
+class Page:
+    """Pagination commune : ?limit=&offset= (défaut 500, max 1000). Le total est dans l'en-tête X-Total-Count."""
+
+    def __init__(self, limit: int = Query(500, ge=1, le=1000), offset: int = Query(0, ge=0)):
+        self.limit, self.offset = limit, offset
+
+    def apply(self, query, response: Response):
+        response.headers["X-Total-Count"] = str(query.count())
+        return query.offset(self.offset).limit(self.limit).all()
+
+
 @router.get("/customers")
-def customers(q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def customers(response: Response, page: Page = Depends(), q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     query = db.query(Customer)
     if q:
         query = query.filter(or_(Customer.name.ilike(f"%{q}%"), Customer.code.ilike(f"%{q}%")))
-    rows = query.order_by(Customer.name).all()
+    rows = page.apply(query.order_by(Customer.name), response)
     return [_customer(c) for c in rows]
 
 
@@ -477,8 +791,8 @@ class ProjectIn(BaseModel):
 
 
 @router.get("/projects")
-def projects(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Project).order_by(Project.created_at.desc()).all()
+def projects(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Project).order_by(Project.created_at.desc()), response)
     return [_project(p) for p in rows]
 
 
@@ -550,7 +864,7 @@ def _project(p: Project) -> dict:
 
 def _quote_out(q: Quotation) -> dict:
     return {
-        "id": q.id, "number": q.number, "title": q.title, "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
+        "id": q.id, "number": q.number, "title": q.title, "cover_letter": q.cover_letter or "", "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
@@ -571,9 +885,35 @@ def _quote_out(q: Quotation) -> dict:
     }
 
 
+
+@router.get("/export/{kind}.{fmt}")
+def export_accounting(kind: str, fmt: str, start: str = "", end: str = "", db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Export comptable (devis ou factures) en CSV ou Excel. Filtre : ?start=AAAA-MM-JJ&end=AAAA-MM-JJ."""
+    from datetime import datetime, timezone
+    from app import exports
+    if kind not in ("quotes", "invoices") or fmt not in ("csv", "xlsx"):
+        raise HTTPException(404, "Export inconnu (quotes ou invoices, csv ou xlsx).")
+    try:
+        d0 = datetime.fromisoformat(start).replace(tzinfo=timezone.utc) if start else None
+        d1 = datetime.fromisoformat(end).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc) if end else None
+    except ValueError:
+        raise HTTPException(400, "Date invalide : utilise AAAA-MM-JJ.")
+    data = exports.rows(db, kind, d0, d1)
+    audit(db, user.id, "export", kind, fmt, f"{len(data)} ligne(s)")
+    db.commit()
+    name = f"unic-{'devis' if kind == 'quotes' else 'factures'}-{datetime.now(timezone.utc).date().isoformat()}.{fmt}"
+    if fmt == "csv":
+        body, mime = exports.to_csv(data), "text/csv; charset=utf-8"
+    else:
+        body, mime = exports.to_xlsx(data, "Devis" if kind == "quotes" else "Factures"), \
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(body, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
 @router.get("/quotes")
-def quotes(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Quotation).order_by(Quotation.created_at.desc()).all()
+def quotes(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Quotation).options(selectinload(Quotation.items), joinedload(Quotation.customer))
+                      .order_by(Quotation.created_at.desc()), response)
     return [_quote_out(q) for q in rows]
 
 
@@ -613,10 +953,13 @@ def patch_quote(qid: str, body: QuotePatch, db: Session = Depends(get_db), user:
         q.customer_id = body.customer_id
         owner = db.get(Customer, body.customer_id)
         if owner is not None and q.status == "draft":
-            # le numéro porte les initiales du client : il suit le client tant que le devis est un brouillon
-            current = document_number(db, owner.name, q.created_at.date() if q.created_at else None)
-            if not q.number.startswith(current.rsplit("-", 1)[0] + "-" + client_initials(owner.name)):
-                q.number = current
+            # le numéro porte les initiales du client : elles suivent le client tant que le devis est un brouillon (même bloc)
+            m = NUMBER_RE.match(q.number)
+            init = client_initials(owner.name)
+            if m and m.group(3) != init:
+                renamed = f"UC-{m.group(1)}-{m.group(2)}-{init}"
+                q.number = renamed if renamed not in _taken_numbers(db, renamed) else document_number(
+                    db, owner.name, q.created_at.date() if q.created_at else None)
             q.client_label = ""
     if body.items is not None:
         db.query(QuotationItem).filter(QuotationItem.quotation_id == q.id).delete()
@@ -664,8 +1007,37 @@ def approve_quote(qid: str, db: Session = Depends(get_db), user: User = Depends(
         raise HTTPException(404, "Devis introuvable")
     approve_entity(db, q, user.id)
     generate_quote_pdf(db, q, user.id)
+    ensure_cover_letter(db, q)   # lettre d'accompagnement préparée à l'approbation
     db.commit()
-    return {"status": q.status, "number": q.number}
+    return {"status": q.status, "number": q.number, "cover_letter": q.cover_letter or ""}
+
+
+class CoverLetterIn(BaseModel):
+    text: str = Field(..., max_length=4000)
+
+
+@router.post("/quotes/{qid}/cover-letter")
+def regenerate_cover_letter(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.get(Quotation, qid)
+    if not q:
+        raise HTTPException(404, "Devis introuvable")
+    q.cover_letter = make_cover_letter(db, q)
+    audit(db, user.id, "cover_letter", "quotation", q.id)
+    db.commit()
+    return {"cover_letter": q.cover_letter}
+
+
+@router.put("/quotes/{qid}/cover-letter")
+def edit_cover_letter(qid: str, body: CoverLetterIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.get(Quotation, qid)
+    if not q:
+        raise HTTPException(404, "Devis introuvable")
+    text = body.text.strip()
+    if len(text.split()) > 250:
+        raise HTTPException(400, "Lettre trop longue : 250 mots au maximum.")
+    q.cover_letter = text
+    db.commit()
+    return {"cover_letter": q.cover_letter}
 
 
 @router.post("/quotes/{qid}/invoice")
@@ -678,8 +1050,9 @@ def quote_to_invoice(qid: str, kind: str = "invoice", db: Session = Depends(get_
 
 
 @router.get("/invoices")
-def invoices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Invoice).order_by(Invoice.created_at.desc()).all()
+def invoices(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(Invoice).options(selectinload(Invoice.items), selectinload(Invoice.payments), joinedload(Invoice.customer))
+                      .order_by(Invoice.created_at.desc()), response)
     return [_invoice(i) for i in rows]
 
 
@@ -691,7 +1064,23 @@ def get_invoice(iid: str, db: Session = Depends(get_db), user: User = Depends(ge
     data = _invoice(i)
     if i.artifact_id:
         data["download_url"] = f"/api/artifacts/{i.artifact_id}/download"
+    if i.status != "draft" and (reliquat_data(db, i)["remaining"] or 0) > 0:   # reliquat : PDF + message de rappel
+        co = company_dict(db)
+        cust = db.get(Customer, i.customer_id) if i.customer_id else None
+        data["balance_url"] = f"/api/invoices/{i.id}/balance"
+        data["balance_message"] = balance_message(db, i, (cust.contact_name or cust.name) if cust else "", i.currency or co.get("currency") or "", co.get("phone") or "")
     return data
+
+
+@router.get("/invoices/{iid}/balance")
+def invoice_balance_pdf(iid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    i = db.get(Invoice, iid)
+    if not i:
+        raise HTTPException(404, "Facture introuvable")
+    if (reliquat_data(db, i)["remaining"] or 0) <= 0:
+        raise HTTPException(409, "Le dossier est entièrement payé : pas de reliquat.")
+    path = build_balance_pdf(db, i)
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 class PaymentIn(BaseModel):
@@ -752,8 +1141,8 @@ def _invoice(i: Invoice) -> dict:
 
 
 @router.get("/purchase-orders")
-def pos(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).all()
+def pos(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()), response)
     return [_po(p) for p in rows]
 
 
@@ -793,8 +1182,8 @@ def _po(p: PurchaseOrder) -> dict:
 
 
 @router.get("/delivery-notes")
-def dns(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(DeliveryNote).order_by(DeliveryNote.created_at.desc()).all()
+def dns(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = page.apply(db.query(DeliveryNote).order_by(DeliveryNote.created_at.desc()), response)
     return [_dn(n) for n in rows]
 
 
@@ -850,6 +1239,7 @@ class SettingsIn(BaseModel):
     currency: str | None = None
     vat_rate: float | None = None
     quote_validity_days: int | None = None
+    invoice_due_days: int | None = Field(default=None, ge=0, le=365)
     payment_terms: str | None = None
     default_waste: float | None = None
     default_margin: float | None = None
@@ -873,14 +1263,235 @@ def put_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = D
     return company_dict(db)
 
 
+@router.get("/settings/signature")
+def get_signature(user: User = Depends(get_current_user)):
+    from app.pdfs import owner_signature_path
+    p = owner_signature_path()
+    if not p.exists():
+        raise HTTPException(404, "Aucune signature enregistrée")
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+def _save_brand_image(data: bytes, dest) -> dict:
+    from app import inkimage
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(413, "Image trop lourde (15 Mo maximum).")
+    try:
+        ink = inkimage.extract(inkimage.load(data))
+    except inkimage.InkError as exc:
+        raise HTTPException(400, str(exc))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ink.save(dest, "PNG")
+    return {"ok": True, "width": ink.width, "height": ink.height}
+
+
+@router.put("/settings/signature")
+async def put_signature(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
+                        db: Session = Depends(get_db)):
+    """Signature du gérant (photo sur papier blanc) : fond retiré, recadrée, encre bleu foncé, PNG transparent."""
+    from app.pdfs import owner_signature_path
+    out = _save_brand_image(await file.read(), owner_signature_path())
+    audit(db, user.id, "update", "signature", "owner")
+    db.commit()
+    return out
+
+
+@router.get("/settings/stamp")
+def get_stamp(user: User = Depends(get_current_user)):
+    from app.pdfs import owner_stamp_path
+    p = owner_stamp_path()
+    if not p.exists():
+        raise HTTPException(404, "Aucun cachet enregistré")
+    return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/settings/stamp")
+async def put_stamp(file: UploadFile = File(...), user: User = Depends(require_roles("admin", "manager")),
+                    db: Session = Depends(get_db)):
+    """Cachet de l'entreprise (photo du tampon sur papier) : posé à côté de la signature sur les documents."""
+    from app.pdfs import uploaded_stamp_path
+    out = _save_brand_image(await file.read(), uploaded_stamp_path())
+    audit(db, user.id, "update", "stamp", "owner")
+    db.commit()
+    return out
+
+
+@router.delete("/settings/stamp")
+def delete_stamp(user: User = Depends(require_roles("admin", "manager"))):
+    from app.pdfs import uploaded_stamp_path
+    uploaded_stamp_path().unlink(missing_ok=True)   # le cachet intégré reprend sa place
+    return {"ok": True}
+
+
+@router.delete("/settings/signature")
+def delete_signature(user: User = Depends(require_roles("admin", "manager"))):
+    from app.pdfs import owner_signature_path
+    owner_signature_path().unlink(missing_ok=True)
+    return {"ok": True}
+
+
+class AppointmentIn(BaseModel):
+    title: str = Field(min_length=2, max_length=255)
+    start: str
+    kind: str = "rdv"
+    duration_min: int | None = None
+    location: str = ""
+    client_name: str = ""
+    phone: str = ""
+    notes: str = ""
+    remind_minutes: int = 60
+
+
+@router.get("/agenda")
+def agenda_list(days: int = 30, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    return {"rdv": [agenda.to_dict(a) for a in agenda.upcoming(db, days=max(1, min(days, 365)))], "kinds": agenda.KINDS}
+
+
+@router.post("/agenda")
+def agenda_create(body: AppointmentIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    try:
+        a, clash = agenda.create(db, **body.model_dump())
+    except agenda.AgendaError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"rdv": agenda.to_dict(a), "conflits": [agenda.line(c) for c in clash]}
+
+
+@router.patch("/agenda/{aid}")
+def agenda_update(aid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import agenda
+    from app.models import Appointment
+    a = db.get(Appointment, aid)
+    if a is None:
+        raise HTTPException(404, "Rendez-vous introuvable")
+    if body.get("status") in ("planned", "done", "cancelled"):
+        a.status = body["status"]
+    if body.get("start"):
+        try:
+            s = agenda.parse_dt(body["start"])
+        except agenda.AgendaError as exc:
+            raise HTTPException(400, str(exc))
+        dur = (agenda._aware(a.end_at) - agenda._aware(a.start_at)) if a.end_at else None
+        a.start_at = s
+        if dur:
+            a.end_at = s + dur
+    db.commit()
+    return {"rdv": agenda.to_dict(a)}
+
+
+@router.post("/worker/poll")
+def worker_poll(body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Appelé en boucle par l'appli Windows : signale le PC en ligne et récupère une question à traiter."""
+    from app import localworker
+    hold = 0.0 if body.get("hold") == 0 else localworker.POLL_HOLD
+    return {"job": localworker.next_job(None, str(body.get("model") or "")[:64], hold=hold)}
+
+
+@router.post("/worker/result/{jid}")
+def worker_result(jid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import localworker
+    ok = localworker.finish(db, jid, str(body.get("text") or ""), str(body.get("model") or ""), ok=bool(body.get("ok", True)))
+    return {"ok": ok}
+
+
+@router.get("/worker/status")
+def worker_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import localworker
+    return localworker.status(db)
+
+
+@router.get("/leads")
+def leads_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import sitechat
+    return [{"id": l.id, "name": l.name, "phone": l.phone, "area": l.area, "need": l.need, "surface": l.surface,
+             "status": l.status, "created_at": l.created_at.isoformat() if l.created_at else None} for l in sitechat.new_leads(db, 90)]
+
+
+@router.patch("/leads/{lid}")
+def leads_update(lid: str, body: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.models import WebLead
+    lead = db.get(WebLead, lid)
+    if lead is None:
+        raise HTTPException(404, "Prospect introuvable")
+    if body.get("status") in ("new", "contacted", "done"):
+        lead.status = body["status"]
+    db.commit()
+    return {"ok": True, "status": lead.status}
+
+
+@router.get("/invoices-unpaid")
+def invoices_unpaid(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import unpaid
+    u = unpaid.unpaid(db)
+    company = company_dict(db).get("name") or "UniC Plaquiste"
+    for r in u["en_retard"] + u["a_venir"]:
+        r["relance"] = unpaid.reminder_text(r, company)
+    return u
+
+
+@router.get("/backups")
+def backups_list(user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    return {"backups": backup.list_local(), "status": backup.status(), "offsite": backup.offsite_available(),
+            "folder": backup.REMOTE_FOLDER, "every_hours": backup.EVERY_HOURS}
+
+
+@router.post("/backups")
+def backups_create(user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    try:
+        made = backup.create("manuel")
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    remote = None
+    if backup.offsite_available():
+        try:
+            remote = backup.push_offsite(made["name"])
+        except backup.BackupError as exc:
+            remote = {"ok": False, "error": str(exc)}
+    release_memory()
+    return {**made, "offsite": remote}
+
+
+@router.get("/backups/{name}/download")
+def backups_download(name: str, user: User = Depends(require_roles("admin", "manager"))):
+    from app import backup
+    try:
+        p = backup.path_of(name)
+    except backup.BackupError as exc:
+        raise HTTPException(404, str(exc))
+    return FileResponse(p, media_type="application/zip", filename=name)
+
+
+@router.post("/backups/restore")
+async def backups_restore(file: UploadFile = File(...), user: User = Depends(require_roles("admin"))):
+    from app import backup
+    data = await file.read()
+    try:
+        out = backup.restore(data)
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    finally:
+        release_memory()
+    return out
+
+
 @router.get("/health")
-def health():
-    return health_dashboard()
+def health(db: Session = Depends(get_db)):
+    return health_dashboard(db)
+
+
+@router.get("/connectors")
+def connectors(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """État réel des connecteurs, pour les raccourcis du chat (rien de figé)."""
+    return _connectors(db)
 
 
 @router.get("/capabilities")
-def capabilities(user: User = Depends(get_current_user)):
-    return registry_snapshot()
+def capabilities(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return registry_snapshot(db)
 
 
 @router.get("/audit")
@@ -938,7 +1549,7 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     defaults = {
         "waste": company.get("default_waste") or 0.08,
         "board_width_m": company.get("board_width_m") or 1.2,
-        "board_height_m": company.get("board_height_m") or 2.5,
+        "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
     }
     if body.text:
@@ -951,3 +1562,206 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     if body.kind == "ceiling" and body.length_m and body.width_m:
         return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"]).to_dict()
     raise HTTPException(400, "Paramètres insuffisants")
+
+
+# ---------- Atelier : UniC se surveille, se corrige, crée ses agents ----------
+
+ADMIN = require_roles("admin", "manager")
+
+
+class RepairIn(BaseModel):
+    kind: str = "fix"
+    request: str = ""
+    incident_id: str = ""
+
+
+class GithubIn(BaseModel):
+    token: str = ""
+    repo: str = ""
+    base: str = ""
+    deploy_hook: str = ""
+
+
+class AgentIn(BaseModel):
+    name: str
+    mission: str
+    every_hours: int = 24
+
+
+class StatusIn(BaseModel):
+    status: str
+
+
+def _repair_call(fn, *a):
+    from app import repair
+    try:
+        return fn(*a)
+    except repair.RepairError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+@router.get("/selfcare")
+def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents, repair, selfcare
+    from app.models import AppSetting, CustomAgent, RepairJob
+    selfcare.ensure_running()
+    last = db.get(AppSetting, "selfcheck_last")
+    return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
+            "last_check": last.value if last else None, "github": repair.status(db),
+            "slow_queries": list(reversed(SLOW_QUERIES)), "auto_work": selfcare.auto_enabled(db),
+            "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
+            "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
+
+
+class AutoIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/selfcare/auto")
+def selfcare_auto(body: AutoIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Active ou coupe le travail automatique (contrôle quotidien, agents planifiés). Seul le patron décide."""
+    from app import selfcare
+    selfcare.set_auto(db, body.enabled)
+    audit(db, user.id, "auto_work_on" if body.enabled else "auto_work_off", "selfcare", "auto_work")
+    db.commit()
+    return {"auto_work": body.enabled}
+
+
+@router.post("/selfcare/check")
+def selfcare_check(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    selfcare.wake_sleepers()
+    return selfcare.self_check(db)
+
+
+@router.get("/selfcare/incidents/{iid}")
+def selfcare_incident(iid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    from app.models import Incident
+    i = db.get(Incident, iid)
+    if i is None:
+        raise HTTPException(404, "Incident introuvable")
+    return selfcare.to_dict(i, detail=True)
+
+
+@router.patch("/selfcare/incidents/{iid}")
+def selfcare_incident_status(iid: str, body: StatusIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import selfcare
+    from app.models import Incident
+    i = db.get(Incident, iid)
+    if i is None:
+        raise HTTPException(404, "Incident introuvable")
+    if body.status not in ("open", "ignored", "fixed"):
+        raise HTTPException(400, "Statut inconnu")
+    i.status = body.status
+    db.commit()
+    return selfcare.to_dict(i)
+
+
+@router.post("/selfcare/repair")
+def selfcare_repair(body: RepairIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    job = _repair_call(repair.start_job, db, body.kind, body.request, body.incident_id)
+    return repair.to_dict(job)
+
+
+@router.get("/selfcare/jobs/{jid}")
+def selfcare_job(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    out = repair.to_dict(j)
+    if j.status == "proposed":
+        try:
+            out["checks"] = repair.checks(db, j)
+        except repair.RepairError as exc:
+            out["checks"] = {"state": "unknown", "detail": str(exc)}
+    return out
+
+
+@router.post("/selfcare/jobs/{jid}/merge")
+def selfcare_merge(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    out = _repair_call(repair.merge, db, j)
+    audit(db, user.id, "repair_merge", "repair_job", j.id, j.pr_url)
+    db.commit()
+    return out
+
+
+@router.post("/selfcare/jobs/{jid}/close")
+def selfcare_close(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Proposition introuvable")
+    _repair_call(repair.close, db, j)
+    return repair.to_dict(j)
+
+
+@router.get("/selfcare/github")
+def selfcare_github(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    return repair.status(db)
+
+
+@router.put("/selfcare/github")
+def selfcare_github_connect(body: GithubIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    return _repair_call(repair.connect, db, body.token, body.repo, body.base, body.deploy_hook)
+
+
+@router.delete("/selfcare/github")
+def selfcare_github_disconnect(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    repair.disconnect(db)
+    return repair.status(db)
+
+
+@router.post("/agents")
+def agents_create(body: AgentIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    try:
+        return agents.to_dict(agents.create(db, body.name, body.mission, body.every_hours, by="owner"))
+    except agents.AgentError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.patch("/agents/{aid}")
+def agents_status(aid: str, body: StatusIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    try:
+        return agents.to_dict(agents.set_status(db, a, body.status))
+    except agents.AgentError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/agents/{aid}/run")
+def agents_run(aid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    return {"started": agents.start(a.id)}
+
+
+@router.delete("/agents/{aid}")
+def agents_delete(aid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    db.delete(a)
+    db.commit()
+    return {"ok": True}

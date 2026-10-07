@@ -6,9 +6,9 @@ import { api, net, type Post } from "./api";
 /* ---------- Barre de page avec bouton retour (toutes les pages hors conversation) ---------- */
 
 const TITLES: Record<string, string> = {
-  parametres: "Paramètres", entreprise: "Informations société", courrier: "Courrier", reseaux: "Réseaux & Google",
+  parametres: "Paramètres", entreprise: "Informations société", courrier: "Courrier", reseaux: "Réseaux & Google", voix: "Voix",
   memoire: "Mémoire", sante: "Moteur & santé", materiaux: "Matériaux & prix", clients: "Clients",
-  fournisseurs: "Fournisseurs", devis: "Devis", factures: "Factures", commandes: "Bons de commande",
+  fournisseurs: "Fournisseurs", devis: "Devis", factures: "Factures", agenda: "Agenda", prospects: "Prospects", commandes: "Bons de commande",
   livraisons: "Bons de livraison", chantiers: "Chantiers", documents: "Fichiers reçus",
 };
 
@@ -41,7 +41,7 @@ export function PageBar() {
 
 /* ---------- Indicateur « l'IA écrit » ---------- */
 
-export function Typing({ deep, web }: { deep: boolean; web: boolean }) {
+export function Typing({ deep, web, status, liveHtml }: { deep: boolean; web: boolean; status?: string; liveHtml?: string }) {
   const [step, setStep] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setStep((s) => s + 1), 2500);
@@ -52,12 +52,20 @@ export function Typing({ deep, web }: { deep: boolean; web: boolean }) {
     : web
       ? ["Je réfléchis…", "Je consulte les sources si besoin…", "Je rédige la réponse…"]
       : ["Je réfléchis…", "Je rédige la réponse…"];
+  if (liveHtml) {
+    return (
+      <div className="msg assistant">
+        <div className="avatar">U</div>
+        <div className="bubble typing"><div className="md" dangerouslySetInnerHTML={{ __html: liveHtml }} /></div>
+      </div>
+    );
+  }
   return (
     <div className="msg assistant enter">
       <div className="avatar">U</div>
       <div className="bubble typing" role="status" aria-live="polite">
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
-        <span className="typing-text">{phrases[step % phrases.length]}</span>
+        <span className="typing-text">{status || phrases[step % phrases.length]}</span>
       </div>
     </div>
   );

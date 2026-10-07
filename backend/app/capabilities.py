@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Callable
 
-from app import mailbox, ocr
+from app import google_business, instagram, linkedin, mailbox, ocr, vision, voice, website
 from app.config import settings
 from app.ai import providers_health
 
@@ -22,20 +22,26 @@ class Capability:
     handler: Callable | None = field(default=None, repr=False)
 
 
-def _connectors():
-    email_ok = mailbox.imap_configured()
-    return {
-        "email": email_ok,
-        "website": False,
-        "social": False,
-        "gbp": False,
-        "ocr": ocr.disponible(),
-        "voice_server": False,
-    }
+def _connectors(db=None) -> dict:
+    """État RÉEL des connecteurs (jamais une valeur figée). Sans base : on ne présume pas qu'ils sont branchés."""
+    conn = {"email": mailbox.imap_configured(), "website": False, "linkedin": False, "instagram": False, "gbp": google_business.configured(),
+            "ocr": ocr.disponible(), "vision": vision.disponible(), "voice": False}
+    if db is not None:
+        for key, fn in (("website", website.status), ("linkedin", linkedin.status), ("instagram", instagram.status)):
+            try:
+                conn[key] = bool(fn(db).get("connected"))
+            except Exception:
+                conn[key] = False
+        try:
+            conn["voice"] = bool(voice.status(db).get("configured"))
+        except Exception:
+            pass
+    conn["social"] = conn["linkedin"] or conn["instagram"]
+    return conn
 
 
-def registry_snapshot() -> list[dict]:
-    conn = _connectors()
+def registry_snapshot(db=None) -> list[dict]:
+    conn = _connectors(db)
     caps = [
         Capability("read_pdf", "Lire un PDF et extraire le texte page par page",
                    {"file_id": "str"}, {"pages": "int", "status": "str"}, ["user"], True),
@@ -78,18 +84,35 @@ def registry_snapshot() -> list[dict]:
                    {"to": "str", "subject": "str"}, {"draft": "object"}, ["user"], True),
         Capability("read_email", "Lire la boîte mail (IMAP), résumer, proposer des réponses",
                    {}, {}, ["user"], conn["email"],
-                   "" if conn["email"] else "NON DISPONIBLE — IMAP non configuré (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)."),
+                   "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),
         Capability("create_social_post", "Préparer posts et réponses (11 plateformes, brouillon → revue → approbation)",
                    {"text": "str"}, {"draft": "object"}, ["manager"], True),
-        Capability("publish_social_post", "Publier automatiquement sur les réseaux (API)",
-                   {"post_id": "str"}, {}, ["admin"], False,
-                   "NON DISPONIBLE — publication manuelle : copiez le texte approuvé, puis « Marquer publié »."),
+        Capability("publish_social_post", "Publier sur LinkedIn (après ton approbation)",
+                   {"post_id": "str"}, {}, ["admin"], conn["linkedin"],
+                   "" if conn["linkedin"] else "NON DISPONIBLE — LinkedIn non connecté (Réseaux › LinkedIn). Autres réseaux : publication manuelle."),
         Capability("manage_google_business", "Fiche Google : publier / répondre aux avis via API",
-                   {}, {}, ["admin"], False,
-                   "NON DISPONIBLE — API non configurée. Textes d'actualités et réponses aux avis préparés en brouillon."),
-        Capability("website_update", "Préparer une mise à jour du site UniC",
-                   {"content": "str"}, {"draft": "object"}, ["admin"], False,
-                   "NON DISPONIBLE — connecteur site non configuré. La préparation de texte reste possible."),
+                   {}, {}, ["admin"], conn["gbp"],
+                   "" if conn["gbp"] else "NON DISPONIBLE — accès API Google en attente d'approbation. Brouillons seulement."),
+        Capability("website_update", "Préparer une page du site (brouillon, jamais publiée sans ton clic)",
+                   {"content": "str"}, {"draft": "object"}, ["admin"], conn["website"],
+                   "" if conn["website"] else "NON DISPONIBLE — site non connecté (Réseaux › Site web)."),
+        Capability("read_plan", "Lire un plan : pièces, surfaces, plafonds, références placo/cloisons (FR/EN)",
+                   {"file_id": "str"}, {"pieces": "list"}, ["user"], vision.disponible(),
+                   "" if vision.disponible() else "NON DISPONIBLE — clé Claude absente."),
+        Capability("read_cad", "Lire DXF et IFC (AutoCAD, Revit, ArchiCAD)",
+                   {"file_id": "str"}, {"text": "str"}, ["user"], True),
+        Capability("read_image", "Regarder photos, plans scannés et PDF sans texte (vision Claude)",
+                   {"file_id": "str"}, {"text": "str"}, ["user"], vision.disponible(),
+                   "" if vision.disponible() else "NON DISPONIBLE — clé Claude absente."),
+        Capability("draw_diagram", "Dessiner un schéma, un graphique ou un logo en SVG → PNG partageable",
+                   {"svg": "str"}, {"image": "object"}, ["user"], True),
+        Capability("design_logo", "Concevoir et auditer des logos (méthode d'identité, 3 concepts)",
+                   {"brief": "str"}, {"concepts": "list"}, ["user"], True),
+        Capability("learned_knowledge", "Réponses validées (Retenir) réutilisées quand Claude est indisponible",
+                   {"question": "str"}, {"answer": "str"}, ["user"], True),
+        Capability("voice", "Lecture vocale des réponses (ElevenLabs)",
+                   {"text": "str"}, {"audio": "bytes"}, ["user"], conn["voice"],
+                   "" if conn["voice"] else "NON DISPONIBLE — clé ElevenLabs non enregistrée (voix du téléphone en secours)."),
     ]
     return [
         {
@@ -106,7 +129,31 @@ def registry_snapshot() -> list[dict]:
     ]
 
 
-def health_dashboard() -> dict:
+def memory_mb() -> dict:
+    """Mémoire du serveur (actuelle et pic) : permet de voir si Render (512 Mo) approche de sa limite."""
+    out = {}
+    try:
+        for line in open("/proc/self/status"):
+            if line.startswith(("VmRSS", "VmHWM")):
+                out["actuelle_mo" if line.startswith("VmRSS") else "pic_mo"] = int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return out
+
+
+def release_memory() -> None:
+    """Rend au système la mémoire libérée après un gros travail (fichier, réponse longue) : le serveur ne gonfle pas au fil des envois."""
+    import ctypes
+    import gc
+
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:   # hors Linux/glibc : sans effet
+        pass
+
+
+def health_dashboard(db=None) -> dict:
     from app.database import engine
     db_ok = True
     db_detail = "ok"
@@ -123,13 +170,8 @@ def health_dashboard() -> dict:
         "database": {"status": "ok" if db_ok else "error", "detail": db_detail, "url_kind": "sqlite" if settings.is_sqlite else "external"},
         "storage": {"status": "ok" if storage_ok else "error", "path": str(settings.storage_path)},
         "ai_providers": providers_health(),
-        "capabilities": registry_snapshot(),
-        "connectors": {
-            "email": "ok" if settings.smtp_host else "not_configured",
-            "website": "not_configured",
-            "social": "not_configured",
-            "google_business": "not_configured",
-            "ocr": "not_configured",
-        },
+        "memory": memory_mb(),
+        "capabilities": registry_snapshot(db),
+        "connectors": {k: ("ok" if v else "not_configured") for k, v in _connectors(db).items()},
         "note": "Le serveur cloud UniC AI fonctionne même si le PC personnel est éteint.",
     }

@@ -29,6 +29,16 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx cap sync android
+      - name: Voice model for "Hey UniC" (offline keyword spotting, checked by hash)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/vosk-fr.zip" https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip
+          echo "cabf6180e177eb9b3a9a9d43a437bd5e549f3a7d09525e5d69a3fed787be12ad  $RUNNER_TEMP/vosk-fr.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/vosk-fr.zip" -d "$RUNNER_TEMP/vosk"
+          mkdir -p android/app/src/main/assets
+          mv "$RUNNER_TEMP/vosk/vosk-model-small-fr-0.22" android/app/src/main/assets/model-fr
+      - name: Unit tests (Android)
+        working-directory: frontend/android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
       - name: Build debug APK
         working-directory: frontend/android
         run: ./gradlew assembleDebug --no-daemon

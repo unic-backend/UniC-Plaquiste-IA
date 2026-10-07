@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -29,7 +28,6 @@ from app.models import (
     QuotationItem,
     Sequence,
     Supplier,
-    new_id,
     utcnow,
 )
 from app.pdfs import build_document_pdf, fr_num, money, validate_pdf
@@ -101,16 +99,50 @@ def _quote_client(q: Quotation) -> str:
     return _norm_name(q.customer.name if q.customer else q.client_label)
 
 
-_NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
+NUMBER_RE = _NUMBER_RE = re.compile(r"^UC-(\d{4})-(\d{4})-([A-Z]+)(\d*)$")
 
 
-def _client_block(db: Session, party_name: str | None, day: date) -> int:
-    """Le bloc à 4 chiffres (« 1004 ») appartient au CLIENT : Pape Diop 1004, Awa Fall 1005, Fallou Ndiaye 1006, même le
-    même jour ; le lendemain on continue (1007…). Un client qui revient garde SON bloc (le devis suivant prend 2, 3…)."""
+def same_site(a: str | None, b: str | None) -> bool:
+    """Deux lieux de chantier désignent le même endroit : égaux ou l'un contient l'autre (« Point E » / « Point E, appt A »).
+    Un lieu vide est compatible avec tout : il ne sépare jamais deux clients."""
+    def words(v) -> set[str]:
+        return {w for w in re.split(r"[^a-z0-9]+", str(v or "").lower().translate(_ACCENTS)) if w and w not in _LINK_WORDS}
+
+    x, y = words(a), words(b)
+    if not x or not y:
+        return True
+    return x <= y or y <= x
+
+
+def same_party(name_a: str | None, site_a: str | None, name_b: str | None, site_b: str | None) -> bool:
+    """Même client = même nom ET même lieu. Deux « Madame Ribeiro » à deux adresses sont deux clients."""
+    na, nb = _norm_name(name_a), _norm_name(name_b)
+    return bool(na) and na == nb and same_site(site_a, site_b)
+
+
+def sites_of_client(db: Session, name: str | None) -> list[str]:
+    """Lieux distincts (non vides) déjà utilisés par les devis de ce nom de client."""
+    out: list[str] = []
+    for q in db.query(Quotation).filter(Quotation.site_location != "").all():
+        if _norm_name(q.customer.name if q.customer else q.client_label) == _norm_name(name) \
+                and not any(same_site(q.site_location, o) for o in out):
+            out.append(q.site_location)
+    return out
+
+
+def quote_signature(q: Quotation) -> tuple:
+    """Ce que le devis vend : lignes (désignation, quantité, unité). Deux devis de même signature sont le même travail."""
+    return tuple(sorted(((it.description or "").strip().lower(), round(it.quantity or 0, 3), (it.unit or "").lower())
+                        for it in q.items))
+
+
+def _client_block(db: Session, party_name: str | None, day: date, lieu: str | None = None, new: bool = False) -> int:
+    """Bloc à 4 chiffres (« 1007 »). Chaque DEVIS prend le bloc libre suivant (1007, 1008, 1009…, le même jour comme le
+    lendemain). Avec new=False (documents liés sans devis), on reprend le bloc du client (nom + lieu du chantier) s'il en a un."""
     me, init = _norm_name(party_name), client_initials(party_name)
-    owners: dict[int, set[str]] = {}
-    for (number, label, cust_name) in (
-        (q.number, q.client_label, q.customer.name if q.customer else None)
+    owners: dict[int, list[tuple[str, str]]] = {}
+    for (number, label, cust_name, site) in (
+        (q.number, q.client_label, q.customer.name if q.customer else None, q.site_location)
         for q in db.query(Quotation).filter(Quotation.number.like(f"UC-{day.year}-%")).all()
     ):
         m = _NUMBER_RE.match(number)
@@ -120,9 +152,9 @@ def _client_block(db: Session, party_name: str | None, day: date) -> int:
         owner = _norm_name(cust_name or label)
         if not owner and m.group(3) == init:
             owner = me   # devis ancien sans nom de client, mêmes initiales : on le rattache à ce client
-        owners.setdefault(block, set()).add(owner)
-    if me:
-        mine = [b for b, o in owners.items() if me in o]
+        owners.setdefault(block, []).append((owner, site or ""))
+    if me and not new:
+        mine = [b for b, o in owners.items() if any(n == me and same_site(site, lieu) for n, site in o)]
         if mine:
             return min(mine)
     block = int(f"{day.month:02d}{day.day:02d}")
@@ -131,15 +163,14 @@ def _client_block(db: Session, party_name: str | None, day: date) -> int:
     return block
 
 
-def _client_root(db: Session, party_name: str | None, day: date) -> str:
-    return f"UC-{day.year}-{_client_block(db, party_name, day):04d}-{client_initials(party_name)}"
+def _client_root(db: Session, party_name: str | None, day: date, lieu: str | None = None, new: bool = False) -> str:
+    return f"UC-{day.year}-{_client_block(db, party_name, day, lieu, new):04d}-{client_initials(party_name)}"
 
 
-def document_number(db: Session, party_name: str | None, on: date | None = None) -> str:
-    """UC-AAAA-BLOC-CLI. Chaque client a SON bloc (1004, 1005, 1006… dans l'ordre d'arrivée) ; son devis suivant
-    garde le même bloc et prend 2, 3… (UC-2026-1004-PD2). Deux clients ne partagent jamais un numéro."""
+def document_number(db: Session, party_name: str | None, on: date | None = None, lieu: str | None = None) -> str:
+    """UC-AAAA-BLOC-CLI. Chaque devis a SON numéro de bloc (1007, 1008, 1009…) : jamais deux devis sur le même bloc."""
     day = on or datetime.now(timezone.utc).date()
-    base = _client_root(db, party_name, day)
+    base = _client_root(db, party_name, day, lieu, new=True)
     taken = _taken_numbers(db, base)
     number, i = base, 2
     while number in taken:
@@ -228,6 +259,7 @@ def company_dict(db: Session) -> dict:
         "currency": row.currency,
         "vat_rate": row.vat_rate,
         "quote_validity_days": row.quote_validity_days,
+        "invoice_due_days": row.invoice_due_days if row.invoice_due_days is not None else 15,
         "payment_terms": row.payment_terms,
         "default_waste": row.default_waste,
         "default_margin": row.default_margin,
@@ -354,7 +386,7 @@ def quotation_from_quantities(
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
     label = (known.name if known else (client_name or "")).strip()
-    number = document_number(db, label)
+    number = document_number(db, label, lieu=lieu)
     q = Quotation(
         number=number,
         client_label="" if known else label,
@@ -500,7 +532,6 @@ def party_text_from_company(company: dict) -> str:
 
 
 def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | None) -> Invoice:
-    company = company_dict(db)
     number = linked_number(db, DOC_CODES["credit" if kind == "credit" else "invoice"], quote_number=quote.number)
     inv = Invoice(
         number=number,
@@ -554,7 +585,7 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     if inv.subtotal is not None:
         totals.append(("Sous-total HT", money(inv.subtotal, currency)))
         if inv.vat_rate is not None:
-            totals.append((f"TVA", money(inv.vat_amount, currency)))
+            totals.append(("TVA", money(inv.vat_amount, currency)))
         totals.append(("Total", money(inv.total, currency)))
         totals.append(("Payé", money(inv.paid, currency)))
         totals.append(("Reste dû", money(inv.remaining if inv.remaining is not None else None, currency)))
@@ -584,6 +615,80 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     art = store_artifact(db, dest, filename, "invoice", inv.id, f"unic-invoice-{inv.number.lower()}", user_id)
     inv.artifact_id = art.id
     return art
+
+
+def reliquat_data(db: Session, inv: Invoice) -> dict:
+    """Le reliquat d'une affaire : ce qui a été convenu (devis), ce que le client a versé (tous les paiements des factures du devis),
+    ce qui reste à payer. Sans devis lié, la facture elle-même fait foi."""
+    quote = db.get(Quotation, inv.quotation_id) if inv.quotation_id else None
+    invoices = [inv]
+    if quote is not None:
+        invoices = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind != "credit").all() or [inv]
+    credits = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind == "credit").all() if quote is not None else []
+    agreed = quote.total if quote is not None and quote.total is not None else inv.total
+    if agreed is not None and credits:
+        agreed -= sum((c.total or 0) for c in credits)
+    pays = sorted((p for i in invoices for p in i.payments), key=lambda p: p.paid_at or utcnow())
+    paid = sum(p.amount or 0 for p in pays)
+    return {"quote": quote, "invoices": invoices, "payments": pays, "agreed": agreed, "paid": paid,
+            "remaining": None if agreed is None else max(0.0, agreed - paid), "credits": sum((c.total or 0) for c in credits)}
+
+
+def balance_message(db: Session, inv: Invoice, client: str, currency: str, phone: str = "") -> str:
+    """Message de rappel : convenu, versé, reste à payer (aucune IA : uniquement les chiffres du dossier)."""
+    d = reliquat_data(db, inv)
+
+    def amt(v: float | None) -> str:
+        return f"{(v or 0):,.0f} {currency or 'FCFA'}".replace(",", " ")
+    first = (client or "").strip()
+    ref = d["quote"].number if d["quote"] is not None else inv.number
+    lines = [f"Bonjour{(' ' + first) if first else ''},", "",
+             f"Voici le point sur votre dossier {ref} : montant convenu {amt(d['agreed'])}, déjà versé {amt(d['paid'])}.",
+             f"Il reste {amt(d['remaining'])} à régler.", "Le reliquat détaillé est joint à ce message.",
+             "Merci d'avance et bonne journée.", "", "UniC Plaquiste"]
+    if phone:
+        lines.append(phone)
+    return "\n".join(lines)
+
+
+def build_balance_pdf(db: Session, inv: Invoice) -> Path:
+    """RELIQUAT : 1) ce qui a été convenu, 2) ce que le client a versé, 3) ce qui reste à payer. Recalculé à chaque demande."""
+    company = company_dict(db)
+    customer = db.get(Customer, inv.customer_id) if inv.customer_id else None
+    currency = inv.currency or company.get("currency") or ""
+    d = reliquat_data(db, inv)
+    quote = d["quote"]
+    sec = lambda t: ["", f"<b>{t}</b>", "", "", "", ""]
+    rows = [sec("1. CE QUI A ÉTÉ CONVENU" + (f" — devis {quote.number}" if quote is not None else f" — facture {inv.number}"))]
+    src = sorted(quote.items, key=lambda x: x.position) if quote is not None else sorted(inv.items, key=lambda x: x.position)
+    for it in src:
+        rows.append([str(it.position), it.description, fr_num(it.quantity, 2), it.unit, money(it.unit_price, currency), money(it.total, currency)])
+    if d["credits"]:
+        rows.append(["", "Avoirs accordés", "", "", "", "- " + money(d["credits"], currency)])
+    rows.append(["", "<b>MONTANT CONVENU</b>", "", "", "", f"<b>{money(d['agreed'], currency)}</b>"])
+    rows.append(sec("2. CE QUE LE CLIENT A VERSÉ"))
+    if d["payments"]:
+        for p in d["payments"]:
+            inv_no = next((i.number for i in d["invoices"] if p.invoice_id == i.id), "")
+            how = " — ".join(x for x in ((p.method or "").strip(), (p.reference or "").strip(), f"facture {inv_no}" if len(d["invoices"]) > 1 else "") if x)
+            rows.append(["", f"Versement du {p.paid_at.strftime('%d/%m/%Y') if p.paid_at else ''}" + (f" ({how})" if how else ""), "", "", "", money(p.amount, currency)])
+    else:
+        rows.append(["", "Aucun versement enregistré", "", "", "", ""])
+    rows.append(["", "<b>TOTAL VERSÉ</b>", "", "", "", f"<b>{money(d['paid'], currency)}</b>"])
+    totals = [("Montant convenu", money(d["agreed"], currency)), ("Déjà versé", money(d["paid"], currency)),
+              ("RESTE À PAYER", money(d["remaining"], currency))]
+    ref = quote.number if quote is not None else inv.number
+    filename = f"UniC_Reliquat_{ref.replace('-', '_')}.pdf"
+    dest = settings.artifacts_path / "balances" / filename
+    build_document_pdf(
+        dest, company=company, doc_label="RELIQUAT", number=ref, title=(quote.object_text or quote.title) if quote is not None and (quote.object_text or quote.title) else f"Reliquat — {ref}",
+        status="",
+        meta_lines=[f"Dossier {ref}", f"Édité le {utcnow().strftime('%d/%m/%Y')}"] + ([f"Chantier : {quote.site_location}"] if quote is not None and quote.site_location else []),
+        party_left=("Émetteur", party_text_from_company(company)), party_right=("Client", party_text_customer(customer)),
+        headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"], rows=rows, col_widths=[18, 210, 50, 40, 80, 80],
+        totals=totals, notes="", warnings=[],
+    )
+    return dest
 
 
 def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
@@ -708,7 +813,7 @@ def generate_dn_pdf(db: Session, dn: DeliveryNote, user_id: str | None) -> Artif
         headers=["#", "Désignation", "Qté", "Unité"],
         rows=rows, col_widths=[24, 340, 70, 70],
         notes=dn.notes,
-        extra_paragraphs=["Réception : date ________    signature / cachet ________"],
+        extra_paragraphs=["Réception des matériaux : date et signature du destinataire dans le cadre ci-dessous."],
     )
     art = store_artifact(db, dest, filename, "delivery_note", dn.id, f"unic-dn-{dn.number.lower()}", user_id)
     dn.artifact_id = art.id
@@ -764,3 +869,6 @@ def approve_entity(db, entity, user_id: str) -> None:
     entity.status = "approved"
     entity.approved_by = user_id
     entity.approved_at = utcnow()
+    if isinstance(entity, Invoice) and entity.due_date is None:   # échéance : approbation + délai de l'entreprise
+        from datetime import timedelta
+        entity.due_date = entity.approved_at + timedelta(days=int(company_dict(db).get("invoice_due_days") or 15))

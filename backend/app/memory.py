@@ -11,6 +11,8 @@ Principes (repris de l'expérience du projet ARENA du même propriétaire, réé
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import io
 import json
 import logging
@@ -352,7 +354,7 @@ def recall_past(db: Session, query: str, exclude_conversation_id: str | None = N
     lines, used = [], 0
     for i in picked:
         m, title = by_id[i]
-        who = "Patron" if m.role == "user" else "JARVIS"
+        who = "Patron" if m.role == "user" else "UniC"
         d = _aware(m.created_at)
         line = f"- [{d.strftime('%d/%m') if d else '?'} · « {(title or '')[:40]} »] {who} : {' '.join((m.content or '').split())[:280]}"
         if used + len(line) > budget:
@@ -372,7 +374,6 @@ def _device(path) -> int:
 
 
 def state_report(db: Session) -> dict:
-    now = _now()
     all_rows = db.query(Memory).all()
     by_nature: dict[str, int] = {}
     for m in all_rows:
@@ -403,7 +404,119 @@ def state_report(db: Session) -> dict:
     }
 
 
+# ---------- règles du patron enregistrées une fois pour toutes ----------
+
+OWNER_RULES_V1 = (
+    "Une barre (fourrure, montant, rail, cornière) mesure 2,90 m. Une barre n'est pas un paquet : ne jamais confondre ni convertir l'un en l'autre.",
+    "Une barre de fourrure coûte 1 200 FCFA (c'est le prix d'une barre, pas d'un paquet).",
+    "Plaques de plâtre : par défaut 2 m de long sur 1,20 m de large. Seulement si le patron précise « 2,50 » : 2,50 m de long sur 1,20 m de large.",
+    "Vis : 25 mm par défaut ; 35 mm uniquement si le patron le dit.",
+    "Médina est un lieu (quartier de Dakar), pas un client ni un article.",
+)
+
+
+OWNER_RULES_V2: tuple = ()   # remplacée par V3 (le prix de 6 500 était celui de la plaque de 2,50 m, pas de 2 m)
+OWNER_RULES_V3 = (
+    "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; standard 2,50 m × 1,20 m = 6 500 FCFA ; hydrofuge 2,50 m × 1,20 m = 8 000 FCFA. "
+    "Chaque taille de plaque a son prix : ne jamais appliquer le prix de l'une à l'autre.",
+)
+OWNER_RULES_V4 = (
+    "Plaques : si le patron donne un nombre de plaques SANS préciser la taille (« 20 plaques »), c'est la plaque de 2 m (standard 4 500 FCFA, "
+    "hydrofuge 6 000 FCFA) : choix automatique, ne pas redemander la taille. La plaque de 2,50 m (6 500 ; hydrofuge 8 000) seulement s'il dit « 2,50 ». "
+    "C'est le patron qui choisit la plaque : ne jamais en choisir une autre de ton côté.",
+)
+OWNER_RULES_V5 = (
+    "Je n'utilise pas de « suspente » : un point d'accroche de faux plafond = 1 tige (300 FCFA l'unité) + 1 pivot + 1 cheville à laiton. "
+    "Pivot = 6 500 FCFA le paquet de 100 ; chevilles à laiton = 6 000 FCFA le paquet de 100.",
+)
+
+OWNER_RULES_V6 = (
+    "Ossature de faux plafond UniC : fourrures tous les 0,50 m (pas 0,60), une tige tous les 0,90 m sur chaque fourrure ; "
+    "la plaque de 2 m se pose en travers des fourrures (plus résistant).",
+)
+
+OWNER_RULES_V7 = (
+    "Moulures : barres de 3 m ; taille 4 = 3 500 FCFA la barre, taille 2 = 2 500 FCFA la barre ; nombre de barres = ⌈ longueur à couvrir / 3 ⌉. "
+    "Colle silicone = 3 500 FCFA l'unité ; colle à pompe = 3 500 FCFA l'unité.",
+    "Moulures, colles et peinture ne vont dans un devis BA13 QUE si je le demande.",
+    "Peinture et finition : seau enduit 20 kg = 11 000 FCFA ; seau peinture Gylatex = 11 000 FCFA ; paquet papier ponçage = 8 000 FCFA ; "
+    "toile = 5 000 FCFA le rouleau de 10 m².",
+)
+
+OWNER_RULES_V8 = (
+    "Moulures : 1 colle pour 5 barres de moulure, arrondi au-dessus (⌈ barres / 5 ⌉). Colle silicone par défaut, colle à pompe si je la demande.",
+)
+
+OWNER_RULES_V9 = (
+    "Devis : le tableau des matériaux ne contient QUE des fournitures. La livraison en fait partie et s'écrit « Livraison : à la charge du client » "
+    "(0 FCFA, 1 forfait) sauf si je donne un prix. La main-d'œuvre n'est jamais mélangée aux matériaux : elle a son propre tableau séparé, en bas, "
+    "avec la surface en m², le prix unitaire du m² puis le prix total (ligne dont la désignation commence par « Main-d'œuvre »).",
+    "Un travail = un seul devis. Jamais deux devis à la fois ; une correction modifie le devis existant.",
+)
+
+_RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
+              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9}
+
+
+def seed_owner_rules(db: Session) -> int:
+    """Pose une seule fois chaque série de règles énoncées par le patron. Supprimées ensuite, elles ne reviennent pas."""
+    from app.models import AppSetting
+
+    n = 0
+    for version, rules in _RULE_SETS.items():
+        flag = f"seed_owner_rules_{version}"
+        if db.get(AppSetting, flag):
+            continue
+        if version == "v4":   # la règle de prix précédente ignorait l'hydrofuge 2 m : remplacée
+            for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix des plaques BA13 : standard 2 m%")):
+                m.state = "archived"
+            rules = rules + (
+                "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000 FCFA ; standard 2,50 m = 6 500 FCFA ; "
+                "hydrofuge 2,50 m = 8 000 FCFA. Chaque taille a son prix : ne jamais appliquer le prix de l'une à l'autre.",)
+        if version == "v3":   # la règle de prix erronée de la version précédente est archivée
+            for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix d'une plaque BA13 standard : 6 500%")):
+                m.state = "archived"
+        for text in rules:
+            try:
+                if add(db, text, kind="preference", source="user", pinned=True):
+                    n += 1
+            except MemoryRefused:
+                continue
+        db.add(AppSetting(key=flag, value="1"))
+        db.commit()
+    return n
+
+
 # ---------- apprentissage automatique (suppositions) ----------
+
+# Textes à analyser APRÈS l'envoi de la réponse (l'extraction est un second appel à l'IA : il ne doit pas faire attendre le patron).
+AFTER_REPLY: ContextVar = ContextVar("unic_after_reply", default=None)
+
+
+def defer_extract(db: Session, user_text: str) -> None:
+    pending = AFTER_REPLY.get()
+    if pending is None:
+        extract_and_store(db, user_text)  # pas d'envoi différé possible (appel direct) : tout de suite
+    else:
+        pending.append(user_text)
+
+
+def extract_in_background(user_text) -> None:
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if isinstance(user_text, dict):   # analyse d'une correction du patron (leçon à retenir)
+            from app import lessons
+            lessons.learn(db, user_text)
+        else:
+            extract_and_store(db, user_text)
+        db.commit()
+    except Exception as exc:  # jamais bloquer ni faire échouer quoi que ce soit
+        logger.debug("extraction mémoire différée impossible : %s", exc)
+    finally:
+        db.close()
+
 
 def extract_and_store(db: Session, user_text: str) -> list[str]:
     """Extraction depuis un message du patron : des SUPPOSITIONS à confirmer, jamais des faits. Silencieuse en cas d'échec."""

@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import re
+
 from contextvars import ContextVar
-from datetime import datetime, timezone
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Image as RLImage
+from reportlab.platypus import Flowable
 from reportlab.platypus import (
     Paragraph,
     SimpleDocTemplate,
@@ -20,7 +22,6 @@ from reportlab.platypus import (
     Table,
     TableStyle,
     KeepTogether,
-    HRFlowable,
 )
 
 INK = colors.HexColor("#1A1814")
@@ -132,6 +133,110 @@ def _entreprise(company: dict) -> dict:
 _SCALE: ContextVar[float] = ContextVar("pdf_scale", default=1.0)
 
 
+# Cadres de signature posés pendant le rendu : (page, x1, y1, x2, y2, nom du champ). Servent à créer les champs Adobe.
+_SIGN_BOXES: ContextVar[list | None] = ContextVar("pdf_sign_boxes", default=None)
+
+
+def owner_signature_path() -> Path:
+    """Signature manuscrite du gérant (PNG transparent), posée dans le cadre UniC de chaque document."""
+    from app.config import settings
+    return settings.storage_path / "brand" / "signature.png"
+
+
+STAMP_DEFAULT = BRAND_DIR / "stamp.png"   # cachet UniC Plaquiste intégré (demandé par le patron : déjà visible sur chaque document)
+
+
+def uploaded_stamp_path() -> Path:
+    from app.config import settings
+    return settings.storage_path / "brand" / "stamp.png"
+
+
+def owner_stamp_path() -> Path:
+    """Cachet posé à côté de la signature : celui envoyé depuis l'appli s'il existe, sinon le cachet intégré."""
+    up = uploaded_stamp_path()
+    return up if up.exists() else STAMP_DEFAULT
+
+
+class SignBox(Flowable):
+    """Cadre de signature : bordure fine, libellé discret, signature du gérant éventuelle.
+    Un champ de signature PDF invisible y est ajouté ensuite (Adobe : signer à la main ou placer sa signature)."""
+
+    def __init__(self, width: float, height: float, field: str, image: Path | None = None, stamp: Path | None = None):
+        super().__init__()
+        self.width, self.height, self.field, self.image, self.stamp = width, height, field, image, stamp
+
+    LABEL_H = 11   # le libellé est AU-DESSUS du cadre : le crayon du lecteur PDF (coin haut-gauche du champ) ne le cache plus
+
+    def wrap(self, aw, ah):
+        return self.width, self.height + self.LABEL_H
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        c.setFont("Helvetica", 7)
+        c.setFillColor(MUTED)
+        c.drawString(2, self.height + 3, "Signature et cachet")
+        c.setStrokeColor(colors.HexColor("#1F3A93"))
+        c.setLineWidth(0.8)
+        c.roundRect(0, 0, self.width, self.height, 3, stroke=1, fill=0)
+        from reportlab.lib.utils import ImageReader
+        has_stamp = bool(self.stamp and self.stamp.exists())
+        sig_w = self.width * (0.55 if has_stamp else 1.0)   # signature à gauche, cachet à droite
+        if self.image and self.image.exists():
+            try:
+                img = ImageReader(str(self.image))
+                iw, ih = img.getSize()
+                k = min((sig_w - 12) * (0.9 if has_stamp else 0.6) / iw, (self.height - 8) * 0.85 / ih)
+                w, h = iw * k, ih * k
+                c.drawImage(img, (sig_w - w) / 2, (self.height - h) / 2, w, h, mask="auto")
+            except Exception:
+                pass
+        if has_stamp:
+            try:
+                st = ImageReader(str(self.stamp))
+                sw, sh = st.getSize()
+                k = min((self.width - sig_w - 6) / sw, (self.height - 6) / sh)
+                w, h = sw * k, sh * k
+                c.saveState()
+                c.setFillAlpha(0.92)
+                c.drawImage(st, sig_w + (self.width - sig_w - w) / 2, (self.height - h) / 2, w, h, mask="auto")
+                c.restoreState()
+            except Exception:
+                pass
+        c.restoreState()
+        boxes = _SIGN_BOXES.get()
+        if boxes is not None:
+            x, y = c.absolutePosition(0, 0)
+            boxes.append((c.getPageNumber(), x, y, x + self.width, y + self.height, self.field))
+
+
+def add_signature_fields(path: Path, boxes: list) -> None:
+    """Champs de signature PDF (/Sig) invisibles posés sur les cadres : Acrobat propose « Signer » dans chaque cadre."""
+    if not boxes:
+        return
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, NumberObject, TextStringObject
+
+    writer = PdfWriter(clone_from=PdfReader(str(path)))
+    fields = ArrayObject()
+    for page_no, x1, y1, x2, y2, name in boxes:
+        page = writer.pages[page_no - 1]
+        widget = DictionaryObject({
+            NameObject("/Type"): NameObject("/Annot"), NameObject("/Subtype"): NameObject("/Widget"),
+            NameObject("/FT"): NameObject("/Sig"), NameObject("/T"): TextStringObject(name),
+            NameObject("/Rect"): ArrayObject([FloatObject(round(v, 2)) for v in (x1, y1, x2, y2)]),
+            NameObject("/F"): NumberObject(4), NameObject("/P"): page.indirect_reference,
+        })
+        ref = writer._add_object(widget)
+        if "/Annots" not in page:
+            page[NameObject("/Annots")] = ArrayObject()
+        page["/Annots"].append(ref)
+        fields.append(ref)
+    writer._root_object[NameObject("/AcroForm")] = DictionaryObject({NameObject("/Fields"): fields})
+    with open(path, "wb") as fh:
+        writer.write(fh)
+
+
 def P(x: float) -> float:
     """Dimension mise à l'échelle : le document se resserre pour tenir sur une page."""
     return x * _SCALE.get()
@@ -178,6 +283,44 @@ def _clean(v: str) -> str:
 def _strip(html: str) -> str:
     import re
     return re.sub(r"<[^>]+>", "", html or "").strip()
+
+
+_LABOUR_RE = re.compile(r"main[\s\-]*d['’ ]?\s*(?:œ|oe)uvre|^\s*pose\b|\bpose complète\b|^\s*façon\b", re.I)
+
+
+def _is_labour(designation: str) -> bool:
+    return bool(_LABOUR_RE.search(designation or ""))
+
+
+def _amount(cell: str) -> float:
+    """« 346 500 FCFA » -> 346500.0 (0 si illisible)."""
+    m = re.sub(r"[^\d,]", "", _strip(cell)).replace(",", ".")
+    try:
+        return float(m)
+    except ValueError:
+        return 0.0
+
+
+def _sum_lines(lines: list[list[str]]) -> str:
+    total = sum(_amount(l[-1]) for l in lines)
+    cur = " FCFA" if any("FCFA" in _strip(l[-1]) for l in lines) else ""
+    return f"{round(total):,}".replace(",", " ") + cur
+
+
+def _labour_table(heads: list[str], lines: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """Tableau de la main-d'œuvre : Désignation | Surface (m²) | Prix unitaire (par m²) | Prix Total."""
+    qi = heads.index("Quantité")
+    pi = heads.index("Prix Unitaire") if "Prix Unitaire" in heads else None
+    ti = heads.index("Prix Total") if "Prix Total" in heads else None
+    per_m2 = all(_strip(l[qi]).lower().endswith(("m²", "m2")) for l in lines)
+    hd = ["Désignation", "Surface (m²)" if per_m2 else "Quantité"] + (["Prix unitaire (par m²)" if per_m2 else "Prix Unitaire"] if pi is not None else []) + (["Prix Total"] if ti is not None else [])
+    out = []
+    for l in lines:
+        q = _strip(l[qi])
+        if per_m2:
+            q = re.sub(r"\s*m(²|2)$", "", q) + " m²"
+        out.append([l[0], q] + ([l[pi]] if pi is not None else []) + ([l[ti]] if ti is not None else []))
+    return hd, out
 
 
 def _columns(headers: list[str], rows: list[list[str]]):
@@ -287,33 +430,55 @@ def _render(
 
     # --- tableau
     mapped = _columns(headers, rows)
+    split_labour = False
     if mapped:
         heads, body, has_pu = mapped
         if has_pu:
             story += [Paragraph("Important — Prix unitaires :", _st("imp", textColor=BLUE, leading=12)),
                       Paragraph(MENTION_PU, txt), Spacer(1, P(8))]
-        story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3))]
-        ncol = len(heads)
-        widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in heads else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
+        mat_body, lab_body = body, []
+        if is_quote:   # règle du patron : la main-d'œuvre n'est JAMAIS dans le tableau des matériaux ; elle a son propre tableau en dessous
+            mat_body = [l for l in body if not _is_labour(_strip(l[0]))]
+            lab_body = [l for l in body if _is_labour(_strip(l[0]))]
+            if not mat_body:   # un devis de main-d'œuvre seule : un seul tableau, inchangé
+                mat_body, lab_body = body, []
+        split_labour = bool(lab_body)
         cellr = _st("cellr", fontSize=8.5, leading=11, alignment=TA_RIGHT)
         cellwr = _st("cellwr", fontSize=8.5, leading=11, textColor=colors.white, alignment=TA_RIGHT)
-        data = [[Paragraph(h, cellw if n == 0 else cellwr) for n, h in enumerate(heads)]]
-        for line in body:
-            data.append([Paragraph(str(c), cell if n == 0 else cellr) for n, c in enumerate(line)])
+
+        def grid(hd: list[str], lines: list[list[str]], sub: tuple[str, str] | None) -> Table:
+            ncol = len(hd)
+            widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in hd else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
+            if hd[0] == "Désignation" and "Surface (m²)" in hd:
+                widths = {4: [66, 30, 44, 40], 3: [98, 40, 42]}.get(ncol, widths)
+            data = [[Paragraph(h, cellw if n == 0 else cellwr) for n, h in enumerate(hd)]]
+            for line in lines:
+                data.append([Paragraph(str(c), cell if n == 0 else cellr) for n, c in enumerate(line)])
+            has_sub = bool(sub) and hd[-1] == "Prix Total"
+            if has_sub:
+                data.append([Paragraph(sub[0], cellw)] + [""] * (ncol - 2) + [Paragraph(_clean(sub[1]), cellwr)])
+            t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
+            st = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
+                  ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                  ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
+            if has_sub:
+                st += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
+            for r in range(1, len(data) - (1 if has_sub else 0)):
+                if r % 2 == 0:
+                    st.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
+            t.setStyle(TableStyle(st))
+            return t
+
         first_total = totals[0] if totals else None
-        if first_total and heads[-1] == "Prix Total":
-            data.append([Paragraph(first_total[0], cellw)] + [""] * (ncol - 2) + [Paragraph(_clean(first_total[1]), cellwr)])
-        t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
-        style = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
-                 ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                 ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
-        if first_total and heads[-1] == "Prix Total":
-            style += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
-        for r in range(1, len(data) - (1 if first_total and heads[-1] == "Prix Total" else 0)):
-            if r % 2 == 0:
-                style.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
-        t.setStyle(TableStyle(style))
-        story += [t, Spacer(1, P(8))]
+        if split_labour:
+            story += [_bar("Tableau des matériaux (fournitures)"), Spacer(1, P(3)),
+                      grid(heads, mat_body, ("Sous-total matériaux HT", _sum_lines(mat_body))), Spacer(1, P(8))]
+            lab_heads, lab_rows = _labour_table(heads, lab_body)
+            story += [_bar("Main-d'œuvre (pose)"), Spacer(1, P(3)),
+                      grid(lab_heads, lab_rows, ("Sous-total main-d'œuvre HT", _sum_lines(lab_body))), Spacer(1, P(8))]
+        else:
+            story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3)),
+                      grid(heads, mat_body, first_total), Spacer(1, P(8))]
     else:
         story += [_bar("Détail"), Spacer(1, P(3))]
         data = [[Paragraph(h, cellw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
@@ -327,7 +492,7 @@ def _render(
     if totals:
         labels = [a for a, _ in totals]
         final = next(((a, b) for a, b in totals if a == "Total"), None)
-        middle = [(a, b) for a, b in totals[1:] if (a, b) != final] if mapped and mapped[0][-1] == "Prix Total" else \
+        middle = [(a, b) for a, b in totals[1:] if (a, b) != final] if mapped and mapped[0][-1] == "Prix Total" and not split_labour else \
                  [(a, b) for a, b in totals if (a, b) != final]
         if middle:
             mt = Table([[Paragraph(a, _st("ml", alignment=TA_RIGHT)), Paragraph(_clean(b), _st("mv", alignment=TA_RIGHT))] for a, b in middle],
@@ -353,7 +518,7 @@ def _render(
 
     # --- conditions et exclusions (devis), comme sur le devis de référence
     if is_quote:
-        labour = any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
+        labour = split_labour or any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
         important = [b.strip() for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
         important += [
             "Les prix indiqués dans la colonne « Prix Unitaire » sont des prix à l'unité, et non des montants totaux.",
@@ -376,12 +541,17 @@ def _render(
             story += [Paragraph(f"• {x}", txt) for x in excl]
         story.append(Spacer(1, P(14)))
 
-    # --- signatures
+    # --- signatures : un cadre par partie (signature à la main, ou champ de signature Adobe invisible dans le cadre)
     who = party_lines[0] if party_lines else party_right[0]
-    sig = Table([[Paragraph(e["nom"], txt), Paragraph(f"{party_right[0].capitalize()} ({who})", txt)],
-                 [Paragraph("Signature : ______________________", txt), Paragraph("Signature : ______________________", txt)],
-                 [Paragraph("Date : ____________", txt), Paragraph("Date : ____________", txt)]], colWidths=[90 * mm, 90 * mm])
-    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(6)), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    other = f"{party_right[0].capitalize()} ({who})"
+    box_w, box_h = 82 * mm, P(26) * mm
+    head = _st("sh", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
+    sig = Table([[Paragraph(e["nom"], head), Paragraph(other, head)],
+                 [Paragraph("Date : ____ / ____ / ________", txt), Paragraph("Date : ____ / ____ / ________", txt)],
+                 [SignBox(box_w, box_h, "Signature_UniC", owner_signature_path(), owner_stamp_path()), SignBox(box_w, box_h, "Signature_Client")]],
+                colWidths=[90 * mm, 90 * mm])
+    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2)),
+                             ("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(KeepTogether(sig))
 
     doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=P(9) * mm,
@@ -398,21 +568,31 @@ MIN_SCALE = 0.72   # en dessous, le texte devient illisible : le document passe 
 def build_document_pdf(path: Path, **kw) -> Path:
     """Un document tient sur UNE page : on resserre par paliers ; au-delà du minimum lisible, il s'étale (exception)."""
     scale = 1.0
+    boxes: list = []
     while True:
-        token = _SCALE.set(scale)
+        token, btoken = _SCALE.set(scale), _SIGN_BOXES.set(boxes)
+        boxes.clear()
         try:
             pages = _render(path, **kw)
         finally:
             _SCALE.reset(token)
+            _SIGN_BOXES.reset(btoken)
         if pages <= 1 or scale <= MIN_SCALE + 1e-9:
             break
         scale = round(max(MIN_SCALE, scale - 0.04), 2)
     if pages > 1:   # trop long même resserré : rendu lisible sur plusieurs pages
-        token = _SCALE.set(0.9)
+        token, btoken = _SCALE.set(0.9), _SIGN_BOXES.set(boxes)
+        boxes.clear()
         try:
             _render(path, **kw)
         finally:
             _SCALE.reset(token)
+            _SIGN_BOXES.reset(btoken)
+    try:
+        add_signature_fields(path, boxes)
+    except Exception:   # le document reste valable sans champ Adobe (cadres dessinés quand même)
+        import logging
+        logging.getLogger("unic.pdfs").exception("Champs de signature non ajoutés")
     return path
 
 

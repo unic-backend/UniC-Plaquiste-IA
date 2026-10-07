@@ -20,7 +20,7 @@ STATUS_MISSING = "missing"
 
 DEFAULTS = {
     "board_width_m": 1.20,
-    "board_height_m": 2.50,
+    "board_height_m": 2.00,
     "waste": 0.08,
     "stud_spacing_m": 0.60,
     "screws_per_m2": 15.0,
@@ -31,8 +31,19 @@ DEFAULTS = {
     "paint_coats": 2,
     "primer_l_per_m2": 0.08,
     "ceiling_tile_side_m": 0.60,
-    "hanger_spacing_m": 1.20,
+    "hanger_spacing_m": 0.90,    # méthode UniC : une tige tous les 0,90 m le long de chaque fourrure
+    "furring_spacing_m": 0.50,
+    "bar_length_m": 2.90,        # fourrures, montants, rails, cornières : barres de 2,90 m   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
 }
+
+
+BAR_LENGTH_M = 2.90   # longueur des barres UniC (fourrure, montant, rail, cornière)
+
+
+def board_sku(board_width_m: float, board_height_m: float, suffix: str = "") -> tuple[str, str]:
+    """Référence et libellé de la plaque selon ses dimensions (2 m × 1,20 m, 2,50 m × 1,20 m…) : chaque taille a son prix."""
+    h, w = int(round(board_height_m * 1000)), int(round(board_width_m * 1000))
+    return f"BA13-{h}x{w}{suffix}", f"Plaque de plâtre BA13 {h}×{w}"
 
 
 @dataclass
@@ -144,11 +155,27 @@ def studs_needed(length_m: float, spacing_m: float) -> int:
     if spacing_m <= 0:
         raise ValueError("Entraxe invalide")
     # montants d'extrémité inclus : floor(L/e) + 1
-    return int(math.floor(length_m / spacing_m)) + 1
+    return int(math.floor(length_m / spacing_m + 1e-9)) + 1   # 1e-9 : évite 6,999… pour 7
 
 
 def tracks_length(length_m: float, runs: int = 2) -> float:
     return round_qty(length_m * runs, 3)
+
+
+MAX_SURFACE_M2 = 10_000.0   # au-delà : probablement une faute de frappe (unité, virgule) → confirmation explicite
+
+
+def check_inputs(*, positive: dict[str, float] | None = None, surface_m2: float | None = None,
+                 waste: float | None = None, confirmed_large: bool = False) -> None:
+    """Refuse les saisies physiquement impossibles (valeurs ≤ 0, non numériques, surface démesurée)."""
+    for name, v in (positive or {}).items():
+        if not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v <= 0:
+            raise ValueError(f"« {name} » doit être un nombre strictement positif (reçu : {v}).")
+    if waste is not None and not 0 <= waste <= 0.5:
+        raise ValueError(f"Le taux de chute doit être entre 0 % et 50 % (reçu : {waste:.0%}).")
+    if surface_m2 is not None and surface_m2 > MAX_SURFACE_M2 and not confirmed_large:
+        raise ValueError(f"Surface de {surface_m2:,.0f} m² : au-delà de {MAX_SURFACE_M2:,.0f} m² pour un seul calcul. "
+                         "Vérifie les unités (m ou mm ?) puis confirme, ou découpe en plusieurs chantiers.".replace(",", " "))
 
 
 def calculate_partition(
@@ -162,8 +189,12 @@ def calculate_partition(
     board_height: float = DEFAULTS["board_height_m"],
     stud_spacing: float = DEFAULTS["stud_spacing_m"],
     include_finish: bool = True,
+    confirmed_large: bool = False,
 ) -> CalcResult:
     openings = openings or []
+    check_inputs(positive={"longueur": length_m, "hauteur": height_m, "largeur de plaque": board_width,
+                           "hauteur de plaque": board_height, "entraxe": stud_spacing},
+                 surface_m2=length_m * height_m * sides, waste=waste, confirmed_large=confirmed_large)
     b_area = board_area(board_width, board_height)
     areas = partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
@@ -282,12 +313,12 @@ def calculate_partition(
     ]
 
     result.quantities = [
-        QuantityLine("BA13-2500x1200", "Plaque de plâtre BA13 2500×1200", n_boards, "u",
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         QuantityLine("MONTANT-M48", "Montant M48", n_studs, "u",
                      "⌊L/entraxe⌋+1", STATUS_ESTIMATED, notes=f"Soit {stud_ml} ml à la hauteur {height_m:g} m"),
-        QuantityLine("RAIL-R48", "Rail R48 (haut + bas)", tracks, "ml",
-                     "L×2", STATUS_ESTIMATED),
+        QuantityLine("UC-RAILS-48-MM", "Rails 48 mm (barre de 2,90 m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
+                     "⌈ L × 2 / 2,90 ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
                      f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
     ]
@@ -330,11 +361,23 @@ def calculate_ceiling(
     board_width: float = DEFAULTS["board_width_m"],
     board_height: float = DEFAULTS["board_height_m"],
     system: str = "ba13",
+    confirmed_large: bool = False,
 ) -> CalcResult:
+    check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
+                           "hauteur de plaque": board_height},
+                 surface_m2=length_m * width_m, waste=waste, confirmed_large=confirmed_large)
     area = round_qty(length_m * width_m, 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
-    hangers = ceil_int((length_m / DEFAULTS["hanger_spacing_m"] + 1) * (width_m / DEFAULTS["hanger_spacing_m"] + 1))
+    # Fourrures parallèles à la longueur, espacées de 0,50 m sur la largeur ; tiges tous les 0,90 m sur chaque fourrure.
+    # Sens de pose retenu : celui qui demande le moins de tiges (fourrures dans le sens le plus économique).
+    f_sp, h_sp = DEFAULTS["furring_spacing_m"], DEFAULTS["hanger_spacing_m"]
+
+    def layout(run: float, across: float) -> tuple[int, int, float]:
+        rows_ = ceil_int(across / f_sp) + 1
+        return rows_, rows_ * (ceil_int(run / h_sp) + 1), round_qty(run * rows_, 2)
+
+    rows, hangers, furring_ml = min(layout(length_m, width_m), layout(width_m, length_m), key=lambda t: (t[1], t[2]))
 
     result = CalcResult(
         kind="ceiling",
@@ -359,23 +402,29 @@ def calculate_ceiling(
                  {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CONFIRMED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
-        CalcStep("Suspentes (maillage approx.)",
-                 "⌈(L/e + 1)×(l/e + 1)⌉",
-                 {"e": DEFAULTS["hanger_spacing_m"]}, hangers, "u", STATUS_ASSUMED),
+        CalcStep("Lignes de fourrure (entraxe 0,50 m)", "⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
+        CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
+                 "lignes × (⌈ longueur de fourrure / 0,90 ⌉ + 1)",
+                 {"lignes": rows, "e": h_sp}, hangers, "u", STATUS_ESTIMATED),
     ]
     result.quantities = [
-        QuantityLine("BA13-2500x1200", "Plaque de plâtre BA13 2500×1200", n_boards, "u",
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
-        QuantityLine("SUSPENTE", "Suspente de plafond", hangers, "u",
-                     "maillage 1,20 m", STATUS_ASSUMED),
-        QuantityLine("FOURRURE", "Fourrure / ossature plafond",
-                     round_qty(length_m * (width_m / 0.60 + 1), 2), "ml",
-                     "L × (l/0,60 + 1)", STATUS_ASSUMED),
+        # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
+        QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
+                     "1 tige tous les 0,90 m sur chaque fourrure", STATUS_ESTIMATED),
+        QuantityLine("UC-PIVOT", "Pivot (paquet de 100)", ceil_int(hangers / 100), "paquet",
+                     f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
+        QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
+                     f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
+        QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", "Barre de fourrure (2,90 m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
+                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / 2,90 ⌉", STATUS_ESTIMATED),
     ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
-        "Maillage suspentes 1,20 m (hypothèse).",
+        "Méthode UniC : fourrures tous les 0,50 m, une tige tous les 0,90 m (tige + pivot + cheville à laiton), "
+        "plaques de 2 m posées en travers des fourrures.",
         "Les profils périphériques et les entretoises ne sont pas détaillés pièce par pièce.",
         "Aucun prix n'est appliqué.",
     ]
@@ -392,7 +441,10 @@ def calculate_paint(
     coats: int = 2,
     include_primer: bool = True,
     consumption: float = DEFAULTS["paint_l_per_m2_per_coat"],
+    confirmed_large: bool = False,
 ) -> CalcResult:
+    check_inputs(positive={"surface": area_m2, "couches": coats, "consommation": consumption},
+                 surface_m2=area_m2, confirmed_large=confirmed_large)
     paint_l = round_qty(area_m2 * coats * consumption, 2)
     primer_l = round_qty(area_m2 * DEFAULTS["primer_l_per_m2"], 2) if include_primer else 0.0
     result = CalcResult(
@@ -441,7 +493,10 @@ def calculate_paint(
     return result
 
 
-def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float = 0.10) -> CalcResult:
+def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float = 0.10,
+                      confirmed_large: bool = False) -> CalcResult:
+    check_inputs(positive={"surface": area_m2, "épaisseur": thickness_mm}, surface_m2=area_m2,
+                 waste=waste, confirmed_large=confirmed_large)
     # 10 mm → 10 L/m² → ~10 kg/m² selon produit ; on reste en kg avec 1 kg ≈ 1 L hypothèse
     kg = round_qty(area_m2 * thickness_mm * (1.0 + waste), 2)
     result = CalcResult(
@@ -477,7 +532,10 @@ def calculate_plaster(area_m2: float, thickness_mm: float = 10.0, waste: float =
     return result
 
 
-def calculate_surface(length_m: float, width_or_height_m: float, extra_factor: float = 1.0) -> CalcResult:
+def calculate_surface(length_m: float, width_or_height_m: float, extra_factor: float = 1.0,
+                      confirmed_large: bool = False) -> CalcResult:
+    check_inputs(positive={"longueur": length_m, "largeur/hauteur": width_or_height_m, "facteur": extra_factor},
+                 surface_m2=length_m * width_or_height_m * extra_factor, confirmed_large=confirmed_large)
     area = round_qty(length_m * width_or_height_m * extra_factor, 3)
     result = CalcResult(
         kind="surface",
@@ -562,6 +620,8 @@ def detect_calc_kind(text: str) -> str | None:
         return "ceiling"
     if re.search(r"peinture|paint|peintur", t):
         return "paint"
+    if re.search(r"plafond", t) and not re.search(r"cloison|doublage", t):
+        return "ceiling"
     if re.search(r"enduit|pl[aâ]tre(?!rie)|plaster(?!board)", t) and not re.search(
         r"plaque|placo|ba13|cloison", t
     ):
@@ -582,6 +642,9 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     if kind is None:
         return None
     t = text.lower().replace("×", "x")
+    if re.search(r"plaques?\s*(?:de\s*)?(?:2[.,]50?|2500)\b", t):
+        cfg["board_height_m"] = 2.5   # seulement si le patron le précise : la plaque par défaut fait 2 m
+    t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
 
     pair = _extract_dimension_pair(t)
     nums = _find_numbers(t)
@@ -616,6 +679,13 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
             L = nums[0]
         if H is None:
             H = nums[1] if len(nums) > 1 else 2.50
+        if L is not None and (H > 8 or L > 2000):
+            return CalcResult(
+                kind="partition", title="Calcul de cloison",
+                understanding=f"Dimensions peu crédibles ({L:g} x {H:g} m) : je préfère ne pas calculer.",
+                missing=["Longueur et hauteur de la cloison en mètres."],
+                next_step="Indiquez par exemple : cloison 12 x 2,5 m.",
+            )
         if L is None:
             return CalcResult(
                 kind="partition", title="Calcul de cloison",

@@ -1,4 +1,10 @@
 import * as I from "./Icons";
+import { LinkedInConnect, LinkedInPublish } from "./LinkedIn";
+import { InstagramConnect, InstagramPublish } from "./Instagram";
+import { SiteConnect, SitePageActions } from "./Site";
+import { TikTokActions, TikTokStudio } from "./TikTok";
+import { WhatsAppActions, WhatsAppStudio } from "./WhatsApp";
+import { sharePhoto } from "./Google";
 import { useEffect, useState } from "react";
 import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
@@ -115,7 +121,13 @@ export function Reseaux() {
   const [comment, setComment] = useState("");
   const [plan, setPlan] = useState("");
   const [busy, setBusy] = useState(false);
+  const [li, setLi] = useState<{ connected: boolean; pageReady: boolean }>({ connected: false, pageReady: false });
+  const [ig, setIg] = useState(false);
+  const [siteOk, setSiteOk] = useState(false);
   const { msg, say } = useToast();
+  const refreshLi = () => net.linkedinStatus().then((s) => setLi({ connected: s.connected, pageReady: s.connected && s.page_scope && !!s.page_id })).catch(() => {});
+  const refreshIg = () => net.instagramStatus().then((s) => setIg(s.connected)).catch(() => {});
+  useEffect(() => { refreshLi(); refreshIg(); }, []);
 
   const load = () => {
     net.platforms().then((r) => {
@@ -128,6 +140,8 @@ export function Reseaux() {
   useEffect(load, []);
 
   const p = plats.find((x) => x.id === sel);
+  const mine = posts.filter((x) => x.platform === sel);   // chaque réseau a sa propre liste
+  const others = posts.length - mine.length;
   useEffect(() => {
     setHandle(p?.handle ?? "");
     setUrl(p?.page_url ?? "");
@@ -222,6 +236,11 @@ export function Reseaux() {
         </div>
 
         {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
+        {sel === "linkedin" && <LinkedInConnect say={say} onChange={refreshLi} />}
+        {sel === "instagram" && <InstagramConnect say={say} onChange={refreshIg} />}
+        {sel === "tiktok" && <TikTokStudio say={say} onDraft={load} />}
+        {sel === "whatsapp" && <WhatsAppStudio say={say} onDraft={load} />}
+        {sel === "website" && <SiteConnect say={say} onChange={setSiteOk} onDraft={load} />}
 
         <section className="card-box">
           <h3>Booster ({p.label})</h3>
@@ -233,9 +252,10 @@ export function Reseaux() {
           {plan && <pre className="plan">{plan}</pre>}
         </section>
 
-        <h2>Brouillons & file d'attente</h2>
-        {posts.length === 0 && <div className="empty">Aucun brouillon.</div>}
-        {posts.map((d) => (
+        <h2>Brouillons : {label(sel)}</h2>
+        {mine.length === 0 && <div className="empty">Aucun brouillon pour {label(sel)}.</div>}
+        {others > 0 && <p className="hint">{others} brouillon(s) d'autres réseaux : choisis le réseau en haut pour les voir.</p>}
+        {mine.map((d) => (
           <article key={d.id} className="card-box">
             <div className="toolbar">
               <b>{label(d.platform)} · {d.kind === "reply" ? "Réponse" : "Post"} · {STATUS[d.status] ?? d.status}</b>
@@ -244,6 +264,18 @@ export function Reseaux() {
             {d.title && <p className="hint">{d.title}</p>}
             <p className="post-body">{d.body}</p>
             {d.hashtags && <p className="hint">{d.hashtags}</p>}
+            {d.platform === "linkedin" && d.status === "approved" && (
+              <LinkedInPublish post={d} connected={li.connected} pageReady={li.pageReady} say={say} onDone={load} />
+            )}
+            {d.platform === "tiktok" && d.kind === "post" && d.status !== "published" && <TikTokActions post={d} say={say} />}
+            {d.platform === "whatsapp" && d.kind === "post" && d.status !== "published" && <WhatsAppActions post={d} say={say} />}
+            {d.platform === "website" && d.kind === "post" && d.status !== "published" && (
+              <SitePageActions post={d} connected={siteOk} say={say} onDone={load} />
+            )}
+            {d.platform === "instagram" && d.status === "approved" && (
+              <InstagramPublish post={d} connected={ig} say={say} onDone={load} />
+            )}
+            {d.external_url && <p className="hint"><a href={d.external_url} target="_blank" rel="noopener noreferrer">Voir la publication</a></p>}
             <div className="toolbar">
               {NEXT[d.status] && (
                 <button className="btn btn-copper btn-small" disabled={busy}
@@ -255,6 +287,11 @@ export function Reseaux() {
                 <button className="btn btn-copper btn-small" disabled={busy}
                   onClick={() => run(async () => { await net.publish(d.id); load(); }, "Publié sur la fiche Google.")}>
                   Publier sur Google
+                </button>
+              )}
+              {d.platform === "linkedin" && d.status !== "published" && (
+                <button className="btn btn-line btn-small" onClick={async () => { try { say(await sharePhoto(null, `${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, "LinkedIn", "Publication LinkedIn")); } catch { say("Partage annulé."); } }}>
+                  Partager
                 </button>
               )}
               <button className="btn btn-line btn-small" onClick={() => copy(`${d.body}${d.hashtags ? `\n\n${d.hashtags}` : ""}`, say)}>Copier</button>
@@ -269,6 +306,12 @@ export function Reseaux() {
   );
 }
 
+/** Lien Google qui demande de se connecter AU compte indiqué (utile quand le téléphone est connecté à un autre compte). */
+const googleLink = (email: string, target: string) =>
+  email.includes("@")
+    ? `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(email.trim())}&continue=${encodeURIComponent(target)}`
+    : target;
+
 export function Courrier() {
   const [status, setStatus] = useState<{ read: boolean; send: boolean; ai: boolean; note: string } | null>(null);
   const [mails, setMails] = useState<Mail[]>([]);
@@ -277,11 +320,18 @@ export function Courrier() {
   const [draft, setDraft] = useState<MailDraft | null>(null);
   const [instr, setInstr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [acct, setAcct] = useState<{ connected: boolean; address: string; env_override: boolean } | null>(null);
+  const [gAddr, setGAddr] = useState("");
+  const [gPwd, setGPwd] = useState("");
   const { msg, say } = useToast();
+  const refresh = () => {
+    net.mailStatus().then(setStatus).catch((e) => say(e.message));
+    net.mailAccount().then(setAcct).catch(() => {});
+  };
 
   const load = () => net.mails().then(setMails).catch((e) => say(e.message));
   useEffect(() => {
-    net.mailStatus().then(setStatus).catch((e) => say(e.message));
+    refresh();
     load();
   }, []);
 
@@ -306,6 +356,36 @@ export function Courrier() {
           {status.read ? "Lecture seule : vos mails ne sont ni modifiés ni marqués lus." : status.note}
           {" "}Rien ne part sans votre approbation.
         </p>
+        {acct && !acct.env_override && (
+          acct.connected ? (
+            <section className="card-box">
+              <label>Gmail connecté</label>
+              <p className="post-body"><I.Check size={16} /> {acct.address}</p>
+              <p className="hint">Lecture seule. Chaque réponse reste un brouillon : rien ne part sans ton approbation.</p>
+              <button className="btn btn-ghost btn-small" disabled={busy}
+                onClick={() => { if (window.confirm("Déconnecter Gmail ? Le mot de passe d'application sera effacé du serveur.")) run(async () => { await net.disconnectGmail(); refresh(); setMails([]); }, "Gmail déconnecté."); }}>
+                Déconnecter
+              </button>
+            </section>
+          ) : (
+            <section className="card-box">
+              <label>Connecter Gmail</label>
+              <p className="hint">Étape 1 : écris l'adresse du compte à connecter (ton Gmail d'entreprise).</p>
+              <input type="email" inputMode="email" autoComplete="off" placeholder="ton.adresse@gmail.com" value={gAddr} onChange={(e) => setGAddr(e.target.value)} />
+              <ol className="steps" start={2}>
+                <li>Touche <a href={googleLink(gAddr, "https://myaccount.google.com/signinoptions/twosv")} target="_blank" rel="noopener noreferrer">activer la validation en 2 étapes</a>. Google te demandera de te connecter à CE compte (pas ton compte perso). Tes autres comptes ne sont pas touchés.</li>
+                <li>Touche <a href={googleLink(gAddr, "https://myaccount.google.com/apppasswords")} target="_blank" rel="noopener noreferrer">créer le mot de passe d'application</a> (nom : UniC AI). Google affiche 16 lettres : copie-les.</li>
+                <li>Reviens ici et colle-les.</li>
+              </ol>
+              <input type="password" autoComplete="off" placeholder="Mot de passe d'application (16 lettres)" value={gPwd} onChange={(e) => setGPwd(e.target.value)} />
+              <button className="btn btn-copper" disabled={busy || !gAddr.includes("@") || gPwd.replace(/\s/g, "").length < 16}
+                onClick={() => run(async () => { await net.connectGmail(gAddr, gPwd); setGPwd(""); refresh(); load(); }, "Gmail connecté.")}>
+                Connecter Gmail
+              </button>
+              <p className="hint">Ce mot de passe ne donne accès qu'à ta messagerie, il est chiffré sur ton serveur et tu peux le révoquer chez Google à tout moment.</p>
+            </section>
+          )
+        )}
         <div className="toolbar">
           <button className="btn btn-copper" disabled={busy || !status.read}
             onClick={() => run(async () => { const r = await net.mailSync(); await load(); say(`${r.new} nouveau(x) mail(s).`); })}>

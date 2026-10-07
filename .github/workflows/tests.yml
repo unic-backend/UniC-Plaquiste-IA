@@ -1,0 +1,80 @@
+name: Tests
+
+# Chaque proposition d'UniC AI (branches unic-ai/*) et chaque changement passent ici avant toute fusion.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]   # poser l'étiquette core-change-approved relance les contrôles
+  push:
+    paths: ["backend/**", "frontend/src/**", "scripts/**", "AGENTS.md", ".github/workflows/tests.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guardrails:
+    # Garde-fous du dépôt (AGENTS.md) : base du projet préservée, zones protégées au propriétaire. Sur chaque pull request.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Garde-fous
+        env:
+          BASE: ${{ github.base_ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: python3 scripts/guardrails.py --base "origin/$BASE" --labels "$LABELS"
+
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff bandit
+      - name: Ruff (imports inutiles, variables mortes, erreurs de syntaxe)
+        run: ruff check backend/app --select F,E9
+      - name: Bandit (failles, niveau moyen et plus)
+        run: bandit -q -r backend/app -ll
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Outils système (OCR, PDF)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng libcairo2
+      - run: pip install -r requirements.txt
+      - name: Tests serveur
+        run: UNIC_DATA_DIR="$(mktemp -d)" python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Types et construction de l'appli
+        run: npx tsc --noEmit -p . && npm run build
+      - name: Contacts, oui/non, appels et SMS vocaux
+        run: npm run test:phone

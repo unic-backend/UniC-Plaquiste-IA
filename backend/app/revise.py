@@ -1,7 +1,8 @@
 """Corriger ou retirer un document déjà créé (devis, facture, bon de commande, bon de livraison).
 
 Règle du patron : une correction MODIFIE le document fautif, elle n'en crée pas un second ; un document faux
-et abandonné est RETIRÉ de la bibliothèque. Seuls les brouillons se touchent : un document approuvé est figé.
+et abandonné est RETIRÉ de la bibliothèque (brouillons seulement). Un document approuvé, envoyé ou refusé SE MODIFIE aussi sur ordre du patron :
+il repasse « à valider » (à ré-approuver), la modification est tracée dans le journal. Une facture déjà payée garde son état et le patron en est averti.
 Tout est déterministe : les totaux sont recalculés ici, jamais par le modèle.
 """
 from __future__ import annotations
@@ -89,9 +90,10 @@ def _recompute(kind: str, doc, items: list) -> None:
 
 def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | None = None, add: list[dict] | None = None,
            update: list[dict] | None = None, title: str | None = None, vat_rate: float | None = None,
-           client_name: str | None = None, objet: str | None = None, lieu: str | None = None) -> list[str]:
+           client_name: str | None = None, objet: str | None = None, lieu: str | None = None,
+           new_number: str | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
-    _draft_only(kind, doc)
+    prev_status = doc.status
     _model, item_model, fk, _col = KINDS[kind]
     items = db.query(item_model).filter(getattr(item_model, fk) == doc.id).order_by(item_model.position).all()
     changes: list[str] = []
@@ -122,6 +124,26 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
         db.add(it)
         items.append(it)
         changes.append(f"ligne ajoutée : {it.description}")
+    if new_number and new_number.strip().upper() != doc.number:
+        if kind != "quote":
+            raise ReviseError("Seul le numéro d'un devis brouillon se change : les factures gardent leur suite.")
+        n = new_number.strip().upper()
+        if not svc.NUMBER_RE.match(n):
+            raise ReviseError("Format attendu : UC-AAAA-BLOC-INITIALES, par exemple UC-2026-1008-MR.")
+        if n in svc._taken_numbers(db, n):
+            raise ReviseError(f"Le numéro {n} existe déjà.")
+        if db.query(Invoice).filter(Invoice.quotation_id == doc.id).first():
+            raise ReviseError("Une facture est liée à ce devis : son numéro ne change plus.")
+        old_art = db.get(Artifact, doc.artifact_id) if doc.artifact_id else None
+        if old_art is not None:   # le PDF porte l'ancien numéro : il est refait sous le nouveau
+            try:
+                os.remove(old_art.path)
+            except OSError:
+                pass
+            doc.artifact_id = None
+            db.delete(old_art)
+        changes.append(f"numéro {doc.number} → {n}")
+        doc.number = n
     if title:
         doc.title = title
         changes.append("titre modifié")
@@ -144,6 +166,14 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
             doc.client_label = client_name.strip()
         changes.append(f"client : {client_name.strip()}")
     _recompute(kind, doc, items)
+    if prev_status != "draft":   # modifié sur ordre du patron : il n'y a plus d'approbation valable sur le nouveau contenu
+        if prev_status in ("paid", "partial"):
+            changes.append(f"ATTENTION : cette facture est « {prev_status} » (des paiements existent) ; son état est gardé, vérifie le reste à payer")
+        else:
+            doc.status = "draft"
+            if hasattr(doc, "approved_by"):
+                doc.approved_by, doc.approved_at = None, None
+            changes.append(f"statut « {prev_status} » → « à valider » : à ré-approuver par le patron")
     doc.version = (doc.version or 1) + 1
     db.flush()
     db.expire(doc)
@@ -153,6 +183,17 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     db.commit()
     db.refresh(doc)
     return changes
+
+
+def dump(db: Session, kind: str, doc) -> dict:
+    """Le document ouvert : statut, client, TVA, total et CHAQUE ligne (pour travailler dessus sans deviner)."""
+    _model, item_model, fk, _col = KINDS[kind]
+    items = db.query(item_model).filter(getattr(item_model, fk) == doc.id).order_by(item_model.position).all()
+    lines = [{"n": i.position, "designation": i.description, "quantite": i.quantity, "unite": getattr(i, "unit", ""),
+              "prix_unitaire": getattr(i, "unit_price", None), "total": getattr(i, "total", None)} for i in items]
+    return {"numero": doc.number, "type": LABEL[kind], "statut": doc.status, "version": doc.version,
+            "client": getattr(doc, "client_label", "") or getattr(doc, "customer_id", ""), "lieu": getattr(doc, "site_location", ""),
+            "tva": getattr(doc, "vat_rate", None), "sous_total": getattr(doc, "subtotal", None), "total": getattr(doc, "total", None), "lignes": lines}
 
 
 def discard(db: Session, kind: str, doc, user_id: str | None) -> str:

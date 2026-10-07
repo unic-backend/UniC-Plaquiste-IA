@@ -10,10 +10,14 @@ from app.security import hash_password
 
 
 MATERIALS = [
+    ("BA13-2000x1200", "Plaque de plâtre BA13 2000×1200", "plaques", "u", 0.08,
+     "Plaque par défaut : 2 m × 1,20 m."),
+    ("BA13-2000x1200-H", "Plaque BA13 hydrofuge 2000×1200", "plaques", "u", 0.08,
+     "Plaque 2 m × 1,20 m, pièces humides."),
     ("BA13-2500x1200", "Plaque de plâtre BA13 2500×1200", "plaques", "u", 0.08,
-     "Référence catalogue standard. Dimensions 2,50 × 1,20 m. Prix UniC à saisir."),
+     "Plaque 2,50 m × 1,20 m, seulement si le patron la demande."),
     ("BA13-2500x1200-H", "Plaque BA13 hydrofuge 2500×1200", "plaques", "u", 0.08,
-     "Usage pièces humides. Prix UniC à saisir."),
+     "Plaque 2,50 m × 1,20 m, pièces humides."),
     ("BA13-2500x1200-F", "Plaque BA13 feu 2500×1200", "plaques", "u", 0.08,
      "Usage coupe-feu selon prescription. Prix UniC à saisir."),
     ("MONTANT-M48", "Montant M48", "ossature", "u", 0.05, "Ossature cloison. Prix UniC à saisir."),
@@ -164,3 +168,143 @@ def seed_if_empty(db: Session) -> None:
         import_metier(db)
     except Exception:  # l'application doit démarrer ; l'erreur reste visible dans les logs
         logging.getLogger("unic.seed").exception("Import des connaissances métier impossible")
+
+
+def _set_price(db: Session, mat, amount: float, source: str, note: str) -> None:
+    """Nouveau prix de vente si différent : l'ancien est clos (historique gardé), jamais effacé."""
+    from app.models import MaterialPrice, utcnow
+
+    cur = [p for p in mat.prices if p.kind == "selling" and p.valid_to is None]
+    if cur and cur[0].amount == amount:
+        return
+    currency = next((p.currency for p in cur if p.currency), "") or "FCFA"
+    for p in cur:
+        p.valid_to = utcnow()
+    db.add(MaterialPrice(material_id=mat.id, kind="selling", amount=amount, currency=currency, source=source, notes=note))
+
+
+def apply_owner_prices_v1(db: Session) -> int:
+    """« 1 200 » est le prix d'UNE BARRE de fourrure (2,90 m), pas d'un paquet. Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v1"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    fourrure = db.query(Material).filter(Material.sku == "UC-PAQUET-DE-FOURRURES").first()
+    if fourrure is not None:
+        fourrure.name, fourrure.unit = "Barre de fourrure (2,90 m)", "barre"
+        fourrure.notes = "Prix d'une barre de 2,90 m (pas d'un paquet), donné par le patron."
+        n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_prices_v2(db: Session) -> int:
+    """Une plaque a un prix PAR TAILLE : 2 m × 1,20 = 4 500 ; 2,50 m × 1,20 = 6 500 ; hydrofuge 2,50 m = 8 000.
+    Hydrofuge 2 m : 7 000 (ancienne grille, à confirmer). La plaque par défaut est celle de 2 m. Une seule fois."""
+    from app.models import AppSetting, CompanySettings
+
+    flag = "seed_owner_prices_v2"
+    if db.get(AppSetting, flag):
+        return 0
+    src = "donné par le patron"
+    spec = {
+        "BA13-2000x1200": ("Plaque de plâtre BA13 2000×1200", "Plaque par défaut : 2 m × 1,20 m.", 4500.0),
+        "BA13-2000x1200-H": ("Plaque BA13 hydrofuge 2000×1200", "Plaque 2 m × 1,20 m, pièces humides. Prix repris de l'ancienne grille : à confirmer.", 7000.0),
+        "BA13-2500x1200": ("Plaque de plâtre BA13 2500×1200", "Plaque 2,50 m × 1,20 m, seulement si le patron la demande.", 6500.0),
+        "BA13-2500x1200-H": ("Plaque BA13 hydrofuge 2500×1200", "Plaque 2,50 m × 1,20 m, pièces humides.", 8000.0),
+    }
+    n = 0
+    for sku, (name, notes, amount) in spec.items():
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is None:
+            m = Material(sku=sku, name=name, category="plaques", unit="u", waste_coefficient=0.08, notes=notes)
+            db.add(m)
+            db.flush()
+        m.name, m.notes = name, notes
+        _set_price(db, m, amount, src, "Prix de vente de la plaque")
+        n += 1
+    co = db.query(CompanySettings).first()
+    if co is not None and (co.board_height_m or 0) == 2.5:
+        co.board_height_m = 2.0     # plaque de 2 m par défaut
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_prices_v5(db: Session) -> int:
+    """Moulures, colles et finitions peinture (prix donnés par le patron). Anciennes valeurs gardées dans l'historique. Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v5"
+    if db.get(AppSetting, flag):
+        return 0
+    src = "donné par le patron"
+    spec = {   # sku : (nom, catégorie, unité, prix, note)
+        "UC-MOULURE-TAILLE-4-BARRE-DE-3-M": ("Moulure taille 4 (barre de 3 m)", "moulures", "u", 3500.0, "Barre de 3 m."),
+        "UC-MOULURE-TAILLE-2-BARRE-DE-3-M": ("Moulure taille 2 (barre de 3 m)", "moulures", "u", 2500.0, "Barre de 3 m."),
+        "UC-COLLE-SILICONE": ("Colle silicone", "moulures", "u", 3500.0, "Pose des moulures."),
+        "UC-COLLE-A-POMPE": ("Colle à pompe", "moulures", "u", 3500.0, "Pose des moulures."),
+        "UC-SEAU-ENDUIT": ("Seau enduit (20 kg)", "finition", "seau", 11000.0, "Seau de 20 kg."),
+        "UC-PEINTURE-EN-EAU-GYLATEX-COLORIS": ("Seau peinture Gylatex", "peinture", "seau", 11000.0, "Peinture en eau Gylatex."),
+        "UC-PAPIER-PONCAGE": ("Paquet papier ponçage", "finition", "paquet", 8000.0, ""),
+        "UC-TOILE": ("Toile (rouleau de 10 m²)", "finition", "rouleau", 5000.0, "Rouleau de 10 m²."),
+    }
+    n = 0
+    for sku, (name, cat, unit, amount, note) in spec.items():
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is None:
+            m = Material(sku=sku, name=name, category=cat, unit=unit, waste_coefficient=0.0, notes=note)
+            db.add(m)
+            db.flush()
+        m.name, m.category, m.unit, m.is_active = name, cat, unit, True
+        if note:
+            m.notes = note
+        _set_price(db, m, amount, src, f"Prix de vente : {name}")
+        n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_hangers_v4(db: Session) -> int:
+    """Le patron n'utilise pas de « suspente » : point d'accroche = tige + pivot + cheville à laiton.
+    Pivot et chevilles à laiton : prix au paquet de 100 (confirmé par le patron). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_hangers_v4"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for sku, name in (("UC-PIVOT", "Pivot (paquet de 100)"), ("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)")):
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is not None:
+            m.name, m.unit = name, "paquet"
+            m.notes = "Paquet de 100 pièces (donné par le patron)."
+            n += 1
+    sus = db.query(Material).filter(Material.sku == "SUSPENTE").first()
+    if sus is not None:
+        sus.is_active = False   # remplacée par tige + pivot + cheville à laiton
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_prices_v3(db: Session) -> int:
+    """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v3"
+    if db.get(AppSetting, flag):
+        return 0
+    m = db.query(Material).filter(Material.sku == "BA13-2000x1200-H").first()
+    n = 0
+    if m is not None:
+        m.notes = "Plaque 2 m × 1,20 m, pièces humides. Prix donné par le patron."
+        _set_price(db, m, 6000.0, "donné par le patron", "Prix de vente de la plaque hydrofuge 2 m")
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n

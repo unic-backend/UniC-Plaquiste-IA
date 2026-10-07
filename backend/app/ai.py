@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import json
 from dataclasses import dataclass
-from typing import Any
 
 import httpx
 
@@ -127,6 +129,34 @@ class LocalAIProvider(AIProvider):
             return AIResult("", self.id, settings.local_ai_model, False, str(exc))
 
 
+# Rappel de progression pour l'écran (flux en direct) : {"t": "status"|"delta"|"reset", ...}. Absent = réponse d'un bloc.
+STREAM_CB: ContextVar = ContextVar("unic_stream_cb", default=None)
+
+STREAM_SINK: ContextVar = ContextVar("unic_stream_sink", default=None)  # où vont les événements (posé par l'API)
+
+
+@contextmanager
+def live():
+    """Active le flux en direct pour UN appel (la réponse principale), pas pour les appels annexes (mémoire…)."""
+    tok = STREAM_CB.set(STREAM_SINK.get())
+    try:
+        yield
+    finally:
+        STREAM_CB.reset(tok)
+
+
+TOOL_LABELS = {
+    "get_prices": "Je regarde les prix…", "calculate_materials": "Je calcule les quantités…",
+    "create_quote": "Je prépare le devis…", "create_invoice": "Je prépare la facture…",
+    "create_purchase_order": "Je prépare le bon de commande…", "create_delivery_note": "Je prépare le bon de livraison…",
+    "revise_document": "Je corrige le document…", "list_documents": "Je cherche dans tes documents…",
+    "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "read_email": "Je lis le mail…",
+    "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
+    "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
+    "create_agent": "Je crée l'agent…",
+}
+
+
 class ClaudeAIProvider(AIProvider):
     """API Claude via le SDK officiel `anthropic`. Raisonnement profond à la demande, recherche Internet intégrée."""
 
@@ -160,12 +190,42 @@ class ClaudeAIProvider(AIProvider):
 
         from app import usage
 
-        try:
-            resp = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
-        except anthropic.BadRequestError:
-            resp = client.messages.create(**params)
+        cb = STREAM_CB.get()
+        resp = None
+        if cb is not None:
+            try:
+                resp = ClaudeAIProvider._send_stream(client, params, cb)
+            except Exception:  # flux impossible : on retombe sur l'appel classique (le texte déjà affiché est effacé)
+                cb({"t": "reset"})
+        if resp is None:
+            try:
+                resp = client.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params)
+            except anthropic.BadRequestError:
+                resp = client.messages.create(**params)
         usage.tally(resp)
         return resp
+
+    @staticmethod
+    def _send_stream(client, params: dict, cb):
+        """Même requête en flux : le texte arrive mot à mot, les recherches Internet sont annoncées."""
+        import anthropic
+
+        def attempt(manager):
+            with manager as stream:
+                for ev in stream:
+                    kind = getattr(ev, "type", "")
+                    if kind == "content_block_start" and getattr(ev.content_block, "type", "") == "server_tool_use":
+                        cb({"t": "status", "text": "Je cherche sur Internet…"})
+                    elif kind == "content_block_delta" and getattr(ev.delta, "type", "") == "text_delta":
+                        cb({"t": "delta", "text": ev.delta.text})
+                return stream.get_final_message()
+
+        cb({"t": "reset"})
+        try:
+            return attempt(client.beta.messages.stream(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **params))
+        except anthropic.BadRequestError:
+            cb({"t": "reset"})
+            return attempt(client.messages.stream(**params))
 
     @staticmethod
     def _text_and_sources(resp) -> tuple[str, list[dict]]:
@@ -196,6 +256,9 @@ class ClaudeAIProvider(AIProvider):
                     if getattr(block, "type", "") != "tool_use":
                         continue
                     used.append(block.name)
+                    cb = STREAM_CB.get()
+                    if cb is not None:
+                        cb({"t": "status", "text": TOOL_LABELS.get(block.name, "Je travaille…")})
                     out = handler(block.name, dict(block.input or {}))
                     item = {"type": "tool_result", "tool_use_id": block.id,
                             "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]}
@@ -215,13 +278,20 @@ class ClaudeAIProvider(AIProvider):
         model = kwargs.get("model") or settings.anthropic_model
         if not settings.anthropic_api_key:
             return AIResult("", self.id, model, False, "not_configured")
-        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        sys_msgs = [m for m in messages if m["role"] == "system"]
         turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
         params: dict = {"model": model, "max_tokens": kwargs.get("max_tokens", 8000), "messages": turns}
-        if system:
-            params["system"] = system
+        if any(m.get("cache") for m in sys_msgs):
+            # Cache de prompt (réduit le prix des textes qui se répètent à chaque message ; le contenu lu par l'IA ne change pas) :
+            # la partie stable (règles) est marquée ; la partie qui varie (mémoire, base, fichiers) vient après, sans marque.
+            params["system"] = [{"type": "text", "text": m["content"], **({"cache_control": {"type": "ephemeral"}} if m.get("cache") else {})}
+                                for m in sys_msgs if m["content"]]
+        elif sys_msgs:
+            params["system"] = "\n\n".join(m["content"] for m in sys_msgs)
         if kwargs.get("effort"):
             params["output_config"] = {"effort": kwargs["effort"]}
+        if kwargs.get("thinking"):
+            params["thinking"] = {"type": "adaptive"}   # raisonnement profond (ex. atelier de réparation)
         web = bool(kwargs.get("web")) and settings.web_search_enabled
         client_tools = list(kwargs.get("tools") or [])
         handler = kwargs.get("tool_handler")
@@ -256,6 +326,32 @@ class ClaudeAIProvider(AIProvider):
             return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}", raw={"tools_used": used, "usage": tally})
         finally:
             _usage.TALLY.reset(_tok)
+
+
+class PCWorkerProvider(AIProvider):
+    """Secours quand Claude ne répond pas : d'abord les réponses validées (Retenir), puis le modèle local du PC s'il est allumé."""
+    id = "pc"
+    kind = "chat"
+
+    def health(self) -> dict:
+        from app import localworker
+        st = localworker.status()
+        return {"id": self.id, "available": st["online"], "model": st["model"] or None,
+                "status": "ok" if st["online"] else "offline",
+                "detail": "" if st["online"] else "PC éteint ou appli Windows fermée : seules les réponses validées servent de secours."}
+
+    def complete(self, messages: list[dict], **kwargs) -> AIResult:
+        from app import learned, localworker
+        from app.database import SessionLocal
+        question = next((m["content"] for m in reversed(messages) if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+        with SessionLocal() as db:
+            known = learned.local_reply(db, question)
+            if known:   # lecture seule : pas d'écriture pendant que la conversation s'enregistre
+                return AIResult(known, "learned", "réponses validées", True)
+        text, model = localworker.ask(None, messages)
+        if text:
+            return AIResult(text, self.id, model or "local", True)
+        return AIResult("", self.id, "", False, "offline")
 
 
 class VisionAIProvider(AIProvider):
@@ -315,6 +411,7 @@ PROVIDERS: dict[str, AIProvider] = {
     "cloud": CloudAIProvider(),
     "local": LocalAIProvider(),
     "claude": ClaudeAIProvider(),
+    "pc": PCWorkerProvider(),
     "vision": VisionAIProvider(),
     "embedding": EmbeddingProvider(),
 }
@@ -324,7 +421,9 @@ def provider_chain(deep: bool = False) -> list[AIProvider]:
     """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
     sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
     # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
-    order = ["claude", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
+    if not settings.llm_enabled:
+        return []
+    order = ["claude", "pc", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 
 
@@ -338,6 +437,12 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
     last = AIResult("", "none", "", False, "not_configured")
     for provider in provider_chain(deep):
+        if provider.id != "claude":   # les autres moteurs ne connaissent ni le cache ni plusieurs messages « system » : un seul, sans marque
+            sysm = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+            rest = [{k: v for k, v in m.items() if k != "cache"} for m in messages if m["role"] != "system"]
+            plain = ([{"role": "system", "content": sysm}] if sysm else []) + rest
+        else:
+            plain = messages
         opts = dict(kwargs)
         if provider.id == "claude":
             opts.setdefault("model", settings.anthropic_model if deep else settings.anthropic_fast_model)
@@ -345,7 +450,7 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             opts["web"] = web
             opts["tools"], opts["tool_handler"] = tools, tool_handler
             opts.setdefault("max_tokens", 16000 if deep else 8000)
-        res = provider.complete(messages, **opts)
+        res = provider.complete(plain, **opts)
         if res.available and res.text:
             return res
         last = res

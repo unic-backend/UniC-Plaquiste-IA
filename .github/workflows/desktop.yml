@@ -1,0 +1,52 @@
+name: Desktop apps
+
+on:
+  push:
+    paths: ["frontend/**", "desktop/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            flag: --win nsis
+            name: unic-ai-windows
+            files: desktop/dist/UniC-AI-Setup-*.exe
+          - os: macos-latest
+            flag: --mac dmg
+            name: unic-ai-mac
+            files: desktop/dist/UniC-AI-*-mac.dmg
+          - os: ubuntu-latest
+            flag: --linux AppImage
+            name: unic-ai-linux
+            files: desktop/dist/UniC-AI-*-linux.AppImage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm install --no-audit --no-fund
+        working-directory: desktop
+      - run: npx electron-builder ${{ matrix.flag }} --publish never
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.files }}
+          retention-days: 30

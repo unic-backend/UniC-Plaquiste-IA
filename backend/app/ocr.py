@@ -12,6 +12,7 @@ from pathlib import Path
 logger = logging.getLogger("unic.ocr")
 
 LANGUES_VOULUES = ("fra", "eng")
+OCR_MAX_SIDE = 3000   # 5000 px : 66 s et 400 Mo sur un plan A1 ; 3000 px : 1 s et 110 Mo
 ECHELLE_RENDU = 300 / 72  # 300 DPI : en dessous, un A4 scanné devient illisible
 
 
@@ -33,25 +34,26 @@ def disponible() -> bool:
     return langues() is not None
 
 
+def scale_for(page, wanted: float, max_side: int) -> float:
+    """Échelle de rendu bornée : un plan A1/A0 à 300 DPI ferait 200 Mo en mémoire et planterait le serveur (512 Mo)."""
+    try:
+        w, h = page.get_size()
+        return max(0.2, min(wanted, max_side / max(w, h, 1)))
+    except Exception:
+        return min(wanted, 1.5)
+
+
 def ocr_pdf_page(path: Path, index: int) -> str:
     """Texte d'une page PDF sans calque texte. Vide si OCR impossible."""
     lang = langues()
     if lang is None:
         return ""
-    doc = None
-    try:
-        import pypdfium2 as pdfium
-        import pytesseract
-
-        doc = pdfium.PdfDocument(str(path))
-        image = doc[index].render(scale=ECHELLE_RENDU).to_pil()
-        return pytesseract.image_to_string(image, lang=lang).strip()
-    except Exception as exc:
+    from app import pdfjob
+    try:   # rendu + OCR dans un processus séparé à mémoire bornée
+        return pdfjob.run("ocr", timeout=30, path=str(path), index=index, max_side=OCR_MAX_SIDE, lang=lang)["text"]
+    except pdfjob.PdfJobError as exc:
         logger.debug("OCR page %s impossible : %s", index + 1, exc)
         return ""
-    finally:
-        if doc is not None:
-            doc.close()
 
 
 def ocr_image(path: Path) -> str:

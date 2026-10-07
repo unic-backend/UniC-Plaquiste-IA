@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "cap:sync": "vite build && cap sync android",
-    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug"
+    "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug",
+    "test:phone": "esbuild tests/phone.check.ts --bundle --platform=node --format=esm --outfile=.phone-check.mjs --log-level=error && node .phone-check.mjs && esbuild tests/notifs.check.ts --bundle --platform=node --format=esm --outfile=.notifs-check.mjs --log-level=error && node .notifs-check.mjs && esbuild tests/speech.check.ts --bundle --platform=node --format=esm --outfile=.speech-check.mjs --log-level=error && node .speech-check.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",
@@ -16,9 +17,11 @@
     "@capacitor/core": "^7.6.9",
     "@capacitor/filesystem": "^7.1.9",
     "@capacitor/keyboard": "^7.0.6",
+    "@capacitor/local-notifications": "^7.0.7",
     "@capacitor/share": "^7.0.4",
     "@capacitor/splash-screen": "^7.0.5",
     "@capacitor/status-bar": "^7.0.6",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"
