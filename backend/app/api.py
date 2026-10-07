@@ -169,6 +169,7 @@ class ChatIn(BaseModel):
     deep: bool = False  # raisonnement profond (Claude) à la demande
     voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
     locked: bool = False  # téléphone verrouillé (Hey UniC) : aucune donnée de l'entreprise, aucun outil
+    tracking_key: str | None = None  # conversation intégrée à la fiche d'un client du suivi (ou « _all »)
 
 
 class TranslateIn(BaseModel):
@@ -219,7 +220,7 @@ def list_conversations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = db.query(Conversation).filter(Conversation.user_id == user.id)
+    query = db.query(Conversation).filter(Conversation.user_id == user.id, or_(Conversation.kind.is_(None), Conversation.kind != "suivi"))
     if q:
         query = query.filter(Conversation.title.ilike(f"%{q}%"))
     rows = query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc()).limit(80).all()
@@ -323,8 +324,26 @@ def delete_conversation(cid: str, db: Session = Depends(get_db), user: User = De
 RUNNING: set[str] = set()
 
 
+def _tracking_conv(db: Session, user: User, key: str) -> Conversation:
+    """Conversation propre à la fiche d'un client : une seule, retrouvée à chaque ouverture, hors de la liste des conversations."""
+    from app import tracking
+    title = f"Suivi · {key}"
+    conv = db.query(Conversation).filter(Conversation.user_id == user.id, Conversation.kind == "suivi", Conversation.title == title).first()
+    if conv is None:
+        group = tracking._group(db).get(key)
+        if key != "_all" and group is None:
+            raise HTTPException(404, "Client introuvable dans le suivi")
+        name = group["client"] if group else ""
+        conv = Conversation(user_id=user.id, title=title, kind="suivi", state_json=json.dumps({"focus": {"key": key, "client": name}}, ensure_ascii=False))
+        db.add(conv)
+        db.flush()
+    return conv
+
+
 def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
-    if body.conversation_id:
+    if body.tracking_key:
+        conv = _tracking_conv(db, user, body.tracking_key)
+    elif body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if conv is None or conv.user_id != user.id:
             raise HTTPException(404, "Conversation introuvable")
@@ -1520,6 +1539,68 @@ def tracking_balance_invoice(qid: str, db: Session = Depends(get_db), user: User
         raise HTTPException(404, "Devis introuvable")
     inv = _tracked(lambda: tracking.balance_invoice(db, q, user.id))
     return {"id": inv.id, "numero": inv.number, "reste": round(inv.remaining or 0)}
+
+
+class CollectIn(BaseModel):
+    date: str | None = None   # AAAA-MM-JJ, vide = pas de rappel
+
+
+class NewClientIn(BaseModel):
+    name: str
+    phone: str = ""
+    site: str = ""
+    note: str = ""
+
+
+class ClientInfoIn(BaseModel):
+    phone: str = ""
+    note: str = ""
+
+
+def _quote_or_404(db: Session, qid: str) -> Quotation:
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    return q
+
+
+@router.post("/tracking/quotes/{qid}/collect")
+def tracking_collect(qid: str, body: CollectIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.set_collect_date(db, _quote_or_404(db, qid), body.date, user.id))
+
+
+@router.delete("/tracking/quotes/{qid}")
+def tracking_remove_quote(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.remove_quote(db, _quote_or_404(db, qid), user.id))
+
+
+@router.post("/tracking/quotes/{qid}/restore")
+def tracking_restore_quote(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.restore_quote(db, _quote_or_404(db, qid), user.id))
+
+
+@router.put("/tracking/{key}/info")
+def tracking_client_info(key: str, body: ClientInfoIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.set_client_info(db, key, body.phone, body.note))
+
+
+@router.post("/tracking/clients")
+def tracking_new_client(body: NewClientIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.create_client(db, body.name, body.phone, body.site, body.note))
+
+
+@router.get("/tracking/{key}/chat")
+def tracking_chat_history(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    conv = db.query(Conversation).filter(Conversation.user_id == user.id, Conversation.kind == "suivi", Conversation.title == f"Suivi · {key}").first()
+    if conv is None:
+        return {"messages": [], "working": False}
+    rows = db.query(Message).filter(Message.conversation_id == conv.id).order_by(Message.created_at.asc()).limit(60).all()
+    return {"messages": [{"id": m.id, "role": m.role, "content": m.content} for m in rows], "working": conv.id in RUNNING}
 
 
 @router.get("/tracking/{key}")

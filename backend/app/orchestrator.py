@@ -950,7 +950,7 @@ def handle_turn(
                     kb_text, doc_text, doc_flags = ctx.knowledge_and_documents(db, text)
                     memory_block = mem.block(db, text)
                     fresh_doc = bool(DOC_REQUEST_RE.search(text)) and db.query(Message).filter(Message.conversation_id == conv.id).count() <= 1
-                    past_block = "" if fresh_doc else mem.recall_past(db, text, conv.id)   # nouveau devis : rien des autres conversations (clients, chantiers, montants)
+                    past_block = "" if (fresh_doc or state.get("focus")) else mem.recall_past(db, text, conv.id)   # dossier client : rien d'un autre client   # nouveau devis : rien des autres conversations (clients, chantiers, montants)
                 # 1er message « system » = partie STABLE (règles) : marquée pour le cache de prompt ; 2e = ce qui varie à chaque message
                 msgs = [{"role": "system", "content": SYSTEM_RULES + (VOICE_RULES if voice else "") + (LOCKED_RULES if locked else ""), "cache": True},
                         {"role": "system", "content": (f"\n\n{memory_block}" if memory_block else "")
@@ -971,6 +971,19 @@ def handle_turn(
                 tools_on = bool(chain) and chain[0].id == "claude" and not locked
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
+                focus = state.get("focus") or {}
+                if focus and not locked:   # conversation ouverte depuis la fiche d'un client du suivi
+                    who = focus.get("client") or ""
+                    msgs[1]["content"] += (
+                        f"\n\nCONVERSATION DU DOSSIER CLIENT « {who} » (suivi des encaissements). PÉRIMÈTRE STRICT : tu ne traites QUE ce client et son dossier, "
+                        "et le métier de plaquiste de l'entreprise : devis, factures, bons de commande et de livraison, encaissements, prix, métrés, "
+                        "dimensions, plaques, ossature, placo, plafonds, cloisons, finitions. Toute autre demande (culture générale, actualité, autre client, "
+                        "sujet sans rapport) : réponds en UNE phrase que cette conversation est réservée au dossier de ce client et au placo, et propose "
+                        "d'ouvrir une conversation normale pour le reste. "
+                        f"Le client est DÉJÀ connu : « {who} ». Ne le redemande jamais ; pour tout devis, facture, bon de commande ou de livraison, utilise "
+                        f"client_name=\"{who}\". « il », « son devis », « l'avance » = ce client ; n'agis jamais sur un autre client. "
+                        f"Pour ses chiffres, appelle list_tracking(client=\"{who}\"). Tu as tous les outils du projet (prix, métrés, devis, factures, bons, fichiers, "
+                        "suivi). Annonce toujours le reste et les pourcentages donnés par les outils. Réponds court.")
                 if attached:
                     msgs[1]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)
                                            + ". Le patron parle de CE fichier : plan, métré, photo, tableur ou document. "

@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, utcnow
-from app.services import _ACCENTS, _LINK_WORDS, audit, client_name_of, generate_invoice_pdf, invoice_from_quote
+from app.models import InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, TrackingClient, utcnow
+from app.services import _ACCENTS, _LINK_WORDS, audit, client_name_of, company_dict, generate_invoice_pdf, invoice_from_quote
 
 DECISIONS = ("pending", "accepted", "declined")
 KINDS = ("avance", "acompte", "solde", "autre")
 MAX_AMOUNT = 10_000_000_000
+NO_REPLY_DAYS = 7   # un devis sans réponse depuis autant de jours est signalé
 
 
 class TrackingError(ValueError):
@@ -72,10 +73,21 @@ def sync_existing(db: Session) -> int:
     return changed
 
 
+def _aware(d: datetime | None) -> datetime | None:
+    return None if d is None else (d if d.tzinfo else d.replace(tzinfo=timezone.utc))
+
+
 def _quote_row(db: Session, q: Quotation) -> dict:
     total = q.total or 0
     got = _received(db, q.id)
     left = max(0.0, total - got)
+    since = _aware(q.approved_at or q.created_at)
+    waiting = (utcnow() - since).days if since and (q.client_decision or "pending") == "pending" else 0
+    return {"attente_jours": waiting, "collecte": q.collect_on.date().isoformat() if q.collect_on else None,
+            **_quote_row_base(q, total, got, left)}
+
+
+def _quote_row_base(q: Quotation, total: float, got: float, left: float) -> dict:
     return {"id": q.id, "numero": q.number, "titre": q.object_text[:120] if q.object_text else q.title, "lieu": q.site_location,
             "montant": round(total), "devise": q.currency or "FCFA", "decision": q.client_decision or "pending",
             "brouillon": q.status == "draft", "recu": round(got), "reste": round(left),
@@ -89,6 +101,8 @@ def _group(db: Session) -> dict[str, dict]:
         name = client_name_of(db, q) or "Client sans nom"
         g = groups.setdefault(client_key(name), {"key": client_key(name), "client": name, "quotes": []})
         g["quotes"].append(_quote_row(db, q))
+    for row in db.query(TrackingClient).filter(TrackingClient.name != "").all():   # client créé avec « + », sans devis pour l'instant
+        groups.setdefault(row.key, {"key": row.key, "client": row.name, "quotes": []})
     return groups
 
 
@@ -98,17 +112,48 @@ def _client_totals(g: dict) -> dict:
     total = sum(r["montant"] for r in acc)
     got = sum(min(r["recu"], r["montant"]) for r in acc)
     left = sum(r["reste"] for r in acc)
-    state = ("soldé" if acc and left <= 0 else "à encaisser" if acc else "en attente" if pend else "refusé")
+    state = ("soldé" if acc and left <= 0 else "à encaisser" if acc else "en attente" if pend else "nouveau" if not g["quotes"] else "refusé")
     return {"key": g["key"], "client": g["client"], "accepte": total, "recu": got, "reste": left, "pct_recu": _pct(got, total),
             "pct_reste": _pct(left, total), "en_attente": sum(r["montant"] for r in pend), "nb_devis": len(g["quotes"]),
             "nb_attente": len(pend), "etat": state, "devise": g["quotes"][0]["devise"] if g["quotes"] else "FCFA"}
 
 
+def _reminders(groups: dict[str, dict]) -> list[dict]:
+    """Encaissements prévus (date choisie par le patron) sur des devis acceptés qui ont encore un reste : retards d'abord."""
+    today = utcnow().date()
+    out = []
+    for g in groups.values():
+        for r in g["quotes"]:
+            if r["decision"] == "accepted" and r["reste"] > 0 and r["collecte"]:
+                days = (today - datetime.fromisoformat(r["collecte"]).date()).days
+                out.append({"key": g["key"], "client": g["client"], "numero": r["numero"], "reste": r["reste"], "devise": r["devise"],
+                            "date": r["collecte"], "jours_retard": max(0, days), "dans_jours": max(0, -days)})
+    out.sort(key=lambda x: x["date"])
+    return out
+
+
+def _no_reply(groups: dict[str, dict]) -> list[dict]:
+    """Devis sans réponse du client depuis NO_REPLY_DAYS jours ou plus (brouillons exclus : pas encore envoyés)."""
+    out = [{"key": g["key"], "client": g["client"], "numero": r["numero"], "montant": r["montant"], "devise": r["devise"],
+            "jours": r["attente_jours"]} for g in groups.values() for r in g["quotes"]
+           if r["decision"] == "pending" and not r["brouillon"] and r["attente_jours"] >= NO_REPLY_DAYS]
+    out.sort(key=lambda x: -x["jours"])
+    return out
+
+
+def removed(db: Session) -> list[dict]:
+    """Devis retirés du suivi (récupérables)."""
+    return [{"id": q.id, "numero": q.number, "client": client_name_of(db, q) or "Client sans nom", "montant": round(q.total or 0),
+             "devise": q.currency or "FCFA"} for q in db.query(Quotation).filter(Quotation.status == "cancelled").order_by(Quotation.updated_at.desc()).limit(50).all()
+            if (q.total or 0) > 0]
+
+
 def overview(db: Session) -> dict:
     """Tableau de bord : chiffres globaux + une ligne par client (les plus gros restes à encaisser d'abord)."""
     sync_existing(db)
-    clients = [_client_totals(g) for g in _group(db).values()]
-    order = {"à encaisser": 0, "en attente": 1, "soldé": 2, "refusé": 3}
+    groups = _group(db)
+    clients = [_client_totals(g) for g in groups.values()]
+    order = {"à encaisser": 0, "nouveau": 1, "en attente": 2, "soldé": 3, "refusé": 4}
     clients.sort(key=lambda c: (order[c["etat"]], -c["reste"], c["client"].lower()))
     accepted = sum(c["accepte"] for c in clients)
     got = sum(c["recu"] for c in clients)
@@ -116,7 +161,8 @@ def overview(db: Session) -> dict:
             "pct_reste": _pct(accepted - got, accepted) if accepted else 0.0,
             "en_attente": sum(c["en_attente"] for c in clients), "nb_attente": sum(c["nb_attente"] for c in clients),
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
-            "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA"}
+            "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
+            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db)}
 
 
 def client_file(db: Session, key: str) -> dict:
@@ -129,7 +175,16 @@ def client_file(db: Session, key: str) -> dict:
     receipts = db.query(Receipt).filter(Receipt.quotation_id.in_(ids)).order_by(Receipt.received_at.desc()).all()
     numbers = {r["id"]: r["numero"] for r in g["quotes"]}
     invs = db.query(Invoice).filter(Invoice.quotation_id.in_(ids), Invoice.kind == "final", Invoice.status != "cancelled").all()
-    return {**_client_totals(g), "devis": g["quotes"],
+    info = db.get(TrackingClient, key)
+    phone = (info.phone if info else "") or next((q.customer.phone for q in valid_quotes(db) if client_key(client_name_of(db, q)) == key
+                                                    and q.customer is not None and q.customer.phone), "") or ""
+    gone = [{"id": q.id, "numero": q.number, "montant": round(q.total or 0)} for q in db.query(Quotation).filter(Quotation.status == "cancelled").all()
+            if client_key(client_name_of(db, q)) == key and (q.total or 0) > 0]
+    tot = _client_totals(g)
+    site = (info.site if info else "") or next((r["lieu"] for r in g["quotes"] if r["lieu"]), "")
+    return {**tot, "telephone": phone, "note": info.note if info else "", "lieu": site, "retires": gone, "documents": _documents(db, key),
+            "message_point": point_message(db, g, tot),
+            "devis": g["quotes"],
             "versements": [{"id": r.id, "devis": numbers.get(r.quotation_id, ""), "montant": round(r.amount), "type": r.kind,
                             "date": r.received_at.date().isoformat() if r.received_at else None, "moyen": r.method, "note": r.note}
                            for r in receipts],
@@ -162,6 +217,98 @@ def find_quote(db: Session, client: str = "", number: str = "", prefer: str = "o
         raise TrackingError("Plusieurs devis pour ce client, lequel ? " + " ; ".join(
             f"{rows[q.id]['numero']} ({rows[q.id]['montant']:,} {rows[q.id]['devise']})".replace(",", " ") for q in pool))
     return pool[0]
+
+
+# ---------- fiche client : téléphone, note, rappels, retrait d'un devis ----------
+
+def point_message(db: Session, g: dict, tot: dict) -> str:
+    """Message « où en est votre dossier » : uniquement les chiffres du suivi, sans IA. Vide s'il n'y a rien à encaisser."""
+    acc = [r for r in g["quotes"] if r["decision"] == "accepted" and r["reste"] > 0]
+    if not acc:
+        return ""
+    money = lambda n: f"{n:,.0f}".replace(",", " ")   # noqa: E731
+    lines = [f"Bonjour {g['client']},", "", "Voici le point sur votre dossier :"]
+    for r in acc:
+        lines.append(f"- Devis {r['numero']} : {money(r['montant'])} {r['devise']} · reçu {money(r['recu'])} ({str(r['pct_recu']).replace('.', ',')} %) · reste {money(r['reste'])}")
+    lines += ["", f"Reste à régler : {money(tot['reste'])} {tot['devise']}.", "Merci de me confirmer la date de règlement.", "",
+              "Cordialement,", company_dict(db).get("name") or "UniC Plaquiste"]
+    return "\n".join(lines)
+
+
+def set_client_info(db: Session, key: str, phone: str, note: str) -> dict:
+    if key not in _group(db):
+        raise TrackingError("Client introuvable dans le suivi.")
+    row = db.get(TrackingClient, key)
+    if row is None:
+        row = TrackingClient(key=key)
+        db.add(row)
+    row.phone = re.sub(r"[^\d+ ().-]", "", phone or "")[:40]
+    row.note = (note or "").strip()[:2000]
+    row.updated_at = utcnow()
+    db.commit()
+    return {"telephone": row.phone, "note": row.note}
+
+
+def set_collect_date(db: Session, quote: Quotation, day: str | None, user_id: str | None) -> dict:
+    """Date du prochain encaissement prévu (vide = pas de rappel). Sert au rappel de l'appli."""
+    if day:
+        try:
+            quote.collect_on = datetime.strptime(day, "%Y-%m-%d").replace(hour=9, tzinfo=timezone.utc)
+        except ValueError:
+            raise TrackingError("Date invalide.")
+    else:
+        quote.collect_on = None
+    audit(db, user_id, "tracking_collect_date", "quotation", quote.id, f"{quote.number} {day or '-'}")
+    db.commit()
+    return _quote_row(db, quote)
+
+
+def remove_quote(db: Session, quote: Quotation, user_id: str | None) -> dict:
+    """Retire un devis du suivi (statut « annulé », récupérable). Refusé s'il y a de l'argent enregistré : on ne cache pas un encaissement."""
+    if _received(db, quote.id) > 0:
+        raise TrackingError(f"Le devis {quote.number} a des versements : annule-les d'abord.")
+    if db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.status.notin_(("draft", "cancelled"))).first() is not None:
+        raise TrackingError(f"Le devis {quote.number} a une facture approuvée : il ne peut pas être retiré.")
+    quote.status = "cancelled"
+    quote.collect_on = None
+    audit(db, user_id, "tracking_remove_quote", "quotation", quote.id, quote.number)
+    db.commit()
+    return {"id": quote.id, "numero": quote.number}
+
+
+def restore_quote(db: Session, quote: Quotation, user_id: str | None) -> dict:
+    if quote.status != "cancelled":
+        raise TrackingError("Ce devis n'est pas retiré.")
+    quote.status = "approved" if quote.approved_at else "draft"
+    audit(db, user_id, "tracking_restore_quote", "quotation", quote.id, quote.number)
+    db.commit()
+    return _quote_row(db, quote)
+
+
+def _documents(db: Session, key: str) -> list[dict]:
+    """Factures, bons de commande et de livraison du client (les devis sont listés à part)."""
+    from app.models import DeliveryNote, PurchaseOrder
+    out = []
+    for kind, label, model in (("invoice", "Facture", Invoice), ("po", "Bon de commande", PurchaseOrder), ("dn", "Bon de livraison", DeliveryNote)):
+        for r in db.query(model).order_by(model.created_at.desc()).all():
+            if r.status != "cancelled" and client_key(client_name_of(db, r)) == key:
+                out.append({"kind": kind, "label": label, "id": r.id, "numero": r.number, "statut": r.status,
+                            "total": round(r.total) if getattr(r, "total", None) is not None else None})
+    return out
+
+
+def create_client(db: Session, name: str, phone: str = "", site: str = "", note: str = "") -> dict:
+    """Nouveau client saisi à la main : sa fiche existe tout de suite, le dossier (devis, factures…) se prépare ensuite dans son chat."""
+    name = " ".join((name or "").split())
+    if not 2 <= len(name) <= 120:
+        raise TrackingError("Donne le nom du client (2 caractères au moins).")
+    key = client_key(name)
+    existed = key in _group(db)
+    if not existed:
+        db.add(TrackingClient(key=key, name=name, site=(site or "").strip()[:255], note=(note or "").strip()[:2000],
+                              phone=re.sub(r"[^\d+ ().-]", "", phone or "")[:40]))
+        db.commit()
+    return {"key": key, "existait": existed}
 
 
 def find_client(db: Session, name: str) -> str:

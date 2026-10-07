@@ -3497,3 +3497,82 @@ def test_mail_hints_only_suggest_and_can_be_dismissed(client):
     client.post(f"/api/tracking/mail/{mine[0]['mail_id']}/dismiss")
     assert not [h for h in client.get("/api/tracking/mail").json()["suggestions"] if h["client"] == "Moussa Ndao Suivi"]
     assert qid
+
+
+def test_tracking_remove_restore_and_collect_reminder(client):
+    qid = _track_quote("UC-TRK-0010-OP", "Omar Pouye Suivi", 600_000)
+    assert client.post(f"/api/tracking/quotes/{qid}/collect", json={"date": "n'importe quoi"}).status_code == 400
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"}).status_code == 200
+    assert client.post(f"/api/tracking/quotes/{qid}/collect", json={"date": "2026-10-20"}).json()["collecte"] == "2026-10-20"
+    ov = client.get("/api/tracking").json()
+    assert [r for r in ov["rappels"] if r["numero"] == "UC-TRK-0010-OP"][0]["reste"] == 600_000
+    client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 50_000})
+    assert client.delete(f"/api/tracking/quotes/{qid}").status_code == 400   # de l'argent est enregistré : refusé
+    rid = client.get(f"/api/tracking/{_tclient(ov, 'Omar Pouye Suivi')['key']}").json()["versements"][0]["id"]
+    client.delete(f"/api/tracking/receipts/{rid}")
+    assert client.delete(f"/api/tracking/quotes/{qid}").status_code == 200
+    ov = client.get("/api/tracking").json()
+    assert not any(c["client"] == "Omar Pouye Suivi" for c in ov["clients"])
+    assert any(r["numero"] == "UC-TRK-0010-OP" for r in ov["retires"])
+    assert client.post(f"/api/tracking/quotes/{qid}/restore").status_code == 200
+    assert any(c["client"] == "Omar Pouye Suivi" for c in client.get("/api/tracking").json()["clients"])
+
+
+def test_tracking_client_info_point_message_and_no_reply(client):
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from datetime import timedelta
+    qid = _track_quote("UC-TRK-0011-QR", "Quentin Roy Suivi", 400_000, status="approved")
+    db = SessionLocal()
+    q = db.get(Quotation, qid)
+    from app.models import utcnow
+    q.approved_at = utcnow() - timedelta(days=10)
+    db.commit()
+    db.close()
+    ov = client.get("/api/tracking").json()
+    assert any(x["numero"] == "UC-TRK-0011-QR" and x["jours"] >= 10 for x in ov["sans_reponse"])
+    key = _tclient(ov, "Quentin Roy Suivi")["key"]
+    assert client.get(f"/api/tracking/{key}").json()["message_point"] == ""   # rien d'accepté : pas de message
+    client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000})
+    assert client.put(f"/api/tracking/{key}/info", json={"phone": "+221 77 000 00 00<script>", "note": "Paie par Wave"}).json()["telephone"] == "+221 77 000 00 00"
+    f = client.get(f"/api/tracking/{key}").json()
+    assert f["telephone"] == "+221 77 000 00 00" and f["note"] == "Paie par Wave"
+    assert "300 000" in f["message_point"] and "25,0 %" in f["message_point"]
+    assert client.put("/api/tracking/inconnu/info", json={}).status_code == 400
+
+
+def test_tracking_chat_is_hidden_from_conversation_list_and_knows_the_client(client, claude):
+    qid = _track_quote("UC-TRK-0012-ST", "Sophie Thiam Suivi", 500_000)
+    key = _tclient(client.get("/api/tracking").json(), "Sophie Thiam Suivi")["key"]
+    fake = claude(lambda kind, kw: _resp("Noté."))
+    r = client.post("/api/chat", json={"message": "Elle a accepté", "tracking_key": key})
+    assert r.status_code == 200
+    sys_text = "\n".join(_sysstr(kw) for _, kw in fake.calls)
+    assert "PÉRIMÈTRE STRICT" in sys_text and "Sophie Thiam Suivi" in sys_text
+    assert "Suivi" not in " ".join(c["title"] for c in client.get("/api/conversations").json())
+    hist = client.get(f"/api/tracking/{key}/chat").json()["messages"]
+    assert [m["role"] for m in hist][:2] == ["user", "assistant"]
+    again = client.post("/api/chat", json={"message": "Merci", "tracking_key": key}).json()
+    assert again["conversation_id"] == r.json()["conversation_id"]   # une seule conversation par client
+    assert client.post("/api/chat", json={"message": "x", "tracking_key": "client-inexistant"}).status_code == 404
+    assert qid
+
+
+def test_tracking_new_client_without_quote_then_dossier_chat_is_scoped(client, claude):
+    assert client.post("/api/tracking/clients", json={"name": "x"}).status_code == 400
+    r = client.post("/api/tracking/clients", json={"name": "Tidiane Gueye Suivi", "phone": "77 111 22 33", "site": "Mermoz"})
+    assert r.status_code == 200 and r.json()["existait"] is False
+    key = r.json()["key"]
+    assert client.post("/api/tracking/clients", json={"name": "gueye tidiane suivi"}).json() == {"key": key, "existait": True}   # même client
+    c = _tclient(client.get("/api/tracking").json(), "Tidiane Gueye Suivi")
+    assert c["etat"] == "nouveau" and c["nb_devis"] == 0
+    f = client.get(f"/api/tracking/{key}").json()
+    assert f["telephone"] == "77 111 22 33" and f["lieu"] == "Mermoz" and f["devis"] == [] and f["documents"] == []
+    fake = claude(lambda kind, kw: _resp("ok"))
+    client.post("/api/chat", json={"message": "Prépare un devis", "tracking_key": key})
+    sys_text = "\n".join(_sysstr(kw) for _, kw in fake.calls)
+    assert "PÉRIMÈTRE STRICT" in sys_text and "client_name=\"Tidiane Gueye Suivi\"" in sys_text
+    # un devis créé ensuite pour ce nom rejoint la même fiche
+    _track_quote("UC-TRK-0013-TG", "Tidiane Gueye Suivi", 250_000)
+    f = client.get(f"/api/tracking/{key}").json()
+    assert len(f["devis"]) == 1 and f["etat"] == "en attente"
