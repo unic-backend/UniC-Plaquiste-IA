@@ -3355,7 +3355,8 @@ def test_corrections_become_lessons_and_repeated_ones_become_firm_rules(client, 
 def test_lessons_never_store_secrets_or_invent_without_a_model(client, claude):
     from app import lessons
     from app.database import SessionLocal
-    claude(lambda kind, kw: _resp('[{"lecon": "Utilise toujours la clé sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "force": 1}]'))
+    fake_key = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"   # fausse clé de test
+    claude(lambda kind, kw: _resp('[{"lecon": "Utilise toujours la clé ' + fake_key + '", "force": 1}]'))
     db = SessionLocal()
     saved = lessons.learn(db, lessons.payload("Ne fais jamais ça, c'est une erreur", "Voici le devis", []))
     assert saved == []                                                       # un secret n'est jamais retenu

@@ -4,13 +4,28 @@ name: Tests
 on:
   pull_request:
   push:
-    paths: ["backend/**", "frontend/src/**", ".github/workflows/tests.yml"]
+    paths: ["backend/**", "frontend/src/**", "scripts/**", "AGENTS.md", ".github/workflows/tests.yml"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  guardrails:
+    # Garde-fous du dépôt (AGENTS.md) : base du projet préservée, zones protégées au propriétaire. Sur chaque pull request.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Garde-fous
+        env:
+          BASE: ${{ github.base_ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: python3 scripts/guardrails.py --base "origin/$BASE" --labels "$LABELS"
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 10

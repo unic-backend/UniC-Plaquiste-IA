@@ -1,0 +1,22 @@
+# Le propriétaire relit tout ce qui touche à la base : zones protégées (voir AGENTS.md).
+# Activer : Settings › Branches › protéger main › « Require review from Code Owners ».
+/backend/app/auth.py            @unic-backend
+/backend/app/security.py        @unic-backend
+/backend/app/secrets_box.py     @unic-backend
+/backend/app/config.py          @unic-backend
+/backend/app/repair.py          @unic-backend
+/backend/app/selfcare.py        @unic-backend
+/backend/app/trust.py           @unic-backend
+/backend/requirements*          @unic-backend
+/.github/                       @unic-backend
+/Dockerfile                     @unic-backend
+/docker-compose.yml             @unic-backend
+/render.yaml                    @unic-backend
+/AGENTS.md                      @unic-backend
+/CLAUDE.md                      @unic-backend
+/GEMINI.md                      @unic-backend
+/.cursor/                       @unic-backend
+/.windsurfrules                 @unic-backend
+/ARCHITECTURE.md                @unic-backend
+/scripts/guardrails.py          @unic-backend
+/scripts/core_manifest.txt      @unic-backend

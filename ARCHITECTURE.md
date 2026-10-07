@@ -43,3 +43,7 @@ Frontend : `frontend/src` (React, Vite, TypeScript). Pages principales dans `App
 - **Schéma sans Alembic** : `create_all` + `ensure_columns` + `ensure_indexes` (ajouts seulement, aucune donnée touchée). À revoir si la base passe sur Postgres.
 - **Claude premier fournisseur**, autres en secours ; `LLM_ENABLED=false` coupe tout appel IA.
 - **Pas de suppression physique ajoutée** : décision du propriétaire.
+
+## Garde-fous pour les outils IA
+`AGENTS.md` (règles), `scripts/core_manifest.txt` (fichiers essentiels), `scripts/guardrails.py` (contrôle CI), `.github/CODEOWNERS` (relecture du propriétaire sur les zones protégées).
+La structure est figée : dossiers `backend`, `frontend`, `desktop`, `docs`, `scripts`, `.github` ; un seul serveur (`backend/app/main.py`), un seul `Dockerfile`, un seul `docker-compose.yml`.

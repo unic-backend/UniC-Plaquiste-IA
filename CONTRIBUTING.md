@@ -24,3 +24,8 @@ Interface : `cd frontend && npm install && npm run dev`.
 
 ## Zones protégées
 `repair.py`, `selfcare.py`, `trust.py`, l'authentification et le déploiement ne sont pas modifiables par l'auto-réparation : relecture humaine obligatoire.
+
+## Outils et agents IA
+Tout outil ou agent IA (Codex, Cursor, Copilot, Gemini, Claude Code…) suit **`AGENTS.md`** : il peut ajouter fonctionnalités, outils, agents et tests, mais ne sort pas de la base,
+ne recrée rien de ce qui existe et ne touche pas aux zones protégées. Le job CI **guardrails** (`scripts/guardrails.py`) le vérifie sur chaque pull request ;
+le propriétaire lève un blocage voulu avec l'étiquette `core-change-approved`.
