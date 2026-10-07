@@ -24,4 +24,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL" || echo "::warning::Fusion automatique non activée : Settings > General > Pull Requests > Allow auto-merge, et Settings > Actions > General > Workflow permissions > Read and write."
+        run: |
+          gh pr merge --auto --squash "$PR_URL" || echo "::warning::Fusion automatique non activée (Settings, General, Pull Requests, Allow auto-merge ; Settings, Actions, General, Workflow permissions, Read and write)."
