@@ -6,6 +6,7 @@ import { Voix } from "./Voix";
 import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
 import { Agenda } from "./Agenda";
+import { Suivi, SuiviClient } from "./Suivi";
 import { Prospects } from "./Prospects";
 import { prepareFile } from "./compress";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
@@ -566,6 +567,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         </Link>
         <Link to="/interprete" className="side-brief side-code" onClick={() => setOpen(false)}>
           <I.Globe size={18} /> Interprète
+        </Link>
+        <Link to="/suivi" className={`side-brief side-code ${loc.pathname.startsWith("/suivi") ? "active" : ""}`} onClick={() => setOpen(false)}>
+          <I.Receipt size={18} /> Suivi des encaissements
         </Link>
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
@@ -2036,6 +2040,8 @@ export default function App() {
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />
+        <Route path="/suivi" element={<Suivi />} />
+        <Route path="/suivi/:key" element={<SuiviClient />} />
         <Route path="/prospects" element={<Prospects />} />
         <Route path="/factures/:id" element={<DocDetail kind="invoice" />} />
         <Route path="/commandes" element={<Commandes />} />

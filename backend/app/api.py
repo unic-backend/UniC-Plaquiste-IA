@@ -1431,6 +1431,103 @@ def invoices_unpaid(db: Session = Depends(get_db), user: User = Depends(get_curr
     return u
 
 
+# ---------- suivi des encaissements (argent seulement) ----------
+
+class DecisionIn(BaseModel):
+    decision: str
+
+
+class ReceiptIn(BaseModel):
+    quote_id: str
+    amount: float
+    kind: str = "avance"
+    method: str = ""
+    note: str = ""
+    received_on: str | None = None   # AAAA-MM-JJ
+    mail_id: str | None = None
+
+
+def _tracked(fn):
+    from app import tracking
+    try:
+        return fn()
+    except tracking.TrackingError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/tracking")
+def tracking_overview(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return tracking.overview(db)
+
+
+@router.get("/tracking/mail")
+def tracking_mail(refresh: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    note = ""
+    if refresh:
+        try:
+            from app import connectors as _cx
+            _cx.sync_inbox(db, 20)
+        except Exception as exc:   # boîte non configurée ou injoignable : on montre ce qu'on a déjà lu
+            note = str(exc)
+    return {"suggestions": tracking.mail_hints(db), "note": note}
+
+
+@router.post("/tracking/mail/{mail_id}/dismiss")
+def tracking_mail_dismiss(mail_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    tracking.dismiss_mail(db, mail_id)
+    return {"ok": True}
+
+
+@router.post("/tracking/receipts")
+def tracking_add_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from datetime import datetime as _dt, timezone as _tz
+    from app import tracking
+    q = db.get(Quotation, body.quote_id)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    when = None
+    if body.received_on:
+        try:
+            when = _dt.strptime(body.received_on, "%Y-%m-%d").replace(hour=12, tzinfo=_tz.utc)
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+    return _tracked(lambda: tracking.record_receipt(db, q, body.amount, body.kind, body.method, body.note, user.id, when, body.mail_id))
+
+
+@router.delete("/tracking/receipts/{rid}")
+def tracking_cancel_receipt(rid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.cancel_receipt(db, rid, user.id))
+
+
+@router.post("/tracking/quotes/{qid}/decision")
+def tracking_decision(qid: str, body: DecisionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    return _tracked(lambda: tracking.set_decision(db, q, body.decision, user.id))
+
+
+@router.post("/tracking/quotes/{qid}/balance-invoice")
+def tracking_balance_invoice(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    inv = _tracked(lambda: tracking.balance_invoice(db, q, user.id))
+    return {"id": inv.id, "numero": inv.number, "reste": round(inv.remaining or 0)}
+
+
+@router.get("/tracking/{key}")
+def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.client_file(db, key))
+
+
 @router.get("/backups")
 def backups_list(user: User = Depends(require_roles("admin", "manager"))):
     from app import backup

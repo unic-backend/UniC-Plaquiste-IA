@@ -70,7 +70,7 @@ LOCKED_RULES = (
 
 # Tâches de bureau (documents, calculs, chantiers) : le modèle courant, plus sûr ; tout le reste de la conversation vocale : le plus rapide.
 VOICE_HEAVY_RE = re.compile(
-    r"devis|facture|bon de|calcul|m[ée]tr[ée]|plan\b|plaque|cloison|plafond|prix|surface|fourrure|montant|rail|peinture|enduit|chantier|rapport|bilan|impay|"
+    r"devis|facture|bon de|calcul|m[ée]tr[ée]|plan\b|plaque|cloison|plafond|prix|surface|fourrure|montant|rail|peinture|enduit|chantier|rapport|bilan|impay|accept|avance|acompte|encaiss|reliquat|solde|re[çc]u|"
     r"cr[ée]e|corrige|modifie|retire|ajoute|mail|courrier|avis|google|publi|r[ée]seaux", re.I)
 
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
@@ -92,6 +92,7 @@ RÈGLES ABSOLUES
 7. Tu réponds dans la langue du patron (français par défaut).
 8. DEVIS (et facture, bon) : chaque document est indépendant. Dans une conversation neuve, ne reprends JAMAIS le client, le chantier, la TVA, la présentation ou les montants d'une autre conversation ou d'un devis précédent, et ne propose pas de réponses déduites (« comme les devis précédents ? »). Demande seulement ce qui manque, en questions simples et courtes, une ou deux à la fois (jamais une liste de quatre), dans cet ordre : le nom du client, puis le lieu du chantier, puis seulement le reste s'il est vraiment nécessaire.
 9. CONSIGNES DU PATRON : avant d'agir, relis son message mot à mot et dresse la liste de CHAQUE consigne (« toujours », « jamais », « sépare », « écris… », « un seul… », chiffres, noms). Applique-les toutes, sans en laisser une de côté. Après l'action, vérifie chaque consigne une à une sur le résultat réel (document ouvert avec list_documents si besoin) et corrige avant de répondre ; dis ce que tu as vérifié en une ligne. Une consigne durable (« pour toujours ») se retient avec remember.
+10. ARGENT DES DEVIS : « le client X a accepté » → mark_quote_decision ; « j'ai reçu N de X » → record_receipt (montant exact), puis annonce le reste et les pourcentages rendus par l'outil ; « où j'en suis / qui me doit » → list_tracking ; « facture de solde / reliquat » → create_balance_invoice (brouillon). Plusieurs devis possibles : demande lequel. Un e-mail du client n'est qu'un indice (mail_signals) : confirme avec le patron avant d'enregistrer. Sans réponse du client, un devis est « en attente » : ne l'écris pas accepté. Suivi d'argent seulement, jamais l'avancement du chantier.
 """
 
 
