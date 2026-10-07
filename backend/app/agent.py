@@ -12,7 +12,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, pricecheck, revise, trust, google_business as gbp, metier
+from app import calc, connectors, pricecheck, revise, tracking, trust, google_business as gbp, metier
 from app import services as svc
 from app.connectors import ConnectorError
 from app.models import ConstructionSite, Customer, Project, Supplier, Invoice, InboxMessage, Material, Quotation, SocialPost
@@ -293,6 +293,47 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"only_late": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "list_tracking",
+        "description": ("SUIVI DES ENCAISSEMENTS (argent seulement) : tableau de bord + liste des clients avec devis accepté, reçu, reste, "
+                        "pourcentages. À utiliser pour « où j'en suis », « combien on me doit », « mes chantiers acceptés ». "
+                        "Avec client=…, renvoie sa fiche complète (devis, versements, factures de solde). Chiffres exacts, ne les recalcule jamais."),
+        "input_schema": {"type": "object", "properties": {"client": {"type": "string"}}, "additionalProperties": False},
+    },
+    {
+        "name": "mark_quote_decision",
+        "description": ("SUIVI : enregistre la réponse du client à un devis. decision = accepted (« le client a accepté »), declined "
+                        "(« il refuse ») ou pending. Cible par quote_number ou client. Plusieurs devis possibles → l'outil les liste : "
+                        "demande lequel, ne devine pas. Sans réponse du client, un devis reste « en attente » : n'écris rien."),
+        "input_schema": {"type": "object", "properties": {
+            "decision": {"type": "string", "enum": ["accepted", "declined", "pending"]},
+            "client": {"type": "string"}, "quote_number": {"type": "string"}},
+            "required": ["decision"], "additionalProperties": False},
+    },
+    {
+        "name": "record_receipt",
+        "description": ("SUIVI : le patron dit avoir REÇU une somme d'un client (avance, acompte, solde). Enregistre-la sur le bon devis "
+                        "(l'argent reçu vaut acceptation) puis annonce le reste et les pourcentages donnés par l'outil. kind = avance / acompte / "
+                        "solde / autre. Montant exactement comme dit, sans l'arrondir. Plusieurs devis → demande lequel. "
+                        "Jamais pour un paiement que le patron n'a pas confirmé lui-même (un e-mail seul ne suffit pas)."),
+        "input_schema": {"type": "object", "properties": {
+            "amount": {"type": "number"}, "client": {"type": "string"}, "quote_number": {"type": "string"},
+            "kind": {"type": "string", "enum": ["avance", "acompte", "solde", "autre"]}, "method": {"type": "string"}, "note": {"type": "string"}},
+            "required": ["amount"], "additionalProperties": False},
+    },
+    {
+        "name": "create_balance_invoice",
+        "description": ("SUIVI : crée la FACTURE DE RELIQUAT (solde) d'un devis accepté : lignes du devis, déjà reçu, reste dû. Brouillon : le patron "
+                        "l'approuve et l'envoie lui-même. Cible par quote_number ou client."),
+        "input_schema": {"type": "object", "properties": {"client": {"type": "string"}, "quote_number": {"type": "string"}},
+                         "additionalProperties": False},
+    },
+    {
+        "name": "mail_signals",
+        "description": ("SUIVI : e-mails récents de clients qui semblent dire « j'accepte » ou « j'ai payé ». Ce sont des SUGGESTIONS : montre-les au "
+                        "patron et demande-lui de confirmer avant d'utiliser mark_quote_decision ou record_receipt. Ne synchronise pas la boîte seul."),
+        "input_schema": {"type": "object", "properties": {"refresh": {"type": "boolean"}}, "additionalProperties": False},
+    },
+    {
         "name": "calculate_from_plan",
         "description": ("MÉTRÉ DEPUIS LE PLAN lu par read_plan : transforme les pièces et surfaces du plan en quantités (plaques, ossature, "
                         "suspentes), sans redemander les dimensions. rooms = pièces retenues (noms du plan) ; vide = pièces dont le plan "
@@ -409,7 +450,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -635,6 +676,45 @@ class AgentSession:
         u["note"] = ("Montants exacts, sans décimales. Présente d'abord les retards. Le patron envoie lui-même les relances "
                      "(bouton Partager / WhatsApp) : ne dis jamais qu'un message est parti.")
         return u
+
+    def _tracked(self, fn):
+        try:
+            return fn()
+        except tracking.TrackingError as exc:
+            raise ConnectorError(str(exc), 400)
+
+    def _t_list_tracking(self, client: str = "") -> dict:
+        if client.strip():
+            key = self._tracked(lambda: tracking.find_client(self.db, client))
+            return self._tracked(lambda: tracking.client_file(self.db, key))
+        out = tracking.overview(self.db)
+        out["note"] = "Chiffres exacts calculés en code. Présente d'abord le reste à encaisser. Argent seulement, jamais l'avancement du chantier."
+        return out
+
+    def _t_mark_quote_decision(self, decision: str, client: str = "", quote_number: str = "") -> dict:
+        q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number, prefer="pending"))
+        row = self._tracked(lambda: tracking.set_decision(self.db, q, decision, self.user_id))
+        self.state["last_quote_id"] = q.id
+        return row
+
+    def _t_record_receipt(self, amount: float, client: str = "", quote_number: str = "", kind: str = "avance",
+                          method: str = "", note: str = "") -> dict:
+        q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))
+        row = self._tracked(lambda: tracking.record_receipt(self.db, q, amount, kind, method, note, self.user_id))
+        self.state["last_quote_id"] = q.id
+        return row
+
+    def _t_create_balance_invoice(self, client: str = "", quote_number: str = "") -> dict:
+        q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))
+        inv = self._tracked(lambda: tracking.balance_invoice(self.db, q, self.user_id))
+        self._doc("invoice", inv)
+        return {"numero": inv.number, "depuis": q.number, "total": round(inv.total or 0), "deja_recu": round(inv.paid or 0),
+                "reste_du": round(inv.remaining or 0), "statut": inv.status}
+
+    def _t_mail_signals(self, refresh: bool = False) -> dict:
+        if refresh:
+            connectors.sync_inbox(self.db, 15)
+        return {"suggestions": tracking.mail_hints(self.db), "note": UNTRUSTED_NOTE + " Rien n'est appliqué : le patron confirme d'abord."}
 
     def _t_calculate_from_plan(self, file_id: str = "", rooms: list | None = None, include_to_confirm: bool = False,
                                hydrofuge_rooms: list | None = None, partitions: list | None = None,

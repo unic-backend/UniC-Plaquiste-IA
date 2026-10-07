@@ -239,6 +239,8 @@ class Quotation(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    client_decision: Mapped[str] = mapped_column(String(16), default="pending")   # suivi : pending / accepted / declined
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     customer: Mapped[Customer | None] = relationship()
     project: Mapped[Project | None] = relationship()
@@ -825,3 +827,31 @@ class QuoteAcceptance(Base):
     signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     ip: Mapped[str] = mapped_column(String(64), default="")
     user_agent: Mapped[str] = mapped_column(String(255), default="")
+
+
+class Receipt(Base):
+    """Suivi des encaissements : une somme reçue du client pour un devis (avance, acompte, solde). Saisie par le patron."""
+
+    __tablename__ = "receipts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quotation_id: Mapped[str] = mapped_column(ForeignKey("quotations.id"), index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    kind: Mapped[str] = mapped_column(String(16), default="avance")   # avance / acompte / solde / autre
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    method: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    payment_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)   # paiement miroir sur la facture, s'il existe
+    mail_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MailSeen(Base):
+    """E-mail déjà traité (ou écarté) par le suivi : il ne revient plus dans les suggestions."""
+
+    __tablename__ = "tracking_mail_seen"
+
+    mail_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    action: Mapped[str] = mapped_column(String(16), default="dismissed")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -3362,3 +3362,138 @@ def test_lessons_never_store_secrets_or_invent_without_a_model(client, claude):
     assert saved == []                                                       # un secret n'est jamais retenu
     assert lessons._parse("pas du json") == [] and lessons._parse('[{"lecon": 3}]') == []
     db.close()
+
+
+# ---------- suivi des encaissements ----------
+
+def _track_quote(number, who, total, status="approved"):
+    from app.database import SessionLocal
+    from app.models import Quotation, QuotationItem
+    db = SessionLocal()
+    q = Quotation(number=number, title="Plafond", client_label=who, status=status, subtotal=total, total=total, currency="FCFA")
+    db.add(q)
+    db.flush()
+    db.add(QuotationItem(quotation_id=q.id, position=1, description="Faux plafond", quantity=1, unit="u", unit_price=total, total=total))
+    db.commit()
+    qid = q.id
+    db.close()
+    return qid
+
+
+def _tclient(overview, name):
+    return next(c for c in overview["clients"] if c["client"] == name)
+
+
+def test_tracking_pending_then_accepted_then_advance_gives_percentages(client):
+    qid = _track_quote("UC-TRK-0001-AB", "Awa Ba Suivi", 1_000_000)
+    ov = client.get("/api/tracking").json()
+    c = _tclient(ov, "Awa Ba Suivi")
+    assert (c["etat"], c["en_attente"], c["accepte"]) == ("en attente", 1_000_000, 0)
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"}).status_code == 200
+    r = client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 400_000, "kind": "avance"})
+    assert r.status_code == 200 and r.json()["reste"] == 600_000 and r.json()["pct_recu"] == 40.0 and r.json()["pct_reste"] == 60.0
+    fiche = client.get(f"/api/tracking/{c['key']}").json()
+    assert fiche["recu"] == 400_000 and fiche["reste"] == 600_000 and len(fiche["versements"]) == 1
+    # même mots dans un autre ordre = même client
+    from app import tracking
+    assert tracking.client_key("Ba  awa suivi") == c["key"]
+
+
+def test_tracking_receipt_implies_acceptance_and_validates_amount(client):
+    qid = _track_quote("UC-TRK-0002-CD", "Cheikh Dia Suivi", 500_000)
+    assert client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 0}).status_code == 400
+    assert client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000, "received_on": "pas-une-date"}).status_code == 400
+    assert client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000, "received_on": "2026-10-01"}).status_code == 200
+    c = _tclient(client.get("/api/tracking").json(), "Cheikh Dia Suivi")
+    assert c["etat"] == "à encaisser" and c["recu"] == 100_000
+    over = client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 600_000}).json()
+    assert "alerte" in over and over["reste"] == 0
+
+
+def test_tracking_cancelled_and_declined_quotes_are_not_counted(client):
+    _track_quote("UC-TRK-0003-EF", "Eva Fall Suivi", 300_000, status="cancelled")
+    qid = _track_quote("UC-TRK-0004-EF", "Eva Fall Suivi", 200_000)
+    client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "declined"})
+    c = _tclient(client.get("/api/tracking").json(), "Eva Fall Suivi")
+    assert c["nb_devis"] == 1 and c["accepte"] == 0 and c["etat"] == "refusé"
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "nimporte"}).status_code == 400
+
+
+def test_balance_invoice_uses_received_amount_and_mirrors_payments(client):
+    from app.database import SessionLocal
+    from app.models import Invoice
+    qid = _track_quote("UC-TRK-0005-GH", "Gora Hann Suivi", 1_000_000)
+    assert client.post(f"/api/tracking/quotes/{qid}/balance-invoice").status_code == 400   # pas accepté
+    client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 250_000})
+    r = client.post(f"/api/tracking/quotes/{qid}/balance-invoice")
+    assert r.status_code == 200 and r.json()["reste"] == 750_000
+    assert client.post(f"/api/tracking/quotes/{qid}/balance-invoice").status_code == 400   # une seule
+    db = SessionLocal()
+    inv = db.get(Invoice, r.json()["id"])
+    assert inv.kind == "final" and inv.status == "draft" and inv.paid == 250_000 and inv.remaining == 750_000 and len(inv.payments) == 1
+    db.close()
+    # un versement suivant se pose aussi sur la facture, sans double compte dans le suivi
+    client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000})
+    db = SessionLocal()
+    inv = db.get(Invoice, r.json()["id"])
+    assert inv.paid == 350_000 and inv.remaining == 650_000
+    db.close()
+    c = _tclient(client.get("/api/tracking").json(), "Gora Hann Suivi")
+    assert c["recu"] == 350_000 and c["reste"] == 650_000
+    # annuler une erreur de saisie remet la facture d'équerre
+    fiche = client.get(f"/api/tracking/{c['key']}").json()
+    assert client.delete(f"/api/tracking/receipts/{fiche['versements'][0]['id']}").status_code == 200
+    db = SessionLocal()
+    assert db.get(Invoice, r.json()["id"]).paid == 250_000
+    db.close()
+
+
+def test_tracking_picks_up_existing_payments_and_signed_quotes(client):
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from app.services import apply_payment, invoice_from_quote
+    qid = _track_quote("UC-TRK-0006-IJ", "Ibou Job Suivi", 800_000)
+    db = SessionLocal()
+    inv = invoice_from_quote(db, db.get(Quotation, qid), "invoice", None)
+    apply_payment(db, inv, 200_000, "wave", "ref", None)
+    db.close()
+    c = _tclient(client.get("/api/tracking").json(), "Ibou Job Suivi")
+    assert c["etat"] == "à encaisser" and c["recu"] == 200_000
+    assert _tclient(client.get("/api/tracking").json(), "Ibou Job Suivi")["recu"] == 200_000   # idempotent
+
+
+def test_agent_tools_record_decision_receipt_and_ask_when_ambiguous(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    _track_quote("UC-TRK-0007-KL", "Khady Lo Suivi", 400_000)
+    _track_quote("UC-TRK-0008-KL", "Khady Lo Suivi", 900_000)
+    db = SessionLocal()
+    t = AgentSession(db, None, {})
+    amb = t("record_receipt", {"amount": 100_000, "client": "Khady Lo"})
+    assert "Plusieurs devis" in amb["error"] and "UC-TRK-0007-KL" in amb["error"]
+    assert t("mark_quote_decision", {"decision": "accepted", "quote_number": "uc-trk-0008-kl"})["decision"] == "accepted"
+    out = t("record_receipt", {"amount": 300_000, "client": "Khady Lo", "kind": "avance"})
+    assert out["numero"] == "UC-TRK-0008-KL" and out["reste"] == 600_000
+    fiche = t("list_tracking", {"client": "Khady Lo"})
+    assert fiche["recu"] == 300_000 and fiche["nb_devis"] == 2
+    assert t("create_balance_invoice", {"quote_number": "UC-TRK-0008-KL"})["reste_du"] == 600_000
+    db.close()
+
+
+def test_mail_hints_only_suggest_and_can_be_dismissed(client):
+    from app.database import SessionLocal
+    from app.models import InboxMessage
+    qid = _track_quote("UC-TRK-0009-MN", "Moussa Ndao Suivi", 700_000)
+    db = SessionLocal()
+    db.add(InboxMessage(uid="trk-1", from_addr="moussa@example.com", subject="Devis plafond", date="2026-10-05",
+                        body="Bonjour, c'est Moussa Ndao Suivi. Je valide le devis, d'accord pour commencer."))
+    db.add(InboxMessage(uid="trk-2", from_addr="inconnu@example.com", subject="Promo", body="Super offre sans rapport"))
+    db.commit()
+    db.close()
+    hints = client.get("/api/tracking/mail").json()["suggestions"]
+    mine = [h for h in hints if h["client"] == "Moussa Ndao Suivi"]
+    assert len(mine) == 1 and mine[0]["signal"] == "acceptation" and mine[0]["devis"] == "UC-TRK-0009-MN"
+    assert _tclient(client.get("/api/tracking").json(), "Moussa Ndao Suivi")["etat"] == "en attente"   # rien d'appliqué seul
+    client.post(f"/api/tracking/mail/{mine[0]['mail_id']}/dismiss")
+    assert not [h for h in client.get("/api/tracking/mail").json()["suggestions"] if h["client"] == "Moussa Ndao Suivi"]
+    assert qid
