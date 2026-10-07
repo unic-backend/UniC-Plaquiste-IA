@@ -506,6 +506,7 @@ class AgentSession:
         self.documents: list[dict] = []   # documents à afficher dans la conversation
         self.images: list[dict] = []   # schémas dessinés à afficher dans la conversation
         self.files: list[dict] = []   # fichiers modifiés à proposer (téléchargement, partage)
+        self.changes: list[str] = []   # ce que l'assistant a modifié dans les documents (sert à tirer une leçon d'une correction)
         self.used: list[str] = []
 
     def __call__(self, name: str, args: dict) -> dict:
@@ -554,6 +555,7 @@ class AgentSession:
         art = res.pop("artifact", None)
         if art:
             self.files.append(art)
+            self.changes.extend(f"{art['filename']} : {e.get('op')} {str(e.get('find') or e.get('text') or e.get('cell') or '')[:60]}" for e in edits if isinstance(e, dict))
         return res
 
     def _t_draw_diagram(self, title: str, svg: str) -> dict:
@@ -1003,6 +1005,7 @@ class AgentSession:
         if kind == "quote":
             self.state["last_quote_id"] = doc.id
         self._doc(kind, doc)
+        self.changes.extend(f"{doc.number} : {c}" for c in changes)
         linked = []
         if kind == "quote":
             linked = [i.number for i in self.db.query(Invoice).filter(Invoice.quotation_id == doc.id).all()]

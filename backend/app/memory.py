@@ -501,12 +501,16 @@ def defer_extract(db: Session, user_text: str) -> None:
         pending.append(user_text)
 
 
-def extract_in_background(user_text: str) -> None:
+def extract_in_background(user_text) -> None:
     from app.database import SessionLocal
 
     db = SessionLocal()
     try:
-        extract_and_store(db, user_text)
+        if isinstance(user_text, dict):   # analyse d'une correction du patron (leçon à retenir)
+            from app import lessons
+            lessons.learn(db, user_text)
+        else:
+            extract_and_store(db, user_text)
         db.commit()
     except Exception as exc:  # jamais bloquer ni faire échouer quoi que ce soit
         logger.debug("extraction mémoire différée impossible : %s", exc)

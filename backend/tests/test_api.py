@@ -3320,3 +3320,44 @@ def test_non_claude_engines_get_one_plain_system_message(monkeypatch):
     monkeypatch.setattr(ai, "provider_chain", lambda deep=False: [P()])
     ai.chat_complete([{"role": "system", "content": "A", "cache": True}, {"role": "system", "content": "B"}, {"role": "user", "content": "q"}])
     assert seen["m"] == [{"role": "system", "content": "A\n\nB"}, {"role": "user", "content": "q"}]
+
+
+def test_corrections_become_lessons_and_repeated_ones_become_firm_rules(client, claude):
+    from app import lessons
+    from app.database import SessionLocal
+    from app.models import Memory
+
+    def script(kind, kw):
+        if "CORRIGE son assistant" in _sysstr(kw):                   # passage d'analyse des corrections
+            return _resp('[{"lecon": "La livraison reste dans le tableau des matériaux, écrite « à la charge du client ».", "force": 0.9},'
+                         ' {"lecon": "x", "force": 0.2}]')
+        return _resp("D'accord, c'est corrigé.")
+    claude(script)
+    assert lessons.wants_to_learn("Ne mélange jamais la livraison avec la main-d'œuvre", []) is True
+    assert lessons.wants_to_learn("combien de plaques pour 20 m² ?", []) is False
+    assert lessons.wants_to_learn("ajoute 3 sacs d'enduit", ["revise_document"]) is False                     # trop court : changement ponctuel
+    assert lessons.wants_to_learn("ajoute la livraison de 500000 dans le devis de Diop", ["revise_document"]) is True
+
+    r = client.post("/api/chat", json={"message": "Tu as encore mis la livraison avec la main-d'œuvre, ne mélange jamais ça"})
+    assert r.status_code == 200
+    db = SessionLocal()
+    mems = [m for m in db.query(Memory).filter(Memory.kind == "correction", Memory.state == "active") if "livraison" in m.text.lower()]
+    assert len(mems) == 1 and mems[0].source == "auto" and mems[0].nature == "inference" and not mems[0].pinned   # supposition à confirmer
+    assert not any(m.text == "x" for m in db.query(Memory))                                                       # leçon trop faible ignorée
+    db.close()
+    client.post("/api/chat", json={"message": "Encore une fois : la livraison ne se mélange jamais avec la main-d'œuvre"})
+    db = SessionLocal()
+    m = [m for m in db.query(Memory).filter(Memory.kind == "correction", Memory.state == "active") if "livraison" in m.text.lower()]
+    assert len(m) == 1 and m[0].nature == "preference" and m[0].pinned and m[0].occurrences >= 2                  # 2e correction : règle ferme
+    db.close()
+
+
+def test_lessons_never_store_secrets_or_invent_without_a_model(client, claude):
+    from app import lessons
+    from app.database import SessionLocal
+    claude(lambda kind, kw: _resp('[{"lecon": "Utilise toujours la clé sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "force": 1}]'))
+    db = SessionLocal()
+    saved = lessons.learn(db, lessons.payload("Ne fais jamais ça, c'est une erreur", "Voici le devis", []))
+    assert saved == []                                                       # un secret n'est jamais retenu
+    assert lessons._parse("pas du json") == [] and lessons._parse('[{"lecon": 3}]') == []
+    db.close()

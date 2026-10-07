@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, learned, memory as mem, metier, pricecheck
+from app import lessons
 from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
@@ -1008,6 +1009,10 @@ def handle_turn(
                                        + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")
                     if not locked:
                         mem.defer_extract(db, text)
+                        used_tools = list(session.used) if session is not None else []
+                        if lessons.wants_to_learn(text, used_tools) and mem.AFTER_REPLY.get() is not None:   # correction du patron : leçon à retenir, après l'envoi
+                            prev = next((m.content for m in history if m.role == "assistant"), "")
+                            mem.AFTER_REPLY.get().append(lessons.payload(text, prev, session.changes if session is not None else []))
                     if deep and ai.provider != "claude":
                         reply_text += (
                             "\n\n_Raisonnement profond Claude NON DISPONIBLE"
