@@ -1545,6 +1545,13 @@ class CollectIn(BaseModel):
     date: str | None = None   # AAAA-MM-JJ, vide = pas de rappel
 
 
+class NewClientIn(BaseModel):
+    name: str
+    phone: str = ""
+    site: str = ""
+    note: str = ""
+
+
 class ClientInfoIn(BaseModel):
     phone: str = ""
     note: str = ""
@@ -1579,6 +1586,12 @@ def tracking_restore_quote(qid: str, db: Session = Depends(get_db), user: User =
 def tracking_client_info(key: str, body: ClientInfoIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import tracking
     return _tracked(lambda: tracking.set_client_info(db, key, body.phone, body.note))
+
+
+@router.post("/tracking/clients")
+def tracking_new_client(body: NewClientIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import tracking
+    return _tracked(lambda: tracking.create_client(db, body.name, body.phone, body.site, body.note))
 
 
 @router.get("/tracking/{key}/chat")

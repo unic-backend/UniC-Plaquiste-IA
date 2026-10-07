@@ -101,6 +101,8 @@ def _group(db: Session) -> dict[str, dict]:
         name = client_name_of(db, q) or "Client sans nom"
         g = groups.setdefault(client_key(name), {"key": client_key(name), "client": name, "quotes": []})
         g["quotes"].append(_quote_row(db, q))
+    for row in db.query(TrackingClient).filter(TrackingClient.name != "").all():   # client créé avec « + », sans devis pour l'instant
+        groups.setdefault(row.key, {"key": row.key, "client": row.name, "quotes": []})
     return groups
 
 
@@ -110,7 +112,7 @@ def _client_totals(g: dict) -> dict:
     total = sum(r["montant"] for r in acc)
     got = sum(min(r["recu"], r["montant"]) for r in acc)
     left = sum(r["reste"] for r in acc)
-    state = ("soldé" if acc and left <= 0 else "à encaisser" if acc else "en attente" if pend else "refusé")
+    state = ("soldé" if acc and left <= 0 else "à encaisser" if acc else "en attente" if pend else "nouveau" if not g["quotes"] else "refusé")
     return {"key": g["key"], "client": g["client"], "accepte": total, "recu": got, "reste": left, "pct_recu": _pct(got, total),
             "pct_reste": _pct(left, total), "en_attente": sum(r["montant"] for r in pend), "nb_devis": len(g["quotes"]),
             "nb_attente": len(pend), "etat": state, "devise": g["quotes"][0]["devise"] if g["quotes"] else "FCFA"}
@@ -151,7 +153,7 @@ def overview(db: Session) -> dict:
     sync_existing(db)
     groups = _group(db)
     clients = [_client_totals(g) for g in groups.values()]
-    order = {"à encaisser": 0, "en attente": 1, "soldé": 2, "refusé": 3}
+    order = {"à encaisser": 0, "nouveau": 1, "en attente": 2, "soldé": 3, "refusé": 4}
     clients.sort(key=lambda c: (order[c["etat"]], -c["reste"], c["client"].lower()))
     accepted = sum(c["accepte"] for c in clients)
     got = sum(c["recu"] for c in clients)
@@ -179,7 +181,8 @@ def client_file(db: Session, key: str) -> dict:
     gone = [{"id": q.id, "numero": q.number, "montant": round(q.total or 0)} for q in db.query(Quotation).filter(Quotation.status == "cancelled").all()
             if client_key(client_name_of(db, q)) == key and (q.total or 0) > 0]
     tot = _client_totals(g)
-    return {**tot, "telephone": phone, "note": info.note if info else "", "retires": gone,
+    site = (info.site if info else "") or next((r["lieu"] for r in g["quotes"] if r["lieu"]), "")
+    return {**tot, "telephone": phone, "note": info.note if info else "", "lieu": site, "retires": gone, "documents": _documents(db, key),
             "message_point": point_message(db, g, tot),
             "devis": g["quotes"],
             "versements": [{"id": r.id, "devis": numbers.get(r.quotation_id, ""), "montant": round(r.amount), "type": r.kind,
@@ -280,6 +283,32 @@ def restore_quote(db: Session, quote: Quotation, user_id: str | None) -> dict:
     audit(db, user_id, "tracking_restore_quote", "quotation", quote.id, quote.number)
     db.commit()
     return _quote_row(db, quote)
+
+
+def _documents(db: Session, key: str) -> list[dict]:
+    """Factures, bons de commande et de livraison du client (les devis sont listés à part)."""
+    from app.models import DeliveryNote, PurchaseOrder
+    out = []
+    for kind, label, model in (("invoice", "Facture", Invoice), ("po", "Bon de commande", PurchaseOrder), ("dn", "Bon de livraison", DeliveryNote)):
+        for r in db.query(model).order_by(model.created_at.desc()).all():
+            if r.status != "cancelled" and client_key(client_name_of(db, r)) == key:
+                out.append({"kind": kind, "label": label, "id": r.id, "numero": r.number, "statut": r.status,
+                            "total": round(r.total) if getattr(r, "total", None) is not None else None})
+    return out
+
+
+def create_client(db: Session, name: str, phone: str = "", site: str = "", note: str = "") -> dict:
+    """Nouveau client saisi à la main : sa fiche existe tout de suite, le dossier (devis, factures…) se prépare ensuite dans son chat."""
+    name = " ".join((name or "").split())
+    if not 2 <= len(name) <= 120:
+        raise TrackingError("Donne le nom du client (2 caractères au moins).")
+    key = client_key(name)
+    existed = key in _group(db)
+    if not existed:
+        db.add(TrackingClient(key=key, name=name, site=(site or "").strip()[:255], note=(note or "").strip()[:2000],
+                              phone=re.sub(r"[^\d+ ().-]", "", phone or "")[:40]))
+        db.commit()
+    return {"key": key, "existait": existed}
 
 
 def find_client(db: Session, name: str) -> str:

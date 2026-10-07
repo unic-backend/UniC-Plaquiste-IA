@@ -865,6 +865,8 @@ class TrackingClient(Base):
     __tablename__ = "tracking_clients"
 
     key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), default="")   # nom saisi : permet un client sans devis encore (dossier à préparer)
+    site: Mapped[str] = mapped_column(String(255), default="")   # lieu habituel du chantier
     phone: Mapped[str] = mapped_column(String(40), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -1226,3 +1226,11 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-typing { color: var(--muted); font-style: italic; }
 .sv-chat-in { display: flex; gap: 8px; align-items: flex-end; }
 .sv-chat-in textarea { flex: 1; resize: none; max-height: 120px; }
+.sv-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sv-title h1 { margin: 0; }
+.sv-plus { flex: none; width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--copper); color: #fff; font-size: 28px; line-height: 1; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.18); transition: transform .16s var(--ease, ease); }
+.sv-plus:active { transform: scale(.92); }
+.sv-new { margin: 12px 0; }
+.sv-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.sv-quick button { padding: 6px 12px; font: inherit; font-size: 12.5px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: inherit; cursor: pointer; }
+.sv-quick button:disabled { opacity: .5; }

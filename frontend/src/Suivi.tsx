@@ -9,7 +9,7 @@ import { api, isNative, shareText } from "./api";
  */
 const money = (n: number) => Math.round(n || 0).toLocaleString("fr-FR").replace(/ | /g, " ");
 const pct = (n: number) => `${String(n ?? 0).replace(".", ",")} %`;
-const STATE_TONE: Record<string, string> = { "à encaisser": "warn", "en attente": "wait", "soldé": "ok", "refusé": "off" };
+const STATE_TONE: Record<string, string> = { "à encaisser": "warn", "en attente": "wait", "soldé": "ok", "refusé": "off", "nouveau": "wait" };
 const waLink = (phone: string) => {
   const d = phone.replace(/\D/g, "");
   return d ? `https://wa.me/${d.length === 9 && d.startsWith("7") ? "221" + d : d}` : "";   // numéro sénégalais sans indicatif : +221
@@ -93,8 +93,8 @@ async function scheduleCollectReminders(rows: any[]) {
 }
 
 /** Conversation avec UniC DANS le suivi : rien ne s'ouvre ailleurs, les chiffres de la page se mettent à jour après chaque réponse. */
-function SuiviChat({ k, title, hint, onChanged }: { k: string; title: string; hint: string; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
+function SuiviChat({ k, title, hint, quick = [], onChanged }: { k: string; title: string; hint: string; quick?: [string, string][]; onChanged: () => void }) {
+  const [open, setOpen] = useState(true);
   const [msgs, setMsgs] = useState<{ id: string; role: string; content: string }[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -103,10 +103,10 @@ function SuiviChat({ k, title, hint, onChanged }: { k: string; title: string; hi
   const load = useCallback(() => api.trackingChat(k).then((d) => setMsgs(d.messages)).catch(() => {}), [k]);
   useEffect(() => { if (open) load(); }, [open, load]);
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [msgs, busy]);
-  const send = async () => {
-    const m = text.trim();
+  const send = async (said?: string) => {
+    const m = (said ?? text).trim();
     if (!m || busy) return;
-    setBusy(true); setErr(""); setText("");
+    setBusy(true); setErr(""); if (said === undefined) setText("");
     setMsgs((x) => [...x, { id: `tmp-${Date.now()}`, role: "user", content: m }]);
     try { await api.trackingSay(k, m); await load(); onChanged(); }
     catch (e: any) { setErr(e?.message || "Erreur"); await load(); }
@@ -126,13 +126,39 @@ function SuiviChat({ k, title, hint, onChanged }: { k: string; title: string; hi
             <div ref={end} />
           </div>
           {err && <p className="error">{err}</p>}
+          {quick.length > 0 && (
+            <div className="sv-quick">{quick.map(([label, say]) => <button key={label} disabled={busy} onClick={() => send(say)}>{label}</button>)}</div>
+          )}
           <div className="sv-chat-in">
             <textarea rows={1} value={text} placeholder="Écris ici…" onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-            <button className="btn btn-copper btn-small" disabled={busy || !text.trim()} onClick={send}>Envoyer</button>
+            <button className="btn btn-copper btn-small" disabled={busy || !text.trim()} onClick={() => send()}>Envoyer</button>
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function NewClient({ onCreated }: { onCreated: (key: string) => void }) {
+  const [f, setF] = useState({ name: "", phone: "", site: "", note: "" });
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true); setMsg("");
+    try { const r = await api.trackingNewClient(f); onCreated(r.key); } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card-box sv-form sv-new">
+      <b>Nouveau client</b>
+      <label>Nom<input value={f.name} autoFocus onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="ex. Awa Ba" /></label>
+      <div className="two-col">
+        <label>Téléphone<input type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+        <label>Lieu du chantier<input value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} placeholder="ex. Mermoz" /></label>
+      </div>
+      <label>Note (optionnel)<input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
+      <button className="btn btn-copper" disabled={busy || f.name.trim().length < 2} onClick={go}>Créer et préparer son dossier</button>
+      {msg && <p className="error">{msg}</p>}
     </section>
   );
 }
@@ -145,6 +171,7 @@ export function Suivi() {
   const [err, setErr] = useState("");
   const [filter, setFilter] = useState("actifs");
   const [search, setSearch] = useState("");
+  const [adding, setAdding] = useState(false);
   const load = useCallback(() => { api.tracking().then((d) => { setOv(d); scheduleCollectReminders(d.rappels || []); }).catch((e) => setErr(e?.message || "Erreur")); }, []);
   useEffect(() => { load(); }, [load]);
   const restore = async (id: string) => { try { await api.trackingRestore(id); load(); } catch (e: any) { setErr(e?.message || "Erreur"); } };
@@ -154,8 +181,12 @@ export function Suivi() {
   return (
     <div className="page">
       <div className="page-inner sv">
-        <h1>Suivi des encaissements</h1>
-        <p className="lede">L'argent de tes devis, client par client. Tout se fait ici : parle à UniC en bas, ou touche un client.</p>
+        <div className="sv-title">
+          <h1>Suivi des encaissements</h1>
+          <button className="sv-plus" aria-label="Ajouter un client" onClick={() => setAdding(!adding)}>{adding ? "×" : "+"}</button>
+        </div>
+        <p className="lede">L'argent de tes devis, client par client. Touche un client pour ouvrir son dossier et parler à UniC.</p>
+        {adding && <NewClient onCreated={(key) => nav(`/suivi/${encodeURIComponent(key)}`)} />}
         {err && <p className="error">{err}</p>}
         {ov && (
           <>
@@ -190,8 +221,6 @@ export function Suivi() {
                 ))}
               </section>
             )}
-            <SuiviChat k="_all" title="💬 Parler à UniC" onChanged={load}
-              hint="Ex. « Awa a accepté son devis », « j'ai reçu 300 000 de Moussa », « qui me doit le plus ? »" />
             <MailSuggestions onApplied={load} />
             <h2 className="sv-h2">Clients · {ov.nb_clients}</h2>
             <input className="sv-search" type="search" placeholder="Chercher un client…" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -284,6 +313,7 @@ function ContactCard({ d, onSaved }: { d: any; onSaved: () => void }) {
           {wa && <a className="btn btn-line btn-small" href={wa} target="_blank" rel="noreferrer">WhatsApp</a>}
         </div>
       )}
+      {d.lieu && <p className="sv-muted">Chantier : {d.lieu}</p>}
       <label>Note<textarea rows={2} value={note} placeholder="Ex. paie par Wave, rappeler après le 15…" onChange={(e) => { setNote(e.target.value); setSaved(""); }} onBlur={save} /></label>
       {saved && <p className="sv-muted">{saved}</p>}
     </section>
@@ -319,8 +349,23 @@ export function SuiviClient() {
           </section>
         )}
         {err && <p className="error">{err}</p>}
+        <SuiviChat k={d.key} title={`💬 Dossier de ${d.client}`} onChanged={load}
+          quick={[["Préparer un devis", `Prépare un devis pour ${d.client}.`], ["Facture", `Prépare une facture pour ${d.client}.`],
+            ["Bon de commande", `Prépare un bon de commande matériaux pour ${d.client}.`], ["Bon de livraison", `Prépare un bon de livraison pour ${d.client}.`]]}
+          hint="Parle de son dossier : devis, métré, prix, facture, bons, avance reçue… Uniquement ce client et le placo." />
         <ContactCard key={d.key + (d.telephone || "")} d={d} onSaved={load} />
+        {d.documents.length > 0 && (
+          <>
+            <h2 className="sv-h2">Documents du dossier</h2>
+            {d.documents.map((x: any) => (
+              <Link key={x.id} className="sv-link" to={`/${x.kind === "invoice" ? "factures" : x.kind === "po" ? "commandes" : "livraisons"}/${x.id}`}>
+                {x.label} · {x.numero}{x.total != null ? ` · ${money(x.total)} FCFA` : ""}
+              </Link>
+            ))}
+          </>
+        )}
         <h2 className="sv-h2">Devis</h2>
+        {!d.devis.length && <p className="sv-muted">Aucun devis pour l'instant : demande-le à UniC dans le dossier ci-dessus.</p>}
         {d.devis.map((q: any) => (
           <section className="card-box sv-quote-card" key={q.id}>
             <div className="sv-row"><b>{q.numero}</b><span className={`sv-chip ${q.decision === "accepted" ? "ok" : q.decision === "declined" ? "off" : "wait"}`}>{DECISION_FR[q.decision]}</span></div>
@@ -385,8 +430,6 @@ export function SuiviClient() {
               onClick={() => window.confirm(`Annuler le versement de ${money(v.montant)} FCFA ? (erreur de saisie)`) && run(() => api.trackingCancelReceipt(v.id))}>Annuler</button>
           </div>
         ))}
-        <SuiviChat k={d.key} title={`💬 Parler à UniC de ${d.client}`} onChanged={load}
-          hint="Ex. « il a accepté », « j'ai reçu 200 000 en Wave », « rappelle-moi de le relancer le 15 »" />
       </div>
     </div>
   );

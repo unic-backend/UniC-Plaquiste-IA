@@ -3548,7 +3548,7 @@ def test_tracking_chat_is_hidden_from_conversation_list_and_knows_the_client(cli
     r = client.post("/api/chat", json={"message": "Elle a accepté", "tracking_key": key})
     assert r.status_code == 200
     sys_text = "\n".join(_sysstr(kw) for _, kw in fake.calls)
-    assert "SUIVI DES ENCAISSEMENTS" in sys_text and "Sophie Thiam Suivi" in sys_text
+    assert "PÉRIMÈTRE STRICT" in sys_text and "Sophie Thiam Suivi" in sys_text
     assert "Suivi" not in " ".join(c["title"] for c in client.get("/api/conversations").json())
     hist = client.get(f"/api/tracking/{key}/chat").json()["messages"]
     assert [m["role"] for m in hist][:2] == ["user", "assistant"]
@@ -3556,3 +3556,23 @@ def test_tracking_chat_is_hidden_from_conversation_list_and_knows_the_client(cli
     assert again["conversation_id"] == r.json()["conversation_id"]   # une seule conversation par client
     assert client.post("/api/chat", json={"message": "x", "tracking_key": "client-inexistant"}).status_code == 404
     assert qid
+
+
+def test_tracking_new_client_without_quote_then_dossier_chat_is_scoped(client, claude):
+    assert client.post("/api/tracking/clients", json={"name": "x"}).status_code == 400
+    r = client.post("/api/tracking/clients", json={"name": "Tidiane Gueye Suivi", "phone": "77 111 22 33", "site": "Mermoz"})
+    assert r.status_code == 200 and r.json()["existait"] is False
+    key = r.json()["key"]
+    assert client.post("/api/tracking/clients", json={"name": "gueye tidiane suivi"}).json() == {"key": key, "existait": True}   # même client
+    c = _tclient(client.get("/api/tracking").json(), "Tidiane Gueye Suivi")
+    assert c["etat"] == "nouveau" and c["nb_devis"] == 0
+    f = client.get(f"/api/tracking/{key}").json()
+    assert f["telephone"] == "77 111 22 33" and f["lieu"] == "Mermoz" and f["devis"] == [] and f["documents"] == []
+    fake = claude(lambda kind, kw: _resp("ok"))
+    client.post("/api/chat", json={"message": "Prépare un devis", "tracking_key": key})
+    sys_text = "\n".join(_sysstr(kw) for _, kw in fake.calls)
+    assert "PÉRIMÈTRE STRICT" in sys_text and "client_name=\"Tidiane Gueye Suivi\"" in sys_text
+    # un devis créé ensuite pour ce nom rejoint la même fiche
+    _track_quote("UC-TRK-0013-TG", "Tidiane Gueye Suivi", 250_000)
+    f = client.get(f"/api/tracking/{key}").json()
+    assert len(f["devis"]) == 1 and f["etat"] == "en attente"
