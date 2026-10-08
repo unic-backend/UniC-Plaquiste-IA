@@ -43,6 +43,16 @@ BRANCH_PREFIX = "unic-ai/"
 REQUIRED_CHECKS = ("backend", "frontend")   # jobs de .github/workflows/tests.yml
 
 
+RELEASE_RE = re.compile(r"\b(apk|d[ée]ploie\w*|red[ée]ploie\w*|mise? en ligne|render|nouveau lien|new lien)\b", re.I)
+CODE_VERB_RE = re.compile(r"\b(ajoute\w*|corrige\w*|modifie\w*|change\w*|supprime\w*|retire\w*|affiche\w*|cr[ée]e\w*|bouton|page)\b", re.I)
+
+
+def is_release_request(text: str) -> bool:
+    """« Donne le nouvel APK », « redéploie sur Render » : une publication, pas du code à écrire."""
+    t = (text or "").strip()
+    return len(t) <= 160 and bool(RELEASE_RE.search(t)) and not CODE_VERB_RE.search(t)
+
+
 class RepairError(ValueError):
     def __init__(self, msg: str, status: int = 400):
         super().__init__(msg)
@@ -353,6 +363,8 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") 
         raise RepairError("Type inconnu.")
     if not _token(db):
         raise RepairError("Atelier non connecté à GitHub : Paramètres › Atelier › Connecter GitHub.")
+    if is_release_request(request):
+        raise RepairError("Ce n'est pas du code : utilise le bloc « Publication » en haut de l'Atelier (déploiement Render, nouvel APK).")
     if not incident_id and len((request or "").strip()) < 10:
         raise RepairError("Décris le problème ou la fonction voulue (une phrase au moins).")
     if incident_id and db.get(Incident, incident_id) is None:
@@ -380,6 +392,20 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") 
 
 # ---------- état des tests, fusion, refus ----------
 
+def _test_runs(tok: str, repo: str, sha: str) -> list[dict]:
+    """Tests du commit. Un jeton GitHub « fine-grained » n'a pas la permission Checks : on lit alors les jobs du workflow « Tests »
+    par l'API Actions (permission « Actions : lecture » suffit)."""
+    r = _gh("GET", f"/repos/{repo}/commits/{sha}/check-runs", tok)
+    if r.status_code < 300:
+        return r.json().get("check_runs", [])
+    runs = _ok(_gh("GET", f"/repos/{repo}/actions/runs", tok, params={"head_sha": sha, "per_page": 20}), "tests").get("workflow_runs", [])
+    latest = next((w for w in runs if w.get("name") == "Tests"), None)   # la plus récente d'abord
+    if latest is None:
+        return []
+    jobs = _ok(_gh("GET", f"/repos/{repo}/actions/runs/{latest['id']}/jobs", tok), "tests").get("jobs", [])
+    return [{"name": j.get("name"), "status": j.get("status"), "conclusion": j.get("conclusion")} for j in jobs]
+
+
 def checks(db: Session, job: RepairJob) -> dict:
     """État des tests GitHub Actions sur la proposition."""
     if not job.pr_number:
@@ -390,7 +416,7 @@ def checks(db: Session, job: RepairJob) -> dict:
         return {"state": "merged"}
     if pr.get("state") == "closed":
         return {"state": "closed"}
-    runs = _ok(_gh("GET", f"/repos/{repo}/commits/{pr['head']['sha']}/check-runs", tok), "tests").get("check_runs", [])
+    runs = _test_runs(tok, repo, pr["head"]["sha"])
     runs = [r for r in runs if r.get("name") in REQUIRED_CHECKS]   # les tests (workflow « Tests »), pas l'APK
     if {r.get("name") for r in runs} != set(REQUIRED_CHECKS):
         return {"state": "pending", "detail": "Tests pas encore lancés."}
@@ -398,6 +424,77 @@ def checks(db: Session, job: RepairJob) -> dict:
         return {"state": "pending", "detail": "Tests en cours…"}
     bad = [r["name"] for r in runs if r.get("conclusion") not in ("success", "skipped", "neutral")]
     return {"state": "failure", "detail": "Échec : " + ", ".join(bad)} if bad else {"state": "success", "detail": "Tous les tests passent."}
+
+
+def sync(db: Session, job: RepairJob) -> None:
+    """La pull request a été fusionnée (ou fermée) sans passer par « Fusionner » (fusion automatique de GitHub) : on aligne la proposition,
+    sinon elle resterait « Prête » et la pastille de l'Atelier ne disparaîtrait jamais."""
+    if job.status != "proposed" or not job.pr_number:
+        return
+    state = checks(db, job)["state"]
+    if state not in ("merged", "closed"):
+        return
+    job.status = state
+    if job.incident_id:
+        i = db.get(Incident, job.incident_id)
+        if i is not None and i.status == "fixing":
+            i.status, i.fix_url = ("fixed", i.fix_url) if state == "merged" else ("open", "")
+    db.commit()
+
+
+def sync_all(db: Session) -> None:
+    for job in db.query(RepairJob).filter(RepairJob.status == "proposed").all():
+        try:
+            sync(db, job)
+        except RepairError:
+            return   # GitHub injoignable ou non connecté : l'état reste tel quel
+
+
+# ---------- publication : déploiement Render et APK ----------
+
+def _deploy_state(head: str) -> dict:
+    """Le serveur compare SA version (fournie par Render) à la dernière version du dépôt : pas de supposition."""
+    mine = os.environ.get("RENDER_GIT_COMMIT", "").strip()
+    if not mine:
+        return {"state": "unknown", "detail": "Version du serveur inconnue (hors Render)."}
+    if mine == head:
+        return {"state": "ok", "detail": "Render a la dernière version."}
+    return {"state": "pending", "detail": "Render n'a pas encore la dernière version : déploiement en cours. "
+            "Si ça dure plus de 10 minutes : Render › Manual Deploy."}
+
+
+def release(db: Session) -> dict:
+    """État de la publication : version en ligne sur Render et dernier APK construit."""
+    tok, repo, base = _ctx(db)
+    head = _ok(_gh("GET", f"/repos/{repo}/commits/{base}", tok), "dernière version").get("sha", "")
+    out = {"latest": head[:7], "deploy": _deploy_state(head), "apk": {"state": "unknown", "detail": "Aucun APK construit."}}
+    r = _gh("GET", f"/repos/{repo}/actions/workflows/android.yml/runs", tok, params={"branch": base, "per_page": 1})
+    if r.status_code in (403, 404):
+        out["apk"] = {"state": "unknown", "detail": "Le jeton GitHub n'a pas la permission « Actions » : ajoute « Actions : Read and write »."}
+        return out
+    runs = (r.json() or {}).get("workflow_runs", []) if r.status_code < 300 else []
+    if runs:
+        run = runs[0]
+        done = run.get("status") == "completed"
+        ok = done and run.get("conclusion") == "success"
+        state = "building" if not done else ("failed" if not ok else ("ready" if run.get("head_sha") == head else "old"))
+        out["apk"] = {"state": state, "url": run.get("html_url", ""), "when": run.get("updated_at", ""),
+                      "detail": {"building": "APK en construction (3 minutes environ)…", "ready": "APK à jour.",
+                                 "old": "Cet APK ne contient pas la dernière version.", "failed": "La construction a échoué."}[state]}
+    return out
+
+
+def build_apk(db: Session) -> dict:
+    """Clic du patron : lance la construction de l'APK sur la dernière version. (La fusion automatique de GitHub ne la déclenche pas.)"""
+    tok, repo, base = _ctx(db)
+    r = _gh("POST", f"/repos/{repo}/actions/workflows/android.yml/dispatches", tok, json={"ref": base})
+    if r.status_code == 204:
+        return {"ok": True, "note": "APK en construction : 3 minutes environ. Le lien apparaît ici."}
+    if r.status_code in (403, 404):
+        raise RepairError("Le jeton GitHub n'a pas la permission de lancer la construction : "
+                          "github.com › Settings › Developer settings › ton jeton › Permissions › « Actions : Read and write ».", 403)
+    _ok(r, "construction de l'APK")
+    return {"ok": True, "note": "Construction lancée."}
 
 
 def to_dict(job: RepairJob) -> dict:
@@ -431,8 +528,8 @@ def merge(db: Session, job: RepairJob) -> dict:
             deployed = False
     db.commit()
     return {"ok": True, "deployed": deployed,
-            "note": "Redéploiement lancé : la correction sera en ligne dans quelques minutes." if deployed
-            else "Fusionné. Lance « Manual Deploy » sur Render pour la mettre en ligne."}
+            "note": "Redéploiement lancé : la correction sera en ligne dans quelques minutes. Pour l'APK : bloc « Publication »." if deployed
+            else "Fusionné. Render redéploie tout seul ; sinon lance « Manual Deploy ». Pour l'APK : bloc « Publication »."}
 
 
 def close(db: Session, job: RepairJob) -> None:

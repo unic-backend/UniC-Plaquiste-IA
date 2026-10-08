@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import * as I from "./Icons";
 
@@ -7,6 +7,50 @@ import * as I from "./Icons";
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "jamais");
 const KIND: Record<string, string> = { error: "Erreur", sleeping: "Agent endormi", check: "Contrôle", tool: "Agent" };
 const JOB: Record<string, string> = { working: "UniC code…", proposed: "Prête", merged: "Fusionnée", failed: "Échec", closed: "Refusée" };
+
+// Même règle que le serveur (repair.is_release_request) : « donne le nouvel APK » est une publication, pas du code à écrire.
+const RELEASE_RE = /\b(apk|d[ée]ploie\w*|red[ée]ploie\w*|mise? en ligne|render|nouveau lien|new lien)\b/i;
+const CODE_VERB_RE = /\b(ajoute\w*|corrige\w*|modifie\w*|change\w*|supprime\w*|retire\w*|affiche\w*|cr[ée]e\w*|bouton|page)\b/i;
+const isRelease = (t: string) => t.trim().length <= 160 && RELEASE_RE.test(t) && !CODE_VERB_RE.test(t);
+const TONE: Record<string, string> = { ok: "hint ic", ready: "hint ic", pending: "hint", building: "hint", old: "error", failed: "error", unknown: "hint" };
+
+/** Publication : version en ligne sur Render et APK, avec le lien dès qu'il est prêt. Se rafraîchit seul pendant une construction. */
+function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) => void }) {
+  const [r, setR] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api.release().then(setR).catch((e) => onMsg(e?.message || "Erreur")), [onMsg]);
+  useEffect(() => { if (connected) load(); }, [connected, load]);
+  const waiting = r && (r.apk?.state === "building" || r.deploy?.state === "pending");
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(load, 12000);
+    return () => clearInterval(t);
+  }, [waiting, load]);
+  const build = async () => {
+    setBusy(true); onMsg("");
+    try { const x = await api.buildApk(); onMsg(x.note); await load(); } catch (e: any) { onMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  if (!connected) return null;
+  return (
+    <section className="card-box">
+      <div className="at-head"><h3>Publication</h3>
+        <button className="btn btn-line btn-small" onClick={load}><I.Refresh size={15} /> Actualiser</button></div>
+      {!r && <p className="hint">Lecture de l'état…</p>}
+      {r && (
+        <>
+          <p className={TONE[r.deploy.state]}>{r.deploy.state === "ok" ? "✓ " : ""}<b>Render</b> · {r.deploy.detail} {r.latest && <span className="hint">(version {r.latest})</span>}</p>
+          <p className={TONE[r.apk.state]}>{r.apk.state === "ready" ? "✓ " : ""}<b>APK</b> · {r.apk.detail}</p>
+          <div className="row-actions">
+            <button className="btn btn-copper btn-small" disabled={busy || r.apk.state === "building"} onClick={build}>
+              {r.apk.state === "building" ? "Construction…" : "Nouvel APK"}</button>
+            {r.apk.url && r.apk.state !== "building" && <a className="btn btn-line btn-small" href={r.apk.url} target="_blank" rel="noreferrer">Ouvrir le lien de l'APK</a>}
+          </div>
+          {r.apk.url && <p className="hint">Sur la page : « Artifacts » en bas, télécharge l'APK, décompresse, installe.</p>}
+        </>
+      )}
+    </section>
+  );
+}
 
 export function Atelier() {
   const [d, setD] = useState<any>(null);
@@ -46,6 +90,7 @@ export function Atelier() {
         <h1>Atelier</h1>
         <p className="lede">UniC se surveille, se répare et crée ses agents. Rien ne change en ligne sans ton clic « Fusionner ».</p>
         {msg && <p className="hint" role="status">{msg}</p>}
+        <Release connected={!!connected} onMsg={setMsg} />
 
         <section className="card-box">
           <div className="at-head"><h3>Travail automatique</h3>
@@ -117,10 +162,17 @@ export function Atelier() {
           <p className="hint">Décris une correction ou une nouvelle fonction : UniC la code, ajoute un test, puis te la propose.</p>
           <textarea rows={3} value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Ex. : ajoute le nom du chantier en haut de chaque facture" />
           <div className="row-actions">
-            <button className="btn btn-copper btn-small" disabled={!connected || ask.trim().length < 10 || !!busy}
-              onClick={() => act("feat", () => api.repair({ kind: "feature", request: ask }), () => { setAsk(""); return "UniC code la fonction (quelques minutes)."; })}>Nouvelle fonction</button>
-            <button className="btn btn-line btn-small" disabled={!connected || ask.trim().length < 10 || !!busy}
-              onClick={() => act("fix", () => api.repair({ kind: "fix", request: ask }), () => { setAsk(""); return "UniC cherche et corrige (quelques minutes)."; })}>Corriger un bug</button>
+            {isRelease(ask) ? (
+              <button className="btn btn-copper btn-small" disabled={!connected || !!busy}
+                onClick={() => act("apk", () => api.buildApk(), (r) => { setAsk(""); return r.note; })}>Lancer le nouvel APK</button>
+            ) : (
+              <>
+                <button className="btn btn-copper btn-small" disabled={!connected || ask.trim().length < 10 || !!busy}
+                  onClick={() => act("feat", () => api.repair({ kind: "feature", request: ask }), () => { setAsk(""); return "UniC code la fonction (quelques minutes)."; })}>Nouvelle fonction</button>
+                <button className="btn btn-line btn-small" disabled={!connected || ask.trim().length < 10 || !!busy}
+                  onClick={() => act("fix", () => api.repair({ kind: "fix", request: ask }), () => { setAsk(""); return "UniC cherche et corrige (quelques minutes)."; })}>Corriger un bug</button>
+              </>
+            )}
           </div>
         </section>
 
