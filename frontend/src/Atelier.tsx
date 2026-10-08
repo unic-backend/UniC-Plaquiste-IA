@@ -38,8 +38,8 @@ function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) 
       {!r && <p className="hint">Lecture de l'état…</p>}
       {r && (
         <>
-          <p className={TONE[r.deploy.state]}>{r.deploy.state === "ok" ? "✓ " : ""}<b>Render</b> · {r.deploy.detail} {r.latest && <span className="hint">(version {r.latest})</span>}</p>
-          <p className={TONE[r.apk.state]}>{r.apk.state === "ready" ? "✓ " : ""}<b>APK</b> · {r.apk.detail}</p>
+          <p className={TONE[r.deploy.state]}><span>{r.deploy.state === "ok" ? "✓ " : ""}<b>Render</b> · {r.deploy.detail}{r.latest ? ` (version ${r.latest})` : ""}</span></p>
+          <p className={TONE[r.apk.state]}><span>{r.apk.state === "ready" ? "✓ " : ""}<b>APK</b> · {r.apk.detail}</span></p>
           <div className="row-actions">
             <button className="btn btn-copper btn-small" disabled={busy || r.apk.state === "building"} onClick={build}>
               {r.apk.state === "building" ? "Construction…" : "Nouvel APK"}</button>
