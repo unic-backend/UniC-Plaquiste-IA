@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, type ChatMessage, type Conv } from "./api";
 import { AttachRow, type Attach } from "./Attach";
 import { FileCard, ShareButton } from "./Share";
@@ -10,6 +11,8 @@ export function ConvMenu({ conv, onChange, onGone }: { conv: Conv; onChange: (n:
   const [sheet, setSheet] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [err, setErr] = useState("");
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 64, right: 12 });
   useEffect(() => {   // le retour du téléphone ferme d'abord le menu ou la feuille
     if (!menu && !sheet) return;
     const h = (e: Event) => { e.preventDefault(); setMenu(false); setSheet(false); setConfirm(false); };
@@ -20,11 +23,15 @@ export function ConvMenu({ conv, onChange, onGone }: { conv: Conv; onChange: (n:
   const run = async (fn: () => Promise<void>) => { try { await fn(); close(); } catch (e: any) { setErr(e?.message || "Erreur"); } };
   return (
     <div className="conv-tools">
-      <button className="icon-btn" aria-label="Options de la conversation" aria-expanded={menu} onClick={() => { setMenu((m) => !m); setConfirm(false); }}><I.More size={22} /></button>
-      {menu && (
+      <button ref={btn} className="icon-btn" aria-label="Options de la conversation" aria-expanded={menu} onClick={() => {
+        const r = btn.current?.getBoundingClientRect();
+        if (r) setPos({ top: Math.round(r.bottom + 8), right: Math.max(8, Math.round(window.innerWidth - r.right)) });
+        setMenu((m) => !m); setConfirm(false);
+      }}><I.More size={22} /></button>
+      {menu && createPortal(   // hors de la barre du haut : au-dessus de tout, jamais sous le texte de la conversation
         <>
           <div className="conv-tools-shade" onClick={close} />
-          <div className="conv-tools-menu" role="menu">
+          <div className="conv-tools-menu" role="menu" style={{ top: pos.top, right: pos.right }}>
             {!confirm ? (
               <>
                 <button role="menuitem" onClick={() => { setMenu(false); setSheet(true); }}><I.File size={18} /> Fichiers de la conversation</button>
@@ -44,9 +51,10 @@ export function ConvMenu({ conv, onChange, onGone }: { conv: Conv; onChange: (n:
             )}
             {err && <p className="error">{err}</p>}
           </div>
-        </>
+        </>,
+        document.body,
       )}
-      {sheet && <ConvFiles id={conv.id} title={conv.title} onClose={() => setSheet(false)} />}
+      {sheet && createPortal(<ConvFiles id={conv.id} title={conv.title} onClose={() => setSheet(false)} />, document.body)}
     </div>
   );
 }

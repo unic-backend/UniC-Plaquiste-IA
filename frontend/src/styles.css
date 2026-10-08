@@ -1251,8 +1251,8 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 
 /* Menu de la conversation (haut à droite), archive, chantiers en bannières */
 .topbar .conv-tools { margin-left: auto; position: relative; }
-.conv-tools-shade { position: fixed; inset: 0; z-index: 40; }
-.conv-tools-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 41; min-width: 250px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 6px; box-shadow: 0 14px 34px rgba(0,0,0,.22); animation: msgIn .18s var(--ease) both; }
+.conv-tools-shade { position: fixed; inset: 0; z-index: 1000; }
+.conv-tools-menu { position: fixed; z-index: 1001; min-width: 250px; max-width: calc(100vw - 16px); background: var(--paper, #faf7f1); color: var(--ink, inherit); border: 1px solid var(--line); border-radius: 16px; padding: 6px; box-shadow: 0 14px 34px rgba(0,0,0,.22); animation: msgIn .18s var(--ease) both; }
 .conv-tools-menu button { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; color: inherit; font: inherit; font-size: 15px; padding: 12px 12px; border-radius: 10px; cursor: pointer; text-align: left; }
 .conv-tools-menu button:active { background: var(--shade, rgba(0,0,0,.07)); }
 .conv-tools-menu .danger { color: #b3261e; }
