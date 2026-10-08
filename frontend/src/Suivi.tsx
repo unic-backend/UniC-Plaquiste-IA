@@ -4,8 +4,7 @@ import { api, isNative, shareText } from "./api";
 
 /**
  * Suivi des encaissements : l'argent des devis, client par client. Jamais l'avancement du chantier.
- * Les chiffres viennent du serveur (calculés en code). Rien n'est enregistré sans un clic du patron :
- * les e-mails ne font que suggérer.
+ * Les chiffres viennent du serveur (calculés en code). Rien n'est enregistré sans un clic du patron.
  */
 const money = (n: number) => Math.round(n || 0).toLocaleString("fr-FR").replace(/ | /g, " ");
 const pct = (n: number) => `${String(n ?? 0).replace(".", ",")} %`;
@@ -23,55 +22,6 @@ function Bar({ value }: { value: number }) {
 
 function Kpi({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
   return <div className={`sv-kpi ${tone}`}><span>{label}</span><b>{value}</b></div>;
-}
-
-function MailSuggestions({ onApplied }: { onApplied: () => void }) {
-  const [rows, setRows] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const load = useCallback((refresh = false) => {
-    setBusy(true); setMsg("");
-    api.trackingMail(refresh).then((d) => { setRows(d.suggestions || []); if (d.note) setMsg(d.note); })
-      .catch((e) => setMsg(e?.message || "Erreur")).finally(() => setBusy(false));
-  }, []);
-  useEffect(() => { load(); }, [load]);
-  const apply = async (h: any) => {
-    setMsg("");
-    try {
-      const q = h.devis_id;
-      if (h.signal === "acceptation") await api.trackingDecide(q, "accepted");
-      else await api.trackingReceipt({ quote_id: q, amount: h.montant, kind: "avance", mail_id: h.mail_id, note: `D'après un e-mail de ${h.de}` });
-      if (h.signal === "acceptation") await api.trackingDismiss(h.mail_id);
-      load(); onApplied();
-    } catch (e: any) { setMsg(e?.message || "Erreur"); }
-  };
-  const skip = async (h: any) => { try { await api.trackingDismiss(h.mail_id); load(); } catch (e: any) { setMsg(e?.message || "Erreur"); } };
-  return (
-    <section className="card-box sv-mail">
-      <div className="sv-row">
-        <h3>Dans mes e-mails</h3>
-        <button className="btn btn-line btn-small" disabled={busy} onClick={() => load(true)}>{busy ? "Lecture…" : "Lire mes mails"}</button>
-      </div>
-      {!rows.length && <p className="sv-muted">Aucun e-mail client à vérifier. Rien n'est enregistré sans toi.</p>}
-      {rows.map((h) => (
-        <div className="sv-hint" key={h.mail_id}>
-          <div><b>{h.client}</b> <span className={`sv-chip ${h.signal === "paiement" ? "ok" : "wait"}`}>{h.signal === "paiement" ? "Paiement ?" : "Acceptation ?"}</span></div>
-          <p className="sv-quote">« {h.extrait} »</p>
-          <p className="sv-muted">{h.objet}{h.montant ? ` · ${money(h.montant)} FCFA détectés` : ""}</p>
-          <div className="sv-actions">
-            {h.devis && (h.signal === "acceptation" || h.montant) && (
-              <button className="btn btn-copper btn-small" onClick={() => apply(h)}>
-                {h.signal === "acceptation" ? `Marquer ${h.devis} accepté` : `Enregistrer ${money(h.montant)} FCFA`}
-              </button>
-            )}
-            {!h.devis && h.devis_possibles?.length > 0 && <span className="sv-muted">Plusieurs devis : ouvre la fiche du client.</span>}
-            <button className="btn btn-line btn-small" onClick={() => skip(h)}>Écarter</button>
-          </div>
-        </div>
-      ))}
-      {msg && <p className="error">{msg}</p>}
-    </section>
-  );
 }
 
 const REMIND_BASE = 6000;   // identifiants des rappels d'encaissement : 6000 à 6199
@@ -221,7 +171,6 @@ export function Suivi() {
                 ))}
               </section>
             )}
-            <MailSuggestions onApplied={load} />
             <h2 className="sv-h2">Clients · {ov.nb_clients}</h2>
             <input className="sv-search" type="search" placeholder="Chercher un client…" value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="sv-filters" role="group" aria-label="Filtrer">
