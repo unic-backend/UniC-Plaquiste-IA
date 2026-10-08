@@ -3576,3 +3576,80 @@ def test_tracking_new_client_without_quote_then_dossier_chat_is_scoped(client, c
     _track_quote("UC-TRK-0013-TG", "Tidiane Gueye Suivi", 250_000)
     f = client.get(f"/api/tracking/{key}").json()
     assert len(f["devis"]) == 1 and f["etat"] == "en attente"
+
+
+class _GhR:
+    def __init__(self, code, data=None):
+        self.status_code, self._d, self.content = code, data if data is not None else {}, b"x"
+
+    def json(self):
+        return self._d
+
+
+def _repair_ready(db):
+    from app import repair, secrets_box
+    repair._put(db, "repair_gh_token", secrets_box.encrypt("ghp_" + "y" * 30))
+    repair._put(db, "repair_base", "main")
+    db.commit()
+
+
+def test_repair_job_merged_by_github_is_synced_and_leaves_the_badge(client, monkeypatch):
+    from app import repair
+    from app.database import SessionLocal
+    from app.models import Incident, RepairJob
+    db = SessionLocal()
+    _repair_ready(db)
+    inc = Incident(fingerprint="fp-sync-merged", source="unic.x", message="boom", detail="", status="fixing")
+    db.add(inc)
+    db.flush()
+    job = RepairJob(kind="fix", status="proposed", pr_number=71, incident_id=inc.id)
+    gone = RepairJob(kind="feature", status="proposed", pr_number=72)
+    db.add_all([job, gone])
+    db.commit()
+    monkeypatch.setattr(repair, "_gh", lambda m, p, t, **kw: _GhR(200, {"merged": p.endswith("/71"), "state": "closed", "head": {"sha": "s"}}))
+    data = client.get("/api/selfcare").json()
+    states = {j["id"]: j["status"] for j in data["jobs"]}
+    assert states[job.id] == "merged" and states[gone.id] == "closed"   # plus « Prête » : la pastille disparaît
+    db.expire_all()
+    assert db.get(Incident, inc.id).status == "fixed"
+    db.close()
+
+
+def test_release_state_apk_build_and_release_requests_are_not_code(client, monkeypatch):
+    from app import repair
+    from app.database import SessionLocal
+    db = SessionLocal()
+    _repair_ready(db)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abc1234full")
+    run = {"status": "completed", "conclusion": "success", "head_sha": "abc1234full", "html_url": "https://github.com/x/y/actions/runs/9", "updated_at": "t"}
+    seen = []
+
+    def gh(method, path, token, **kw):
+        seen.append((method, path))
+        if "/commits/" in path:
+            return _GhR(200, {"sha": "abc1234full"})
+        if path.endswith("/runs"):
+            return _GhR(200, {"workflow_runs": [run]})
+        if path.endswith("/dispatches"):
+            return _GhR(204)
+        return _GhR(200, {})
+    monkeypatch.setattr(repair, "_gh", gh)
+    r = client.get("/api/selfcare/release").json()
+    assert r["deploy"]["state"] == "ok" and r["apk"]["state"] == "ready" and r["apk"]["url"].endswith("/runs/9")
+    run["head_sha"] = "older"
+    assert client.get("/api/selfcare/release").json()["apk"]["state"] == "old"
+    run["status"] = "in_progress"
+    assert client.get("/api/selfcare/release").json()["apk"]["state"] == "building"
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "other")
+    assert client.get("/api/selfcare/release").json()["deploy"]["state"] == "pending"
+    assert client.post("/api/selfcare/release/apk").status_code == 200 and ("POST", "/repos/unic-backend/UniC-Plaquiste-IA/actions/workflows/android.yml/dispatches") in seen
+    monkeypatch.setattr(repair, "_gh", lambda m, p, t, **kw: _GhR(403))
+    denied = client.post("/api/selfcare/release/apk")
+    assert denied.status_code == 403 and "Actions" in denied.json()["detail"]
+    assert client.get("/api/selfcare/release").status_code in (200, 502)
+    for text in ("donne le nouvel apk", "redéploie sur Render", "Je veux le nouveau lien"):
+        assert repair.is_release_request(text)
+    assert not repair.is_release_request("ajoute un bouton pour télécharger l'APK dans les paramètres")
+    r = client.post("/api/selfcare/repair", json={"kind": "feature", "request": "donne moi le nouvel apk"})
+    assert r.status_code == 400 and "Publication" in r.json()["detail"]
+    db.close()

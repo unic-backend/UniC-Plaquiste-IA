@@ -1783,6 +1783,7 @@ def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)
     from app import agents, repair, selfcare
     from app.models import AppSetting, CustomAgent, RepairJob
     selfcare.ensure_running()
+    repair.sync_all(db)   # une proposition fusionnée par GitHub n'est plus « à voir » : la pastille disparaît
     last = db.get(AppSetting, "selfcheck_last")
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
@@ -1850,12 +1851,32 @@ def selfcare_job(jid: str, db: Session = Depends(get_db), user: User = Depends(A
     j = db.get(RepairJob, jid)
     if j is None:
         raise HTTPException(404, "Proposition introuvable")
+    if j.status == "proposed":
+        try:
+            repair.sync(db, j)
+        except repair.RepairError:
+            pass
     out = repair.to_dict(j)
     if j.status == "proposed":
         try:
             out["checks"] = repair.checks(db, j)
         except repair.RepairError as exc:
             out["checks"] = {"state": "unknown", "detail": str(exc)}
+    return out
+
+
+@router.get("/selfcare/release")
+def selfcare_release(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    return _repair_call(repair.release, db)
+
+
+@router.post("/selfcare/release/apk")
+def selfcare_release_apk(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import repair
+    out = _repair_call(repair.build_apk, db)
+    audit(db, user.id, "apk_build", "release", "android")
+    db.commit()
     return out
 
 
