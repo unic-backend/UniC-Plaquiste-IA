@@ -1234,3 +1234,17 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-quick { display: flex; gap: 6px; flex-wrap: wrap; }
 .sv-quick button { padding: 6px 12px; font: inherit; font-size: 12.5px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: inherit; cursor: pointer; }
 .sv-quick button:disabled { opacity: .5; }
+
+/* Atelier : tâches en bannières (5 visibles, le reste en archive) */
+.at-banner { border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-bottom: 8px; overflow: hidden; }
+.at-banner.s-proposed { border-left: 4px solid var(--copper); }
+.at-banner.s-working { border-left: 4px solid #2e7d4f; }
+.at-banner-head { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "tag chev chev2" "title title title" "date date date"; gap: 4px 8px; align-items: center; width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 0; padding: 12px 14px; cursor: pointer; }
+.at-banner-head .at-tag { grid-area: tag; justify-self: start; }
+.at-banner-title { grid-area: title; font-size: 14.5px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.at-banner-date { grid-area: date; font-size: 12px; color: var(--muted); }
+.at-chev { grid-area: chev2; color: var(--muted); }
+.at-banner-body { padding: 0 14px 14px; display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.at-banner-body p { margin: 0; overflow-wrap: anywhere; }
+.at-archive { margin-top: 12px; }
+.at-archive summary { cursor: pointer; color: var(--muted); padding: 6px 0; }

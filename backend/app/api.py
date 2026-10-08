@@ -1880,6 +1880,39 @@ def selfcare_release_apk(db: Session = Depends(get_db), user: User = Depends(ADM
     return out
 
 
+FINISHED_JOBS = ("merged", "closed", "failed")
+
+
+class PurgeIn(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/selfcare/jobs/purge")
+def selfcare_purge(body: PurgeIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron : vide l'archive. Seules les tâches terminées sont supprimées, jamais une proposition à décider."""
+    from app.models import RepairJob
+    rows = db.query(RepairJob).filter(RepairJob.id.in_(body.ids), RepairJob.status.in_(FINISHED_JOBS)).all()
+    for j in rows:
+        db.delete(j)
+    audit(db, user.id, "repair_purge", "repair_job", "archive", f"{len(rows)} tâche(s)")
+    db.commit()
+    return {"deleted": len(rows)}
+
+
+@router.delete("/selfcare/jobs/{jid}")
+def selfcare_delete_job(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app.models import RepairJob
+    j = db.get(RepairJob, jid)
+    if j is None:
+        raise HTTPException(404, "Tâche introuvable")
+    if j.status not in FINISHED_JOBS:
+        raise HTTPException(409, "Cette tâche n'est pas terminée : fusionne-la ou refuse-la d'abord.")
+    db.delete(j)
+    audit(db, user.id, "repair_delete", "repair_job", jid)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/selfcare/jobs/{jid}/merge")
 def selfcare_merge(jid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     from app import repair

@@ -6,6 +6,14 @@ import * as I from "./Icons";
 
 const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "jamais");
 const KIND: Record<string, string> = { error: "Erreur", sleeping: "Agent endormi", check: "Contrôle", tool: "Agent" };
+const MAX_SHOWN = 5;   // bannières visibles ; les autres passent à l'archive toutes seules
+const DONE = ["merged", "closed", "failed"];
+/** Titre court d'une tâche : la demande du patron, sinon la première phrase du résumé. */
+function jobTitle(j: any): string {
+  const raw = String(j.request || j.summary || "Tâche").replace(/^\s*(Demande|Correction)\s*:\s*/i, "").replace(/[`*]/g, "").trim();
+  const first = raw.split(/(?<=[.!?])\s/)[0] || raw;
+  return first.length > 72 ? first.slice(0, 70).trimEnd() + "…" : first;
+}
 const JOB: Record<string, string> = { working: "UniC code…", proposed: "Prête", merged: "Fusionnée", failed: "Échec", closed: "Refusée" };
 
 // Même règle que le serveur (repair.is_release_request) : « donne le nouvel APK » est une publication, pas du code à écrire.
@@ -38,8 +46,8 @@ function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) 
       {!r && <p className="hint">Lecture de l'état…</p>}
       {r && (
         <>
-          <p className={TONE[r.deploy.state]}>{r.deploy.state === "ok" ? "✓ " : ""}<b>Render</b> · {r.deploy.detail} {r.latest && <span className="hint">(version {r.latest})</span>}</p>
-          <p className={TONE[r.apk.state]}>{r.apk.state === "ready" ? "✓ " : ""}<b>APK</b> · {r.apk.detail}</p>
+          <p className={TONE[r.deploy.state]}><span>{r.deploy.state === "ok" ? "✓ " : ""}<b>Render</b> · {r.deploy.detail}{r.latest ? ` (version ${r.latest})` : ""}</span></p>
+          <p className={TONE[r.apk.state]}><span>{r.apk.state === "ready" ? "✓ " : ""}<b>APK</b> · {r.apk.detail}</span></p>
           <div className="row-actions">
             <button className="btn btn-copper btn-small" disabled={busy || r.apk.state === "building"} onClick={build}>
               {r.apk.state === "building" ? "Construction…" : "Nouvel APK"}</button>
@@ -80,6 +88,55 @@ export function Atelier() {
     try { const r = await fn(); if (ok) setMsg(ok(r)); await load(); }
     catch (e: any) { setMsg(e?.message || "Erreur"); }
     finally { setBusy(""); }
+  };
+
+  const [openJob, setOpenJob] = useState<string>("");
+  const active = (j: any) => j.status === "working" || j.status === "proposed";
+  const sorted = [...(d?.jobs || [])].sort((a: any, b: any) => Number(active(b)) - Number(active(a)) || (b.created_at || "").localeCompare(a.created_at || ""));
+  const shown = sorted.slice(0, MAX_SHOWN);
+  const archived = sorted.slice(MAX_SHOWN);
+  const banner = (j: any) => {
+    const c = jobs[j.id]?.checks;
+    const isOpen = openJob === j.id;
+    return (
+      <article key={j.id} className={`at-banner s-${j.status} ${isOpen ? "open" : ""}`}>
+        <button className="at-banner-head" aria-expanded={isOpen} onClick={() => setOpenJob(isOpen ? "" : j.id)}>
+          <span className={`at-tag s-${j.status}`}>{JOB[j.status] || j.status}</span>
+          <span className="at-banner-title">{jobTitle(j)}</span>
+          <span className="at-banner-date">{when(j.created_at)}</span>
+          <span className="at-chev" aria-hidden="true">{isOpen ? "▴" : "▾"}</span>
+        </button>
+        {isOpen && (
+          <div className="at-banner-body">
+            <p className="hint">{j.kind === "feature" ? "Fonction" : "Correction"}</p>
+            <p>{j.summary || j.request || "…"}</p>
+            {j.error && <p className="error">{j.error}</p>}
+            {j.files?.length > 0 && <p className="hint">Fichiers : {j.files.join(", ")}</p>}
+            {j.status === "proposed" && (
+              <>
+                <p className={c?.state === "success" ? "hint ic" : c?.state === "failure" ? "error" : "hint"}>
+                  {c ? (c.state === "success" ? "✓ " : "") + (c.detail || c.state) : "Lecture des tests…"}
+                </p>
+                <div className="row-actions">
+                  <button className="btn btn-copper btn-small" disabled={c?.state !== "success" || !!busy}
+                    onClick={() => window.confirm("Fusionner cette proposition dans l'appli ?") &&
+                      act(j.id, () => api.mergeJob(j.id), (r) => r.note)}>Fusionner</button>
+                  {j.pr_url && <a className="btn btn-line btn-small" href={j.pr_url} target="_blank" rel="noreferrer">Voir le code</a>}
+                  <button className="btn btn-ghost btn-small" onClick={() => act(j.id, () => api.closeJob(j.id))}>Refuser</button>
+                </div>
+              </>
+            )}
+            {DONE.includes(j.status) && (
+              <div className="row-actions">
+                {j.pr_url && <a className="btn btn-line btn-small" href={j.pr_url} target="_blank" rel="noreferrer">Voir le code</a>}
+                <button className="btn btn-ghost btn-small" disabled={!!busy}
+                  onClick={() => window.confirm("Supprimer cette tâche de l'Atelier ?") && act(j.id, () => api.deleteJob(j.id))}>Supprimer</button>
+              </div>
+            )}
+          </div>
+        )}
+      </article>
+    );
   };
 
   if (!d) return <div className="page"><div className="page-inner"><h1>Atelier</h1><p className="hint">{msg || "Chargement…"}</p></div></div>;
@@ -177,34 +234,21 @@ export function Atelier() {
         </section>
 
         <section className="card-box">
-          <h3>Propositions</h3>
+          <h3>Tâches de l'Atelier</h3>
           {!d.jobs.length && <p className="hint">Aucune pour l'instant.</p>}
-          {d.jobs.map((j: any) => {
-            const c = jobs[j.id]?.checks;
-            return (
-              <article key={j.id} className="at-item">
-                <div className="at-line"><span className={`at-tag s-${j.status}`}>{JOB[j.status] || j.status}</span>
-                  <span className="hint">{j.kind === "feature" ? "Fonction" : "Correction"} · {when(j.created_at)}</span></div>
-                <p>{j.summary || j.request || "…"}</p>
-                {j.error && <p className="error">{j.error}</p>}
-                {j.files?.length > 0 && <p className="hint">Fichiers : {j.files.join(", ")}</p>}
-                {j.status === "proposed" && (
-                  <>
-                    <p className={c?.state === "success" ? "hint ic" : c?.state === "failure" ? "error" : "hint"}>
-                      {c ? (c.state === "success" ? "✓ " : "") + (c.detail || c.state) : "Lecture des tests…"}
-                    </p>
-                    <div className="row-actions">
-                      <button className="btn btn-copper btn-small" disabled={c?.state !== "success" || !!busy}
-                        onClick={() => window.confirm("Fusionner cette proposition dans l'appli ?") &&
-                          act(j.id, () => api.mergeJob(j.id), (r) => r.note)}>Fusionner</button>
-                      {j.pr_url && <a className="btn btn-line btn-small" href={j.pr_url} target="_blank" rel="noreferrer">Voir le code</a>}
-                      <button className="btn btn-ghost btn-small" onClick={() => act(j.id, () => api.closeJob(j.id))}>Refuser</button>
-                    </div>
-                  </>
-                )}
-              </article>
-            );
-          })}
+          {shown.map(banner)}
+          {archived.length > 0 && (
+            <details className="at-archive">
+              <summary>Archive · {archived.length}</summary>
+              <p className="hint">Les tâches plus anciennes passent ici toutes seules (5 visibles au maximum).</p>
+              {archived.map(banner)}
+              {archived.some((j: any) => DONE.includes(j.status)) && (
+                <button className="btn btn-ghost btn-small" disabled={!!busy}
+                  onClick={() => window.confirm("Supprimer définitivement toutes les tâches terminées de l'archive ?") &&
+                    act("purge", () => api.purgeJobs(archived.map((j: any) => j.id)), (r) => `${r.deleted} tâche(s) supprimée(s).`)}>Vider l'archive</button>
+              )}
+            </details>
+          )}
         </section>
 
         <section className="card-box">
