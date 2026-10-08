@@ -3653,3 +3653,31 @@ def test_release_state_apk_build_and_release_requests_are_not_code(client, monke
     r = client.post("/api/selfcare/repair", json={"kind": "feature", "request": "donne moi le nouvel apk"})
     assert r.status_code == 400 and "Publication" in r.json()["detail"]
     db.close()
+
+
+def test_repair_checks_fall_back_to_actions_jobs_when_token_has_no_checks_permission(client, monkeypatch):
+    from app import repair
+    from app.database import SessionLocal
+    from app.models import RepairJob
+    db = SessionLocal()
+    _repair_ready(db)
+    job = RepairJob(kind="fix", status="proposed", pr_number=81)
+    db.add(job)
+    db.commit()
+    jobs = [{"name": "backend", "status": "completed", "conclusion": "success"}, {"name": "frontend", "status": "completed", "conclusion": "success"}]
+
+    def gh(method, path, token, **kw):
+        if path.endswith("/pulls/81"):
+            return _GhR(200, {"merged": False, "state": "open", "head": {"sha": "s81"}})
+        if "/check-runs" in path:
+            return _GhR(403)
+        if path.endswith("/actions/runs"):
+            return _GhR(200, {"workflow_runs": [{"id": 5, "name": "Auto-merge"}, {"id": 6, "name": "Tests"}]})
+        if path.endswith("/actions/runs/6/jobs"):
+            return _GhR(200, {"jobs": jobs})
+        return _GhR(200, {})
+    monkeypatch.setattr(repair, "_gh", gh)
+    assert repair.checks(db, job)["state"] == "success"
+    jobs[0]["conclusion"] = "failure"
+    assert repair.checks(db, job)["state"] == "failure"
+    db.close()

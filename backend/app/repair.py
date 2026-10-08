@@ -392,6 +392,20 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") 
 
 # ---------- état des tests, fusion, refus ----------
 
+def _test_runs(tok: str, repo: str, sha: str) -> list[dict]:
+    """Tests du commit. Un jeton GitHub « fine-grained » n'a pas la permission Checks : on lit alors les jobs du workflow « Tests »
+    par l'API Actions (permission « Actions : lecture » suffit)."""
+    r = _gh("GET", f"/repos/{repo}/commits/{sha}/check-runs", tok)
+    if r.status_code < 300:
+        return r.json().get("check_runs", [])
+    runs = _ok(_gh("GET", f"/repos/{repo}/actions/runs", tok, params={"head_sha": sha, "per_page": 20}), "tests").get("workflow_runs", [])
+    latest = next((w for w in runs if w.get("name") == "Tests"), None)   # la plus récente d'abord
+    if latest is None:
+        return []
+    jobs = _ok(_gh("GET", f"/repos/{repo}/actions/runs/{latest['id']}/jobs", tok), "tests").get("jobs", [])
+    return [{"name": j.get("name"), "status": j.get("status"), "conclusion": j.get("conclusion")} for j in jobs]
+
+
 def checks(db: Session, job: RepairJob) -> dict:
     """État des tests GitHub Actions sur la proposition."""
     if not job.pr_number:
@@ -402,7 +416,7 @@ def checks(db: Session, job: RepairJob) -> dict:
         return {"state": "merged"}
     if pr.get("state") == "closed":
         return {"state": "closed"}
-    runs = _ok(_gh("GET", f"/repos/{repo}/commits/{pr['head']['sha']}/check-runs", tok), "tests").get("check_runs", [])
+    runs = _test_runs(tok, repo, pr["head"]["sha"])
     runs = [r for r in runs if r.get("name") in REQUIRED_CHECKS]   # les tests (workflow « Tests »), pas l'APK
     if {r.get("name") for r in runs} != set(REQUIRED_CHECKS):
         return {"state": "pending", "detail": "Tests pas encore lancés."}
