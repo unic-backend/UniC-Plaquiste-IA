@@ -3703,3 +3703,28 @@ def test_atelier_jobs_can_be_deleted_only_when_finished_and_archive_can_be_purge
     db.delete(db.get(RepairJob, ids["todo"]))
     db.commit()
     db.close()
+
+
+def test_conversations_can_be_archived_and_listed_apart(client):
+    cid = client.post("/api/conversations").json()["id"]
+    client.patch(f"/api/conversations/{cid}", json={"title": "Arch Test Conv", "pinned": True})
+    r = client.patch(f"/api/conversations/{cid}", json={"archived": True}).json()
+    assert r["archived"] is True and r["pinned"] is False
+    assert cid not in [c["id"] for c in client.get("/api/conversations").json()]
+    assert cid in [c["id"] for c in client.get("/api/conversations?archived=true").json()]
+    assert client.patch(f"/api/conversations/{cid}", json={"archived": False}).json()["archived"] is False
+    assert cid in [c["id"] for c in client.get("/api/conversations").json()]
+    client.delete(f"/api/conversations/{cid}")
+
+
+def test_tracking_builds_one_chantier_per_accepted_quote_progress_follows_payments(client):
+    qa = _track_quote("UC-TRK-0014-UV", "Ursule Vaz Suivi", 1_000_000)
+    _track_quote("UC-TRK-0015-UV", "Ursule Vaz Suivi", 400_000)          # pas accepté : pas de chantier
+    assert not [c for c in client.get("/api/tracking").json()["chantiers"] if c["client"] == "Ursule Vaz Suivi"]
+    client.post(f"/api/tracking/quotes/{qa}/decision", json={"decision": "accepted"})
+    client.post("/api/tracking/receipts", json={"quote_id": qa, "amount": 250_000})
+    ch = [c for c in client.get("/api/tracking").json()["chantiers"] if c["client"] == "Ursule Vaz Suivi"]
+    assert len(ch) == 1 and ch[0]["avancement"] == 25.0 and ch[0]["termine"] is False and ch[0]["reste"] == 750_000
+    client.post("/api/tracking/receipts", json={"quote_id": qa, "amount": 750_000})
+    ch = [c for c in client.get("/api/tracking").json()["chantiers"] if c["client"] == "Ursule Vaz Suivi"]
+    assert ch[0]["avancement"] == 100.0 and ch[0]["termine"] is True

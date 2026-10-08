@@ -132,6 +132,16 @@ def _reminders(groups: dict[str, dict]) -> list[dict]:
     return out
 
 
+def _chantiers(groups: dict[str, dict]) -> list[dict]:
+    """Un chantier par devis accepté, créé tout seul. L'avancement = le pourcentage encaissé (argent seulement, pas de photos ni de suivi terrain)."""
+    out = [{"key": g["key"], "client": g["client"], "id": r["id"], "numero": r["numero"], "titre": r["titre"], "lieu": r["lieu"],
+            "montant": r["montant"], "recu": r["recu"], "reste": r["reste"], "avancement": r["pct_recu"], "devise": r["devise"],
+            "termine": r["reste"] <= 0, "date": r["date"]}
+           for g in groups.values() for r in g["quotes"] if r["decision"] == "accepted"]
+    out.sort(key=lambda x: (x["termine"], -(x["date"] and int(x["date"].replace("-", "")) or 0)))
+    return out
+
+
 def _no_reply(groups: dict[str, dict]) -> list[dict]:
     """Devis sans réponse du client depuis NO_REPLY_DAYS jours ou plus (brouillons exclus : pas encore envoyés)."""
     out = [{"key": g["key"], "client": g["client"], "numero": r["numero"], "montant": r["montant"], "devise": r["devise"],
@@ -162,7 +172,7 @@ def overview(db: Session) -> dict:
             "en_attente": sum(c["en_attente"] for c in clients), "nb_attente": sum(c["nb_attente"] for c in clients),
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
-            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db)}
+            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db), "chantiers": _chantiers(groups)}
 
 
 def client_file(db: Session, key: str) -> dict:

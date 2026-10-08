@@ -217,15 +217,17 @@ def unic_polish(body: IntentIn, user: User = Depends(get_current_user)):
 @router.get("/conversations")
 def list_conversations(
     q: str = "",
+    archived: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     query = db.query(Conversation).filter(Conversation.user_id == user.id, or_(Conversation.kind.is_(None), Conversation.kind != "suivi"))
+    query = query.filter(Conversation.archived.is_(True)) if archived else query.filter(or_(Conversation.archived.is_(None), Conversation.archived.is_(False)))
     if q:
         query = query.filter(Conversation.title.ilike(f"%{q}%"))
     rows = query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc()).limit(80).all()
     return [
-        {"id": c.id, "title": c.title, "pinned": bool(c.pinned),
+        {"id": c.id, "title": c.title, "pinned": bool(c.pinned), "archived": bool(c.archived),
          "updated_at": c.updated_at.isoformat() if c.updated_at else None}
         for c in rows
     ]
@@ -234,6 +236,7 @@ def list_conversations(
 class ConversationPatch(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     pinned: bool | None = None
+    archived: bool | None = None
 
 
 @router.patch("/conversations/{cid}")
@@ -249,8 +252,12 @@ def patch_conversation(cid: str, body: ConversationPatch, db: Session = Depends(
         c.title = title
     if body.pinned is not None:
         c.pinned = body.pinned
+    if body.archived is not None:
+        c.archived = body.archived
+        if body.archived:
+            c.pinned = False   # une conversation rangée n'est plus épinglée
     db.commit()
-    return {"id": c.id, "title": c.title, "pinned": bool(c.pinned)}
+    return {"id": c.id, "title": c.title, "pinned": bool(c.pinned), "archived": bool(c.archived)}
 
 
 @router.post("/conversations")
