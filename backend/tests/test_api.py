@@ -3681,3 +3681,25 @@ def test_repair_checks_fall_back_to_actions_jobs_when_token_has_no_checks_permis
     jobs[0]["conclusion"] = "failure"
     assert repair.checks(db, job)["state"] == "failure"
     db.close()
+
+
+def test_atelier_jobs_can_be_deleted_only_when_finished_and_archive_can_be_purged(client):
+    from app.database import SessionLocal
+    from app.models import RepairJob
+    db = SessionLocal()
+    done = RepairJob(kind="fix", status="merged", summary="Fait.")
+    todo = RepairJob(kind="feature", status="proposed", summary="À décider.", pr_number=99)
+    old1, old2 = RepairJob(kind="fix", status="closed"), RepairJob(kind="fix", status="failed")
+    db.add_all([done, todo, old1, old2])
+    db.commit()
+    ids = {k: v.id for k, v in {"done": done, "todo": todo, "old1": old1, "old2": old2}.items()}
+    assert client.delete(f"/api/selfcare/jobs/{ids['todo']}").status_code == 409      # une proposition à décider ne se supprime pas
+    assert client.delete(f"/api/selfcare/jobs/{ids['done']}").status_code == 200
+    assert client.delete(f"/api/selfcare/jobs/{ids['done']}").status_code == 404
+    r = client.post("/api/selfcare/jobs/purge", json={"ids": [ids["todo"], ids["old1"], ids["old2"]]})
+    assert r.json() == {"deleted": 2}                                                  # seules les tâches terminées partent
+    db.expire_all()
+    assert db.get(RepairJob, ids["todo"]) is not None and db.get(RepairJob, ids["old1"]) is None
+    db.delete(db.get(RepairJob, ids["todo"]))
+    db.commit()
+    db.close()

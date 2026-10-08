@@ -442,6 +442,8 @@ export const api = {
     request<any>("/api/selfcare/repair", { method: "POST", body: JSON.stringify(body) }),
   repairJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}`),
   mergeJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}/merge`, { method: "POST" }),
+  deleteJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}`, { method: "DELETE" }),
+  purgeJobs: (ids: string[]) => request<any>("/api/selfcare/jobs/purge", { method: "POST", body: JSON.stringify({ ids }) }),
   closeJob: (id: string) => request<any>(`/api/selfcare/jobs/${id}/close`, { method: "POST" }),
   githubConnect: (body: { token?: string; repo?: string; base?: string; deploy_hook?: string }) =>
     request<any>("/api/selfcare/github", { method: "PUT", body: JSON.stringify(body) }),
