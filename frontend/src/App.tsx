@@ -18,6 +18,9 @@ import { Pointage, SignaturePanel } from "./Terrain";
 import { UnicVoice } from "./UnicVoice";
 import { Interpreter } from "./Interpreter";
 import { Atelier } from "./Atelier";
+import { ConvMenu } from "./ConvTools";
+import { Chantiers } from "./Chantiers";
+import { useBackHandler, useScrollMemory } from "./navMemory";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
@@ -468,8 +471,8 @@ function Connexion({ onDone }: { onDone: () => void }) {
 
 
 /** Une conversation du menu : ouvrir, ⋯ → épingler, renommer, supprimer (avec confirmation). */
-function ConvItem({ c, active, onClose, onChange, onRemove }: {
-  c: Conv; active: boolean; onClose: () => void; onChange: (n: Partial<Conv>) => void; onRemove: () => void;
+function ConvItem({ c, active, onClose, onChange, onRemove, onMoved }: {
+  c: Conv; active: boolean; onClose: () => void; onChange: (n: Partial<Conv>) => void; onRemove: () => void; onMoved: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const [mode, setMode] = useState<"view" | "rename" | "confirm">("view");
@@ -512,6 +515,8 @@ function ConvItem({ c, active, onClose, onChange, onRemove }: {
             <I.Pin size={16} /> {c.pinned ? "Désépingler" : "Épingler"}
           </button>
           <button role="menuitem" onClick={() => { setName(c.title); setMode("rename"); }}><I.Pencil size={16} /> Renommer</button>
+          <button role="menuitem" onClick={async () => { try { await api.patchConversation(c.id, { archived: !c.archived }); done(); onMoved(); } catch (e: any) { setErr(e.message); } }}>
+            <I.ArrowDown size={16} /> {c.archived ? "Sortir de l'archive" : "Archiver"}</button>
           <button role="menuitem" className="danger" onClick={() => setMode("confirm")}><I.Trash size={16} /> Supprimer</button>
         </div>
       )}
@@ -522,12 +527,25 @@ function ConvItem({ c, active, onClose, onChange, onRemove }: {
 function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [convs, setConvs] = useState<Conv[]>([]);
+  const [archived, setArchived] = useState<Conv[]>([]);
   const [q, setQ] = useState("");
   const loc = useLocation();
   const nav = useNavigate();
+  const [stamp, setStamp] = useState(0);   // change quand une conversation est archivée ou sortie de l'archive
+  const openRef = useRef(false);
+  openRef.current = open;
+  useScrollMemory();
+  useBackHandler(() => {   // retour du téléphone : ferme d'abord ce qui est ouvert (menu latéral, menus, feuilles)
+    if (openRef.current) { setOpen(false); return true; }
+    const ev = new Event("unic:back", { cancelable: true });
+    window.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
   useEffect(() => {
     api.conversations(q).then(setConvs).catch(() => setConvs([]));
-  }, [q, loc.pathname]);
+    api.conversations(q, true).then(setArchived).catch(() => setArchived([]));
+  }, [q, loc.pathname, stamp]);
+  const openConv = loc.pathname.startsWith("/c/") ? [...convs, ...archived].find((c) => loc.pathname === `/c/${c.id}`) : undefined;
   useEffect(() => setOpen(false), [loc.pathname]);
   const [work, setWork] = useState(0);   // erreurs à corriger + propositions prêtes (pastille de l'Atelier)
   useEffect(() => {
@@ -592,10 +610,22 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
               {g.rows.map((c) => (
                 <ConvItem key={c.id} c={c} active={loc.pathname === `/c/${c.id}`} onClose={() => setOpen(false)}
                   onChange={(next) => setConvs((x) => x.map((i) => (i.id === c.id ? { ...i, ...next } : i)))}
+                  onMoved={() => { setStamp((n) => n + 1); if (loc.pathname === `/c/${c.id}`) nav("/"); }}
                   onRemove={() => { setConvs((x) => x.filter((i) => i.id !== c.id)); if (loc.pathname === `/c/${c.id}`) nav("/"); }} />
               ))}
             </div>
           ))}
+          {archived.length > 0 && (
+            <details className="conv-archive">
+              <summary>Archivées · {archived.length}</summary>
+              {archived.map((c) => (
+                <ConvItem key={c.id} c={c} active={loc.pathname === `/c/${c.id}`} onClose={() => setOpen(false)}
+                  onChange={(next) => setArchived((x) => x.map((i) => (i.id === c.id ? { ...i, ...next } : i)))}
+                  onMoved={() => setStamp((n) => n + 1)}
+                  onRemove={() => { setArchived((x) => x.filter((i) => i.id !== c.id)); if (loc.pathname === `/c/${c.id}`) nav("/"); }} />
+              ))}
+            </details>
+          )}
         </div>
         <div className="side-foot">
           <Link to="/parametres" className={`foot-link ${loc.pathname.startsWith("/parametres") ? "active" : ""}`}>
@@ -610,6 +640,11 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           </button>
           <Logo size={22} />
           <b>UniC AI</b>
+          {openConv && (
+            <ConvMenu key={openConv.id} conv={openConv}
+              onChange={(n) => setConvs((x) => x.map((i) => (i.id === openConv.id ? { ...i, ...n } : i)))}
+              onGone={() => { setStamp((n) => n + 1); nav("/"); }} />
+          )}
         </div>
         {loc.pathname === "/" || loc.pathname.startsWith("/c/") ? null : <PageBar />}
         <div className="route-anim" key={loc.pathname.startsWith("/c/") ? "/" : loc.pathname}>
@@ -1142,37 +1177,6 @@ function Clients() {
   );
 }
 
-function Fournisseurs() {
-  const [rows, setRows] = useState<any[]>([]);
-  const [name, setName] = useState("");
-  const load = () => api.suppliers().then(setRows);
-  useEffect(() => {
-    load();
-  }, []);
-  return (
-    <TablePage
-      title="Fournisseurs"
-      columns={["Code", "Nom", "E-mail", "Tél"]}
-      rows={rows.map((c) => [c.code, c.name, c.email, c.phone])}
-      extra={
-        <form
-          className="toolbar"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!name.trim()) return;
-            await api.createSupplier({ name });
-            setName("");
-            load();
-          }}
-        >
-          <input placeholder="Nouveau fournisseur" value={name} onChange={(e) => setName(e.target.value)} />
-          <button className="btn btn-copper">Ajouter</button>
-        </form>
-      }
-    />
-  );
-}
-
 function Materiaux() {
   const [rows, setRows] = useState<any[]>([]);
   const [sku, setSku] = useState("");
@@ -1242,7 +1246,7 @@ function Materiaux() {
   );
 }
 
-function Chantiers() {
+function ProjetsManuels() {
   const nav = useNavigate();
   const [rows, setRows] = useState<any[]>([]);
   const [name, setName] = useState("");
@@ -1623,7 +1627,6 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, paramètres de calcul" },
       { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
       { to: "/clients", title: "Clients", text: "Fiches clients" },
-      { to: "/fournisseurs", title: "Fournisseurs", text: "Fiches fournisseurs" },
     ],
   },
   {
@@ -2032,9 +2035,9 @@ export default function App() {
       ) : (
       <Routes>
         <Route path="/clients" element={<Clients />} />
-        <Route path="/fournisseurs" element={<Fournisseurs />} />
         <Route path="/materiaux" element={<Materiaux />} />
         <Route path="/chantiers" element={<Chantiers />} />
+        <Route path="/chantiers/manuels" element={<ProjetsManuels />} />
         <Route path="/chantiers/:id" element={<ChantierDetail />} />
         <Route path="/devis" element={<DevisList />} />
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />

@@ -8,7 +8,7 @@ import { api, net, type Post } from "./api";
 const TITLES: Record<string, string> = {
   parametres: "Paramètres", entreprise: "Informations société", courrier: "Courrier", reseaux: "Réseaux & Google", voix: "Voix",
   memoire: "Mémoire", sante: "Moteur & santé", materiaux: "Matériaux & prix", clients: "Clients",
-  fournisseurs: "Fournisseurs", devis: "Devis", factures: "Factures", agenda: "Agenda", prospects: "Prospects", commandes: "Bons de commande",
+  fournisseurs: "Fournisseurs", devis: "Devis", factures: "Factures", agenda: "Agenda", prospects: "Prospects", commandes: "Bons de commande", suivi: "Suivi des encaissements",
   livraisons: "Bons de livraison", chantiers: "Chantiers", documents: "Fichiers reçus",
 };
 
@@ -16,7 +16,8 @@ const TITLES: Record<string, string> = {
 export function parentPath(path: string): string {
   if (path === "/parametres") return "/";
   if (path === "/parametres/entreprise") return "/parametres";
-  if (/^\/(devis|factures|commandes|livraisons|chantiers)\/[^/]+$/.test(path)) return "/" + path.split("/")[1];
+  if (path === "/suivi") return "/";
+  if (/^\/(devis|factures|commandes|livraisons|chantiers|suivi)\/[^/]+$/.test(path)) return "/" + path.split("/")[1];
   return "/parametres";
 }
 

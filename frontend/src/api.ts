@@ -303,11 +303,11 @@ export const net = {
 
 export const api = {
   me: () => request<User>("/api/auth/me"),
-  conversations: (q = "") =>
-    request<Conv[]>(`/api/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  conversations: (q = "", archived = false) =>
+    request<Conv[]>(`/api/conversations?${new URLSearchParams({ ...(q ? { q } : {}), ...(archived ? { archived: "true" } : {}) })}`),
   newConversation: () => request<Conv>("/api/conversations", { method: "POST" }),
   getConversation: (id: string) => request<ConvDetail>(`/api/conversations/${id}`),
-  patchConversation: (id: string, b: { title?: string; pinned?: boolean }) =>
+  patchConversation: (id: string, b: { title?: string; pinned?: boolean; archived?: boolean }) =>
     request<Conv>(`/api/conversations/${id}`, { method: "PATCH", ...json(b) }),
   deleteConversation: (id: string) =>
     request(`/api/conversations/${id}`, { method: "DELETE" }),
@@ -460,7 +460,7 @@ export const api = {
 };
 
 export type User = { id: string; email: string; name: string; role: string };
-export type Conv = { id: string; title: string; updated_at?: string; pinned?: boolean };
+export type Conv = { id: string; title: string; updated_at?: string; pinned?: boolean; archived?: boolean };
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";

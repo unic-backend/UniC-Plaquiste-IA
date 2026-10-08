@@ -476,6 +476,7 @@ class Conversation(Base):
     project_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     state_json: Mapped[str] = mapped_column(Text, default="{}")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)   # rangée dans « Archivées » : hors de la liste, jamais supprimée
     kind: Mapped[str] = mapped_column(String(16), default="")   # « suivi » : conversation intégrée au suivi des encaissements (hors liste)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
