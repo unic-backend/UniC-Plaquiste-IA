@@ -414,6 +414,40 @@ def test_vibecode_without_readonly_tools_gets_no_tools(monkeypatch):
     assert "tools" not in vibecode.calls[-1][1]                 # aucun outil d'écriture exposé au relais
 
 
+def test_vibecode_tool_handler_blocks_unsafe_tools(monkeypatch):
+    """Défense en profondeur : le relais appelle un outil NON sûr (nom inventé, non déclaré) →
+    le handler d'origine n'est PAS exécuté ; le modèle reçoit {« error »: « outil non autorisé »}."""
+    monkeypatch.setattr(settings, "vibecode_api_key", "vk")
+    state = {"n": 0}
+
+    def reply(kind, kw):
+        state["n"] += 1
+        if state["n"] == 1:
+            tool = _NS(type="tool_use", name="create_quote", id="t1", input={"client": "X"})   # NON sûr, non déclaré
+            return _NS(content=[tool], stop_reason="tool_use", model="m", usage=_usage())
+        if state["n"] == 2:
+            tool = _NS(type="tool_use", name="get_prices", id="t2", input={"sku": "BA13"})    # sûr (SAFE_TOOLS)
+            return _NS(content=[tool], stop_reason="tool_use", model="m", usage=_usage())
+        return _resp("fin")
+
+    vibecode = _install(monkeypatch, ai.VibecodeAIProvider, reply)
+    executed = []
+
+    def handler(name, args):
+        executed.append(name)
+        return {"ok": True}
+
+    tools = [{"name": "get_prices", "description": "lecture", "input_schema": {"type": "object"}}]
+    res = ai.chat_complete([{"role": "user", "content": "fais un devis"}], tools=tools, tool_handler=handler)
+    assert res.available and res.text == "fin"
+    assert executed == ["get_prices"]                            # l'outil non sûr n'a JAMAIS été exécuté
+    # résultats renvoyés au modèle : un message « user » par tour d'outils
+    results = vibecode.calls[1][1]["messages"][-1]["content"] + vibecode.calls[2][1]["messages"][-1]["content"]
+    by_id = {r["tool_use_id"]: r for r in results}
+    assert "outil non autorisé" in by_id["t1"]["content"] and by_id["t1"].get("is_error")   # refusé, signalé en erreur
+    assert '"ok"' in by_id["t2"]["content"]                      # l'outil sûr s'exécute normalement
+
+
 # ---------- refroidissement d'Anthropic (anti-boucle) ----------
 
 def test_claude_cooled_down_after_credit_exhausted(monkeypatch):

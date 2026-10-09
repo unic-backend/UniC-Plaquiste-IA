@@ -604,6 +604,16 @@ def vibecode_model_for(requested: str | None) -> str:
     return settings.vibecode_sonnet_model
 
 
+def _readonly_tool_guard(handler, safe_names):
+    """Enveloppe un handler d'outils pour le relais Vibecode : tout outil hors lecture seule
+    (agents.SAFE_TOOLS) est refusé SANS exécution — même un nom inventé par le modèle."""
+    def guarded(name, args):
+        if name not in safe_names:
+            return {"error": "outil non autorisé"}
+        return handler(name, args)
+    return guarded
+
+
 # ---------- refroidisseur (circuit breaker) : après un échec « quota »/« auth », ne pas réessayer tout de suite ----------
 _CB_LOCK = threading.Lock()
 _CB: dict[str, tuple[float, str]] = {}   # id fournisseur -> (monotonic du dernier échec, kind)
@@ -672,7 +682,8 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
       il ne refroidit PAS (Claude est réessayé au message suivant). Et le refroidissement ne s'applique que
       si Vibecode est configuré : sans relais, Claude est toujours essayé.
     - Vibecode n'a que les outils en LECTURE seule (agents.SAFE_TOOLS) : le relais ne crée, ne modifie
-      ni ne supprime aucun document.
+      ni ne supprime aucun document. Le handler est enveloppé : tout appel d'outil hors SAFE_TOOLS
+      (même un nom inventé par le modèle) est refusé SANS exécution.
     """
     last = AIResult("", "none", "", False, "not_configured")
     skip_vibecode = False
@@ -700,12 +711,15 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             # traduction de l'identifiant demandé vers l'identifiant Vibecode (Sonnet/Opus/Haiku configurables)
             wanted = opts.pop("model", None) or (settings.anthropic_model if deep else settings.anthropic_fast_model)
             opts["model"] = vibecode_model_for(wanted)
-            # Le relais n'expose que les outils en LECTURE seule (agents.SAFE_TOOLS) : jamais de création de documents.
+            # Le relais n'expose que les outils en LECTURE seule (agents.SAFE_TOOLS) : jamais de création de
+            # documents. Le handler est enveloppé : un outil non sûr (même un nom inventé par le modèle)
+            # est refusé SANS exécution.
             if tools:
                 from app import agents
                 safe = [t for t in tools if isinstance(t, dict) and t.get("name") in agents.SAFE_TOOLS]
                 opts["tools"] = safe or None
-                opts["tool_handler"] = tool_handler if safe else None
+                opts["tool_handler"] = (_readonly_tool_guard(tool_handler, agents.SAFE_TOOLS)
+                                        if safe and tool_handler is not None else None)
             else:
                 opts["tools"], opts["tool_handler"] = None, None
             opts.setdefault("max_tokens", 16000 if deep else 8000)
