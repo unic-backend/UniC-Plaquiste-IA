@@ -30,16 +30,19 @@ class AIResult:
 
 
 def classify_exc(exc: Exception) -> str:
-    """Classe un échec fournisseur : quota | auth | request | network | server | other.
+    """Classe un échec fournisseur : rate | quota | auth | request | network | server | other.
 
-    Sert à la bascule : seules « quota », « auth », « network » et « server » justifient d'essayer
-    un autre fournisseur PAYANT (Vibecode) ; une erreur de requête (400/404/422) ou un refus
-    ne sera pas résolu par un autre fournisseur.
+    « rate » (429, temporaire) et « quota » (402 / crédit épuisé) justifient TOUS DEUX la bascule vers
+    Vibecode, mais seul « quota » (et « auth ») refroidit Claude : un 429 est transitoire, Claude est
+    réessayé au message suivant. Une erreur de requête (400/404/422) ou un refus ne sera pas résolu
+    par un autre fournisseur.
     """
     status = getattr(exc, "status_code", None)
     msg = str(getattr(exc, "message", "") or exc).lower()
     name = type(exc).__name__.lower()
-    if status == 402 or status == 429 or "credit" in msg or "balance" in msg or "quota" in msg or "rate limit" in msg or "rate_limit" in msg:
+    if status == 429 or "rate limit" in msg or "rate_limit" in msg or "too many requests" in msg:
+        return "rate"
+    if status == 402 or "credit" in msg or "balance" in msg or "quota" in msg:
         return "quota"
     if status in (401, 403) or "api key" in msg or "authentication" in msg or "unauthorized" in msg or "forbidden" in msg:
         return "auth"
@@ -657,24 +660,29 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
     """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours).
 
     Basculement vers Vibecode (relais payant secondaire) MAÎTRISÉ, jamais aveugle :
-    - Anthropic officiel d'abord. Seuls ses échecs classés « quota », « auth », « network » ou « server »
-      autorisent l'essai de Vibecode ; une erreur de requête (400/404/422), un refus ou une erreur
-      inconnue ne déclenchent PAS de bascule vers un fournisseur payant (les secours locaux gèrent).
+    - Anthropic officiel d'abord. Seuls ses échecs classés « quota » (crédit), « rate » (429), « auth »,
+      « network » ou « server » autorisent l'essai de Vibecode ; une erreur de requête (400/404/422),
+      un refus ou une erreur inconnue ne déclenchent PAS de bascule vers un fournisseur payant.
     - Un seul passage, ordre fixe, séquentiel : jamais deux requêtes payantes simultanées pour une même
       tâche, et jamais de retour arrière (Vibecode en échec → secours local, pas un nouvel essai Claude).
     - Tentatives limitées : le SDK gère les retries internes (429/5xx/connexion, backoff exponentiel,
       max_retries borné) ; aucun retry applicatif au-delà, aucune boucle de basculement.
-    - Refroidissement : après un échec « quota »/« auth » d'Anthropic, celui-ci n'est pas réessayé pendant
-      AI_QUOTA_COOLDOWN_S secondes ; les messages suivants partent directement sur Vibecode.
+    - Refroidissement : après un échec « quota » (402/crédit épuisé) ou « auth » (clé refusée) d'Anthropic,
+      celui-ci n'est pas réessayé pendant AI_QUOTA_COOLDOWN_S secondes. Un 429 (« rate ») est transitoire :
+      il ne refroidit PAS (Claude est réessayé au message suivant). Et le refroidissement ne s'applique que
+      si Vibecode est configuré : sans relais, Claude est toujours essayé.
+    - Vibecode n'a que les outils en LECTURE seule (agents.SAFE_TOOLS) : le relais ne crée, ne modifie
+      ni ne supprime aucun document.
     """
     last = AIResult("", "none", "", False, "not_configured")
     skip_vibecode = False
+    has_vibecode = PROVIDERS["vibecode"].health()["available"]   # sans relais configuré, Claude est toujours essayé
     for provider in provider_chain(deep):
         if provider.id == "vibecode" and skip_vibecode:
             continue   # l'échec précédent ne justifiait pas un appel payant (requête refusée, refus, erreur inconnue)
-        if provider.id == "claude" and _cooldown_active("claude"):
+        if provider.id == "claude" and has_vibecode and _cooldown_active("claude"):
             last = AIResult("", "claude", settings.anthropic_model, False, "cooldown_quota", error_kind="quota")
-            continue   # quota/auth récent : on ne martèle pas l'API officielle, le relais prend le relais
+            continue   # crédit/auth récent + relais configuré : on ne martèle pas l'officiel, le relais prend le relais
         if provider.id not in ("claude", "vibecode"):   # les autres moteurs ne connaissent ni le cache ni plusieurs messages « system » : un seul, sans marque
             sysm = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
             rest = [{k: v for k, v in m.items() if k != "cache"} for m in messages if m["role"] != "system"]
@@ -692,7 +700,14 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             # traduction de l'identifiant demandé vers l'identifiant Vibecode (Sonnet/Opus/Haiku configurables)
             wanted = opts.pop("model", None) or (settings.anthropic_model if deep else settings.anthropic_fast_model)
             opts["model"] = vibecode_model_for(wanted)
-            opts["tools"], opts["tool_handler"] = tools, tool_handler
+            # Le relais n'expose que les outils en LECTURE seule (agents.SAFE_TOOLS) : jamais de création de documents.
+            if tools:
+                from app import agents
+                safe = [t for t in tools if isinstance(t, dict) and t.get("name") in agents.SAFE_TOOLS]
+                opts["tools"] = safe or None
+                opts["tool_handler"] = tool_handler if safe else None
+            else:
+                opts["tools"], opts["tool_handler"] = None, None
             opts.setdefault("max_tokens", 16000 if deep else 8000)
             # « web » ignoré volontairement : l'outil serveur web_search est spécifique à Anthropic, pas au relais
         res = provider.complete(plain, **opts)
@@ -700,8 +715,10 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             return res
         if provider.id == "claude":
             if res.error_kind in ("quota", "auth"):
-                _mark_failure("claude", res.error_kind)   # refroidi : les prochains appels iront droit au relais
-            if res.error_kind not in ("quota", "auth", "network", "server"):
+                # Refroidissement UNIQUEMENT sur crédit épuisé (402) ou clé refusée : un 429 (« rate ») est
+                # transitoire, il bascule vers Vibecode mais ne refroidit pas Claude.
+                _mark_failure("claude", res.error_kind)
+            if res.error_kind not in ("quota", "rate", "auth", "network", "server"):
                 skip_vibecode = True   # requête refusée / refus / erreur inconnue : pas de bascule aveugle vers un payant
         last = res
     return last

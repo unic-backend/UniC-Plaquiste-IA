@@ -380,31 +380,86 @@ def test_vibecode_degrades_to_minimal_request_when_options_rejected(monkeypatch)
         return _resp("ok minimal")
 
     vibecode = _install(monkeypatch, ai.VibecodeAIProvider, reply)
-    tools = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
+    tools = [{"name": "get_prices", "description": "d", "input_schema": {"type": "object"}}]   # outil en lecture seule (SAFE_TOOLS)
     res = ai.chat_complete([{"role": "user", "content": "q"}], tools=tools, tool_handler=lambda n, a: {})
     assert res.available and res.text == "ok minimal"
     assert len(vibecode.calls) == 2                             # exactement un réessai interne
     assert "tools" not in vibecode.calls[1][1] and "output_config" not in vibecode.calls[1][1]
 
 
+def test_vibecode_receives_only_readonly_tools(monkeypatch):
+    """Le relais n'expose que les outils en lecture seule (agents.SAFE_TOOLS), jamais les outils d'écriture."""
+    from app import agents
+    monkeypatch.setattr(settings, "vibecode_api_key", "vk")
+    vibecode = _install(monkeypatch, ai.VibecodeAIProvider, lambda kind, kw: _resp("ok"))
+    safe_name = sorted(agents.SAFE_TOOLS)[0]
+    tools = [
+        {"name": safe_name, "description": "lecture", "input_schema": {"type": "object"}},
+        {"name": "create_quote", "description": "écriture", "input_schema": {"type": "object"}},   # NON sûr
+        {"name": "revise_document", "description": "écriture", "input_schema": {"type": "object"}},  # NON sûr
+    ]
+    res = ai.chat_complete([{"role": "user", "content": "q"}], tools=tools, tool_handler=lambda n, a: {})
+    assert res.available
+    sent = vibecode.calls[-1][1].get("tools") or []
+    assert [t["name"] for t in sent] == [safe_name]             # seul l'outil en lecture seule est transmis
+
+
+def test_vibecode_without_readonly_tools_gets_no_tools(monkeypatch):
+    """Si aucun outil demandé n'est en lecture seule, le relais reçoit une requête sans outil du tout."""
+    monkeypatch.setattr(settings, "vibecode_api_key", "vk")
+    vibecode = _install(monkeypatch, ai.VibecodeAIProvider, lambda kind, kw: _resp("ok"))
+    tools = [{"name": "create_quote", "description": "écriture", "input_schema": {"type": "object"}}]
+    res = ai.chat_complete([{"role": "user", "content": "q"}], tools=tools, tool_handler=lambda n, a: {})
+    assert res.available
+    assert "tools" not in vibecode.calls[-1][1]                 # aucun outil d'écriture exposé au relais
+
+
 # ---------- refroidissement d'Anthropic (anti-boucle) ----------
 
-def test_claude_cooled_down_after_quota(monkeypatch):
+def test_claude_cooled_down_after_credit_exhausted(monkeypatch):
+    """Crédit épuisé (402) + Vibecode configuré : Anthropic est refroidi, les messages suivants vont au relais."""
     monkeypatch.setattr(settings, "anthropic_api_key", "k")
     monkeypatch.setattr(settings, "vibecode_api_key", "vk")
     claude = _install(monkeypatch, ai.ClaudeAIProvider,
-                      lambda kind, kw: _err(anthropic.RateLimitError, 429, "quota"))
+                      lambda kind, kw: _err(anthropic.APIStatusError, 402, "credit balance too low"))
     vibecode = _install(monkeypatch, ai.VibecodeAIProvider, lambda kind, kw: _resp("vibecode"))
     r1 = ai.chat_complete([{"role": "user", "content": "q1"}])
     assert r1.provider == "vibecode"
     n_claude = len(claude.calls)
     r2 = ai.chat_complete([{"role": "user", "content": "q2"}])
     assert r2.provider == "vibecode"
-    assert len(claude.calls) == n_claude                        # Anthropic non réessayé pendant le refroidissemnt
+    assert len(claude.calls) == n_claude                        # Anthropic non réessayé pendant le refroidissement
     assert len(vibecode.calls) == 2
-    monkeypatch.setattr(settings, "ai_quota_cooldown_s", 0)     # refroidissemnt désactivé : Anthropic réessayé
+    monkeypatch.setattr(settings, "ai_quota_cooldown_s", 0)     # refroidissement désactivé : Anthropic réessayé
     ai.chat_complete([{"role": "user", "content": "q3"}])
     assert len(claude.calls) > n_claude
+
+
+def test_cooldown_only_applies_when_vibecode_configured(monkeypatch):
+    """Sans relais Vibecode configuré, le refroidissement ne s'applique PAS : Claude est toujours essayé."""
+    monkeypatch.setattr(settings, "anthropic_api_key", "k")
+    claude = _install(monkeypatch, ai.ClaudeAIProvider,
+                      lambda kind, kw: _err(anthropic.APIStatusError, 402, "credit balance too low"))
+    r1 = ai.chat_complete([{"role": "user", "content": "q1"}])
+    assert not r1.available                                     # pas de relais, pas de secours local : échec honnête
+    n = len(claude.calls)
+    ai.chat_complete([{"role": "user", "content": "q2"}])
+    assert len(claude.calls) > n                                # Claude réessayé : sans Vibecode, pas de refroidissement
+
+
+def test_429_does_not_cooldown_claude(monkeypatch):
+    """Un 429 est transitoire : il bascule vers Vibecode mais ne refroidit PAS Anthropic."""
+    monkeypatch.setattr(settings, "anthropic_api_key", "k")
+    monkeypatch.setattr(settings, "vibecode_api_key", "vk")
+    claude = _install(monkeypatch, ai.ClaudeAIProvider,
+                      lambda kind, kw: _err(anthropic.RateLimitError, 429, "rate limit"))
+    _install(monkeypatch, ai.VibecodeAIProvider, lambda kind, kw: _resp("vibecode"))
+    r1 = ai.chat_complete([{"role": "user", "content": "q1"}])
+    assert r1.provider == "vibecode"                            # bascule OK sur 429
+    n = len(claude.calls)
+    r2 = ai.chat_complete([{"role": "user", "content": "q2"}])
+    assert len(claude.calls) > n                                # 429 = temporaire : Claude est réessayé
+    assert r2.provider == "vibecode"
 
 
 # ---------- sécurité ----------
