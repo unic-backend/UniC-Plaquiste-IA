@@ -30,6 +30,15 @@ def token():
     return None
 
 
+@pytest.fixture(autouse=True)
+def _reset_ai_circuit_breakers():
+    """Le refroidissement post-quota (bascule Claude → Vibecode) est un état global : chaque test repart à zéro."""
+    from app import ai
+    ai.reset_circuit_breakers()
+    yield
+    ai.reset_circuit_breakers()
+
+
 def auth(token):
     return {}
 

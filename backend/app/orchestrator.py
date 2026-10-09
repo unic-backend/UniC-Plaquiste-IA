@@ -493,14 +493,14 @@ def handle_turn(
     intent = "chat" if locked else _intent(text, state)   # téléphone verrouillé : conversation simple, jamais d'action métier
     reply_text = ""
 
-    # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si Claude est là, c'est LUI qui lit
-    # la conversation, calcule et crée le document avec les outils ; il ne demandera que ce qui manque vraiment.
+    # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si un moteur IA cloud est là
+    # (Claude, ou Vibecode en relais), c'est LUI qui lit la conversation, calcule et crée le document avec les outils.
     chain0 = provider_chain(deep)
-    if chain0 and chain0[0].id == "claude" and intent in (
+    if chain0 and chain0[0].id in ("claude", "vibecode") and intent in (
             "greeting", "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
             "list_customers", "list_suppliers", "list_projects", "list_quotes", "list_invoices",
             "create_customer", "create_supplier", "create_project", "analyze_doc", "analyze_photo", "search_doc"):
-        intent = "chat"   # avec Claude, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
+        intent = "chat"   # avec un moteur IA cloud, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":
         state.pop("pending", None)
@@ -925,8 +925,8 @@ def handle_turn(
         # general: knowledge + optional LLM polish. Never invent.
         arts = _search_knowledge(db, text)
         deep = deep or bool(DEEP_RE.search(text))
-        claude_first = bool(chain0) and chain0[0].id == "claude"
-        calc_try = None if claude_first else _calc_for(db, text)   # avec Claude, c'est lui qui calcule (outil), pas le parseur local
+        ai_first = bool(chain0) and chain0[0].id in ("claude", "vibecode")
+        calc_try = None if ai_first else _calc_for(db, text)   # avec un moteur IA cloud, c'est lui qui calcule (outil), pas le parseur local
         if calc_try and calc_try.quantities:
             reply_text = _fmt_calc(calc_try)
             structured = calc_try.to_dict()
@@ -961,14 +961,14 @@ def handle_turn(
                     msgs.append({"role": m.role, "content": m.content[:2000]})
                 msgs.append({"role": "user", "content": text})
                 chain = provider_chain(deep)
-                can_search = bool(chain) and chain[0].id == "claude" and settings.web_search_enabled
+                can_search = bool(chain) and chain[0].id == "claude" and settings.web_search_enabled   # web_search serveur : spécifique à Anthropic (pas sur le relais Vibecode)
                 if can_search:
                     msgs[1]["content"] += (
                         "\n\nOUTIL DE RECHERCHE INTERNET DISPONIBLE : pour toute information récente ou vérifiable "
                         "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
                     )
-                tools_on = bool(chain) and chain[0].id == "claude" and not locked
+                tools_on = bool(chain) and chain[0].id in ("claude", "vibecode") and not locked   # outils client : protocole Anthropic, supporté aussi par le relais Vibecode
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 focus = state.get("focus") or {}
@@ -1005,8 +1005,8 @@ def handle_turn(
                         # le modèle rapide n'a pas répondu : on retombe sur le modèle courant, sans bruit
                         ai = chat_complete(msgs, deep=deep, web=can_search, tools=agent.TOOLS if tools_on else None,
                                            tool_handler=session, effort="low", max_tokens=1200)
-                if ai.provider == "claude" and ai.raw:
-                    usage.record(db, ai.raw.get("usage"), ai.model)
+                if ai.provider in ("claude", "vibecode") and ai.raw:
+                    usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider)   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
                     if session.cards or session.documents or session.images or session.files:
@@ -1033,10 +1033,11 @@ def handle_turn(
                             + (" (clé absente)" if not deep_available() else " (échec)")
                             + f" — réponse du moteur « {ai.provider} »._"
                         )
-                elif chain[0].id == "claude":
-                    reason = (ai.error or "").removeprefix("claude: ") or "aucune réponse"
+                elif chain[0].id in ("claude", "vibecode"):
+                    reason = (ai.error or "").removeprefix("claude: ").removeprefix("vibecode: ") or "aucune réponse"
+                    who = "Claude" if chain[0].id == "claude" else "Vibecode"
                     reply_text = learned.local_reply(db, text) or (
-                        f"Claude n'a pas pu répondre : {reason}. Rien n'a été inventé à sa place. Réessaie.")
+                        f"{who} n'a pas pu répondre : {reason}. Rien n'a été inventé à sa place. Réessaie.")
                 else:
                     reply_text = learned.local_reply(db, text) or (
                         "Je n'ai pas cette information dans la base UniC, et le moteur IA ne répond pas "
@@ -1053,8 +1054,8 @@ def handle_turn(
         reply_text = "\n".join(file_notes) + ("\n\n" + reply_text if reply_text else "")
 
     if reply_text and intent in ("calculate", "prices", "create_quote", "create_po", "create_dn", "create_invoice") \
-            and not (chain0 and chain0[0].id == "claude"):
-        reply_text += "\n\n_Réponse du moteur local : Claude est indisponible, donc plus limitée._"
+            and not (chain0 and chain0[0].id in ("claude", "vibecode")):
+        reply_text += "\n\n_Réponse du moteur local : le moteur IA cloud est indisponible, donc plus limitée._"
 
     _save_state(conv, state)
     db.commit()
