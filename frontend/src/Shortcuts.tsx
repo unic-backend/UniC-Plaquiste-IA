@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "./api";
+import * as B from "./Brands";
 import * as I from "./Icons";
 
 /** Raccourcis vers les comptes et outils du patron : un clic pose la question à l'IA. */
@@ -16,14 +17,14 @@ type Shortcut = {
 
 export const SHORTCUTS: Shortcut[] = [
   { id: "briefing", label: "Briefing", icon: I.Sun, prompt: "briefing" },
-  { id: "mail", label: "Gmail", icon: I.Mail, prompt: "Résume mes derniers e-mails importants.", need: "email", setup: "/courrier" },
-  { id: "agenda", label: "Agenda", icon: I.Calendar, prompt: "Qu'est-ce que j'ai à l'agenda cette semaine ?" },
+  { id: "mail", label: "Gmail", icon: B.Gmail, prompt: "Résume mes derniers e-mails importants.", need: "email", setup: "/courrier" },
+  { id: "agenda", label: "Agenda", icon: B.Calendar, prompt: "Qu'est-ce que j'ai à l'agenda cette semaine ?" },
   { id: "unpaid", label: "Impayés", icon: I.Receipt, prompt: "Quelles factures sont impayées ?" },
   { id: "notes", label: "Notes", icon: I.Note, prompt: "Montre-moi mes notes : ce que tu as retenu et mes consignes." },
-  { id: "google", label: "Avis Google", icon: I.Star, prompt: "Montre les derniers avis Google.", need: "gbp", setup: "/google" },
-  { id: "site", label: "Site · GitHub", icon: I.Globe, need: "website", setup: "/reseaux" },
-  { id: "canva", label: "Canva", icon: I.Palette, soon: true },
-  { id: "gcal", label: "Google Agenda", icon: I.Calendar, soon: true },
+  { id: "google", label: "Avis Google", icon: B.GoogleG, prompt: "Montre les derniers avis Google.", need: "gbp", setup: "/google" },
+  { id: "site", label: "Site · GitHub", icon: B.GitHub, need: "website", setup: "/reseaux" },
+  { id: "canva", label: "Canva", icon: B.Canva, soon: true },
+  { id: "gcal", label: "Google Agenda", icon: B.Calendar, soon: true },
 ];
 
 let cache: Record<string, boolean> | null = null;

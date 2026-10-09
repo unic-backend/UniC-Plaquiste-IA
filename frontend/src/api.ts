@@ -87,6 +87,10 @@ export async function signOut() {
 
 export class AuthError extends Error {}
 /** Connexion coupée pendant la réponse (appli quittée, réseau perdu) : le serveur, lui, continue le travail. */
+export class Stopped extends Error {   // le patron a appuyé sur « Arrêter »
+  constructor() { super("Arrêté"); }
+}
+
 export class Interrupted extends Error {
   constructor(public conversationId?: string) {
     super("Connexion coupée. Si UniC a reçu ta demande, il la termine sur le serveur : elle apparaîtra dans le menu des conversations.");
@@ -317,11 +321,12 @@ export const api = {
   chatStream: async (
     body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean; voice?: boolean; locked?: boolean },
     on: (ev: { t: "status" | "delta" | "reset" | "conv"; text?: string; conversation_id?: string }) => void,
+    signal?: AbortSignal,
   ): Promise<ChatOut & { streamed: boolean }> => {
     const headers = authHeaders(new Headers({ "Content-Type": "application/json" }));
     let res: Response | undefined;
-    try { res = await fetch(apiUrl("/api/chat/stream"), { method: "POST", headers, body: JSON.stringify(body) }); }
-    catch { throw new Interrupted(body.conversation_id); }   // la demande a pu partir : jamais de second envoi (doublon)
+    try { res = await fetch(apiUrl("/api/chat/stream"), { method: "POST", headers, body: JSON.stringify(body), signal }); }
+    catch { if (signal?.aborted) throw new Stopped(); throw new Interrupted(body.conversation_id); }   // la demande a pu partir : jamais de second envoi (doublon)
     if (res?.status === 401) throw new AuthError("Code d'accès requis");
     if (!res || !res.ok) return { ...(await api.chat(body)), streamed: false };   // le flux n'a rien traité : on peut renvoyer sans doublon
     let streamed = false, out: (ChatOut & { streamed: boolean }) | null = null, convId: string | undefined = body.conversation_id;
@@ -338,7 +343,7 @@ export const api = {
       let buf = "";
       for (;;) {
         let chunk: ReadableStreamReadResult<Uint8Array>;
-        try { chunk = await reader.read(); } catch { throw new Interrupted(convId); }
+        try { chunk = await reader.read(); } catch { if (signal?.aborted) throw new Stopped(); throw new Interrupted(convId); }
         const { done, value } = chunk;
         if (done) break;
         buf += dec.decode(value, { stream: true });
@@ -352,6 +357,7 @@ export const api = {
     if (!out) throw new Interrupted(convId);
     return out;
   },
+  stopTurn: (conversation_id: string) => request<any>("/api/chat/stop", { method: "POST", body: JSON.stringify({ conversation_id }) }),
   upload: async (file: File, projectId?: string) => {
     const fd = new FormData();
     fd.append("file", file);

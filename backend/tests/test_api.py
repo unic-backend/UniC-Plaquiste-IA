@@ -3737,3 +3737,25 @@ def test_tracking_builds_one_chantier_per_accepted_quote_progress_follows_paymen
     client.post("/api/tracking/receipts", json={"quote_id": qa, "amount": 750_000})
     ch = [c for c in client.get("/api/tracking").json()["chantiers"] if c["client"] == "Ursule Vaz Suivi"]
     assert ch[0]["avancement"] == 100.0 and ch[0]["termine"] is True
+
+
+def test_stop_button_cancels_the_running_turn_and_keeps_a_note(client, monkeypatch):
+    from app import ai, api as api_mod
+    cid = client.post("/api/conversations").json()["id"]
+    assert client.post("/api/chat/stop", json={"conversation_id": "inconnue"}).status_code == 404
+    assert client.post("/api/chat/stop", json={"conversation_id": cid}).json() == {"ok": True, "running": False}   # rien en cours : sans effet
+
+    def boom(*a, **k):
+        raise ai.Cancelled()
+    monkeypatch.setattr(api_mod, "handle_turn", boom)
+    r = client.post("/api/chat", json={"message": "Fais un devis énorme", "conversation_id": cid})
+    assert r.status_code == 200 and "Arrêté" in r.json()["message"]["content"]
+    assert cid not in api_mod.RUNNING and cid not in api_mod.CANCELLED
+    msgs = client.get(f"/api/conversations/{cid}").json()["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant"] and "Arrêté" in msgs[-1]["content"]
+    client.delete(f"/api/conversations/{cid}")
+
+
+def test_cancelled_is_never_swallowed_by_provider_fallbacks():
+    from app import ai
+    assert not issubclass(ai.Cancelled, Exception)   # les « except Exception » des fournisseurs ne doivent pas l'avaler

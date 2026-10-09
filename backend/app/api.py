@@ -41,7 +41,8 @@ from app.models import (
 )
 from app import pricecheck
 from app.cover import ensure_cover_letter, make_cover_letter
-from app.orchestrator import handle_turn
+from app import ai as ai_mod
+from app.orchestrator import AssistantReply, handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
     NUMBER_RE,
@@ -329,6 +330,7 @@ def delete_conversation(cid: str, db: Session = Depends(get_db), user: User = De
 
 # Conversations dont la réponse est en cours : le travail continue sur le serveur même si l'appli est quittée.
 RUNNING: set[str] = set()
+CANCELLED: set[str] = set()   # conversations dont le patron a demandé l'arrêt : le flux s'interrompt à la prochaine étape
 
 
 def _tracking_conv(db: Session, user: User, key: str) -> Conversation:
@@ -371,11 +373,15 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
     db.commit()   # la demande est enregistrée tout de suite : retrouvable même si l'appli est fermée pendant le travail
     if on_start:
         on_start(conv.id)
+    CANCELLED.discard(conv.id)
     RUNNING.add(conv.id)
     try:
         reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice, body.locked)
     except HTTPException:
         raise
+    except ai_mod.Cancelled:   # « Arrêter » : ce qui était déjà fait reste, le reste s'arrête là
+        db.rollback()
+        reply = AssistantReply(content="⏹ Arrêté à ta demande.")
     except Exception:
         db.rollback()   # la demande reste ; une réponse claire remplace le silence
         db.add(Message(conversation_id=conv.id, role="assistant",
@@ -384,6 +390,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
         raise
     finally:
         RUNNING.discard(conv.id)
+        CANCELLED.discard(conv.id)
         release_memory()
     meta = {
         "structured": reply.structured,
@@ -424,6 +431,22 @@ def chat(body: ChatIn, background: BackgroundTasks, db: Session = Depends(get_db
     return out
 
 
+class StopIn(BaseModel):
+    conversation_id: str
+
+
+@router.post("/chat/stop")
+def chat_stop(body: StopIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Bouton « Arrêter » : demande l'arrêt du travail en cours sur cette conversation."""
+    c = db.get(Conversation, body.conversation_id)
+    if c is None or c.user_id != user.id:
+        raise HTTPException(404, "Conversation introuvable")
+    running = c.id in RUNNING
+    if running:
+        CANCELLED.add(c.id)
+    return {"ok": True, "running": running}
+
+
 @router.post("/chat/stream")
 def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
     """Même réponse que /chat, mais en flux (une ligne JSON par événement) : statut, texte au fil de l'eau, puis « done »."""
@@ -442,14 +465,24 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
     uid = user.id
     pending: list[str] = []
 
+    holder: dict = {"cid": body.conversation_id}
+
+    def sink(ev):
+        if holder["cid"] and holder["cid"] in CANCELLED:
+            raise ai.Cancelled()   # arrêt demandé : coupe le flux avant la prochaine étape (texte, outil)
+        q.put(ev)
+
+    def on_start(cid):
+        holder["cid"] = cid
+        q.put({"t": "conv", "conversation_id": cid})
+
     def worker():
         db = SessionLocal()
-        tok = ai.STREAM_SINK.set(q.put)
+        tok = ai.STREAM_SINK.set(sink)
         mtok = mem.AFTER_REPLY.set(pending)
         try:
             q.put({"t": "status", "text": "Je réfléchis…"})
-            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body,
-                                             on_start=lambda cid: q.put({"t": "conv", "conversation_id": cid}))})
+            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body, on_start=on_start)})
             q.put(None)   # flux fermé : l'écran n'attend plus
             for t in pending:
                 mem.extract_in_background(t)   # la mémoire se met à jour ensuite
