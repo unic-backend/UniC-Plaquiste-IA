@@ -25,7 +25,7 @@ import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
 import { queueMessage, readOutbox, takeQueued, useOnline } from "./offline";
-import { api, net, AuthError, Interrupted, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
+import { api, net, AuthError, Interrupted, Stopped, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
   return (
@@ -690,6 +690,7 @@ function Chat({ initialId }: { initialId?: string }) {
     return () => off?.();
   }, []);
   const sendRef = useRef<(m?: string) => void>();
+  const ctl = useRef<AbortController | null>(null);   // coupe la requête en cours (bouton « Arrêter »)
   const end = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [showDown, setShowDown] = useState(false);   // flèche « tout en bas » : visible quand on est remonté dans la conversation
@@ -790,11 +791,17 @@ function Chat({ initialId }: { initialId?: string }) {
     const my = ++turn.current;
     setBusy(true);
     setText("");
-    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || "Analyse le fichier.", files: pending.map((f) => ({ name: f.name, mime: f.type, file: f })) };
+    const files = pending;
+    const abort = new AbortController();
+    ctl.current = abort;
+    const local: ChatMessage = { id: `u${Date.now()}`, role: "user", content: msg || "Analyse le fichier.", files: files.map((f) => ({ name: f.name, mime: f.type, file: f })) };
     setMessages((m) => [...m, local]);
+    setPending([]);   // la carte du fichier quitte la zone de saisie dès l'envoi : elle est déjà dans le message
+    let started = false;
     try {
       const file_ids: string[] = [];
-      for (const f of pending) {
+      for (const f of files) {
+        if (abort.signal.aborted) throw new Stopped();
         setLive({ status: "Préparation du fichier…", text: "" });
         const prep = await prepareFile(f);   // allège avant l'envoi (photos, gros PDF)
         for (const p of prep.files) {
@@ -803,14 +810,14 @@ function Chat({ initialId }: { initialId?: string }) {
         }
         if (prep.note) setNotice("Allégé : " + prep.note);
       }
-      setPending([]);
       setLive({ status: "", text: "" });
+      started = true;
       const out = await api.chatStream({ message: msg || "Analyse le fichier.", conversation_id: cid, file_ids, deep }, (ev) => {
         if (ev.t === "conv") inflight.current = ev.conversation_id;
         else if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "" }));
         else if (ev.t === "delta") setLive((l) => ({ ...l, text: l.text + (ev.text || "") }));
         else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
-      });
+      }, abort.signal);
       if (turn.current !== my) return;   // la reprise après coupure a déjà affiché la réponse
       setDeep(false);
       if (!cid) {
@@ -821,6 +828,7 @@ function Chat({ initialId }: { initialId?: string }) {
       setMessages((m) => [...m, { ...out.message, fresh: !out.streamed }]);   // déjà lu en direct : pas de seconde animation   // le message de l'utilisateur est déjà affiché
     } catch (e: any) {
       if (turn.current !== my) return;
+      if (!started) setPending(files);   // le fichier n'a pas pu partir : on le remet pour réessayer
       const id = e instanceof Interrupted ? e.conversationId || cid : undefined;
       if (id) { follow(id); return; }   // le serveur continue : on attend sa réponse
       setMessages((m) => [
@@ -830,6 +838,18 @@ function Chat({ initialId }: { initialId?: string }) {
     } finally {
       if (turn.current === my) { setBusy(false); inflight.current = undefined; }
     }
+  }
+
+  /** Bouton « Arrêter » : coupe la requête, demande l'arrêt au serveur, garde ce qui était déjà fait. */
+  function stop() {
+    turn.current++;   // la suite de ce tour est ignorée
+    ctl.current?.abort();
+    const id = inflight.current || idRef.current;
+    if (id) api.stopTurn(id).catch(() => {});
+    setBusy(false);
+    setLive({ status: "", text: "" });
+    inflight.current = undefined;
+    setMessages((m) => [...m, { id: `stop${Date.now()}`, role: "assistant", content: "⏹ Arrêté à ta demande." }]);
   }
 
   /** Reprend une réponse que le serveur termine seul (appli quittée, réseau coupé, conversation rouverte). */
@@ -980,8 +1000,8 @@ function Chat({ initialId }: { initialId?: string }) {
             <button className={`tool round ${rec ? "rec-on" : ""}`} aria-label={rec ? "Arrêter la dictée" : "Dicter"} onClick={voice}>
               {rec ? <I.Stop /> : <I.Mic />}
             </button>
-            <button className="send round" aria-label="Envoyer" onClick={() => send()} disabled={busy}>
-              <I.ArrowUp />
+            <button className={`send round ${busy ? "stop" : ""}`} aria-label={busy ? "Arrêter" : "Envoyer"} onClick={() => (busy ? stop() : send())}>
+              {busy ? <I.Stop /> : <I.ArrowUp />}
             </button>
           </div>
           <input

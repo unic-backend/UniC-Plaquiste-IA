@@ -169,6 +169,11 @@ STREAM_CB: ContextVar = ContextVar("unic_stream_cb", default=None)
 STREAM_SINK: ContextVar = ContextVar("unic_stream_sink", default=None)  # où vont les événements (posé par l'API)
 
 
+class Cancelled(BaseException):
+    """Le patron a appuyé sur « Arrêter ». BaseException exprès : les `except Exception` des fournisseurs (repli sans flux,
+    nouvel essai) ne doivent JAMAIS l'avaler, sinon la demande repartirait."""
+
+
 @contextmanager
 def live():
     """Active le flux en direct pour UN appel (la réponse principale), pas pour les appels annexes (mémoire…)."""

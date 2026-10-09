@@ -1278,3 +1278,11 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .cb-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
 .cb-grid span { color: var(--muted); }
 .cb-h { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
+
+/* Feuilles (« Ajouter du contexte »…) : fond plein, net, sans texte qui transparaît ; le fond derrière est assombri et flouté */
+.sheet-back { background: rgba(8, 12, 10, .55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.sheet-back .sheet { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; border-top: 1px solid var(--line); box-shadow: 0 -14px 40px rgba(0,0,0,.35); }
+.sheet-back .sheet-btn { background: var(--surface, var(--paper)); border: 1px solid var(--line); box-shadow: none; }
+/* Bouton d'envoi : devient un petit carré « Arrêter » pendant que l'IA travaille */
+.send.round.stop { background: var(--ink); color: var(--card); }
+.send.round.stop svg { width: 18px; height: 18px; }
