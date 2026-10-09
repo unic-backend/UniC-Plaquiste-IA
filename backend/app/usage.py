@@ -18,8 +18,15 @@ PRICES = {  # entrée, sortie, lecture de cache
     "claude-sonnet-5-5": (2.0, 10.0, 0.20),
     "claude-opus-5-5": (4.0, 20.0, 0.20),
 }
+# Tarifs Vibecode (https://vibecode.moe/models, canal « cheap » au 09/10/2026) : indicatifs — le canal
+# « stable » et les heures de pointe (peak) sont plus chers ; la facture exacte est sur vibecode.moe.
+VIBECODE_PRICES = {  # entrée, sortie, lecture de cache
+    "claude-sonnet-5-5": (0.20, 0.98, 0.020),
+    "claude-opus-5-5": (0.39, 1.97, 0.020),
+    "claude-haiku-4-5": (0.20, 0.98, 0.020),
+}
 DEFAULT_PRICE = PRICES["claude-sonnet-5-5"]
-WEB_SEARCH_USD = 10.0 / 1000
+WEB_SEARCH_USD = 10.0 / 1000   # outil serveur web_search : spécifique à Anthropic (pas de tel champ chez Vibecode)
 
 #: remplie par le fournisseur Claude pendant un appel (une entrée par échange avec l'API)
 TALLY: ContextVar[list | None] = ContextVar("claude_usage_tally", default=None)
@@ -39,19 +46,21 @@ def tally(resp) -> None:
     })
 
 
-def cost_of(model: str, rows: list[dict]) -> tuple[dict, float, bool]:
-    known = model in PRICES
-    p_in, p_out, p_cache = PRICES.get(model, DEFAULT_PRICE)
+def cost_of(model: str, rows: list[dict], provider: str = "claude") -> tuple[dict, float, bool]:
+    """provider « claude » = tarifs publics Anthropic ; « vibecode » = tarifs du relais (indicatifs)."""
+    table = PRICES if provider == "claude" else VIBECODE_PRICES if provider == "vibecode" else {}
+    known = model in table
+    p_in, p_out, p_cache = table.get(model, DEFAULT_PRICE)
     total = {k: sum(r[k] for r in rows) for k in ("input", "output", "cache_read", "cache_write", "web")}
     usd = (total["input"] * p_in + total["output"] * p_out + total["cache_read"] * p_cache
            + total["cache_write"] * p_in * 1.25) / 1_000_000 + total["web"] * WEB_SEARCH_USD
     return total, round(usd, 6), known
 
 
-def record(db: Session, rows: list[dict] | None, model: str) -> None:
+def record(db: Session, rows: list[dict] | None, model: str, provider: str = "claude") -> None:
     if not rows:
         return
-    total, usd, known = cost_of(model, rows)
+    total, usd, known = cost_of(model, rows, provider=provider)
     db.add(UsageLog(model=model, input_tokens=total["input"], output_tokens=total["output"],
                     cache_read_tokens=total["cache_read"], cache_write_tokens=total["cache_write"],
                     web_searches=total["web"], cost_usd=usd, price_known=known))

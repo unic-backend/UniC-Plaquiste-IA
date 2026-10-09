@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -12,6 +15,8 @@ import httpx
 
 from app.config import settings
 
+logger = logging.getLogger("unic.ai")
+
 
 @dataclass
 class AIResult:
@@ -21,29 +26,58 @@ class AIResult:
     available: bool
     error: str = ""
     raw: dict | None = None
+    error_kind: str = ""   # classification de l'échec : quota | auth | request | network | server | refusal | other
 
 
-def explain_error(exc: Exception) -> str:
-    """Raison lisible d'un échec Claude (jamais la clé, jamais le texte brut du serveur sans nettoyage)."""
+def classify_exc(exc: Exception) -> str:
+    """Classe un échec fournisseur : rate | quota | auth | request | network | server | other.
+
+    « rate » (429, temporaire) et « quota » (402 / crédit épuisé) justifient TOUS DEUX la bascule vers
+    Vibecode, mais seul « quota » (et « auth ») refroidit Claude : un 429 est transitoire, Claude est
+    réessayé au message suivant. Une erreur de requête (400/404/422) ou un refus ne sera pas résolu
+    par un autre fournisseur.
+    """
     status = getattr(exc, "status_code", None)
     msg = str(getattr(exc, "message", "") or exc).lower()
-    if "credit" in msg or "balance" in msg or status == 402:
-        return "crédit Anthropic épuisé : recharge sur console.anthropic.com › Plans & Billing"
+    name = type(exc).__name__.lower()
+    if status == 429 or "rate limit" in msg or "rate_limit" in msg or "too many requests" in msg:
+        return "rate"
+    if status == 402 or "credit" in msg or "balance" in msg or "quota" in msg:
+        return "quota"
+    if status in (401, 403) or "api key" in msg or "authentication" in msg or "unauthorized" in msg or "forbidden" in msg:
+        return "auth"
+    if status in (400, 404, 422) or "invalid" in msg or "bad request" in msg or "not found" in msg or "unknown model" in msg or "model" in msg and "not" in msg:
+        return "request"
+    if status and status >= 500:
+        return "server"
+    if "timeout" in name or "connection" in name or "connect" in name or "network" in name or "unreachable" in msg:
+        return "network"
+    return "other"
+
+
+def explain_error(exc: Exception, who: str = "Claude", key_env: str = "ANTHROPIC_API_KEY",
+                  console: str = "console.anthropic.com › Plans & Billing") -> str:
+    """Raison lisible d'un échec fournisseur (jamais la clé, jamais le texte brut du serveur sans nettoyage)."""
+    status = getattr(exc, "status_code", None)
+    msg = str(getattr(exc, "message", "") or exc).lower()
+    kind = classify_exc(exc)
+    if kind == "quota" and status != 429:
+        return f"crédit {who} épuisé : recharge sur {console}"
     if status == 401:
-        return "clé API refusée (vérifie ANTHROPIC_API_KEY sur Render)"
+        return f"clé API refusée (vérifie {key_env} sur Render)"
     if status == 403:
-        return "accès refusé par Anthropic (permission du compte ou de la clé)"
+        return f"accès refusé par {who} (permission du compte ou de la clé)"
     if status == 404:
         return "modèle introuvable ou non autorisé pour ta clé"
     if status == 429:
         return "trop de requêtes en même temps : réessaie dans une minute"
-    if status and status >= 500:
-        return "Claude est surchargé ou en panne : réessaie dans un instant"
+    if kind == "server":
+        return f"{who} est surchargé ou en panne : réessaie dans un instant"
     if status == 400:
-        return f"requête refusée par Claude ({msg[:120]})"
+        return f"requête refusée par {who} ({msg[:120]})"
     name = type(exc).__name__
-    if "timeout" in name.lower() or "connection" in name.lower():
-        return "connexion à Claude impossible ou trop lente : réessaie"
+    if kind == "network":
+        return f"connexion à {who} impossible ou trop lente : réessaie"
     return name
 
 
@@ -317,13 +351,161 @@ class ClaudeAIProvider(AIProvider):
                     params.pop("tools", None)
                 resp = self._run(client, params, handler, used)
             if getattr(resp, "stop_reason", "") == "refusal":
-                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used, "usage": tally})
+                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used, "usage": tally}, error_kind="refusal")
             text, sources = self._text_and_sources(resp)
             if web and sources:
                 text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
             return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used, "usage": tally})
         except Exception as exc:  # la clé n'apparaît jamais dans le message
-            return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}", raw={"tools_used": used, "usage": tally})
+            return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}",
+                            raw={"tools_used": used, "usage": tally}, error_kind=classify_exc(exc))
+        finally:
+            _usage.TALLY.reset(_tok)
+
+
+class VibecodeAIProvider(AIProvider):
+    """Vibecode.moe — relais compatible Anthropic Messages (doc : vibecode.moe/setup/cc), fournisseur SECONDAIRE.
+
+    Même protocole (SDK officiel `anthropic`, base_url=https://vibecode.moe), donc mêmes familles de modèles,
+    streaming et outils client. Différences VOLONTAIRES avec ClaudeAIProvider, parce que c'est un endpoint tiers :
+    - pas de bêta Anthropic (`server-side-fallback`) : non garanti hors api.anthropic.com ;
+    - pas d'outil serveur `web_search_20260209` : spécifique à Anthropic (la recherche Internet reste Claude) ;
+    - « system » envoyé en texte simple : pas de cache_control de prompt sur le relais ;
+    - si une option avancée (effort / thinking / tools) est refusée (400), UN seul réessai en requête minimale
+      (texte seul) : dégradation interne, jamais une boucle, jamais un autre fournisseur.
+    """
+
+    id = "vibecode"
+    kind = "chat"
+    MAX_ROUNDS = 8  # tours d'outils maximum par réponse
+
+    def health(self) -> dict:
+        ok = bool(settings.vibecode_enabled and settings.vibecode_api_key)
+        return {
+            "id": self.id,
+            "available": ok,
+            "model": settings.vibecode_sonnet_model if ok else None,
+            "status": "ok" if ok else "not_configured",
+            "detail": "" if ok else "VIBECODE_API_KEY absent (ou VIBECODE_ENABLED=false). Relais secondaire inactif : Anthropic reste prioritaire.",
+        }
+
+    def _client(self):
+        import anthropic
+
+        # base_url SANS « /v1 » : le SDK ajoute lui-même /v1/messages (doc Vibecode : ANTHROPIC_BASE_URL=https://vibecode.moe)
+        return anthropic.Anthropic(
+            api_key=settings.vibecode_api_key,
+            base_url=settings.vibecode_base_url or "https://vibecode.moe",
+            timeout=settings.vibecode_timeout_s,
+            max_retries=settings.vibecode_max_retries,   # retries internes (429/5xx/connexion) avec backoff exponentiel
+        )
+
+    @staticmethod
+    def _send_stream(client, params: dict, cb):
+        """Flux standard (pas de bêta) : le texte arrive mot à mot."""
+
+        def attempt(manager):
+            with manager as stream:
+                for ev in stream:
+                    kind = getattr(ev, "type", "")
+                    if kind == "content_block_delta" and getattr(ev.delta, "type", "") == "text_delta":
+                        cb({"t": "delta", "text": ev.delta.text})
+                return stream.get_final_message()
+
+        cb({"t": "reset"})
+        return attempt(client.messages.stream(**params))
+
+    @staticmethod
+    def _send(client, params: dict):
+        from app import usage
+
+        cb = STREAM_CB.get()
+        resp = None
+        if cb is not None:
+            try:
+                resp = VibecodeAIProvider._send_stream(client, params, cb)
+            except Exception:  # flux impossible : on retombe sur l'appel classique (le texte déjà affiché est effacé)
+                cb({"t": "reset"})
+        if resp is None:
+            resp = client.messages.create(**params)
+        usage.tally(resp)
+        return resp
+
+    def _run(self, client, params: dict, handler, used: list[str]):
+        """Boucle tool_use (connecteurs) / pause_turn. Rend la dernière réponse."""
+        resp = self._send(client, params)
+        for _ in range(self.MAX_ROUNDS):
+            stop = getattr(resp, "stop_reason", "")
+            if stop == "pause_turn":
+                params["messages"] = params["messages"] + [{"role": "assistant", "content": resp.content}]
+            elif stop == "tool_use" and handler is not None:
+                results = []
+                for block in resp.content:
+                    if getattr(block, "type", "") != "tool_use":
+                        continue
+                    used.append(block.name)
+                    cb = STREAM_CB.get()
+                    if cb is not None:
+                        cb({"t": "status", "text": TOOL_LABELS.get(block.name, "Je travaille…")})
+                    out = handler(block.name, dict(block.input or {}))
+                    item = {"type": "tool_result", "tool_use_id": block.id,
+                            "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]}
+                    if isinstance(out, dict) and out.get("error"):
+                        item["is_error"] = True
+                    results.append(item)
+                params["messages"] = params["messages"] + [
+                    {"role": "assistant", "content": resp.content},
+                    {"role": "user", "content": results},  # tous les résultats dans UN seul message
+                ]
+            else:
+                break
+            resp = self._send(client, params)
+        return resp
+
+    def complete(self, messages: list[dict], **kwargs) -> AIResult:
+        # L'identifiant Vibecode est toujours celui réellement envoyé (Sonnet/Opus/Haiku configurables dans .env).
+        model = vibecode_model_for(kwargs.get("model"))
+        if not (settings.vibecode_enabled and settings.vibecode_api_key):
+            return AIResult("", self.id, model, False, "not_configured", error_kind="other")
+        sys_msgs = [m for m in messages if m["role"] == "system" and isinstance(m.get("content"), str)]
+        turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
+        params: dict = {"model": model, "max_tokens": kwargs.get("max_tokens", 8000), "messages": turns}
+        if sys_msgs:
+            params["system"] = "\n\n".join(m["content"] for m in sys_msgs)   # texte simple, sans cache_control
+        if kwargs.get("effort"):
+            params["output_config"] = {"effort": kwargs["effort"]}
+        if kwargs.get("thinking"):
+            params["thinking"] = {"type": "adaptive"}
+        tools = list(kwargs.get("tools") or [])
+        handler = kwargs.get("tool_handler")
+        if tools:
+            params["tools"] = tools
+        used: list[str] = []
+        from app import usage as _usage
+        tally: list[dict] = []
+        _tok = _usage.TALLY.set(tally)
+        try:
+            client = self._client()
+            try:
+                resp = self._run(client, params, handler, used)
+            except Exception as exc:
+                import anthropic
+                rich = any(k in params for k in ("output_config", "thinking", "tools"))
+                if not (rich and isinstance(exc, anthropic.BadRequestError)):
+                    raise
+                # Le relais rejette une option avancée : UN seul réessai en requête minimale (texte seul).
+                logger.debug("vibecode : option avancée refusée (%s), réessai en requête minimale", type(exc).__name__)
+                minimal = {k: params[k] for k in ("model", "max_tokens", "messages", "system") if k in params}
+                used.clear()
+                resp = self._run(client, minimal, None, used)
+            if getattr(resp, "stop_reason", "") == "refusal":
+                return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used, "usage": tally}, error_kind="refusal")
+            text, _sources = ClaudeAIProvider._text_and_sources(resp)   # pas de sources web côté Vibecode
+            return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used, "usage": tally})
+        except Exception as exc:  # la clé n'apparaît jamais dans le message
+            return AIResult("", self.id, model, False,
+                            f"vibecode: {explain_error(exc, who='Vibecode', key_env='VIBECODE_API_KEY', console='vibecode.moe (crédits)')}",
+                            raw={"tools_used": used, "usage": tally}, error_kind=classify_exc(exc))
         finally:
             _usage.TALLY.reset(_tok)
 
@@ -407,10 +589,62 @@ class EmbeddingProvider(AIProvider):
             return None
 
 
+def vibecode_model_for(requested: str | None) -> str:
+    """Traduit l'identifiant demandé (familles Anthropic officielles) vers l'identifiant Vibecode équivalent.
+
+    Sonnet = tâches quotidiennes (programmation, rédaction) · Opus = raisonnement et problèmes complexes ·
+    Haiku = voix rapide. Les identifiants Vibecode sont configurables (.env) ; le résultat est celui
+    réellement envoyé à l'API et enregistré dans AIResult.model.
+    """
+    req = (requested or "").lower()
+    if "opus" in req:
+        return settings.vibecode_opus_model
+    if "haiku" in req:
+        return settings.vibecode_haiku_model or settings.vibecode_sonnet_model
+    return settings.vibecode_sonnet_model
+
+
+def _readonly_tool_guard(handler, safe_names):
+    """Enveloppe un handler d'outils pour le relais Vibecode : tout outil hors lecture seule
+    (agents.SAFE_TOOLS) est refusé SANS exécution — même un nom inventé par le modèle."""
+    def guarded(name, args):
+        if name not in safe_names:
+            return {"error": "outil non autorisé"}
+        return handler(name, args)
+    return guarded
+
+
+# ---------- refroidisseur (circuit breaker) : après un échec « quota »/« auth », ne pas réessayer tout de suite ----------
+_CB_LOCK = threading.Lock()
+_CB: dict[str, tuple[float, str]] = {}   # id fournisseur -> (monotonic du dernier échec, kind)
+
+
+def _cooldown_active(pid: str, kinds: tuple[str, ...] = ("quota", "auth")) -> bool:
+    """Vrai si le fournisseur a échoué récemment (quota/auth) : les appels suivants sautent directement au relais."""
+    window = settings.ai_quota_cooldown_s
+    if window <= 0:
+        return False
+    with _CB_LOCK:
+        hit = _CB.get(pid)
+    return bool(hit and hit[1] in kinds and (time.monotonic() - hit[0]) < window)
+
+
+def _mark_failure(pid: str, kind: str) -> None:
+    with _CB_LOCK:
+        _CB[pid] = (time.monotonic(), kind)
+
+
+def reset_circuit_breakers() -> None:
+    """Oublie les refroidissements (tests, rechargement de configuration)."""
+    with _CB_LOCK:
+        _CB.clear()
+
+
 PROVIDERS: dict[str, AIProvider] = {
     "cloud": CloudAIProvider(),
     "local": LocalAIProvider(),
     "claude": ClaudeAIProvider(),
+    "vibecode": VibecodeAIProvider(),
     "pc": PCWorkerProvider(),
     "vision": VisionAIProvider(),
     "embedding": EmbeddingProvider(),
@@ -418,12 +652,11 @@ PROVIDERS: dict[str, AIProvider] = {
 
 
 def provider_chain(deep: bool = False) -> list[AIProvider]:
-    """Ordre d'essai : modèle local d'abord ; Claude en premier si raisonnement profond demandé,
-    sinon Claude (modèle rapide) seulement en dernier recours ; OpenAI-compatible entre les deux. Seuls les fournisseurs configurés sont gardés."""
-    # Sans modèle local ni OpenAI, Claude devient le moteur courant (modèle rapide).
+    """Ordre d'essai : Claude (Anthropic officiel) TOUJOURS en premier ; Vibecode (relais payant secondaire)
+    juste après ; puis les secours locaux (PC, modèle local, OpenAI-compatible). Seuls les fournisseurs configurés sont gardés."""
     if not settings.llm_enabled:
         return []
-    order = ["claude", "pc", "local", "cloud"]   # Claude répond TOUJOURS en premier ; les autres ne sont qu'un secours
+    order = ["claude", "vibecode", "pc", "local", "cloud"]
     return [PROVIDERS[k] for k in order if PROVIDERS[k].health()["available"]]
 
 
@@ -434,10 +667,34 @@ def pick_chat_provider(deep: bool = False) -> AIProvider:
 
 def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, tools: list | None = None,
                   tool_handler=None, **kwargs) -> AIResult:
-    """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours)."""
+    """Essaie chaque fournisseur configuré jusqu'à obtenir un texte (PC éteint → secours).
+
+    Basculement vers Vibecode (relais payant secondaire) MAÎTRISÉ, jamais aveugle :
+    - Anthropic officiel d'abord. Seuls ses échecs classés « quota » (crédit), « rate » (429), « auth »,
+      « network » ou « server » autorisent l'essai de Vibecode ; une erreur de requête (400/404/422),
+      un refus ou une erreur inconnue ne déclenchent PAS de bascule vers un fournisseur payant.
+    - Un seul passage, ordre fixe, séquentiel : jamais deux requêtes payantes simultanées pour une même
+      tâche, et jamais de retour arrière (Vibecode en échec → secours local, pas un nouvel essai Claude).
+    - Tentatives limitées : le SDK gère les retries internes (429/5xx/connexion, backoff exponentiel,
+      max_retries borné) ; aucun retry applicatif au-delà, aucune boucle de basculement.
+    - Refroidissement : après un échec « quota » (402/crédit épuisé) ou « auth » (clé refusée) d'Anthropic,
+      celui-ci n'est pas réessayé pendant AI_QUOTA_COOLDOWN_S secondes. Un 429 (« rate ») est transitoire :
+      il ne refroidit PAS (Claude est réessayé au message suivant). Et le refroidissement ne s'applique que
+      si Vibecode est configuré : sans relais, Claude est toujours essayé.
+    - Vibecode n'a que les outils en LECTURE seule (agents.SAFE_TOOLS) : le relais ne crée, ne modifie
+      ni ne supprime aucun document. Le handler est enveloppé : tout appel d'outil hors SAFE_TOOLS
+      (même un nom inventé par le modèle) est refusé SANS exécution.
+    """
     last = AIResult("", "none", "", False, "not_configured")
+    skip_vibecode = False
+    has_vibecode = PROVIDERS["vibecode"].health()["available"]   # sans relais configuré, Claude est toujours essayé
     for provider in provider_chain(deep):
-        if provider.id != "claude":   # les autres moteurs ne connaissent ni le cache ni plusieurs messages « system » : un seul, sans marque
+        if provider.id == "vibecode" and skip_vibecode:
+            continue   # l'échec précédent ne justifiait pas un appel payant (requête refusée, refus, erreur inconnue)
+        if provider.id == "claude" and has_vibecode and _cooldown_active("claude"):
+            last = AIResult("", "claude", settings.anthropic_model, False, "cooldown_quota", error_kind="quota")
+            continue   # crédit/auth récent + relais configuré : on ne martèle pas l'officiel, le relais prend le relais
+        if provider.id not in ("claude", "vibecode"):   # les autres moteurs ne connaissent ni le cache ni plusieurs messages « system » : un seul, sans marque
             sysm = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
             rest = [{k: v for k, v in m.items() if k != "cache"} for m in messages if m["role"] != "system"]
             plain = ([{"role": "system", "content": sysm}] if sysm else []) + rest
@@ -450,9 +707,33 @@ def chat_complete(messages: list[dict], deep: bool = False, web: bool = False, t
             opts["web"] = web
             opts["tools"], opts["tool_handler"] = tools, tool_handler
             opts.setdefault("max_tokens", 16000 if deep else 8000)
+        elif provider.id == "vibecode":
+            # traduction de l'identifiant demandé vers l'identifiant Vibecode (Sonnet/Opus/Haiku configurables)
+            wanted = opts.pop("model", None) or (settings.anthropic_model if deep else settings.anthropic_fast_model)
+            opts["model"] = vibecode_model_for(wanted)
+            # Le relais n'expose que les outils en LECTURE seule (agents.SAFE_TOOLS) : jamais de création de
+            # documents. Le handler est enveloppé : un outil non sûr (même un nom inventé par le modèle)
+            # est refusé SANS exécution.
+            if tools:
+                from app import agents
+                safe = [t for t in tools if isinstance(t, dict) and t.get("name") in agents.SAFE_TOOLS]
+                opts["tools"] = safe or None
+                opts["tool_handler"] = (_readonly_tool_guard(tool_handler, agents.SAFE_TOOLS)
+                                        if safe and tool_handler is not None else None)
+            else:
+                opts["tools"], opts["tool_handler"] = None, None
+            opts.setdefault("max_tokens", 16000 if deep else 8000)
+            # « web » ignoré volontairement : l'outil serveur web_search est spécifique à Anthropic, pas au relais
         res = provider.complete(plain, **opts)
         if res.available and res.text:
             return res
+        if provider.id == "claude":
+            if res.error_kind in ("quota", "auth"):
+                # Refroidissement UNIQUEMENT sur crédit épuisé (402) ou clé refusée : un 429 (« rate ») est
+                # transitoire, il bascule vers Vibecode mais ne refroidit pas Claude.
+                _mark_failure("claude", res.error_kind)
+            if res.error_kind not in ("quota", "rate", "auth", "network", "server"):
+                skip_vibecode = True   # requête refusée / refus / erreur inconnue : pas de bascule aveugle vers un payant
         last = res
     return last
 

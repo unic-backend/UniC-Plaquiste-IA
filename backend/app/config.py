@@ -38,6 +38,23 @@ class Settings(BaseSettings):
     web_search_enabled: bool = True  # recherche Internet par Claude (facturée à l'usage par Anthropic)
     web_search_max_uses: int = 3
 
+    # Vibecode (https://vibecode.moe) — relais compatible Anthropic Messages, fournisseur SECONDAIRE.
+    # Priorité : Anthropic officiel d'abord ; Vibecode n'est essayé que si Anthropic échoue (quota épuisé,
+    # clé refusée, réseau/panne) ou n'est pas configuré. Même protocole (SDK anthropic), mêmes familles de modèles.
+    # Doc officielle : https://vibecode.moe/setup/cc — ANTHROPIC_BASE_URL=https://vibecode.moe, clé « vk-… ».
+    vibecode_enabled: bool = True  # false = Vibecode désactivé (coupe-circuit, Anthropic seul)
+    vibecode_api_key: str = ""
+    vibecode_base_url: str = "https://vibecode.moe"  # le SDK ajoute /v1 (ne PAS mettre de /v1 ici)
+    vibecode_sonnet_model: str = "claude-sonnet-5-5"  # tâches quotidiennes (vérifié « online » sur vibecode.moe/models)
+    vibecode_opus_model: str = "claude-opus-5-5"  # raisonnement complexe (vérifié « online » sur vibecode.moe/models)
+    vibecode_haiku_model: str = "claude-haiku-4-5"  # voix rapide (vide = retombe sur le modèle Sonnet)
+    vibecode_timeout_s: float = 180.0
+    vibecode_max_retries: int = 2  # retries internes du SDK (429/5xx/connexion) avec backoff exponentiel
+
+    # Refroidissement après un échec « quota »/« auth » d'Anthropic (secondes ; 0 = réessayer à chaque message) :
+    # évite de marteler l'API officielle à chaque message quand son quota est épuisé, bascule directe sur Vibecode.
+    ai_quota_cooldown_s: int = 300
+
     local_ai_url: str = ""
     local_ai_model: str = ""
 

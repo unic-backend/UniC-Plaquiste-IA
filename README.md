@@ -174,6 +174,12 @@ Fonctions : audit de la fiche (lacunes réelles), liste des avis, réponses prop
 - **Par défaut : modèle local** (`LOCAL_AI_URL`, ex. Ollama `http://IP:11434/v1`, + `LOCAL_AI_MODEL`). Serveur éteint → repli sur OpenAI-compatible si configuré, sinon message honnête.
 - **Raisonnement profond : Claude** (`ANTHROPIC_API_KEY`). Jamais automatique : bouton ✦ dans le chat, ou « réfléchis en profondeur ». Facturé à l'usage.
 - **Claude seul** (sans modèle local) : usage courant = `ANTHROPIC_FAST_MODEL` (Sonnet), ✦ = `ANTHROPIC_MODEL` (Opus). Chaque message IA est facturé.
+- **Relais secondaire : Vibecode** (`VIBECODE_API_KEY`, clé `vk-…`, https://vibecode.moe — doc : https://vibecode.moe/setup/cc). Même protocole qu'Anthropic (mêmes modèles Claude), fournisseur distinct avec sa propre clé.
+  - Priorité : **Anthropic officiel d'abord**. Vibecode n'est essayé que si Anthropic échoue (quota épuisé, clé refusée, réseau/panne) ou n'est pas configuré ; si Vibecode échoue aussi → secours local (PC / `LOCAL_AI_URL`). Jamais deux requêtes payantes simultanées pour une même tâche.
+  - Pas de bascule aveugle : une erreur de requête (400/404/422) ou un refus ne déclenche pas Vibecode.
+  - Modèles : `VIBECODE_SONNET_MODEL` (quotidien), `VIBECODE_OPUS_MODEL` (✦), `VIBECODE_HAIKU_MODEL` (voix). Le fournisseur et le modèle réellement utilisés sont enregistrés (compteur d'usage, tarif Vibecode).
+  - Après un quota épuisé chez Anthropic, celui-ci est « refroidi » `AI_QUOTA_COOLDOWN_S` secondes (défaut 300) : les messages suivants partent directement sur Vibecode.
+  - Vérifier les modèles avant activation : `cd backend && python ../scripts/check_vibecode.py` (liste gratuite ; `--probe --yes` pour une sonde payante).
 - Claude absent ou en panne → réponse du moteur local, signalée dans le message.
 
 ## Numérotation des documents

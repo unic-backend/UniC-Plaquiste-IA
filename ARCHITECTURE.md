@@ -41,7 +41,7 @@ Frontend : `frontend/src` (React, Vite, TypeScript). Pages principales dans `App
 - **SQLite en production** (Render, disque persistant 5 Go) : un propriétaire, peu d'écritures concurrentes, sauvegarde quotidienne (`backup.py`). Postgres reste possible via `DATABASE_URL`, non activé.
 - **Jetons opaques plutôt que JWT** : seul le SHA-256 du jeton est en base ; la déconnexion le supprime donc la révocation est immédiate.
 - **Schéma sans Alembic** : `create_all` + `ensure_columns` + `ensure_indexes` (ajouts seulement, aucune donnée touchée). À revoir si la base passe sur Postgres.
-- **Claude premier fournisseur**, autres en secours ; `LLM_ENABLED=false` coupe tout appel IA.
+- **Claude (Anthropic) premier fournisseur**, Vibecode (relais compatible Anthropic Messages) en relais payant secondaire, puis secours locaux (PC, modèle local, OpenAI-compatible) ; `LLM_ENABLED=false` coupe tout appel IA. La bascule vers Vibecode n'a lieu que sur quota/auth/réseau/panne d'Anthropic (jamais sur une erreur de requête), avec refroidissement post-quota et un seul passage séquentiel.
 - **Pas de suppression physique ajoutée** : décision du propriétaire.
 
 ## Garde-fous pour les outils IA
