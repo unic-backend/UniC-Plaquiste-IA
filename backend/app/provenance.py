@@ -110,7 +110,9 @@ def explain(quote: Quotation) -> dict:
     now_lines = [(it.description, it.quantity, it.unit_price) for it in quote.items]
     for l in t.get("lignes") or []:
         src = f" — {l['prix_source']}" + (f" (prix saisi le {l['prix_saisi_le']})" if l.get("prix_saisi_le") else "") if l.get("prix_source") else ""
-        lines.append(f"Ligne : {l['ligne']} — {l['quantite']:g} {l.get('unite') or ''} × {l.get('prix_unitaire')}{src}".replace("  ", " "))
+        unit_price = l.get("prix_unitaire")
+        price_txt = "prix non renseigné" if unit_price is None else f"{unit_price:g}"
+        lines.append(f"Ligne : {l['ligne']} — {l['quantite']:g} {l.get('unite') or ''} × {price_txt}{src}".replace("  ", " "))
     tot = t.get("totaux") or {}
     lines.append(f"Total d'origine : {tot.get('total')} {tot.get('devise') or ''}.".replace("  ", " "))
     changed = (quote.version or 1) != (t.get("version_devis") or 1)

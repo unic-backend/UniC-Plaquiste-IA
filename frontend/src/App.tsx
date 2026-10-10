@@ -173,11 +173,9 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState("");
   const [preview, setPreview] = useState(false);
-  const [margin, setMargin] = useState<string[]>([]);
   const load = () => {
     const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
     fn(id).then(setD).catch((e: Error) => setErr(e.message));
-    if (kind === "quote") api.quoteMargin(id).then((m: any) => setMargin(m?.alertes || [])).catch(() => setMargin([]));
   };
   useEffect(load, [kind, id]);
   if (err) return <div className="doc-card"><p className="error">{err}</p></div>;
@@ -206,9 +204,6 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
       </button>
       {priced && kind === "quote" && Array.isArray(d.price_check) && d.price_check.length > 0 && (
         <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) de prix : ouvre le détail.</p>
-      )}
-      {kind === "quote" && margin.length > 0 && (
-        <p className="error ic"><I.Alert size={16} /> Marge : {margin[0]}{margin.length > 1 ? ` (+${margin.length - 1})` : ""}</p>
       )}
       {kind === "quote" && d.prices_complete === false && (
         <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
@@ -1205,74 +1200,63 @@ function Clients() {
 
 function Materiaux() {
   const [rows, setRows] = useState<any[]>([]);
-  const [filter, setFilter] = useState<"all" | "nobuy" | "nosell">("all");
+  const [filter, setFilter] = useState<"all" | "nosell">("all");
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});   // saisie en cours : "id:kind" → texte
+  const [drafts, setDrafts] = useState<Record<string, string>>({});   // saisie en cours : id → texte
   const load = () => api.materials().then(setRows).catch((e) => setMsg(e?.message || "Erreur"));
   useEffect(() => { load(); }, []);
-  const withBuy = rows.filter((m) => m.purchase_price != null).length;
-  const shown = rows.filter((m) => (filter === "nobuy" ? m.purchase_price == null : filter === "nosell" ? m.selling_price == null : true)
+  const withSell = rows.filter((m) => m.selling_price != null).length;
+  const shown = rows.filter((m) => (filter === "nosell" ? m.selling_price == null : true)
     && (!q.trim() || `${m.name} ${m.sku} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase())));
-  const save = async (m: any, kind: "purchase" | "selling") => {
-    const key = `${m.id}:${kind}`;
-    const raw = drafts[key];
+  const save = async (m: any) => {
+    const raw = drafts[m.id];
     if (raw === undefined) return;
-    const cur = kind === "purchase" ? m.purchase_price : m.selling_price;
     const txt = raw.replace(/\s/g, "").replace(",", ".");
-    setDrafts(({ [key]: _gone, ...rest }) => rest);
-    if (txt === "" || Number(txt) === cur) return;
+    setDrafts(({ [m.id]: _gone, ...rest }) => rest);
+    if (txt === "" || Number(txt) === m.selling_price) return;
     const n = Number(txt);
     if (!Number.isFinite(n) || n <= 0) { setMsg(`« ${raw} » n'est pas un montant valide (nombre positif attendu).`); return; }
     try {
-      const r = await api.savePrices(kind, [{ id: m.id, amount: n }]);
-      setMsg(r.errors?.length ? r.errors[0].error : `✓ ${m.name} : ${kind === "purchase" ? "achat" : "vente"} ${n.toLocaleString("fr-FR")} enregistré.`);
+      const r = await api.savePrices("selling", [{ id: m.id, amount: n }]);
+      setMsg(r.errors?.length ? r.errors[0].error : `✓ ${m.name} : ${n.toLocaleString("fr-FR")} enregistré. Les prochains devis utiliseront ce prix.`);
       load();
     } catch (e: any) { setMsg(e?.message || "Erreur"); }
-  };
-  const field = (m: any, kind: "purchase" | "selling") => {
-    const key = `${m.id}:${kind}`;
-    const cur = kind === "purchase" ? m.purchase_price : m.selling_price;
-    return (
-      <input inputMode="decimal" aria-label={`${kind === "purchase" ? "Prix d'achat" : "Prix de vente"} ${m.name}`}
-        placeholder="à saisir" value={drafts[key] ?? (cur == null ? "" : String(cur))}
-        onChange={(e) => setDrafts({ ...drafts, [key]: e.target.value })} onBlur={() => save(m, kind)}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-    );
   };
   return (
     <div className="page">
       <div className="page-inner mat">
         <h1>Matériaux & prix</h1>
-        <p className="lede">Saisis tes prix d'achat : UniC calcule ainsi ta marge sur chaque devis. Un champ vide reste vide, rien n'est inventé.</p>
+        <p className="lede">Tes prix de vente (fourni et posé). C'est le tableau que le chat utilise pour faire les devis. Si un prix change, modifie-le ici :
+          les prochains devis l'utilisent, les devis déjà faits ne changent pas.</p>
         {rows.length > 0 && (
-          <div className="mat-progress" aria-label="Avancement de la saisie">
-            <div><b>{withBuy}</b> / {rows.length} prix d'achat saisis</div>
-            <div className="sv-bar"><i style={{ width: `${Math.round((100 * withBuy) / rows.length)}%` }} /></div>
+          <div className="mat-progress" aria-label="Prix renseignés">
+            <div><b>{withSell}</b> / {rows.length} prix de vente renseignés</div>
+            <div className="sv-bar"><i style={{ width: `${Math.round((100 * withSell) / rows.length)}%` }} /></div>
           </div>
         )}
         <input className="sv-search" type="search" placeholder="Chercher un matériau…" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="sv-filters" role="group" aria-label="Filtrer">
-          {([["all", "Tous"], ["nobuy", "Sans prix d'achat"], ["nosell", "Sans prix de vente"]] as const).map(([v, l]) => (
+          {([["all", "Tous"], ["nosell", "Sans prix"]] as const).map(([v, l]) => (
             <button key={v} className={filter === v ? "on" : ""} aria-pressed={filter === v} onClick={() => setFilter(v)}>{l}</button>
           ))}
         </div>
         {msg && <p className="hint" role="status">{msg}</p>}
         <div className="mat-list">
-          {shown.map((m) => {
-            const pct = m.selling_price && m.purchase_price ? Math.round((1000 * (m.selling_price - m.purchase_price)) / m.selling_price) / 10 : null;
-            return (
-              <div key={m.id} className="mat-row">
-                <div className="mat-head"><b>{m.name}</b>
-                  {pct !== null && <span className={`sv-chip ${pct < 0 ? "off" : pct < 10 ? "warn" : "ok"}`}>marge {String(pct).replace(".", ",")} %</span>}</div>
-                <div className="sv-small sv-muted">{m.sku} · {m.unit}</div>
-                <div className="mat-fields">
-                  <label>Achat{field(m, "purchase")}</label>
-                  <label>Vente{field(m, "selling")}</label>
-                </div>
+          {shown.map((m) => (
+            <div key={m.id} className="mat-row">
+              <div className="mat-head"><b>{m.name}</b></div>
+              <div className="sv-small sv-muted">{m.sku} · {m.unit}</div>
+              <div className="mat-fields one">
+                <label>Prix de vente
+                  <input inputMode="decimal" aria-label={`Prix de vente ${m.name}`} placeholder="à saisir"
+                    value={drafts[m.id] ?? (m.selling_price == null ? "" : String(m.selling_price))}
+                    onChange={(e) => setDrafts({ ...drafts, [m.id]: e.target.value })} onBlur={() => save(m)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+                </label>
               </div>
-            );
-          })}
+            </div>
+          ))}
           {rows.length > 0 && !shown.length && <p className="sv-muted">Aucun matériau dans cette liste.</p>}
         </div>
       </div>
@@ -1825,36 +1809,10 @@ function CompanyPage() {
         >
           Enregistrer
         </button>
-        <MarginCard />
         <AccountCard />
         <SignatureCard />
       </div>
     </div>
-  );
-}
-
-/** Marge minimale voulue : UniC prévient quand un devis passe dessous (jamais de valeur par défaut inventée). */
-function MarginCard() {
-  const [v, setV] = useState("");
-  const [msg, setMsg] = useState("");
-  useEffect(() => { api.marginSetting().then((x) => setV(x.min_margin_pct == null ? "" : String(x.min_margin_pct))).catch(() => {}); }, []);
-  const save = async () => {
-    setMsg("");
-    try {
-      const n = v.trim() === "" ? null : Number(v.replace(",", "."));
-      if (n !== null && !Number.isFinite(n)) throw new Error("Nombre attendu, ex. 20");
-      await api.saveMarginSetting(n);
-      setMsg(n === null ? "Seuil retiré : seules les ventes à perte sont signalées." : `Enregistré : alerte sous ${n} % de marge.`);
-    } catch (e: any) { setMsg(e?.message || "Erreur"); }
-  };
-  return (
-    <section className="card-box">
-      <h3>Marge minimale</h3>
-      <p className="hint">UniC compare tes prix de vente à tes prix d'achat enregistrés et te prévient sous ce seuil. Vide : seules les ventes à perte sont signalées. Visible par toi seulement, jamais sur un document client.</p>
-      <label>Marge minimale (%)
-        <input inputMode="decimal" value={v} placeholder="ex. 20" onChange={(e) => { setV(e.target.value); setMsg(""); }} onBlur={save} /></label>
-      {msg && <p className="hint">{msg}</p>}
-    </section>
   );
 }
 

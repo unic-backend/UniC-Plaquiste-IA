@@ -307,7 +307,8 @@ TOOLS: list[dict] = [
         "name": "quote_margin",
         "description": ("MARGE d'un devis (pour le patron seulement, jamais pour le client) : prix de vente contre prix d'ACHAT enregistrés, ligne par ligne, "
                         "ventes à perte, marge sous le seuil du patron, lignes sans prix d'achat. À utiliser pour « quelle marge sur ce devis », "
-                        "« est-ce que je gagne de l'argent dessus ». Ne devine jamais un prix d'achat : s'il est inconnu, dis-le."),
+                        "« est-ce que je gagne de l'argent dessus ». Le patron est fournisseur ET poseur : il ne saisit pas de prix d'achat, ne propose donc "
+                        "jamais la marge de ta propre initiative. Ne devine jamais un prix d'achat : s'il est inconnu, dis-le."),
         "input_schema": {"type": "object", "properties": {"quote_number": {"type": "string", "description": "Numéro du devis ; omis = dernier devis de la conversation"}},
                          "additionalProperties": False},
     },
@@ -815,8 +816,7 @@ class AgentSession:
         """Alertes de marge à dire au patron (jamais au client) : ventes à perte, marge sous son seuil, achats inconnus."""
         from app import margin
         m = margin.analyze(q)
-        return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"],
-                "note": "Dis-le au patron seulement s'il y a des alertes ; propose quote_margin pour le détail."}
+        return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"]}
 
     def _t_quote_margin(self, quote_number: str = "") -> dict:
         from app import margin
@@ -1257,7 +1257,7 @@ class AgentSession:
         manquants = [i.description for i in q.items if i.unit_price is None]
         return {"numero": q.number, "statut": q.status, "total": q.total, "devise": q.currency,
                 "prix_complets": q.prices_complete, "lignes": len(q.items), "lignes_sans_prix": manquants,
-                "tva": q.vat_rate, "controle_prix": "conforme à la grille UniC", "marge": self._margin_hint(q),
+                "tva": q.vat_rate, "controle_prix": "conforme à la grille UniC",
                 "note": "Brouillon : le patron relit et approuve. Le devis s'affiche dans la conversation. "
                         "Signale-lui les lignes sans prix et les hypothèses AVANT de parler du PDF."}
 
