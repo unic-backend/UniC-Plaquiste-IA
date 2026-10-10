@@ -1313,3 +1313,17 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-pay-wrap .sv-form { padding: 12px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--card); }
 .sv-pay-act { display: flex; align-items: center; gap: 6px; flex: none; }
 .sv-warn { margin: 0; font-size: 13px; }
+
+/* Choisir un client dans les contacts du téléphone */
+.contact-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.contact-btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--green-text); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.contact-btn:active { transform: scale(.97); }
+.contact-sheet { max-height: 82vh; display: flex; flex-direction: column; }
+.contact-sheet .sv-search { margin: 6px 0 10px; }
+.contact-list { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 120px; }
+.contact-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 4px; font: inherit; color: inherit; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--line); cursor: pointer; }
+.contact-row:active { background: var(--surface-2); }
+.contact-av { flex: none; width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; color: var(--on-green); background: var(--green-2); }
+.contact-txt { display: flex; flex-direction: column; min-width: 0; }
+.contact-txt b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-txt small { color: var(--muted); font-size: 13px; }

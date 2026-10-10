@@ -110,19 +110,21 @@ function authHeaders(headers = new Headers()): Headers {
   return headers;
 }
 
+const GET_RETRY_WAITS = [2000, 4000, 7000, 12000, 20000];
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = authHeaders(new Headers(init.headers));
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   let res: Response | undefined;
-  // lecture seule : on réessaie 2 fois (serveur qui redémarre après une mise à jour) ; jamais un envoi, pour éviter les doublons
-  const tries = (init.method || "GET").toUpperCase() === "GET" ? 3 : 1;
-  for (let i = 0; i < tries && !res; i++) {
+  // lecture seule : on réessaie pendant ~45 s (le serveur redémarre 1 à 2 min après une mise à jour) ; jamais un envoi, pour éviter les doublons
+  const waits = (init.method || "GET").toUpperCase() === "GET" ? GET_RETRY_WAITS : [];
+  for (let i = 0; i <= waits.length && !res; i++) {
     try {
       res = await fetch(apiUrl(path), { ...init, headers });
     } catch {
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, 2500));
+      if (i < waits.length) await new Promise((r) => setTimeout(r, waits[i]));
     }
   }
   if (!res) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, isNative } from "./api";
+import { ContactButton } from "./ContactPicker";
 
 type Rdv = { id: string; title: string; kind: string; kind_label: string; start_at: string; end_at?: string; location: string;
   client_name: string; phone: string; notes: string; status: string; remind_minutes: number };
@@ -69,7 +70,8 @@ export function Agenda() {
                 {[["0", "Aucun"], ["30", "30 min avant"], ["60", "1 h avant"], ["120", "2 h avant"], ["1440", "La veille"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select></label></div>
             {input("location", "Lieu")}
-            <div className="two-col">{input("client_name", "Client")}{input("phone", "Téléphone", "tel")}</div>
+            <div className="contact-head"><span>Client</span><ContactButton onPick={(c) => setF({ ...f, client_name: c.name || f.client_name, phone: c.number || f.phone })} /></div>
+            <div className="two-col">{input("client_name", "Nom")}{input("phone", "Téléphone", "tel")}</div>
             <button className="btn btn-copper" disabled={f.title.trim().length < 2} onClick={save}>Enregistrer</button>
           </section>
         )}
