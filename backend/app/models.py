@@ -648,6 +648,8 @@ class Memory(Base):
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Clé du client du suivi (tracking.client_key) quand le souvenir ne concerne QUE ce client/chantier ; vide = règle générale.
+    subject: Mapped[str] = mapped_column(String(120), default="")
 
 
 class UsageLog(Base):

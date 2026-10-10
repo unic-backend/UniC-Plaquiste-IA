@@ -101,7 +101,7 @@ def _similar(a: str, b: str) -> bool:
 
 
 def add(db: Session, text: str, kind: str | None = None, source: str = "user", pinned: bool = False,
-        nature: str | None = None, importance: float | None = None) -> Memory | None:
+        nature: str | None = None, importance: float | None = None, subject: str = "") -> Memory | None:
     """Ajoute un souvenir. Rend None si trop court ou déjà connu (alors compté, pas dupliqué).
 
     Lève MemoryRefused pour un secret. Un souvenir déduit (auto) ou importé est une SUPPOSITION ; redit par le
@@ -125,7 +125,8 @@ def add(db: Session, text: str, kind: str | None = None, source: str = "user", p
     importance = c_imp if importance is None else max(0.0, min(1.0, importance))
     now = _now()
 
-    for m in db.query(Memory).filter(Memory.state == "active").all():
+    subject = (subject or "")[:120]
+    for m in db.query(Memory).filter(Memory.state == "active", Memory.subject == subject).all():   # même phrase pour un autre client = autre souvenir
         if _similar(m.text, text):
             m.occurrences = (m.occurrences or 1) + 1
             m.last_seen = now
@@ -137,13 +138,13 @@ def add(db: Session, text: str, kind: str | None = None, source: str = "user", p
                 m.pinned = True
             return None
 
-    if db.query(Memory).filter(Memory.state == "active").count() >= MAX_ITEMS:
-        old = (db.query(Memory).filter(Memory.state == "active", Memory.pinned.is_(False))
+    if db.query(Memory).filter(Memory.state == "active", Memory.subject == subject).count() >= MAX_ITEMS:
+        old = (db.query(Memory).filter(Memory.state == "active", Memory.subject == subject, Memory.pinned.is_(False))
                .order_by(Memory.importance, Memory.created_at).first())
         if old:
             old.state = "archived"   # archivé, jamais supprimé en silence
     m = Memory(text=text, kind=kind, source=source if source in ("user", "auto", "import") else "user", pinned=pinned,
-               nature=nature, importance=importance, occurrences=1, last_seen=now,
+               nature=nature, importance=importance, occurrences=1, last_seen=now, subject=subject,
                expires_at=now + timedelta(hours=ttl) if (nature == "temporary" and ttl) else None)
     db.add(m)
     db.flush()
@@ -202,14 +203,31 @@ class Hit:
         return f"score {self.score:.2f} ({', '.join(parts) or 'aucun signal'})"
 
 
-def _active(db: Session, now: datetime) -> list[Memory]:
+def _active(db: Session, now: datetime, subject: str = "") -> list[Memory]:
+    """Souvenirs actifs d'UN périmètre : général (subject vide) ou un client précis. Jamais les deux mélangés."""
     out = []
-    for m in db.query(Memory).filter(Memory.state == "active").all():
+    for m in db.query(Memory).filter(Memory.state == "active", Memory.subject == (subject or "")).all():
         exp = _aware(m.expires_at)
         if exp is not None and exp <= now:
             continue
         out.append(m)
     return out
+
+
+def _active_all(db: Session, now: datetime) -> list[Memory]:
+    out = []
+    for m in db.query(Memory).filter(Memory.state == "active").all():
+        exp = _aware(m.expires_at)
+        if exp is None or exp > now:
+            out.append(m)
+    return out
+
+
+def for_subject(db: Session, subject: str, limit: int = 40) -> list[Memory]:
+    """Tout ce qui est retenu sur UN client/chantier (les plus récents d'abord). Vide si rien."""
+    rows = _active(db, _now(), subject)
+    rows.sort(key=lambda m: _aware(m.created_at) or _now(), reverse=True)
+    return rows[:limit]
 
 
 def _recency(m: Memory, now: datetime) -> float:
@@ -228,12 +246,12 @@ def render_line(m: Memory, conflict: str = "") -> str:
     return f"- ({m.kind}) {prefix}{m.text}{tail}"
 
 
-def retrieve(db: Session, query: str, budget: int = BLOCK_CHARS, now: datetime | None = None) -> list[Hit]:
+def retrieve(db: Session, query: str, budget: int = BLOCK_CHARS, now: datetime | None = None, subject: str = "") -> list[Hit]:
     """Les souvenirs à rendre : toujours-utiles d'abord, puis les plus pertinents, dans un budget DUR."""
     now = now or _now()
     words = retrieval.useful_words(query)
     window = retrieval.evoked_window(query, now)
-    active = _active(db, now)
+    active = _active(db, now, subject)
     hits: list[Hit] = []
     used = 0
     always = sorted((m for m in active if m.pinned or (m.nature in ("fact", "preference") and (m.importance or 0) >= ALWAYS_ON_IMPORTANCE)),
@@ -291,7 +309,7 @@ def conflicts(db: Session) -> list[dict]:
     """Même sujet, nombres différents (prix, surface, délai). Rapporté, jamais arbitré.
 
     Portée : seules les divergences NUMÉRIQUES sont vues ; une négation ou un sens contraire ne le sont pas."""
-    items = [(m, _subject(m.text), numbers(m.text)) for m in _active(db, _now())
+    items = [(m, _subject(m.text), numbers(m.text)) for m in _active_all(db, _now())
              if m.nature != "temporary" and m.kind != "task"]
     out = []
     for i, (a, sa, na) in enumerate(items):
@@ -301,6 +319,8 @@ def conflicts(db: Session) -> list[dict]:
             if not nb or set(na) == set(nb):
                 continue
             common = sa & sb
+            if a.subject != b.subject:   # deux clients différents peuvent avoir des chiffres différents : pas une contradiction
+                continue
             if len(common) < 2:
                 continue
             out.append({"a": {"id": a.id, "text": a.text, "nature": a.nature}, "b": {"id": b.id, "text": b.text, "nature": b.nature},
