@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import asdict, dataclass, field
+from fractions import Fraction
 from typing import Any
 
 
@@ -52,6 +53,7 @@ class Opening:
     width: float
     height: float
     quantity: int = 1
+    assumed_size: bool = False   # taille standard prise par défaut (non donnée par le patron)
 
     @property
     def area(self) -> float:
@@ -107,6 +109,7 @@ class CalcResult:
             "data_used": self.data_used,
             "inputs": self.inputs,
             "next_step": self.next_step,
+            "verification": verify(self),
         }
 
 
@@ -190,8 +193,14 @@ def calculate_partition(
     stud_spacing: float = DEFAULTS["stud_spacing_m"],
     include_finish: bool = True,
     confirmed_large: bool = False,
+    sides_known: bool = True,
+    openings_known: bool | None = None,
 ) -> CalcResult:
     openings = openings or []
+    if openings_known is None:
+        openings_known = bool(openings)   # aucune ouverture citée ≠ « aucune ouverture » : à demander
+    open_status = (STATUS_MISSING if not openings_known
+                   else STATUS_ASSUMED if any(o.assumed_size for o in openings) else STATUS_CONFIRMED)
     check_inputs(positive={"longueur": length_m, "hauteur": height_m, "largeur de plaque": board_width,
                            "hauteur de plaque": board_height, "entraxe": stud_spacing},
                  surface_m2=length_m * height_m * sides, waste=waste, confirmed_large=confirmed_large)
@@ -234,7 +243,9 @@ def calculate_partition(
     result.data_used = [
         {"label": "Longueur", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED},
         {"label": "Hauteur", "value": height_m, "unit": "m", "status": STATUS_CONFIRMED},
-        {"label": "Faces", "value": sides, "unit": "", "status": STATUS_CONFIRMED},
+        {"label": "Faces", "value": sides, "unit": "", "status": STATUS_CONFIRMED if sides_known else STATUS_ASSUMED},
+        {"label": "Ouvertures", "value": (f"{len(openings)} ({areas['openings']:g} m²)" if openings_known else "inconnues — à renseigner"),
+         "unit": "", "status": open_status},
         {
             "label": "Plaque",
             "value": f"{board_width:g} × {board_height:g}",
@@ -252,23 +263,23 @@ def calculate_partition(
             {"longueur": length_m, "hauteur": height_m, "faces": sides},
             areas["gross"],
             "m²",
-            STATUS_CONFIRMED,
+            STATUS_CONFIRMED if sides_known else STATUS_ESTIMATED,
         ),
         CalcStep(
             "Surface des ouvertures",
             "Σ (largeur × hauteur × qté) × faces",
             {"ouvertures": [asdict(o) for o in openings], "faces": sides},
-            areas["openings"],
+            areas["openings"] if openings_known else "inconnue",
             "m²",
-            STATUS_CONFIRMED,
+            open_status,
         ),
         CalcStep(
-            "Surface nette",
+            "Surface nette" if openings_known else "Surface nette (sans déduction des ouvertures, inconnues)",
             "surface brute − ouvertures",
             {"brute": areas["gross"], "ouvertures": areas["openings"]},
             areas["net"],
             "m²",
-            STATUS_CONFIRMED,
+            STATUS_CONFIRMED if openings_known and open_status == STATUS_CONFIRMED and sides_known else STATUS_ESTIMATED,
         ),
         CalcStep(
             "Surface d'une plaque",
@@ -344,12 +355,22 @@ def calculate_partition(
         "Main-d'œuvre : taux horaire non renseigné.",
         "Transport / livraison : non chiffré.",
     ]
-    if not openings:
-        result.missing.append("Ouvertures (portes, fenêtres) non déduites — non communiquées.")
+    if not openings_known:
+        result.missing.append("Ouvertures (portes, fenêtres) non déduites — non communiquées : quantités un peu surestimées.")
+    if not sides_known:
+        result.assumptions.append(f"Nombre de faces = {sides} (non précisé : à confirmer, la surface en dépend directement).")
+    sized = [o for o in openings if o.assumed_size]
+    if sized:
+        result.assumptions.append("Taille d'ouverture standard prise par défaut : "
+                                  + ", ".join(f"{o.kind} {o.width:g}×{o.height:g} m" for o in sized) + " (à confirmer).")
     result.notes = [
         "Les quantités de plaques et d'ossature sont des ESTIMATIONS arrondies à l'unité supérieure.",
-        "Vérifier la hauteur réelle des locaux : si H > hauteur de plaque, prévoir chutes / bandes de rive.",
     ]
+    if height_m > board_height + 1e-9:
+        result.notes.append(f"Hauteur {height_m:g} m > plaque {board_height:g} m : raccords horizontaux et chutes à prévoir "
+                            "(ou plaques plus longues).")
+    else:
+        result.notes.append("Vérifier la hauteur réelle des locaux : si H > hauteur de plaque, prévoir chutes / bandes de rive.")
     return result
 
 
@@ -362,6 +383,7 @@ def calculate_ceiling(
     board_height: float = DEFAULTS["board_height_m"],
     system: str = "ba13",
     confirmed_large: bool = False,
+    dims_known: bool = True,
 ) -> CalcResult:
     check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
                            "hauteur de plaque": board_height},
@@ -392,8 +414,8 @@ def calculate_ceiling(
         next_step="Je peux préparer un devis quantité ou un bon de commande matériaux.",
     )
     result.data_used = [
-        {"label": "Longueur", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED},
-        {"label": "Largeur", "value": width_m, "unit": "m", "status": STATUS_CONFIRMED},
+        {"label": "Longueur", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED if dims_known else STATUS_ASSUMED},
+        {"label": "Largeur", "value": width_m, "unit": "m", "status": STATUS_CONFIRMED if dims_known else STATUS_ASSUMED},
         {"label": "Système", "value": system, "unit": "", "status": STATUS_ASSUMED},
         {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
     ]
@@ -433,6 +455,10 @@ def calculate_ceiling(
         "Hauteur de plénum / type de suspente.",
         "Prix UniC non renseignés.",
     ]
+    if not dims_known:
+        result.assumptions.insert(0, f"Pièce supposée carrée ({length_m:.2f} × {width_m:.2f} m) faute de longueur et largeur : "
+                                     "fourrures et tiges sont approximatives. Donne les deux côtés pour un calcul exact.")
+        result.missing.insert(0, "Longueur et largeur réelles du plafond (seule la surface est connue).")
     return result
 
 
@@ -778,3 +804,59 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
             next_step="Indiquez par exemple : surface 12 x 2,5 m.",
         )
     return None
+
+
+# ---------- vérificateur indépendant ----------
+# Recalcule les résultats clés AUTREMENT (fractions exactes, autre formulation) et compare. Un écart = un bug du moteur :
+# il est signalé, jamais caché. Aucune IA ici.
+
+def _F(x: Any) -> Fraction:
+    return Fraction(str(x))
+
+
+def _min_count(need: Fraction, unit: Fraction) -> int:
+    """Plus petit entier n tel que n × unit ≥ need (0 si rien à couvrir)."""
+    if need <= 0:
+        return 0
+    n = need // unit
+    return int(n if n * unit >= need else n + 1)
+
+
+def verify(result: "CalcResult") -> dict[str, Any]:
+    problems: list[str] = []
+    for q in result.quantities:
+        v = q.quantity
+        if not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v < 0:
+            problems.append(f"{q.name} : quantité invalide ({v}).")
+        if not q.unit:
+            problems.append(f"{q.name} : unité manquante.")
+    inp, qty = result.inputs, {q.sku: q.quantity for q in result.quantities}
+    step = {st.label.split(" (")[0]: st.result for st in result.steps}
+    try:
+        if result.kind == "partition" and inp:
+            L, H, sides = _F(inp["length_m"]), _F(inp["height_m"]), int(inp["sides"])
+            ops = sum((_F(o["width"]) * _F(o["height"]) * int(o["quantity"]) for o in inp.get("openings") or []), Fraction(0))
+            gross = L * H * sides
+            net = max(gross - ops * sides, Fraction(0))
+            if abs(_F(step.get("Surface brute", -1)) - gross) > Fraction(1, 1000):
+                problems.append(f"Surface brute : moteur {step.get('Surface brute')} ≠ contrôle {float(gross):g} m².")
+            if abs(_F(step.get("Surface nette", -1)) - net) > Fraction(1, 1000):
+                problems.append(f"Surface nette : moteur {step.get('Surface nette')} ≠ contrôle {float(net):g} m².")
+            sku, _ = board_sku(inp["board_width"], inp["board_height"])
+            boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
+            if qty.get(sku) != boards:
+                problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
+            studs = int(L // _F(inp["stud_spacing"])) + 1
+            if qty.get("MONTANT-M48") != studs:
+                problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
+            bars = _min_count(2 * L, _F(BAR_LENGTH_M))
+            if qty.get("UC-RAILS-48-MM") != bars:
+                problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
+        elif result.kind == "ceiling" and inp:
+            area = _F(inp["length_m"]) * _F(inp["width_m"])
+            if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):
+                problems.append(f"Surface : moteur {step.get('Surface')} ≠ contrôle {float(area):g} m².")
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+        problems.append(f"Contrôle impossible : {type(exc).__name__}.")
+    return {"ok": not problems, "problems": problems,
+            "note": "Contrôle indépendant (recalcul exact) : OK." if not problems else "ÉCART DÉTECTÉ : ne pas utiliser ce calcul sans vérification."}

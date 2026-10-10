@@ -137,7 +137,9 @@ TOOLS: list[dict] = [
             "kind": {"type": "string", "enum": ["partition", "ceiling", "paint", "plaster", "surface"]},
             "method": {"type": "string", "enum": ["generic", "unic"]},
             "length_m": {"type": "number"}, "height_m": {"type": "number"}, "width_m": {"type": "number"},
-            "area_m2": {"type": "number"}, "sides": {"type": "integer", "enum": [1, 2]},
+            "area_m2": {"type": "number"},
+            "sides": {"type": "integer", "enum": [1, 2], "description": "Faces parementées. N'invente pas : omets-le si le patron ne l'a pas dit (2 sera supposé et signalé)."},
+            "no_openings": {"type": "boolean", "description": "true seulement si le patron a confirmé qu'il n'y a AUCUNE porte ni fenêtre."},
             "parois": {"type": "integer"}, "already_developed": {"type": "boolean"}, "coats": {"type": "integer"},
             "board_length_m": {"type": "number", "description": "Longueur d'une plaque : 2 par défaut ; 2.5 seulement si le patron dit « 2,50 »."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
@@ -1017,9 +1019,11 @@ class AgentSession:
 
     def _t_calculate_materials(self, kind: str, method: str = "generic", length_m: float | None = None,
                                height_m: float | None = None, width_m: float | None = None,
-                               area_m2: float | None = None, sides: int = 2, parois: int | None = None,
+                               area_m2: float | None = None, sides: int | None = None, parois: int | None = None,
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
-                               board_length_m: float | None = None) -> dict:
+                               board_length_m: float | None = None, no_openings: bool = False) -> dict:
+        sides_known = sides is not None
+        sides = int(sides) if sides_known else 2
         co = company_dict(self.db)
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
                "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6}
@@ -1029,23 +1033,30 @@ class AgentSession:
                 if not surface:
                     raise ConnectorError("Surface manquante (area_m2, ou longueur × hauteur).", 400)
                 res = metier.calculate_unic(surface, faces=sides, parois=parois, already_developed=already_developed)
+                if not sides_known:
+                    res.assumptions.append("Nombre de faces = 2 (non précisé : à confirmer, la surface en dépend directement).")
             elif kind == "partition":
                 if not (length_m and height_m):
                     raise ConnectorError("Longueur et hauteur de la cloison requises.", 400)
                 ops = [calc.Opening(o.get("kind", "door"), float(o.get("width_m") or (0.9 if o.get("kind") != "window" else 1.2)),
-                                    float(o.get("height_m") or (2.04 if o.get("kind") != "window" else 1.2)), int(o.get("count") or 1))
+                                    float(o.get("height_m") or (2.04 if o.get("kind") != "window" else 1.2)), int(o.get("count") or 1),
+                                    assumed_size=not (o.get("width_m") and o.get("height_m")))
                        for o in (openings or [])]
                 res = calc.calculate_partition(length_m, height_m, sides, ops, waste=cfg["waste"], board_width=cfg["board_width"],
-                                               board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"])
+                                               board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"],
+                                               sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
             elif kind == "ceiling":
                 a = length_m or None
                 b = width_m or None
+                square = False
                 if not (a and b) and area_m2:
                     import math
                     a = b = math.sqrt(area_m2)
+                    square = True   # supposition signalée dans le résultat (statut « supposé »)
                 if not (a and b):
                     raise ConnectorError("Longueur et largeur (ou surface) du plafond requises.", 400)
-                res = calc.calculate_ceiling(a, b, waste=cfg["waste"], board_width=cfg["board_width"], board_height=cfg["board_height"])
+                res = calc.calculate_ceiling(a, b, waste=cfg["waste"], board_width=cfg["board_width"], board_height=cfg["board_height"],
+                                             dims_known=not square)
             elif kind == "paint":
                 if not area_m2:
                     raise ConnectorError("Surface à peindre (area_m2) requise.", 400)
@@ -1066,12 +1077,21 @@ class AgentSession:
         return {"titre": data.get("title"), "compris": data.get("understanding"), "etapes": data.get("steps", [])[:12],
                 "quantites": data.get("quantities", []), "hypotheses": data.get("assumptions", []),
                 "manquant": data.get("missing", []),
-                "note": "Calcul gardé en mémoire de la conversation : prêt pour un devis ou un bon si le patron le demande."}
+                "donnees": [f"{d['label']} : {d['value']} {d.get('unit') or ''} [{d['status']}]".replace("  ", " ") for d in data.get("data_used", [])],
+                "verification": data.get("verification"),
+                "note": ("Calcul gardé en mémoire de la conversation : prêt pour un devis ou un bon si le patron le demande. "
+                         "Présente les données avec leur statut (confirmé, supposé, estimé, manquant) et demande les manquantes. "
+                         "Si verification.ok est faux, dis-le et ne fais pas de devis.")}
 
     def _quantities(self) -> list[dict]:
-        qs = (self.state.get("last_calc") or {}).get("quantities") or []
+        last = self.state.get("last_calc") or {}
+        qs = last.get("quantities") or []
         if not qs:
             raise ConnectorError("Aucun métré en mémoire : appelle d'abord calculate_materials.", 400)
+        check = last.get("verification") or {}
+        if check and not check.get("ok", True):   # le contrôle indépendant a trouvé un écart : jamais de document dessus
+            raise ConnectorError("Le contrôle indépendant du calcul a trouvé un écart (" + "; ".join(check.get("problems") or [])
+                                 + ") : refais le calcul, aucun document n'est créé.", 409)
         return qs
 
     def _lines_to_quantities(self, lines: list) -> list[dict]:

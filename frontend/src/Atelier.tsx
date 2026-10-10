@@ -60,6 +60,43 @@ function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) 
   );
 }
 
+/** Banc d'essai IA : cas de référence notés par le code (dimensions extraites, rien d'inventé). */
+function Evals({ onMsg }: { onMsg: (m: string) => void }) {
+  const [e, setE] = useState<any>(null);
+  const [open, setOpen] = useState(false);
+  const load = useCallback(() => api.evals().then(setE).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!e?.running) return;
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+  }, [e?.running, load]);
+  const start = async () => {
+    onMsg("");
+    try { await api.runEvals(); setE({ ...(e || {}), running: true }); } catch (x: any) { onMsg(x?.message || "Erreur"); }
+  };
+  const last = e?.last;
+  const fails = (last?.results || []).filter((r: any) => !r.ok);
+  return (
+    <section className="card-box">
+      <div className="at-head"><h3>Banc d'essai IA</h3>
+        <button className="btn btn-line btn-small" disabled={!!e?.running} onClick={start}>{e?.running ? "En cours…" : "Lancer"}</button></div>
+      <p className="hint">{e?.cases ?? 10} demandes de référence (cloisons, plafonds, unités, faces, ouvertures). Le code vérifie que l'IA extrait les bonnes
+        dimensions sans rien inventer. À relancer après chaque changement de l'IA. ≈ 10 appels à Claude.</p>
+      {last && (
+        <>
+          <p className={last.passed === last.total ? "hint ic" : "error"}><b>{last.passed}/{last.total} réussis · {String(last.score).replace(".", ",")} %</b>
+            <span className="hint"> — {new Date(last.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></p>
+          {fails.length > 0 && <button className="btn btn-line btn-small" onClick={() => setOpen(!open)}>{open ? "Masquer" : `Voir les ${fails.length} échec(s)`}</button>}
+          {open && fails.map((r: any) => (
+            <div key={r.id} className="at-item"><b>{r.id}</b>{r.problems.map((p: string) => <p key={p} className="hint">• {p}</p>)}</div>
+          ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Atelier() {
   const [d, setD] = useState<any>(null);
   const [check, setCheck] = useState<any>(null);
@@ -214,6 +251,7 @@ export function Atelier() {
           {!connected && d.incidents.length > 0 && <p className="hint">Connecte GitHub (plus bas) pour que UniC corrige lui-même.</p>}
         </section>
 
+        <Evals onMsg={setMsg} />
         <section className="card-box">
           <h3>Améliorer UniC</h3>
           <p className="hint">Décris une correction ou une nouvelle fonction : UniC la code, ajoute un test, puis te la propose.</p>
