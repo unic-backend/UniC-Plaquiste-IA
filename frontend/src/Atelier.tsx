@@ -60,6 +60,30 @@ function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) 
   );
 }
 
+/** Cohérence : documents dont les chiffres ne tombent pas juste, PDF manquants, erreurs serveur. Détection seulement. */
+function Integrity() {
+  const [r, setR] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => { setBusy(true); try { setR(await api.integrity()); } catch { /* indisponible */ } finally { setBusy(false); } }, []);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <section className="card-box">
+      <div className="at-head"><h3>Cohérence des documents</h3>
+        <button className="btn btn-line btn-small" disabled={busy} onClick={load}><I.Refresh size={15} /> Vérifier</button></div>
+      {!r && <p className="hint">Contrôle en cours…</p>}
+      {r?.ok && <p className="hint ic"><I.Check size={16} /> Tout est cohérent : totaux, TVA, versements, PDF, numéros.</p>}
+      {r && !r.ok && (
+        <>
+          <p className="error">{r.total} point(s) à regarder. Rien n'est corrigé tout seul.</p>
+          {r.problems.map((p: any, i: number) => (
+            <div key={i} className="at-item"><b>{p.ref}</b> <span className="hint">· {p.kind}</span><p className="hint">{p.detail}</p></div>
+          ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Banc d'essai IA : cas de référence notés par le code (dimensions extraites, rien d'inventé). */
 function Evals({ onMsg }: { onMsg: (m: string) => void }) {
   const [e, setE] = useState<any>(null);
@@ -251,6 +275,7 @@ export function Atelier() {
           {!connected && d.incidents.length > 0 && <p className="hint">Connecte GitHub (plus bas) pour que UniC corrige lui-même.</p>}
         </section>
 
+        <Integrity />
         <Evals onMsg={setMsg} />
         <section className="card-box">
           <h3>Améliorer UniC</h3>

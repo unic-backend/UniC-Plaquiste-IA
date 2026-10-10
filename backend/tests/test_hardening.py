@@ -587,3 +587,61 @@ def test_office_zip_bombs_and_traversal_are_refused():
         validate_upload(make([("../../evil.sh", "x")]), "piege.xlsx")
     with pytest.raises(UploadRejected, match="endommagé"):
         validate_upload(b"PK\x03\x04" + b"pas un zip", "faux.xlsx")
+
+
+def test_integrity_watch_detects_incoherent_documents_without_fixing_them(client):
+    from app import integrity
+    from app.database import SessionLocal
+    from app.models import Artifact, Invoice, Payment, Quotation, QuotationItem
+    with SessionLocal() as db:
+        good = Quotation(number="UC-INT-GOOD", title="ok", status="draft", subtotal=1000, vat_rate=0.18, vat_amount=180, total=1180)
+        bad = Quotation(number="UC-INT-BAD", title="x", status="draft", subtotal=1000, vat_rate=0.18, vat_amount=180, total=900)
+        sub = Quotation(number="UC-INT-SUB", title="x", status="draft", subtotal=5000, total=5000)
+        db.add_all([good, bad, sub])
+        db.flush()
+        db.add_all([QuotationItem(quotation_id=good.id, position=1, description="a", quantity=1, unit="u", unit_price=1000, total=1000),
+                    QuotationItem(quotation_id=sub.id, position=1, description="a", quantity=1, unit="u", unit_price=3000, total=3000)])
+        inv = Invoice(number="UC-INT-F1", kind="invoice", status="approved", subtotal=1000, total=1000, paid=700, remaining=300)
+        inv_bad = Invoice(number="UC-INT-F2", kind="invoice", status="approved", subtotal=1000, total=1000, paid=500, remaining=500)
+        db.add_all([inv, inv_bad])
+        db.flush()
+        db.add_all([Payment(invoice_id=inv.id, amount=700), Payment(invoice_id=inv_bad.id, amount=200)])
+        db.add(Artifact(artifact_key="int-missing", filename="Fantome.pdf", path="/tmp/n-existe-pas/Fantome.pdf", entity_type="quote", entity_id="x"))
+        db.commit()
+        before = db.query(Quotation).filter(Quotation.number == "UC-INT-BAD").one().total
+        rep = integrity.check(db)
+        refs = {(p["ref"], p["kind"]) for p in rep["problems"]} | {(p["ref"], "") for p in rep["problems"]}
+        flat = " | ".join(f"{p['ref']}: {p['detail']}" for p in rep["problems"])
+        assert not rep["ok"]
+        assert "UC-INT-BAD: total 900 ≠ sous-total + TVA 1 180" in flat
+        assert "UC-INT-SUB: sous-total 5 000 ≠ somme des lignes 3 000" in flat
+        assert "UC-INT-F2: payé 500 ≠ somme des versements 200" in flat
+        assert "Fantome.pdf" in flat
+        assert "UC-INT-GOOD" not in flat and "UC-INT-F1" not in flat, flat   # les documents justes ne sont pas signalés
+        assert db.query(Quotation).filter(Quotation.number == "UC-INT-BAD").one().total == before   # détection seulement
+        assert client.get("/api/integrity").json()["total"] >= 4
+        assert "incohérence" in integrity.summary(db)
+        # nettoyage : ne pas polluer les autres tests
+        for model, nums in ((Payment, None),):
+            db.query(Payment).filter(Payment.invoice_id.in_([inv.id, inv_bad.id])).delete(synchronize_session=False)
+        db.query(QuotationItem).filter(QuotationItem.quotation_id.in_([good.id, sub.id])).delete(synchronize_session=False)
+        for o in (good, bad, sub, inv, inv_bad):
+            db.delete(o)
+        db.query(Artifact).filter(Artifact.artifact_key == "int-missing").delete()
+        db.commit()
+
+
+def test_integrity_watch_flags_server_error_spike_and_slowness():
+    from app import integrity
+    integrity.reset_requests()
+    for _ in range(60):
+        integrity.record_request(200, 40)
+    assert integrity._server() == []
+    for _ in range(10):
+        integrity.record_request(500, 50)
+    assert any(p["ref"] == "erreurs" for p in integrity._server())
+    integrity.reset_requests()
+    for _ in range(40):
+        integrity.record_request(200, 9000)
+    assert any(p["ref"] == "lenteur" for p in integrity._server())
+    integrity.reset_requests()
