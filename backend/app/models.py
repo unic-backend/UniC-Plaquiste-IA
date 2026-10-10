@@ -796,6 +796,8 @@ class CustomAgent(Base):
     last_result: Mapped[str] = mapped_column(Text, default="")
     last_ok: Mapped[bool] = mapped_column(Boolean, default=True)
     runs: Mapped[int] = mapped_column(Integer, default=0)
+    allowed_tools: Mapped[str] = mapped_column(Text, default="")   # liste d'outils (JSON) ; vide = tous les outils sûrs ; jamais plus que SAFE_TOOLS
+    last_run_id: Mapped[str] = mapped_column(String(16), default="")   # identifiant de corrélation du dernier passage (journal des décisions)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

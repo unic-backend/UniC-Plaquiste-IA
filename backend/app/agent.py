@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import logging
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -59,6 +60,8 @@ TOOLS: list[dict] = [
                         "(Paramètres › Atelier), jamais toi."),
         "input_schema": {"type": "object", "properties": {
             "name": {"type": "string"}, "mission": {"type": "string"}, "every_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+            "tools": {"type": "array", "items": {"type": "string"}, "description": ("Facultatif : réduis les outils de l'agent à ceux dont sa mission a besoin "
+                                                                                       "(lecture et brouillons seulement ; tout autre outil est refusé).")},
             "owner_asked": {"type": "boolean"}}, "required": ["name", "mission", "every_hours", "owner_asked"], "additionalProperties": False},
     },
     {
@@ -618,8 +621,10 @@ PARTIAL_OK = re.compile(r"quand m[eê]me|devis partiel|calcul partiel|seulement 
 class AgentSession:
     """Exécute les appels d'outils d'un tour de conversation et garde la trace de ce qui a été préparé."""
 
-    def __init__(self, db: Session, user_id: str | None, state: dict | None = None, project_id: str | None = None):
+    def __init__(self, db: Session, user_id: str | None, state: dict | None = None, project_id: str | None = None, run_id: str | None = None):
         self.db, self.user_id = db, user_id
+        self.run_id = run_id or uuid.uuid4().hex[:12]   # identifiant de corrélation : relie les décisions d'un même tour ou passage
+        self.audit_prefix = ""
         self.state = state if state is not None else {}   # état de la conversation (dernier calcul, dernier devis…)
         self.project_id = project_id
         self.cards: list[dict] = []   # brouillons à afficher dans la conversation
@@ -655,14 +660,14 @@ class AgentSession:
 
     def __call__(self, name: str, args: dict) -> dict:
         self.used.append(name)
-        audit(self.db, self.user_id, "agent_tool", "tool", name, str(args)[:300])
+        audit(self.db, self.user_id, "agent_tool", "tool", name, f"run={self.run_id} {self.audit_prefix}{str(args)}"[:300])
         try:
             fn = getattr(self, f"_t_{name}", None)
             if fn is None:
                 return {"error": f"Outil inconnu : {name}"}
             refused = self._blocked(name, args if isinstance(args, dict) else {})
             if refused:
-                audit(self.db, self.user_id, "agent_tool_refused", "tool", name, "contenu de tiers lu dans le tour")
+                audit(self.db, self.user_id, "agent_tool_refused", "tool", name, f"run={self.run_id} contenu de tiers lu dans le tour")
                 self.blocked.append(TOOL_LABELS.get(name, name))
                 return {"error": refused}
             return fn(**args)
@@ -1391,10 +1396,10 @@ class AgentSession:
                 "note": ("Dis au patron : la proposition (résumé, fichiers, tests) apparaîtra dans Paramètres › Atelier ; "
                          "elle ne sera en ligne qu'après son clic « Fusionner » quand les tests sont verts.")}
 
-    def _t_create_agent(self, name: str, mission: str, every_hours: int = 24, owner_asked: bool = False) -> dict:
+    def _t_create_agent(self, name: str, mission: str, every_hours: int = 24, owner_asked: bool = False, tools: list | None = None) -> dict:
         from app import agents
         try:
-            a = agents.create(self.db, name, mission, every_hours, by="ai", active=False)   # jamais actif sans le clic du patron
+            a = agents.create(self.db, name, mission, every_hours, by="ai", active=False, tools=tools)   # jamais actif sans le clic du patron
         except agents.AgentError as exc:
             raise ConnectorError(str(exc), 400)
         return {"ok": True, "agent": agents.to_dict(a),
