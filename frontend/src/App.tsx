@@ -173,9 +173,11 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState("");
   const [preview, setPreview] = useState(false);
+  const [margin, setMargin] = useState<string[]>([]);
   const load = () => {
     const fn = { quote: api.getQuote, invoice: api.getInvoice, po: api.getPo, dn: api.getDn }[kind];
     fn(id).then(setD).catch((e: Error) => setErr(e.message));
+    if (kind === "quote") api.quoteMargin(id).then((m: any) => setMargin(m?.alertes || [])).catch(() => setMargin([]));
   };
   useEffect(load, [kind, id]);
   if (err) return <div className="doc-card"><p className="error">{err}</p></div>;
@@ -204,6 +206,9 @@ function DocCard({ kind, id }: { kind: "quote" | "invoice" | "po" | "dn"; id: st
       </button>
       {priced && kind === "quote" && Array.isArray(d.price_check) && d.price_check.length > 0 && (
         <p className="error ic"><I.Alert size={16} /> {d.price_check.length} anomalie(s) de prix : ouvre le détail.</p>
+      )}
+      {kind === "quote" && margin.length > 0 && (
+        <p className="error ic"><I.Alert size={16} /> Marge : {margin[0]}{margin.length > 1 ? ` (+${margin.length - 1})` : ""}</p>
       )}
       {kind === "quote" && d.prices_complete === false && (
         <p className="hint">Prix manquants sur certaines lignes : rien n'est inventé, le total est partiel.</p>
@@ -1812,10 +1817,36 @@ function CompanyPage() {
         >
           Enregistrer
         </button>
+        <MarginCard />
         <AccountCard />
         <SignatureCard />
       </div>
     </div>
+  );
+}
+
+/** Marge minimale voulue : UniC prévient quand un devis passe dessous (jamais de valeur par défaut inventée). */
+function MarginCard() {
+  const [v, setV] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.marginSetting().then((x) => setV(x.min_margin_pct == null ? "" : String(x.min_margin_pct))).catch(() => {}); }, []);
+  const save = async () => {
+    setMsg("");
+    try {
+      const n = v.trim() === "" ? null : Number(v.replace(",", "."));
+      if (n !== null && !Number.isFinite(n)) throw new Error("Nombre attendu, ex. 20");
+      await api.saveMarginSetting(n);
+      setMsg(n === null ? "Seuil retiré : seules les ventes à perte sont signalées." : `Enregistré : alerte sous ${n} % de marge.`);
+    } catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  return (
+    <section className="card-box">
+      <h3>Marge minimale</h3>
+      <p className="hint">UniC compare tes prix de vente à tes prix d'achat enregistrés et te prévient sous ce seuil. Vide : seules les ventes à perte sont signalées. Visible par toi seulement, jamais sur un document client.</p>
+      <label>Marge minimale (%)
+        <input inputMode="decimal" value={v} placeholder="ex. 20" onChange={(e) => { setV(e.target.value); setMsg(""); }} onBlur={save} /></label>
+      {msg && <p className="hint">{msg}</p>}
+    </section>
   );
 }
 

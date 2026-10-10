@@ -182,3 +182,81 @@ def test_ai_eval_run_stores_a_report_without_executing_tools(client=None):
         got = c.get("/api/evals").json()
         assert got["cases"] == len(evals.CASES) and got["last"]["passed"] == 1 and got["running"] is False
         db.close()
+
+
+def test_plan_geometry_check_demotes_doubtful_rooms_and_never_confirms_them():
+    """Lecture de plan : cotes incohérentes, hauteur absurde, pièce citée deux fois, unité inconnue → « incertaine », jamais « confirmée »."""
+    from app import plans
+    data = {"unite_plan": "m", "pieces": [
+        {"nom": "Salon", "longueur_m": 5, "largeur_m": 4, "surface_m2": 20, "hauteur_m": 2.6, "plafond": "oui"},          # sain
+        {"nom": "Chambre 1", "longueur_m": 4, "largeur_m": 3, "surface_m2": 20, "plafond": "oui"},                          # 4×3=12 ≠ 20
+        {"nom": "Bureau", "longueur_m": 3, "largeur_m": 3, "surface_m2": 9, "hauteur_m": 26, "plafond": "oui"},             # 26 m de haut
+        {"nom": "Couloir", "longueur_m": 400, "largeur_m": 1.2, "plafond": "oui"},                                          # 400 m : cm lus en m
+        {"nom": "Cuisine", "surface_m2": 12, "plafond": "oui"}, {"nom": "cuisine", "surface_m2": 18, "plafond": "oui"},      # deux fois, 12 puis 18
+    ]}
+    out = plans._clean(data)
+    rooms = {r["nom"]: r for r in out["pieces"]}
+    assert rooms["Salon"]["confiance"] == "lue" and rooms["Salon"]["plafond"] == "oui"
+    for name in ("Chambre 1", "Bureau", "Couloir", "Cuisine", "cuisine"):
+        assert rooms[name]["confiance"] == "incertaine" and rooms[name]["plafond"] == "a_confirmer", name
+        assert "à confirmer par le patron" in rooms[name]["raison"]
+    assert out["total_plafond_confirme_m2"] == 20.0                      # seul le salon est confirmé
+    assert set(out["pieces_incertaines"]) == {"Chambre 1", "Bureau", "Couloir", "Cuisine", "cuisine"}
+    flat = " | ".join(out["remarques"])
+    assert "= 12" in flat and "une des cotes est fausse" in flat and "hauteur 26 m improbable" in flat and "côté de 400 m improbable" in flat and "contradiction" in flat
+
+
+def test_plan_unknown_unit_only_doubts_surfaces_deduced_from_dimensions():
+    from app import plans
+    out = plans._clean({"unite_plan": "inconnue", "pieces": [
+        {"nom": "A", "surface_m2": 15, "plafond": "oui"}, {"nom": "B", "longueur_m": 5, "largeur_m": 3, "plafond": "oui"}]})
+    rooms = {r["nom"]: r for r in out["pieces"]}
+    assert rooms["A"]["confiance"] == "surface seule" and rooms["A"]["plafond"] == "oui"        # écrite en m² : indépendante de l'unité
+    assert rooms["B"]["confiance"] == "incertaine" and rooms["B"]["plafond"] == "a_confirmer"   # tirée de cotes sans unité
+    assert any("Unité du plan inconnue" in r for r in out["remarques"])
+
+
+def test_quote_margin_uses_only_recorded_purchase_prices():
+    """Marge : aucun prix d'achat inventé. Vente à perte signalée ; achat inconnu = non calculable ; seuil choisi par le patron."""
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from app import margin
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models import Material, MaterialPrice, Quotation, QuotationItem
+    with TestClient(app) as client, SessionLocal() as db:
+        mats = []
+        for sku, buy in (("MG-OK", 600.0), ("MG-LOSS", 1200.0), ("MG-THIN", 920.0), ("MG-NOBUY", None)):
+            m = Material(sku=sku, name=sku, unit="u", category="test")
+            db.add(m); db.flush(); mats.append(m)
+            if buy is not None:
+                db.add(MaterialPrice(material_id=m.id, kind="purchase", amount=buy, valid_from=datetime(2020, 1, 1, tzinfo=timezone.utc)))
+        q = Quotation(number="UC-MARGE-1", title="m", status="draft", subtotal=0, total=0)
+        db.add(q); db.flush()
+        for pos, (m, price, qty) in enumerate(zip(mats, (1000.0, 1000.0, 1000.0, 500.0), (10, 5, 10, 2)), start=1):
+            db.add(QuotationItem(quotation_id=q.id, position=pos, description=m.sku, quantity=qty, unit="u", unit_price=price,
+                                 total=price * qty, material_id=m.id))
+        db.add(QuotationItem(quotation_id=q.id, position=9, description="Main-d'œuvre pose", quantity=1, unit="forfait",
+                             unit_price=50000, total=50000))
+        db.commit()
+        r = margin.analyze(q)
+        # vente connue : 10×1000 + 5×1000 + 10×1000 = 25 000 ; achat : 6 000 + 6 000 + 9 200 = 21 200 ; marge 3 800 = 15,2 %
+        assert r["marge_connue"] == 3800.0 and r["marge_pct"] == 15.2
+        assert [x["ligne"] for x in r["a_perte"]] == ["MG-LOSS"] and "VENTE À PERTE : MG-LOSS" in r["alertes"][0]
+        assert r["achat_inconnu"] == ["MG-NOBUY"] and r["hors_catalogue"] == ["Main-d'œuvre pose"]
+        assert r["seuil_pct"] is None and r["marge_basse"] == []            # sans seuil du patron : seulement les pertes
+        assert margin.analyze(q, min_margin_pct=10)["marge_basse"][0]["ligne"] == "MG-THIN"   # 8 % < 10 %
+        assert client.put("/api/settings/margin", json={"min_margin_pct": 100}).status_code == 400
+        assert client.put("/api/settings/margin", json={"min_margin_pct": 12}).json()["min_margin_pct"] == 12
+        assert client.get(f"/api/quotes/{q.id}/margin").json()["seuil_pct"] == 12
+        from app.agent import AgentSession
+        out = AgentSession(db, None, {})("quote_margin", {"quote_number": "UC-MARGE-1"})
+        assert out["marge_pct"] == 15.2 and out["a_perte"]
+        client.put("/api/settings/margin", json={"min_margin_pct": None})
+        for it in list(q.items):
+            db.delete(it)
+        db.delete(q)
+        db.query(MaterialPrice).filter(MaterialPrice.material_id.in_([m.id for m in mats])).delete(synchronize_session=False)
+        for m in mats:
+            db.delete(m)
+        db.commit()
