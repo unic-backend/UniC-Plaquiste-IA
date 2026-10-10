@@ -295,6 +295,14 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"only_late": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "quote_margin",
+        "description": ("MARGE d'un devis (pour le patron seulement, jamais pour le client) : prix de vente contre prix d'ACHAT enregistrés, ligne par ligne, "
+                        "ventes à perte, marge sous le seuil du patron, lignes sans prix d'achat. À utiliser pour « quelle marge sur ce devis », "
+                        "« est-ce que je gagne de l'argent dessus ». Ne devine jamais un prix d'achat : s'il est inconnu, dis-le."),
+        "input_schema": {"type": "object", "properties": {"quote_number": {"type": "string", "description": "Numéro du devis ; omis = dernier devis de la conversation"}},
+                         "additionalProperties": False},
+    },
+    {
         "name": "client_statement",
         "description": ("RELEVÉ DE COMPTE PDF d'un client du suivi des encaissements : devis acceptés, chaque versement reçu, reste à payer. "
                         "À utiliser pour « fais-moi le relevé de X », « envoie-lui le point en PDF ». Le patron l'envoie lui-même."),
@@ -483,7 +491,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -777,6 +785,24 @@ class AgentSession:
         out = tracking.overview(self.db)
         out["note"] = "Chiffres exacts calculés en code. Présente d'abord le reste à encaisser. Argent seulement, jamais l'avancement du chantier."
         return out
+
+    def _margin_hint(self, q: Quotation) -> dict:
+        """Alertes de marge à dire au patron (jamais au client) : ventes à perte, marge sous son seuil, achats inconnus."""
+        from app import margin
+        m = margin.analyze(q)
+        return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"],
+                "note": "Dis-le au patron seulement s'il y a des alertes ; propose quote_margin pour le détail."}
+
+    def _t_quote_margin(self, quote_number: str = "") -> dict:
+        from app import margin
+        q = None
+        if quote_number.strip():
+            q = self.db.query(Quotation).filter(Quotation.number == quote_number.strip().upper()).first()
+        elif self.state.get("last_quote_id"):
+            q = self.db.get(Quotation, self.state["last_quote_id"])
+        if q is None:
+            return {"error": "Devis introuvable : donne son numéro."}
+        return margin.analyze(q)
 
     def _t_client_statement(self, client: str) -> dict:
         from app.services import store_artifact
@@ -1192,7 +1218,7 @@ class AgentSession:
         manquants = [i.description for i in q.items if i.unit_price is None]
         return {"numero": q.number, "statut": q.status, "total": q.total, "devise": q.currency,
                 "prix_complets": q.prices_complete, "lignes": len(q.items), "lignes_sans_prix": manquants,
-                "tva": q.vat_rate, "controle_prix": "conforme à la grille UniC",
+                "tva": q.vat_rate, "controle_prix": "conforme à la grille UniC", "marge": self._margin_hint(q),
                 "note": "Brouillon : le patron relit et approuve. Le devis s'affiche dans la conversation. "
                         "Signale-lui les lignes sans prix et les hypothèses AVANT de parler du PDF."}
 

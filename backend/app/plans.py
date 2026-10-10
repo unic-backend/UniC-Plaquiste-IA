@@ -112,6 +112,63 @@ def _footprint_check(blocks, rooms: list[dict]) -> dict:
     return {"statut": statut, "emprise": rects, "emprise_m2": foot, "pieces_m2": rooms_total, "ecart_pct": ecart, "note": note}
 
 
+HEIGHT_RANGE = (2.0, 6.0)   # hauteur sous plafond plausible, en mètres
+MAX_SIDE_M = 100.0          # une pièce de plus de 100 m de côté : probablement une cote lue dans la mauvaise unité
+MAX_RATIO = 12.0            # longueur / largeur d'une pièce au-delà : mauvaise lecture d'une cote
+SURFACE_GAP = 0.08          # écart toléré entre surface écrite et longueur × largeur
+
+
+def geometry_check(rooms: list[dict], data: dict) -> list[str]:
+    """Vérification géométrique (code, pas IA) : cotes illisibles, incohérentes ou contradictoires.
+    Chaque pièce reçoit une `confiance` : « lue » (cotes concordantes), « calculée » (longueur × largeur seulement),
+    « surface seule », « absente », ou « incertaine ». Une pièce incertaine annoncée « plafond : oui » est rétrogradée en
+    « a_confirmer » : une mesure douteuse n'est jamais traitée comme confirmée. Rend les remarques pour le patron."""
+    notes: list[str] = []
+
+    def doubt(room: dict, why: str) -> None:
+        room["confiance"] = "incertaine"
+        room.setdefault("doutes", []).append(why)
+        notes.append(f"{room['nom']} : {why}")
+    seen: dict[str, dict] = {}
+    for r in rooms:
+        L, l, S, H = r["longueur_m"], r["largeur_m"], r["surface_m2"], r["hauteur_m"]
+        r["confiance"] = ("absente" if not S else "calculée" if r.get("surface_source") == "calculée"
+                          else "surface seule" if not (L and l) else "lue")
+        if L and l and S and abs(S - L * l) / S > SURFACE_GAP:
+            doubt(r, f"surface {S} m² ≠ {L} × {l} = {round(L * l, 2)} m² : une des cotes est fausse")
+        if (L and L > MAX_SIDE_M) or (l and l > MAX_SIDE_M):
+            doubt(r, f"côté de {max(L or 0, l or 0):g} m improbable (cote en cm ou mm ?)")
+        if L and l and max(L, l) / min(L, l) > MAX_RATIO:
+            doubt(r, f"proportions étranges ({L} × {l} m) : cote mal lue ?")
+        if H and not HEIGHT_RANGE[0] <= H <= HEIGHT_RANGE[1]:
+            doubt(r, f"hauteur {H:g} m improbable (entre {HEIGHT_RANGE[0]:g} et {HEIGHT_RANGE[1]:g} m attendu)")
+        key = " ".join(r["nom"].lower().split())
+        twin = seen.get(key)
+        if twin is not None and S and twin["surface_m2"] and abs(S - twin["surface_m2"]) / max(S, twin["surface_m2"]) > SURFACE_GAP:
+            doubt(r, f"« {r['nom']} » apparaît deux fois avec {twin['surface_m2']} m² puis {S} m² : contradiction")
+            if twin.get("confiance") != "incertaine":
+                doubt(twin, f"« {r['nom']} » contredit une autre mention ({S} m²)")
+        seen.setdefault(key, r)
+    if str(data.get("unite_plan") or "inconnue").lower() == "inconnue":
+        from_dims = [r for r in rooms if r.get("surface_source") == "calculée"]
+        if from_dims:   # les surfaces ÉCRITES en m² ne dépendent pas de l'unité du dessin ; celles tirées des cotes, si
+            notes.append("Unité du plan inconnue : les surfaces déduites des cotes (" + ", ".join(r["nom"] for r in from_dims[:5])
+                         + ") sont à confirmer avant tout devis.")
+            for r in from_dims:
+                if r["confiance"] != "incertaine":
+                    r["confiance"] = "incertaine"
+                    r.setdefault("doutes", []).append("unité du plan inconnue")
+    for c in data.get("cloisons") or []:
+        n = _num(c.get("longueur_m")) if isinstance(c, dict) else None
+        if n and n > 200:
+            notes.append(f"Cloison de {n:g} m (« {str(c.get('texte') or '')[:40]} ») improbable : unité ?")
+    for r in rooms:   # une mesure douteuse n'est jamais « confirmée »
+        if r["confiance"] == "incertaine" and r["plafond"] == "oui":
+            r["plafond"] = "a_confirmer"
+            r["raison"] = (r["raison"] + " — " if r["raison"] else "") + "cote incertaine : à confirmer par le patron"
+    return notes
+
+
 def _clean(data: dict) -> dict:
     """Valide la sortie de l'IA et fait les calculs en code."""
     rooms, notes = [], [str(x)[:200] for x in (data.get("remarques") or [])][:20]
@@ -129,6 +186,7 @@ def _clean(data: dict) -> dict:
         ceil = str(r.get("plafond") or "a_confirmer").lower()
         rooms.append({
             "nom": str(r["nom"])[:80], "page": r.get("page"), "longueur_m": L, "largeur_m": l,
+            "surface_source": "écrite" if S else ("calculée" if calc else None),
             "surface_m2": round(surface, 2) if surface else None, "hauteur_m": _num(r.get("hauteur_m")),
             "plafond": ceil if ceil in CEILING else "a_confirmer", "raison": str(r.get("raison") or "")[:160],
         })
@@ -138,6 +196,7 @@ def _clean(data: dict) -> dict:
     def total(flag: str) -> float:
         return round(sum(r["surface_m2"] or 0 for r in rooms if r["plafond"] == flag), 2)
 
+    notes.extend(geometry_check(rooms, data))
     check = _footprint_check(data.get("emprise"), rooms)
     if check.get("note"):
         notes.insert(0, check["note"])
@@ -148,6 +207,7 @@ def _clean(data: dict) -> dict:
         "cloisons": [c for c in (data.get("cloisons") or []) if isinstance(c, dict)][:60],
         "references": [c for c in (data.get("references") or []) if isinstance(c, dict)][:60],
         "total_plafond_confirme_m2": total("oui"), "total_plafond_a_confirmer_m2": total("a_confirmer"),
+        "pieces_incertaines": [r["nom"] for r in rooms if r.get("confiance") == "incertaine"],
         "remarques": list(dict.fromkeys(notes))[:30],
     }
 

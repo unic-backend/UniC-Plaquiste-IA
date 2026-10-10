@@ -1681,6 +1681,39 @@ def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depend
     return _tracked(lambda: tracking.client_file(db, key))
 
 
+class MarginIn(BaseModel):
+    min_margin_pct: float | None = None
+
+
+@router.get("/settings/margin")
+def margin_setting(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import margin
+    return {"min_margin_pct": margin.get_min_margin(db)}
+
+
+@router.put("/settings/margin")
+def margin_setting_put(body: MarginIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Seuil de marge minimale (le patron le choisit : aucune valeur par défaut inventée). Vide = seules les ventes à perte sont signalées."""
+    from app import margin
+    try:
+        margin.set_min_margin(db, body.min_margin_pct)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "update", "setting", "min_margin_pct", str(body.min_margin_pct))
+    db.commit()
+    return {"min_margin_pct": body.min_margin_pct}
+
+
+@router.get("/quotes/{qid}/margin")
+def quote_margin(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Marge du devis (prix d'achat enregistrés contre prix de vente). Pour le patron seulement."""
+    from app import margin
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    return margin.analyze(q)
+
+
 @router.get("/integrity")
 def integrity_report(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Cohérence des documents (totaux, TVA, versements, PDF, doublons) et santé des requêtes. Détection seulement."""
