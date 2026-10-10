@@ -62,6 +62,10 @@ async def access_code_guard(request: Request, call_next):
     """Code d'accès unique sur /api/*. Ajouté AVANT le CORS : le 401 garde ses en-têtes CORS."""
     code = settings.unic_access_code
     path = request.url.path
+    if not code and settings.unic_env == "production" and _protected(path, request.method) and not _is_loopback(request):
+        # Fermé par défaut : sans code, l'API serait ouverte à tout Internet (devis, factures, mot de passe…).
+        logger.error("UNIC_ACCESS_CODE absent en production : accès refusé à %s", path)
+        return JSONResponse({"detail": "Serveur non sécurisé : définis UNIC_ACCESS_CODE (Render › Environment)."}, status_code=503)
     if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback",
                                                           "/api/auth/login", "/api/auth/status", "/api/health/live", "/api/health/ready") \
             and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
@@ -74,6 +78,21 @@ async def access_code_guard(request: Request, call_next):
             return JSONResponse({"detail": "Code d'accès requis"}, status_code=401)
         ratelimit.reset(ip)
     return await call_next(request)
+
+
+_OPEN_PATHS = ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback",
+               "/api/auth/status", "/api/health/live", "/api/health/ready")
+
+
+def _protected(path: str, method: str) -> bool:
+    return path.startswith("/api/") and method != "OPTIONS" and path not in _OPEN_PATHS \
+        and not path.startswith(("/api/public-media/", "/api/public/"))
+
+
+def _is_loopback(request: Request) -> bool:
+    """Usage local (même machine) : reste possible sans code."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 def _origins() -> list[str]:
