@@ -112,6 +112,22 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def watch_requests(request: Request, call_next):
+    """Compte les erreurs serveur et la lenteur des requêtes /api (surveillance de cohérence, en mémoire seulement)."""
+    import time as _t
+    from app import integrity
+    start = _t.perf_counter()
+    status = 500
+    try:
+        resp = await call_next(request)
+        status = resp.status_code
+        return resp
+    finally:
+        if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/chat"):   # le chat est long par nature
+            integrity.record_request(status, (_t.perf_counter() - start) * 1000)
+
+
+@app.middleware("http")
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     h = resp.headers

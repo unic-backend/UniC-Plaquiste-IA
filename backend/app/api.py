@@ -1681,6 +1681,13 @@ def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depend
     return _tracked(lambda: tracking.client_file(db, key))
 
 
+@router.get("/integrity")
+def integrity_report(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Cohérence des documents (totaux, TVA, versements, PDF, doublons) et santé des requêtes. Détection seulement."""
+    from app import integrity
+    return integrity.check(db)
+
+
 @router.get("/evals")
 def evals_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Banc d'essai de l'IA : dernier rapport, nombre de cas, essai en cours."""

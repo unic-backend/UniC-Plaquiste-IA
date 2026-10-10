@@ -437,6 +437,7 @@ export const api = {
   connectors: () => request<Record<string, boolean>>("/api/connectors"),
   selfcare: () => request<any>("/api/selfcare"),
   release: () => request<any>("/api/selfcare/release"),
+  integrity: () => request<any>("/api/integrity"),
   evals: () => request<any>("/api/evals"),
   runEvals: () => request<any>("/api/evals/run", { method: "POST" }),
   buildApk: () => request<any>("/api/selfcare/release/apk", { method: "POST" }),

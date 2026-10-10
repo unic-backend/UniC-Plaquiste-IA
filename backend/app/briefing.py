@@ -190,9 +190,13 @@ def _health(db: Session) -> Section | None:
     open_rows = selfcare.incidents(db, "open", 5)
     sleepers = selfcare.sleeping()
     ready = db.query(RepairJob).filter(RepairJob.status == "proposed").count()
-    if not open_rows and not sleepers and not ready:
+    from app import integrity
+    incoherent = integrity.summary(db)
+    if not open_rows and not sleepers and not ready and not incoherent:
         return None
     parts = []
+    if incoherent:
+        parts.append(incoherent)
     if open_rows:
         parts.append(f"{len(open_rows)} problème(s) vu(s) : " + " ; ".join(r["message"][:80] for r in open_rows[:3]))
     if sleepers:
