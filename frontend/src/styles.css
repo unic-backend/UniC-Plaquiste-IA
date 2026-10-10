@@ -1327,3 +1327,15 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .contact-txt { display: flex; flex-direction: column; min-width: 0; }
 .contact-txt b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-txt small { color: var(--muted); font-size: 13px; }
+
+/* Matériaux & prix : saisie des prix d'achat */
+.mat-progress { margin: 12px 0; font-size: 14px; }
+.mat-progress .sv-bar { margin-top: 6px; }
+.mat-list { display: grid; gap: 10px; margin-top: 12px; }
+.mat-row { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.mat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mat-head b { overflow-wrap: anywhere; }
+.mat-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.mat-fields label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.mat-fields input { font: inherit; font-size: 16px; letter-spacing: 0; text-transform: none; color: var(--ink); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); min-width: 0; }
+.mat-fields input:focus { outline: 2px solid var(--green-2); outline-offset: 1px; }

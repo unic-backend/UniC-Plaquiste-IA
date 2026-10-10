@@ -838,6 +838,48 @@ def add_price(mid: str, body: PriceIn, db: Session = Depends(get_db), user: User
     return {"id": p.id}
 
 
+class BulkPriceItem(BaseModel):
+    id: str
+    amount: float | None = None
+
+
+class BulkPricesIn(BaseModel):
+    kind: str
+    prices: list[BulkPriceItem] = Field(max_length=300)
+
+
+@router.post("/materials/prices/bulk")
+def add_prices_bulk(body: BulkPricesIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Saisie en série des prix d'achat (ou de vente) : une transaction, un prix inchangé n'est pas répété, une valeur
+    invalide est refusée sans bloquer les autres. Les prix vides restent vides : jamais de valeur inventée."""
+    import math
+    from app.services import current_price
+    if body.kind not in ("purchase", "selling"):
+        raise HTTPException(400, "kind = purchase | selling")
+    saved, unchanged, errors = 0, 0, []
+    for item in body.prices:
+        m = db.get(Material, item.id)
+        if m is None:
+            errors.append({"id": item.id, "error": "matériau introuvable"})
+            continue
+        amt = item.amount
+        if amt is None:
+            continue   # champ laissé vide : rien n'est enregistré
+        if not math.isfinite(amt) or amt <= 0 or amt > 1_000_000_000:
+            errors.append({"id": item.id, "sku": m.sku, "error": "montant invalide (nombre positif attendu)"})
+            continue
+        cur = current_price(db, m.id, body.kind)
+        if cur is not None and abs(cur.amount - amt) < 0.005:
+            unchanged += 1
+            continue
+        db.add(MaterialPrice(material_id=m.id, kind=body.kind, amount=round(amt, 2), currency=(cur.currency if cur else ""),
+                             source="saisie manuelle", created_by=user.id))
+        audit(db, user.id, "price", "material", m.id, f"{body.kind}={round(amt, 2)}")
+        saved += 1
+    db.commit()
+    return {"saved": saved, "unchanged": unchanged, "errors": errors}
+
+
 @router.get("/services")
 def services(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = db.query(Service).all()

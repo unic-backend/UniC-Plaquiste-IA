@@ -1205,67 +1205,75 @@ function Clients() {
 
 function Materiaux() {
   const [rows, setRows] = useState<any[]>([]);
-  const [sku, setSku] = useState("");
-  const [kind, setKind] = useState("selling");
-  const [amount, setAmount] = useState("");
-  const load = () => api.materials().then(setRows);
-  useEffect(() => {
-    load();
-  }, []);
+  const [filter, setFilter] = useState<"all" | "nobuy" | "nosell">("all");
+  const [q, setQ] = useState("");
+  const [msg, setMsg] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});   // saisie en cours : "id:kind" → texte
+  const load = () => api.materials().then(setRows).catch((e) => setMsg(e?.message || "Erreur"));
+  useEffect(() => { load(); }, []);
+  const withBuy = rows.filter((m) => m.purchase_price != null).length;
+  const shown = rows.filter((m) => (filter === "nobuy" ? m.purchase_price == null : filter === "nosell" ? m.selling_price == null : true)
+    && (!q.trim() || `${m.name} ${m.sku} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase())));
+  const save = async (m: any, kind: "purchase" | "selling") => {
+    const key = `${m.id}:${kind}`;
+    const raw = drafts[key];
+    if (raw === undefined) return;
+    const cur = kind === "purchase" ? m.purchase_price : m.selling_price;
+    const txt = raw.replace(/\s/g, "").replace(",", ".");
+    setDrafts(({ [key]: _gone, ...rest }) => rest);
+    if (txt === "" || Number(txt) === cur) return;
+    const n = Number(txt);
+    if (!Number.isFinite(n) || n <= 0) { setMsg(`« ${raw} » n'est pas un montant valide (nombre positif attendu).`); return; }
+    try {
+      const r = await api.savePrices(kind, [{ id: m.id, amount: n }]);
+      setMsg(r.errors?.length ? r.errors[0].error : `✓ ${m.name} : ${kind === "purchase" ? "achat" : "vente"} ${n.toLocaleString("fr-FR")} enregistré.`);
+      load();
+    } catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  const field = (m: any, kind: "purchase" | "selling") => {
+    const key = `${m.id}:${kind}`;
+    const cur = kind === "purchase" ? m.purchase_price : m.selling_price;
+    return (
+      <input inputMode="decimal" aria-label={`${kind === "purchase" ? "Prix d'achat" : "Prix de vente"} ${m.name}`}
+        placeholder="à saisir" value={drafts[key] ?? (cur == null ? "" : String(cur))}
+        onChange={(e) => setDrafts({ ...drafts, [key]: e.target.value })} onBlur={() => save(m, kind)}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+    );
+  };
   return (
     <div className="page">
-      <div className="page-inner">
-        <h1>Matériaux</h1>
-        <p className="lede">Catalogue UniC. Les prix vides restent vides — jamais inventés.</p>
-        <form
-          className="toolbar"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const m = rows.find((x) => x.sku === sku);
-            if (!m || !amount) return;
-            await api.addPrice(m.id, { kind, amount: Number(amount.replace(",", ".")) });
-            setAmount("");
-            load();
-          }}
-        >
-          <select value={sku} onChange={(e) => setSku(e.target.value)}>
-            <option value="">SKU…</option>
-            {rows.map((m) => (
-              <option key={m.id} value={m.sku}>
-                {m.sku}
-              </option>
-            ))}
-          </select>
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="selling">Vente</option>
-            <option value="purchase">Achat</option>
-          </select>
-          <input placeholder="Montant" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <button className="btn btn-copper">Enregistrer le prix</button>
-        </form>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Nom</th>
-                <th>Unité</th>
-                <th>Vente</th>
-                <th>Achat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) => (
-                <tr key={m.id}>
-                  <td data-label="SKU">{m.sku}</td>
-                  <td data-label="Nom">{m.name}</td>
-                  <td data-label="Unité">{m.unit}</td>
-                  <td data-label="Vente">{m.selling_price ?? "non renseigné"}</td>
-                  <td data-label="Achat">{m.purchase_price ?? "non renseigné"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="page-inner mat">
+        <h1>Matériaux & prix</h1>
+        <p className="lede">Saisis tes prix d'achat : UniC calcule ainsi ta marge sur chaque devis. Un champ vide reste vide, rien n'est inventé.</p>
+        {rows.length > 0 && (
+          <div className="mat-progress" aria-label="Avancement de la saisie">
+            <div><b>{withBuy}</b> / {rows.length} prix d'achat saisis</div>
+            <div className="sv-bar"><i style={{ width: `${Math.round((100 * withBuy) / rows.length)}%` }} /></div>
+          </div>
+        )}
+        <input className="sv-search" type="search" placeholder="Chercher un matériau…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="sv-filters" role="group" aria-label="Filtrer">
+          {([["all", "Tous"], ["nobuy", "Sans prix d'achat"], ["nosell", "Sans prix de vente"]] as const).map(([v, l]) => (
+            <button key={v} className={filter === v ? "on" : ""} aria-pressed={filter === v} onClick={() => setFilter(v)}>{l}</button>
+          ))}
+        </div>
+        {msg && <p className="hint" role="status">{msg}</p>}
+        <div className="mat-list">
+          {shown.map((m) => {
+            const pct = m.selling_price && m.purchase_price ? Math.round((1000 * (m.selling_price - m.purchase_price)) / m.selling_price) / 10 : null;
+            return (
+              <div key={m.id} className="mat-row">
+                <div className="mat-head"><b>{m.name}</b>
+                  {pct !== null && <span className={`sv-chip ${pct < 0 ? "off" : pct < 10 ? "warn" : "ok"}`}>marge {String(pct).replace(".", ",")} %</span>}</div>
+                <div className="sv-small sv-muted">{m.sku} · {m.unit}</div>
+                <div className="mat-fields">
+                  <label>Achat{field(m, "purchase")}</label>
+                  <label>Vente{field(m, "selling")}</label>
+                </div>
+              </div>
+            );
+          })}
+          {rows.length > 0 && !shown.length && <p className="sv-muted">Aucun matériau dans cette liste.</p>}
         </div>
       </div>
     </div>

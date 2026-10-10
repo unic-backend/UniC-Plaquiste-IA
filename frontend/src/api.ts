@@ -375,6 +375,8 @@ export const api = {
   createSupplier: (body: any) =>
     request("/api/suppliers", { method: "POST", body: JSON.stringify(body) }),
   materials: () => request<any[]>("/api/materials"),
+  savePrices: (kind: "purchase" | "selling", prices: { id: string; amount: number | null }[]) =>
+    request<{ saved: number; unchanged: number; errors: { id: string; error: string }[] }>("/api/materials/prices/bulk", { method: "POST", body: JSON.stringify({ kind, prices }) }),
   addPrice: (id: string, body: any) =>
     request(`/api/materials/${id}/prices`, { method: "POST", body: JSON.stringify(body) }),
   services: () => request<any[]>("/api/services"),
