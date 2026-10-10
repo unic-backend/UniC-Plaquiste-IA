@@ -1,0 +1,93 @@
+name: Contrôle après déploiement
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: post-deploy
+  cancel-in-progress: true   # un nouveau déploiement remplace le contrôle du précédent
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE: ${{ vars.UNIC_HEALTH_BASE || 'https://unic-plaquiste-ia.onrender.com' }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}        # facultatif (retour arrière automatique)
+      RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}      # facultatif (srv-…)
+      AUTO_ROLLBACK: ${{ vars.UNIC_AUTO_ROLLBACK }}         # "true" pour autoriser le retour arrière automatique
+      TITLE: "🟠 Déploiement dégradé"
+    steps:
+      - name: Attendre la mise en ligne
+        run: |
+          if [ -n "$RENDER_API_KEY" ] && [ -n "$RENDER_SERVICE_ID" ]; then
+            for i in $(seq 1 40); do   # jusqu'à ~20 min : on attend que Render ait fini CE commit
+              st=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=1" \
+                   | jq -r '.[0].deploy | "\(.commit.id) \(.status)"')
+              echo "Render : $st"
+              case "$st" in "${GITHUB_SHA} live") break ;; *" build_failed"|*" update_failed"|*" canceled") echo "Déploiement refusé par Render (ancienne version conservée)."; break ;; esac
+              sleep 30
+            done
+          else
+            sleep 600   # sans clé Render : délai fixe (construction Docker ≈ 5 à 10 min)
+          fi
+
+      - name: Contrôle de santé
+        id: probe
+        run: |
+          problems=""
+          ready=$(curl -s -o /dev/null -w "%{http_code}" --retry 4 --retry-delay 20 --retry-all-errors --max-time 60 "$BASE/api/health/ready" || true)
+          [ "$ready" = "200" ] || problems="$problems- Santé (/api/health/ready) : $ready (attendu 200)%0A"
+          guard=$(curl -s -o /dev/null -w "%{http_code}" --retry 2 --retry-delay 10 --max-time 60 "$BASE/api/materials" || true)
+          [ "$guard" = "401" ] || problems="$problems- Protection (/api/materials sans code) : $guard (attendu 401)%0A"
+          ping=$(curl -s --max-time 30 "$BASE/api/ping" | jq -r '.ok // empty' 2>/dev/null || true)
+          [ "$ping" = "true" ] || problems="$problems- /api/ping ne répond pas correctement%0A"
+          echo "ready=$ready guard=$guard ping=$ping"
+          echo "problems=$problems" >> "$GITHUB_OUTPUT"
+
+      - name: Retour arrière (seulement si autorisé par le propriétaire)
+        id: rollback
+        if: steps.probe.outputs.problems != '' && env.AUTO_ROLLBACK == 'true' && env.RENDER_API_KEY != '' && env.RENDER_SERVICE_ID != ''
+        run: |
+          # Dernière version qui tournait avant celle-ci = le plus récent déploiement « deactivated ».
+          prev=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=10" \
+                 | jq -r '[.[].deploy | select(.status=="deactivated")][0].id // empty')
+          if [ -z "$prev" ]; then echo "done=non" >> "$GITHUB_OUTPUT"; echo "Aucune version précédente disponible."; exit 0; fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+                 -d "{\"deployId\":\"$prev\"}" "https://api.render.com/v1/services/$RENDER_SERVICE_ID/rollback")
+          echo "rollback $prev -> HTTP $code"
+          [ "$code" = "201" ] || [ "$code" = "200" ] && echo "done=oui" >> "$GITHUB_OUTPUT" || echo "done=echec" >> "$GITHUB_OUTPUT"
+
+      - name: Signaler
+        if: steps.probe.outputs.problems != ''
+        env:
+          PROBLEMS: ${{ steps.probe.outputs.problems }}
+          ROLLBACK: ${{ steps.rollback.outputs.done }}
+        run: |
+          case "$ROLLBACK" in
+            oui)   action="↩️ Retour arrière lancé automatiquement vers la version précédente. Corrige puis refais une PR." ;;
+            echec) action="⚠️ Le retour arrière automatique a échoué. Fais-le à la main : Render › unic-ai › Events › version précédente › Rollback." ;;
+            non)   action="⚠️ Aucune version précédente disponible pour le retour arrière." ;;
+            *)     action="Retour arrière automatique désactivé : Render › unic-ai › Events › version précédente › Rollback si l'application est inutilisable." ;;
+          esac
+          body="$(printf '%b' "${PROBLEMS//%0A/\\n}")
+
+          Commit ${GITHUB_SHA:0:7} · contrôle du $(date -u '+%d/%m/%Y %H:%M') UTC sur $BASE.
+          $action"
+          open=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$TITLE" --body "$body"; fi
+          exit 1
+
+      - name: Fermer l'alerte (déploiement sain)
+        if: steps.probe.outputs.problems == ''
+        run: |
+          open=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
+          [ -z "$open" ] || gh issue close "$open" --comment "✅ Déploiement sain (${GITHUB_SHA:0:7})."
