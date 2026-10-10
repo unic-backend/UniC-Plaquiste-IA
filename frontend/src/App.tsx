@@ -19,6 +19,7 @@ import { UnicVoice } from "./UnicVoice";
 import { Interpreter } from "./Interpreter";
 import { Atelier } from "./Atelier";
 import { ConvMenu } from "./ConvTools";
+import { Higgsfield } from "./Higgsfield";
 import { Chantiers } from "./Chantiers";
 import { useBackHandler, useScrollMemory } from "./navMemory";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
@@ -339,7 +340,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
         <DraftCards drafts={structured?.drafts} />
         {structured?.document ? <DocCard kind={structured.document.kind} id={structured.document.id} /> : null}
         {(structured?.documents || []).map((d: any) => <DocCard key={d.id} kind={d.kind} id={d.id} />)}
-        {(structured?.images || []).map((d: any) => <DiagramCard key={d.id} id={d.id} filename={d.filename} title={d.title} />)}
+        {(structured?.images || []).map((d: any) => <DiagramCard key={d.id} id={d.id} filename={d.filename} title={d.title} caption={d.caption} />)}
         {(structured?.files || []).map((f: any) => <FileCard key={f.id} id={f.id} filename={f.filename} mime={f.mime} size={f.size} />)}
         {arts.length && !structured?.document && !structured?.documents ? (
           <div className="arts">
@@ -1628,6 +1629,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/google", title: "Fiche Google", text: "Publier tous les 4 jours, mots-clés, fiche complète" },
       { to: "/reseaux", title: "Réseaux & avis", text: "Publications, avis Google, site" },
       { to: "/voix", title: "Voix", text: "Écouter les réponses : voix du téléphone, ElevenLabs, ta voix" },
+      { to: "/higgsfield", title: "Higgsfield", text: "Créer des images (rendus de pièces, styles) depuis la conversation" },
     ],
   },
   {
@@ -2074,6 +2076,7 @@ export default function App() {
         <Route path="/documents" element={<Documents />} />
         <Route path="/memoire" element={<Memoire />} />
         <Route path="/voix" element={<Voix />} />
+        <Route path="/higgsfield" element={<Higgsfield />} />
         <Route path="/journal" element={<Journal />} />
         <Route path="/couts" element={<Couts />} />
         <Route path="/google" element={<FicheGoogle />} />

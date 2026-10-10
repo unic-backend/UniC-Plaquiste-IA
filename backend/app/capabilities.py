@@ -36,6 +36,13 @@ def _connectors(db=None) -> dict:
             conn["voice"] = bool(voice.status(db).get("configured"))
         except Exception:
             pass
+    conn["higgsfield"] = False
+    if db is not None:
+        try:
+            from app import higgsfield
+            conn["higgsfield"] = bool(higgsfield.status(db)["connected"])
+        except Exception:
+            pass
     conn["social"] = conn["linkedin"] or conn["instagram"]
     return conn
 
