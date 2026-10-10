@@ -454,3 +454,23 @@ def test_phone_intent_claude_fallback_accepts_missing_name(client, monkeypatch):
 def test_voice_prompt_says_unic_can_call_and_never_offers_a_script():
     from app.orchestrator import VOICE_RULES
     assert "Qui veux-tu appeler" in VOICE_RULES and "JAMAIS" in VOICE_RULES and "script" in VOICE_RULES
+
+
+def test_production_without_access_code_is_closed(client, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main.settings, "unic_access_code", "")
+    monkeypatch.setattr(main.settings, "unic_env", "production")
+    r = client.get("/api/materials")
+    assert r.status_code == 503 and "UNIC_ACCESS_CODE" in r.json()["detail"]
+    r = client.put("/api/auth/account", json={"email": "x@y.com", "password": "12345678"})
+    assert r.status_code == 503   # personne ne peut prendre le compte
+    assert client.get("/api/health/live").status_code == 200
+    assert client.get("/api/auth/status").status_code == 200
+
+
+def test_production_with_access_code_still_works(client, monkeypatch):
+    from app import main
+    monkeypatch.setattr(main.settings, "unic_access_code", "secret-code")
+    monkeypatch.setattr(main.settings, "unic_env", "production")
+    assert client.get("/api/materials").status_code == 401
+    assert client.get("/api/materials", headers={"x-access-code": "secret-code"}).status_code == 200
