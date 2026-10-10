@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.middleware.gzip import GZipMiddleware
 
 from app import __version__
@@ -89,10 +90,21 @@ def _protected(path: str, method: str) -> bool:
         and not path.startswith(("/api/public-media/", "/api/public/"))
 
 
+_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host")
+
+
 def _is_loopback(request: Request) -> bool:
-    """Usage local (même machine) : reste possible sans code."""
+    """Usage local (même machine) : reste possible sans code — mais seulement en direct, sans relais.
+
+    Derrière un proxy installé sur la même machine (nginx, Caddy, routeur d'hébergeur), TOUTES les requêtes
+    venues d'Internet arrivent de 127.0.0.1 : l'exception ouvrait alors l'API entière (devis, clients, factures)
+    quand `UNIC_ACCESS_CODE` n'était pas défini. Un relais ajoute un en-tête de transfert : sa présence suffit
+    à ne plus considérer la requête comme locale.
+    """
     host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost")
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        return False
+    return not any(h in request.headers for h in _PROXY_HEADERS)
 
 
 def _origins() -> list[str]:
@@ -102,13 +114,78 @@ def _origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+# Origines des applications INSTALLÉES : le téléphone (Capacitor sert l'interface depuis https://localhost) et le PC
+# (Electron la sert depuis unic://app). Elles appellent l'API depuis leur propre origine : sans elles dans la liste,
+# l'application installée perdrait l'accès au serveur. Aucun site web ne peut se déclarer sous ces origines.
+NATIVE_ORIGINS = ("https://localhost", "http://localhost", "capacitor://localhost", "unic://app")
+
+
+def _cors_origins() -> list[str]:
+    """Origines réellement autorisées : celles déclarées + celles des applications installées.
+
+    En production sans `ALLOWED_ORIGINS` : aucune origine WEB externe (le navigateur est servi par ce même
+    serveur, donc de même origine), mais les applications du téléphone et du PC continuent de fonctionner.
+    """
+    configured = _origins()
+    if configured == ["*"]:      # développement : confort du poste de travail, inchangé
+        return configured
+    return configured + [o for o in NATIVE_ORIGINS if o not in configured]
+
+
+_CORS_ORIGINS = _cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins() or ["*"],
-    allow_credentials=True,
+    # Liste vide en production = aucune origine externe (l'interface est servie par ce même serveur : même origine).
+    # Le repli « * » s'appliquait aussi en production, et avec `allow_credentials=True` Starlette RENVOYAIT
+    # l'origine de l'appelant : n'importe quel site pouvait appeler l'API depuis un navigateur.
+    allow_origins=_CORS_ORIGINS,
+    # L'application n'utilise AUCUN cookie : la connexion passe par l'en-tête X-Access-Code. Autoriser les
+    # identifiants n'apporte rien ici et rend le navigateur permissif : on ne l'autorise pas.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class _PublicCors:
+    """Routes PUBLIQUES appelées depuis un autre domaine : la bulle de discussion du site (`/api/public/chat`).
+
+    Le site public vit sur un autre domaine (Netlify) : son navigateur appelle le serveur en « cross-origin ».
+    Ces routes n'exposent aucune donnée de l'entreprise (le module `sitechat` ne rend que des réponses bornées)
+    et sont limitées par visiteur, par adresse IP et par jour : elles restent donc ouvertes à toute origine,
+    SANS identifiants. Les routes privées (clients, devis, factures) gardent la liste stricte ci-dessus.
+    """
+
+    PUBLIC = ("/api/public/", "/api/public-media/")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith(self.PUBLIC):
+            return await self.app(scope, receive, send)
+        if scope["method"] == "OPTIONS":   # préflight : le navigateur le pose avant le POST en JSON
+            requested = Headers(scope=scope).get("access-control-request-headers", "content-type")
+            await send({"type": "http.response.start", "status": 204, "headers": [
+                (b"access-control-allow-origin", b"*"),
+                (b"access-control-allow-methods", b"GET, POST, OPTIONS"),
+                (b"access-control-allow-headers", requested.encode("latin-1", "ignore") or b"content-type"),
+                (b"access-control-max-age", b"600"),
+                (b"content-length", b"0"),
+            ]})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        async def with_origin(message):
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Access-Control-Allow-Origin"] = "*"
+            await send(message)
+
+        await self.app(scope, receive, with_origin)
+
+
+app.add_middleware(_PublicCors)
 
 
 @app.middleware("http")
