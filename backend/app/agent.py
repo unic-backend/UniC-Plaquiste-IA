@@ -831,6 +831,19 @@ class AgentSession:
     def _t_save_google_review_reply_draft(self, review_id: str, reply: str, review_text: str = "") -> dict:
         if not gbp.REVIEW_ID_RE.match(review_id):
             raise ConnectorError("Identifiant d'avis invalide.", 400)
+        # Un avis = une seule réponse : l'agent quotidien ne doit pas empiler les brouillons.
+        prev = self.db.query(SocialPost).filter(SocialPost.platform == "google_business", SocialPost.kind == "reply",
+                                                SocialPost.external_id == review_id).order_by(SocialPost.created_at.desc()).first()
+        if prev is not None and prev.status != "draft":
+            return {"draft_id": prev.id, "statut": f"déjà traité ({prev.status}) : aucun nouveau brouillon"}
+        if prev is not None:
+            err = connectors.check_post("google_business", reply, "")
+            if err:
+                raise ConnectorError(err, 400)
+            prev.body = reply.strip()
+            self.db.commit()
+            self.cards.append({"kind": "social", "id": prev.id})
+            return {"draft_id": prev.id, "statut": "brouillon existant mis à jour : en attente d'approbation du patron"}
         p = connectors.save_social_draft(self.db, "google_business", reply, kind="reply",
                                          in_reply_to=review_text, external_id=review_id)
         self.cards.append({"kind": "social", "id": p.id})

@@ -3784,3 +3784,22 @@ def test_receipt_can_be_corrected_and_counter_goes_back_to_the_real_percentage(c
     inv = db.get(Invoice, inv_id)
     assert inv.paid == 400_000 and inv.remaining == 600_000 and inv.payments[0].amount == 400_000
     db.close()
+
+
+def test_review_reply_draft_is_never_duplicated(client):
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import SocialPost
+    db = SessionLocal()
+    s = AgentSession(db, None)
+    a = s("save_google_review_reply_draft", {"review_id": "revdup123", "reply": "Merci !"})
+    b = s("save_google_review_reply_draft", {"review_id": "revdup123", "reply": "Merci beaucoup !"})
+    assert a["draft_id"] == b["draft_id"]
+    rows = db.query(SocialPost).filter(SocialPost.external_id == "revdup123").all()
+    assert len(rows) == 1 and rows[0].body == "Merci beaucoup !"
+    rows[0].status = "published"
+    db.commit()
+    c = s("save_google_review_reply_draft", {"review_id": "revdup123", "reply": "Encore merci"})
+    assert "déjà traité" in c["statut"]
+    assert db.query(SocialPost).filter(SocialPost.external_id == "revdup123").count() == 1
+    db.close()
