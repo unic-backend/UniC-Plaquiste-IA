@@ -375,6 +375,9 @@ export const api = {
   createSupplier: (body: any) =>
     request("/api/suppliers", { method: "POST", body: JSON.stringify(body) }),
   materials: () => request<any[]>("/api/materials"),
+  addMaterial: (body: { name: string; unit: string; price: number | null }) =>
+    request<{ id: string; name: string; restored: boolean }>("/api/materials/quick", { method: "POST", body: JSON.stringify(body) }),
+  removeMaterial: (id: string) => request<{ ok: boolean; removed: string; note: string }>(`/api/materials/${id}`, { method: "DELETE" }),
   savePrices: (kind: "purchase" | "selling", prices: { id: string; amount: number | null }[]) =>
     request<{ saved: number; unchanged: number; errors: { id: string; error: string }[] }>("/api/materials/prices/bulk", { method: "POST", body: JSON.stringify({ kind, prices }) }),
   addPrice: (id: string, body: any) =>

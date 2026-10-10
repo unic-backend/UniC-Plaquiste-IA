@@ -1198,17 +1198,28 @@ function Clients() {
   );
 }
 
+const MAT_UNITS = ["u", "m²", "ml", "paquet", "seau", "rouleau", "barre", "sac", "feuille", "planche", "kg"];
+
 function Materiaux() {
   const [rows, setRows] = useState<any[]>([]);
   const [filter, setFilter] = useState<"all" | "nosell">("all");
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});   // saisie en cours : id → texte
+  const [saved, setSaved] = useState<Record<string, boolean>>({});    // « ✓ Enregistré » affiché quelques secondes
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: "", unit: "u", price: "" });
+  const [fresh, setFresh] = useState<string[]>([]);                   // ajoutés à l'instant : en tête de liste
+  const [asking, setAsking] = useState<string | null>(null);          // retrait en attente de confirmation
+  const [busy, setBusy] = useState(false);
   const load = () => api.materials().then(setRows).catch((e) => setMsg(e?.message || "Erreur"));
   useEffect(() => { load(); }, []);
   const withSell = rows.filter((m) => m.selling_price != null).length;
   const shown = rows.filter((m) => (filter === "nosell" ? m.selling_price == null : true)
-    && (!q.trim() || `${m.name} ${m.sku} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase())));
+    && (!q.trim() || `${m.name} ${m.sku} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => Number(fresh.includes(b.id)) - Number(fresh.includes(a.id)));
+  const flash = (id: string) => { setSaved((x) => ({ ...x, [id]: true })); setTimeout(() => setSaved(({ [id]: _g, ...rest }) => rest), 3000); };
+  const toNumber = (raw: string) => Number(raw.replace(/\s/g, "").replace(",", "."));
   const save = async (m: any) => {
     const raw = drafts[m.id];
     if (raw === undefined) return;
@@ -1219,9 +1230,38 @@ function Materiaux() {
     if (!Number.isFinite(n) || n <= 0) { setMsg(`« ${raw} » n'est pas un montant valide (nombre positif attendu).`); return; }
     try {
       const r = await api.savePrices("selling", [{ id: m.id, amount: n }]);
-      setMsg(r.errors?.length ? r.errors[0].error : `✓ ${m.name} : ${n.toLocaleString("fr-FR")} enregistré. Les prochains devis utiliseront ce prix.`);
+      if (r.errors?.length) { setMsg(r.errors[0].error); return; }
+      setMsg(`✓ ${m.name} : ${n.toLocaleString("fr-FR")} enregistré. Le chat l'utilise déjà.`);
+      flash(m.id);
       load();
     } catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  const add = async () => {
+    const name = form.name.trim();
+    const priceTxt = form.price.trim();
+    const price = priceTxt === "" ? null : toNumber(priceTxt);
+    if (name.length < 2) { setMsg("Donne un nom au matériau (2 lettres minimum)."); return; }
+    if (price !== null && (!Number.isFinite(price) || price <= 0)) { setMsg(`« ${form.price} » n'est pas un prix valide (nombre positif, ou laisse vide).`); return; }
+    setBusy(true);
+    try {
+      const r = await api.addMaterial({ name, unit: form.unit.trim() || "u", price });
+      setMsg(`✓ ${r.name} ${r.restored ? "remis dans la liste" : "ajouté"}${price === null ? " (prix à saisir)" : ""}. Le chat le connaît déjà.`);
+      setFresh((f) => [r.id, ...f]);
+      setForm({ name: "", unit: "u", price: "" });
+      setAdding(false);
+      setQ("");
+      setFilter("all");
+      await load();
+    } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  const remove = async (m: any) => {
+    setBusy(true);
+    try {
+      await api.removeMaterial(m.id);
+      setMsg(`✓ ${m.name} retiré de la liste et du chat. Les devis déjà faits ne changent pas. Pour le remettre : ajoute-le à nouveau.`);
+      setAsking(null);
+      await load();
+    } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
   };
   return (
     <div className="page">
@@ -1229,11 +1269,39 @@ function Materiaux() {
         <h1>Matériaux & prix</h1>
         <p className="lede">Tes prix de vente (fourni et posé). C'est le tableau que le chat utilise pour faire les devis. Si un prix change, modifie-le ici :
           les prochains devis l'utilisent, les devis déjà faits ne changent pas.</p>
+        <p className="hint ic"><I.Check size={16} /> Sauvegarde automatique : dès que tu quittes la case (ou Entrée), le prix est enregistré et le chat le connaît.</p>
         {rows.length > 0 && (
           <div className="mat-progress" aria-label="Prix renseignés">
             <div><b>{withSell}</b> / {rows.length} prix de vente renseignés</div>
             <div className="sv-bar"><i style={{ width: `${Math.round((100 * withSell) / rows.length)}%` }} /></div>
           </div>
+        )}
+        {!adding ? (
+          <button className="btn btn-copper mat-add" onClick={() => { setAdding(true); setMsg(""); }}><I.Plus size={16} /> Ajouter un matériau</button>
+        ) : (
+          <form className="mat-row mat-new" onSubmit={(e) => { e.preventDefault(); add(); }}>
+            <div className="mat-head"><b>Nouveau matériau</b></div>
+            <div className="mat-fields one">
+              <label>Nom
+                <input autoFocus aria-label="Nom du matériau" placeholder="Ex. : Corniche plâtre" maxLength={120} value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </label>
+            </div>
+            <div className="mat-fields">
+              <label>Unité
+                <input list="mat-units" aria-label="Unité" value={form.unit} maxLength={16} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
+                <datalist id="mat-units">{MAT_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+              </label>
+              <label>Prix de vente
+                <input inputMode="decimal" aria-label="Prix de vente" placeholder="facultatif" value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })} />
+              </label>
+            </div>
+            <div className="row-actions">
+              <button type="submit" className="btn btn-copper btn-small" disabled={busy}>{busy ? "Ajout…" : "Ajouter"}</button>
+              <button type="button" className="btn btn-ghost btn-small" disabled={busy} onClick={() => { setAdding(false); setForm({ name: "", unit: "u", price: "" }); }}>Annuler</button>
+            </div>
+          </form>
         )}
         <input className="sv-search" type="search" placeholder="Chercher un matériau…" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="sv-filters" role="group" aria-label="Filtrer">
@@ -1244,9 +1312,11 @@ function Materiaux() {
         {msg && <p className="hint" role="status">{msg}</p>}
         <div className="mat-list">
           {shown.map((m) => (
-            <div key={m.id} className="mat-row">
-              <div className="mat-head"><b>{m.name}</b></div>
-              <div className="sv-small sv-muted">{m.sku} · {m.unit}</div>
+            <div key={m.id} className={`mat-row${fresh.includes(m.id) ? " mat-new" : ""}`}>
+              <div className="mat-head"><b>{m.name}</b>
+                {saved[m.id] && <span className="mat-saved" role="status"><I.Check size={14} /> Enregistré</span>}
+              </div>
+              <div className="sv-small sv-muted">{m.sku} · {m.unit}{m.removable ? "" : " · calcul automatique"}</div>
               <div className="mat-fields one">
                 <label>Prix de vente
                   <input inputMode="decimal" aria-label={`Prix de vente ${m.name}`} placeholder="à saisir"
@@ -1255,6 +1325,17 @@ function Materiaux() {
                     onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
                 </label>
               </div>
+              {m.removable && (asking === m.id ? (
+                <div className="row-actions mat-ask">
+                  <span className="sv-small">Retirer « {m.name} » de la liste et du chat ?</span>
+                  <button className="btn btn-copper btn-small" disabled={busy} onClick={() => remove(m)}>Oui, retirer</button>
+                  <button className="btn btn-ghost btn-small" disabled={busy} onClick={() => setAsking(null)}>Annuler</button>
+                </div>
+              ) : (
+                <div className="row-actions">
+                  <button className="btn btn-ghost btn-small mat-del" aria-label={`Retirer ${m.name}`} onClick={() => setAsking(m.id)}><I.Trash size={14} /> Retirer</button>
+                </div>
+              ))}
             </div>
           ))}
           {rows.length > 0 && !shown.length && <p className="sv-muted">Aucun matériau dans cette liste.</p>}
