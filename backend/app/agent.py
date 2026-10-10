@@ -684,11 +684,14 @@ class AgentSession:
                 return {"error": refused}
             return fn(**args)
         except ConnectorError as exc:
+            audit(self.db, self.user_id, "agent_tool_declined", "tool", name, f"run={self.run_id}")   # refus du connecteur ou d'une règle métier
             return {"error": str(exc)}
         except TypeError:
+            audit(self.db, self.user_id, "agent_tool_error", "tool", name, f"run={self.run_id} paramètres invalides")
             return {"error": "Paramètres invalides."}
         except Exception:  # un outil en panne ne casse jamais la conversation
             logger.exception("Outil %s en échec", name)
+            audit(self.db, self.user_id, "agent_tool_error", "tool", name, f"run={self.run_id} panne interne")   # mesuré : tableau Qualité
             return {"error": "Erreur interne du connecteur."}
         finally:
             self.db.commit()

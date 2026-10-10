@@ -1775,6 +1775,13 @@ def integrity_report(db: Session = Depends(get_db), user: User = Depends(get_cur
     return integrity.check(db)
 
 
+@router.get("/quality")
+def quality_report(days: int = 30, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Tableau qualité : indicateurs mesurés sur données enregistrées (lecture seule, aucun appel à Claude)."""
+    from app import quality
+    return quality.report(db, max(1, min(int(days), 365)))
+
+
 @router.get("/evals")
 def evals_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Banc d'essai de l'IA : dernier rapport, nombre de cas, essai en cours."""

@@ -446,6 +446,7 @@ export const api = {
   quoteMargin: (id: string) => request<any>(`/api/quotes/${id}/margin`),
   marginSetting: () => request<{ min_margin_pct: number | null }>("/api/settings/margin"),
   saveMarginSetting: (min_margin_pct: number | null) => request<any>("/api/settings/margin", { method: "PUT", body: JSON.stringify({ min_margin_pct }) }),
+  quality: () => request<any>("/api/quality"),
   evals: () => request<any>("/api/evals"),
   runEvals: () => request<any>("/api/evals/run", { method: "POST" }),
   buildApk: () => request<any>("/api/selfcare/release/apk", { method: "POST" }),
