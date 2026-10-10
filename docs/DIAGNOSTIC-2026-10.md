@@ -5,6 +5,30 @@ Périmètre : tout le dépôt à `main` (commit `3bca38c`, après la PR #44).
 
 ---
 
+## 0. Vérification indépendante (revue après coup)
+
+Ce diagnostic a été relu et **rejoué** avant d'être repris dans `main`. Rien n'a été pris sur parole.
+
+**Confirmé en exécutant le code (avant / après) :**
+
+| Point | Avant (`main`) | Après (cette branche) |
+|---|---|---|
+| Chute négative dans les réglages | `PUT /api/settings` accepté, puis **tout calcul plante** (`ValueError` non gérée) | `PUT` refusé (422), le calcul reste sain ; le renvoi complet des réglages par la page passe (200) |
+| CORS en production (`UNIC_ENV=production`, sans `ALLOWED_ORIGINS`) | origine `https://evil.example` **autorisée** (préflight 200) | refusée (400) ; `https://localhost` (APK) et `unic://app` (PC) **toujours autorisées** ; bulle de discussion du site toujours joignable (204 / `*`, sans identifiants) |
+| `/api/calc` saisie impossible | 500 | 400 avec la raison du moteur |
+
+Suite complète sur l'état fusionné : **460 tests passent** (448 + les 12 de `test_input_bounds.py`), `ruff`, `bandit` et garde-fous OK, aucune zone protégée touchée.
+
+**Corrections apportées au texte d'origine :**
+
+1. **Gravité du CORS : « Élevée » → « Moyenne » (défense en profondeur).** Le défaut est réel (reproduit ci-dessus), mais un site tiers ne peut pas lire de données sans le code d'accès, qui voyage dans un en-tête qu'il ne connaît pas ; l'application n'utilise aucun cookie. Le correctif reste utile, il ne s'agissait pas d'une porte ouverte sur les données.
+2. **Chiffres** : 460 tests (et non 451) sur l'état fusionné ; la « couverture de 85 % » n'a pas été revérifiée ici.
+3. **Recommandations non retenues pour l'instant** (trop lourdes pour un usage mono-propriétaire, ou contraires au principe « fiabilité d'abord, pas plus d'agents ») : exposition Prometheus `/api/metrics` + table `HealthSample` (§6.1), liste d'« agents à ajouter » (§8), double moteur Claude/Vibecode (§6.3). Les autres pistes (CSP en mode rapport, `UNIC_SECRET_KEY`, durée de session, journal des lectures, limite du corps JSON, Dependabot, séparation des dépendances de test) restent valables ; ce sont des zones protégées ou des choix du propriétaire.
+
+Le reste du document est conservé tel qu'écrit.
+
+---
+
 ## 1. Verdict en une page
 
 **Le projet est de bon niveau — nettement au-dessus de la moyenne des applications de cette taille.**
@@ -40,7 +64,7 @@ qui ouvrait l'API à n'importe quel site web**. Les deux sont corrigées dans ce
 | # | Défaut | Gravité | État |
 |---|---|---|---|
 | 1 | `PUT /api/settings` acceptait une chute négative → **500 sur tout calcul et tout devis** | 🔴 Critique | ✅ corrigé + test |
-| 2 | CORS : `*` avec identifiants **même en production** → toute origine web reflétée | 🟠 Élevée | ✅ corrigé + test |
+| 2 | CORS : `*` avec identifiants **même en production** → toute origine web reflétée | 🟠 Moyenne (voir §0) | ✅ corrigé + test |
 | 3 | `/api/calc` renvoyait **500** au lieu de 400 sur saisie impossible | 🟠 Moyenne | ✅ corrigé + test |
 | 4 | Prix de vente **négatif ou nul** accepté (contredit « aucun prix inventé ») | 🟠 Moyenne | ✅ corrigé + test |
 | 5 | Fiches client / fournisseur / matériau / projet **sans nom** acceptées | 🟡 Faible | ✅ corrigé + test |
@@ -174,7 +198,7 @@ PUT /api/settings {"default_waste": -0.5}  → 422 (nomme « default_waste »)
 POST /api/calc    {…}                      → 200 (le moteur fonctionne toujours)
 ```
 
-### 5.2 🟠 Élevée — CORS : n'importe quel site web pouvait appeler l'API
+### 5.2 🟠 Moyenne (voir §0) — CORS : n'importe quel site web pouvait appeler l'API
 
 **Reproduction** (avant correction, en `UNIC_ENV=production`, sans `ALLOWED_ORIGINS`) :
 
