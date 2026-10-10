@@ -9,7 +9,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.models import InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, TrackingClient, utcnow
@@ -41,12 +42,17 @@ def _pct(part: float, whole: float) -> float:
 
 def valid_quotes(db: Session) -> list[Quotation]:
     """Devis encore valables : ni annulés, ni sans montant. Un devis corrigé reste UN devis (même numéro, version suivante)."""
-    return [q for q in db.query(Quotation).order_by(Quotation.created_at).all()
+    return [q for q in db.query(Quotation).options(selectinload(Quotation.customer)).order_by(Quotation.created_at).all()
             if q.status != "cancelled" and (q.total or 0) > 0]
 
 
 def _received(db: Session, quote_id: str) -> float:
     return round(sum(r.amount or 0 for r in db.query(Receipt).filter(Receipt.quotation_id == quote_id).all()), 2)
+
+
+def _received_all(db: Session) -> dict[str, float]:
+    """Sommes reçues de tous les devis en UNE requête (le tableau de bord n'interroge plus la base devis par devis)."""
+    return {qid: round(total or 0, 2) for qid, total in db.query(Receipt.quotation_id, func.sum(Receipt.amount)).group_by(Receipt.quotation_id).all()}
 
 
 def sync_existing(db: Session) -> int:
@@ -79,9 +85,9 @@ def _aware(d: datetime | None) -> datetime | None:
     return None if d is None else (d if d.tzinfo else d.replace(tzinfo=timezone.utc))
 
 
-def _quote_row(db: Session, q: Quotation) -> dict:
+def _quote_row(db: Session, q: Quotation, got: float | None = None) -> dict:
     total = q.total or 0
-    got = _received(db, q.id)
+    got = _received(db, q.id) if got is None else got
     left = max(0.0, total - got)
     since = _aware(q.approved_at or q.created_at)
     waiting = (utcnow() - since).days if since and (q.client_decision or "pending") == "pending" else 0
@@ -101,10 +107,11 @@ def _quote_row_base(q: Quotation, total: float, got: float, left: float) -> dict
 
 def _group(db: Session) -> dict[str, dict]:
     groups: dict[str, dict] = {}
+    received = _received_all(db)
     for q in valid_quotes(db):
         name = client_name_of(db, q) or "Client sans nom"
         g = groups.setdefault(client_key(name), {"key": client_key(name), "client": name, "quotes": []})
-        g["quotes"].append(_quote_row(db, q))
+        g["quotes"].append(_quote_row(db, q, received.get(q.id, 0.0)))
     for row in db.query(TrackingClient).filter(TrackingClient.name != "").all():   # client créé avec « + », sans devis pour l'instant
         groups.setdefault(row.key, {"key": row.key, "client": row.name, "quotes": []})
     return groups
@@ -165,6 +172,14 @@ def _aging(groups: dict[str, dict]) -> dict:
                             "reste": oldest[1]["reste"], "jours": oldest[1]["accepte_jours"]} if oldest else None}
 
 
+def _conversion(groups: dict[str, dict]) -> dict:
+    """Taux d'acceptation des devis tranchés par le client (acceptés / acceptés + refusés). Les devis en attente ne comptent pas."""
+    rows = [r for g in groups.values() for r in g["quotes"]]
+    acc = sum(1 for r in rows if r["decision"] == "accepted")
+    dec = sum(1 for r in rows if r["decision"] == "declined")
+    return {"acceptes": acc, "refuses": dec, "taux": _pct(acc, acc + dec), "en_attente": sum(1 for r in rows if r["decision"] == "pending")}
+
+
 def _no_reply(groups: dict[str, dict]) -> list[dict]:
     """Devis sans réponse du client depuis NO_REPLY_DAYS jours ou plus (brouillons exclus : pas encore envoyés)."""
     out = [{"key": g["key"], "client": g["client"], "numero": r["numero"], "montant": r["montant"], "devise": r["devise"],
@@ -196,7 +211,7 @@ def overview(db: Session) -> dict:
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
             "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db), "chantiers": _chantiers(groups),
-            "anciennete": _aging(groups)}
+            "anciennete": _aging(groups), "conversion": _conversion(groups)}
 
 
 def client_file(db: Session, key: str) -> dict:

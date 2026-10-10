@@ -59,6 +59,30 @@ def _invoices(db: Session) -> Section:
     return Section("Factures à encaisser", OK, "\n".join(lines))
 
 
+def _collections(db: Session) -> Section | None:
+    """Suivi des encaissements : ce qu'il faut aller chercher aujourd'hui (rappels échus, vieux restes, devis sans réponse)."""
+    from app import tracking, unpaid
+    ov = tracking.overview(db)
+    if not ov["reste"] and not ov["sans_reponse"]:
+        return None
+    cur = ov["devise"]
+    lines = [f"Reste à encaisser : {unpaid.fmt(ov['reste'])} {cur} ({str(ov['pct_reste']).replace('.', ',')} % des devis acceptés)."]
+    due = [r for r in ov["rappels"] if r["jours_retard"] > 0 or r["dans_jours"] == 0]
+    if due:
+        lines.append(f"🔔 {len(due)} encaissement(s) prévu(s) aujourd'hui ou en retard :")
+        lines += [f"- {r['client']} — {unpaid.fmt(r['reste'])} {r['devise']}" + (f", {r['jours_retard']} j de retard" if r["jours_retard"] else ", aujourd'hui")
+                  for r in due[:5]]
+    old = sum(t["reste"] for t in ov["anciennete"]["tranches"][2:])
+    if old:
+        p = ov["anciennete"]["plus_ancien"]
+        lines.append(f"⏳ Plus de 60 jours : {unpaid.fmt(old)} {cur}" + (f" (le plus ancien : {p['client']}, {p['jours']} j)." if p else "."))
+    if ov["sans_reponse"]:
+        lines.append(f"Sans réponse depuis 7 j ou plus : {len(ov['sans_reponse'])} devis — "
+                     + ", ".join(f"{r['client']} ({r['jours']} j)" for r in ov["sans_reponse"][:4]) + ".")
+    lines.append("Dis « fais le relevé de … » : je prépare le PDF, tu l'envoies.")
+    return Section("Encaissements", OK, "\n".join(lines))
+
+
 def _mail(db: Session) -> Section:
     if not mailbox.imap_configured():
         return Section("Courrier", NOT_CONFIGURED, "Boîte mail non connectée (Paramètres → Courrier).")
@@ -181,7 +205,7 @@ def _health(db: Session) -> Section | None:
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
-    for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _mail(db), _reviews,
+    for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _collections(db), lambda: _mail(db), _reviews,
                lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db), lambda: _agents(db), lambda: _health(db)):
         try:
             s = fn()

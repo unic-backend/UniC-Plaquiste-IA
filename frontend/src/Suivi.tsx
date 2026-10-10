@@ -150,6 +150,11 @@ export function Suivi() {
                 <Kpi label={`Reste à encaisser · ${pct(ov.pct_reste)}`} value={`${money(ov.reste)} ${ov.devise}`} tone="warn" />
                 <Kpi label={`En attente de réponse · ${ov.nb_attente} devis`} value={`${money(ov.en_attente)} ${ov.devise}`} />
               </div>
+              {ov.conversion && ov.conversion.acceptes + ov.conversion.refuses > 0 && (
+                <p className="sv-small sv-muted sv-conv">
+                  Taux d'acceptation <b>{pct(ov.conversion.taux)}</b> · {ov.conversion.acceptes} accepté{ov.conversion.acceptes > 1 ? "s" : ""} sur {ov.conversion.acceptes + ov.conversion.refuses} devis tranchés
+                </p>
+              )}
             </section>
             {ov.rappels.length > 0 && (
               <section className="card-box sv-alert">
@@ -330,7 +335,7 @@ export function SuiviClient() {
         {err && <p className="error">{err}</p>}
         <SuiviChat k={d.key} title={`💬 Dossier de ${d.client}`} onChanged={load}
           quick={[["Préparer un devis", `Prépare un devis pour ${d.client}.`], ["Facture", `Prépare une facture pour ${d.client}.`],
-            ["Bon de commande", `Prépare un bon de commande matériaux pour ${d.client}.`], ["Bon de livraison", `Prépare un bon de livraison pour ${d.client}.`]]}
+            ["Bon de commande", `Prépare un bon de commande matériaux pour ${d.client}.`], ["Bon de livraison", `Prépare un bon de livraison pour ${d.client}.`], ["Relevé PDF", `Fais le relevé de compte de ${d.client}.`]]}
           hint="Parle de son dossier : devis, métré, prix, facture, bons, avance reçue… Uniquement ce client et le placo." />
         <ContactCard key={d.key + (d.telephone || "")} d={d} onSaved={load} />
         {d.documents.length > 0 && (
