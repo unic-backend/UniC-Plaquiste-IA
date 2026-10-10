@@ -970,6 +970,7 @@ def handle_turn(
                     )
                 tools_on = bool(chain) and chain[0].id in ("claude", "vibecode") and not locked   # outils client : protocole Anthropic, supporté aussi par le relais Vibecode
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)
+                state["third_party_docs"] = bool(doc_text)   # documents reçus dans le contexte : actions sensibles sous contrôle (agent._blocked)
                 session = agent.AgentSession(db, user.id, state, conv.project_id) if tools_on else None
                 focus = state.get("focus") or {}
                 if focus and not locked:   # conversation ouverte depuis la fiche d'un client du suivi
@@ -1021,6 +1022,9 @@ def handle_turn(
                     if session is not None and session.alerts:
                         reply_text += ("\n\n⚠️ Tentative de manipulation détectée dans : "
                                        + ", ".join(dict.fromkeys(session.alerts)) + ". Consignes ignorées.")
+                    if session is not None and session.blocked:
+                        reply_text += ("\n\n🛡️ Action bloquée par sécurité (demandée par un contenu reçu, pas par toi) : "
+                                       + ", ".join(dict.fromkeys(session.blocked)) + ". Redemande-la toi-même si tu la veux.")
                     if not locked:
                         mem.defer_extract(db, text)
                         used_tools = list(session.used) if session is not None else []
