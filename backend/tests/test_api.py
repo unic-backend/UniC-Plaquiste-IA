@@ -3946,3 +3946,37 @@ def test_uploads_are_capped_while_reading(client, monkeypatch):
         z.writestr("unic.db", b"\0" * 5000)
     r = client.post("/api/backups/restore", files={"file": ("s.zip", buf.getvalue(), "application/zip")})
     assert r.status_code == 400 and "trop volumineuse" in r.json()["detail"]
+
+
+def test_tracking_aging_and_client_statement_pdf(client):
+    """Balance âgée par ancienneté d'acceptation + relevé de compte PDF (route et outil de l'IA), chiffres vérifiés à la main."""
+    import io
+    from datetime import timedelta
+    from pypdf import PdfReader
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation, utcnow
+    qid = _track_quote("UC-TRK-0091-RL", "Rokhaya Lam Releve", 1_000_000)
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"}).status_code == 200
+    with SessionLocal() as db:   # acceptée il y a 75 jours
+        db.get(Quotation, qid).decided_at = utcnow() - timedelta(days=75); db.commit()
+    assert client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 250_000, "kind": "avance", "method": "Wave"}).status_code == 200
+    ov = client.get("/api/tracking").json()
+    t6190 = next(t for t in ov["anciennete"]["tranches"] if t["label"] == "61 – 90 jours")
+    assert t6190["reste"] >= 750_000 and t6190["nb"] >= 1
+    assert ov["anciennete"]["total"] == sum(t["reste"] for t in ov["anciennete"]["tranches"])
+    key = _tclient(ov, "Rokhaya Lam Releve")["key"]
+    r = client.get(f"/api/tracking/{key}/statement")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
+    assert "UC-TRK-0091-RL" in text and "750 000" in text and "250 000" in text
+    # client sans devis accepté : pas de relevé
+    _track_quote("UC-TRK-0092-RL", "Moussa Ndao Releve", 300_000)
+    key2 = _tclient(client.get("/api/tracking").json(), "Moussa Ndao Releve")["key"]
+    assert client.get(f"/api/tracking/{key2}/statement").status_code == 400
+    db = SessionLocal()
+    t = AgentSession(db, None, {})
+    out = t("client_statement", {"client": "Rokhaya Lam"})
+    assert out["ok"] and out["reste"] == 750_000 and t.files and t.files[-1]["filename"].startswith("UniC_Releve_")
+    assert "client_statement" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
+    db.close()

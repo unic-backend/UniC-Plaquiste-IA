@@ -1667,6 +1667,14 @@ def tracking_chat_history(key: str, db: Session = Depends(get_db), user: User = 
     return {"messages": [{"id": m.id, "role": m.role, "content": m.content} for m in rows], "working": conv.id in RUNNING}
 
 
+@router.get("/tracking/{key}/statement")
+def tracking_statement(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Relevé de compte PDF du client (devis acceptés, versements, reste), recalculé à chaque demande."""
+    from app import tracking
+    path = _tracked(lambda: tracking.build_statement(db, key))
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
+
+
 @router.get("/tracking/{key}")
 def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import tracking

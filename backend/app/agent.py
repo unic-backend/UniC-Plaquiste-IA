@@ -293,6 +293,12 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"only_late": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "client_statement",
+        "description": ("RELEVÉ DE COMPTE PDF d'un client du suivi des encaissements : devis acceptés, chaque versement reçu, reste à payer. "
+                        "À utiliser pour « fais-moi le relevé de X », « envoie-lui le point en PDF ». Le patron l'envoie lui-même."),
+        "input_schema": {"type": "object", "properties": {"client": {"type": "string"}}, "required": ["client"], "additionalProperties": False},
+    },
+    {
         "name": "list_tracking",
         "description": ("SUIVI DES ENCAISSEMENTS (argent seulement) : tableau de bord + liste des clients avec devis accepté, reçu, reste, "
                         "pourcentages. À utiliser pour « où j'en suis », « combien on me doit », « mes chantiers acceptés ». "
@@ -475,7 +481,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -715,6 +721,16 @@ class AgentSession:
         out = tracking.overview(self.db)
         out["note"] = "Chiffres exacts calculés en code. Présente d'abord le reste à encaisser. Argent seulement, jamais l'avancement du chantier."
         return out
+
+    def _t_client_statement(self, client: str) -> dict:
+        from app.services import store_artifact
+        key = self._tracked(lambda: tracking.find_client(self.db, client))
+        path = self._tracked(lambda: tracking.build_statement(self.db, key))
+        art = store_artifact(self.db, path, path.name, "statement", key, f"unic-statement-{key}", self.user_id)
+        self.files.append({"id": art.id, "filename": art.filename, "mime": art.mime_type, "size": art.size})
+        tot = tracking.client_file(self.db, key)
+        return {"ok": True, "fichier": art.filename, "accepte": tot["accepte"], "recu": tot["recu"], "reste": tot["reste"],
+                "note": "Relevé prêt (bouton du fichier). Ne dis jamais qu'il est parti : le patron l'envoie."}
 
     def _t_mark_quote_decision(self, decision: str, client: str = "", quote_number: str = "") -> dict:
         q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number, prefer="pending"))

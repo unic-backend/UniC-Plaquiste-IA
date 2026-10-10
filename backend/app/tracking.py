@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, TrackingClient, utcnow
 from app.services import _ACCENTS, _LINK_WORDS, audit, client_name_of, company_dict, generate_invoice_pdf, invoice_from_quote
 
@@ -83,7 +85,9 @@ def _quote_row(db: Session, q: Quotation) -> dict:
     left = max(0.0, total - got)
     since = _aware(q.approved_at or q.created_at)
     waiting = (utcnow() - since).days if since and (q.client_decision or "pending") == "pending" else 0
-    return {"attente_jours": waiting, "collecte": q.collect_on.date().isoformat() if q.collect_on else None,
+    accepted_on = _aware(q.decided_at or q.approved_at or q.created_at)
+    age = max(0, (utcnow() - accepted_on).days) if accepted_on and q.client_decision == "accepted" else 0
+    return {"attente_jours": waiting, "accepte_jours": age, "collecte": q.collect_on.date().isoformat() if q.collect_on else None,
             **_quote_row_base(q, total, got, left)}
 
 
@@ -142,6 +146,25 @@ def _chantiers(groups: dict[str, dict]) -> list[dict]:
     return out
 
 
+AGING = ((0, 30, "0 – 30 jours"), (31, 60, "31 – 60 jours"), (61, 90, "61 – 90 jours"), (91, None, "+ de 90 jours"))
+
+
+def _aging(groups: dict[str, dict]) -> dict:
+    """Balance âgée : le reste à encaisser rangé par ancienneté depuis l'acceptation du devis (le plus vieux argent dû se voit)."""
+    rows = [(g, r) for g in groups.values() for r in g["quotes"] if r["decision"] == "accepted" and r["reste"] > 0]
+    tranches = []
+    for lo, hi, label in AGING:
+        part = [r for _, r in rows if r["accepte_jours"] >= lo and (hi is None or r["accepte_jours"] <= hi)]
+        tranches.append({"label": label, "reste": sum(r["reste"] for r in part), "nb": len(part)})
+    total = sum(t["reste"] for t in tranches)
+    for t in tranches:
+        t["pct"] = _pct(t["reste"], total)
+    oldest = max(rows, key=lambda gr: gr[1]["accepte_jours"], default=None)
+    return {"tranches": tranches, "total": total,
+            "plus_ancien": {"key": oldest[0]["key"], "client": oldest[0]["client"], "numero": oldest[1]["numero"],
+                            "reste": oldest[1]["reste"], "jours": oldest[1]["accepte_jours"]} if oldest else None}
+
+
 def _no_reply(groups: dict[str, dict]) -> list[dict]:
     """Devis sans réponse du client depuis NO_REPLY_DAYS jours ou plus (brouillons exclus : pas encore envoyés)."""
     out = [{"key": g["key"], "client": g["client"], "numero": r["numero"], "montant": r["montant"], "devise": r["devise"],
@@ -172,7 +195,8 @@ def overview(db: Session) -> dict:
             "en_attente": sum(c["en_attente"] for c in clients), "nb_attente": sum(c["nb_attente"] for c in clients),
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
-            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db), "chantiers": _chantiers(groups)}
+            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db), "chantiers": _chantiers(groups),
+            "anciennete": _aging(groups)}
 
 
 def client_file(db: Session, key: str) -> dict:
@@ -549,3 +573,43 @@ def mail_hints(db: Session, limit: int = 20) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def build_statement(db: Session, key: str) -> Path:
+    """RELEVÉ DE COMPTE d'un client : chaque devis accepté (convenu), chaque versement reçu, le reste à payer. Chiffres du suivi, sans IA."""
+    from app.pdfs import build_document_pdf, fr_num
+    data = client_file(db, key)
+    acc = [r for r in data["devis"] if r["decision"] == "accepted"]
+    if not acc:
+        raise TrackingError("Aucun devis accepté pour ce client : rien à mettre sur un relevé.")
+    company = company_dict(db)
+    cur = data["devise"] or company.get("currency") or "FCFA"
+    money = lambda n, _c=cur: f"{round(n or 0):,} {_c}".replace(",", " ")   # noqa: E731  montants entiers, comme le suivi
+    by_quote: dict[str, list[dict]] = {}
+    for v in data["versements"]:
+        by_quote.setdefault(v["devis"], []).append(v)
+    day = lambda iso: datetime.fromisoformat(iso).strftime("%d/%m/%Y") if iso else ""   # noqa: E731
+    rows: list[list[str]] = []
+    for r in sorted(acc, key=lambda x: x["date"] or ""):
+        rows.append([day(r["date"]), f"<b>Devis {r['numero']}</b>" + (f" — {r['titre']}" if r["titre"] else ""), money(r["montant"], cur), "", ""])
+        for v in sorted(by_quote.get(r["numero"], []), key=lambda x: x["date"] or ""):
+            how = " — ".join(x for x in (v["type"], v["moyen"]) if x)
+            rows.append([day(v["date"]), f"Versement reçu ({how})" if how else "Versement reçu", "", money(v["montant"], cur), ""])
+        rows.append(["", f"Reste — {fr_num(r['pct_recu'], 1)} % reçu", "", "", f"<b>{money(r['reste'], cur)}</b>"])
+    totals = [("Total convenu", money(data["accepte"], cur)), ("Total versé", money(data["recu"], cur)), ("RESTE À PAYER", money(data["reste"], cur))]
+    customer = next((q.customer for q in valid_quotes(db) if q.id in {r["id"] for r in acc} and q.customer is not None), None)
+    from app.services import party_text_customer, party_text_from_company
+    client_txt = party_text_customer(customer) if customer is not None else data["client"]
+    if customer is None and data["telephone"]:
+        client_txt += f"\nTél. {data['telephone']}"
+    stamp = utcnow().strftime("%Y%m%d")
+    filename = f"UniC_Releve_{re.sub(r'[^A-Za-z0-9]+', '_', key)[:40] or 'client'}_{stamp}.pdf"
+    dest = settings.artifacts_path / "statements" / filename
+    build_document_pdf(
+        dest, company=company, doc_label="RELEVÉ DE COMPTE", number=stamp, title=f"Relevé de compte — {data['client']}", status="",
+        meta_lines=[f"Édité le {utcnow().strftime('%d/%m/%Y')}"] + ([f"Chantier : {data['lieu']}"] if data["lieu"] else []),
+        party_left=("Émetteur", party_text_from_company(company)), party_right=("Client", client_txt),
+        headers=["Date", "Opération", "Convenu", "Versé", "Reste"], rows=rows, col_widths=[58, 182, 84, 84, 84],
+        totals=totals, notes="Relevé établi à partir des versements enregistrés. Merci de nous signaler tout écart.", warnings=[],
+    )
+    return dest
