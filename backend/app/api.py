@@ -794,7 +794,8 @@ class PriceIn(BaseModel):
 
 @router.get("/materials")
 def materials(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Material).order_by(Material.category, Material.name).all()
+    rows = db.query(Material).filter(Material.is_active.is_(True)).order_by(Material.category, Material.name).all()
+    locked = _engine_skus()
     out = []
     for m in rows:
         sell = None
@@ -809,8 +810,77 @@ def materials(db: Session = Depends(get_db), user: User = Depends(get_current_us
             "waste_coefficient": m.waste_coefficient, "availability": m.availability, "notes": m.notes,
             "selling_price": sell.amount if sell else None,
             "purchase_price": buy.amount if buy else None,
+            "removable": m.sku not in locked,   # les articles du calcul automatique se mettent à jour, ils ne se retirent pas
         })
     return out
+
+
+def _engine_skus() -> set[str]:
+    """Matériaux dont le calcul automatique des devis a besoin : on change leur prix, on ne les retire pas."""
+    from app import metier
+    data = metier.load()
+    grid = {**data.get("prix_materiaux", {}), **data.get("prix_portes", {})}
+    return {metier.sku_for(a) for a in grid} | set(metier.EXISTING_SKU.values()) | {metier.LABOR_SKU}
+
+
+class QuickMaterialIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    unit: str = Field(default="u", min_length=1, max_length=16)
+    price: float | None = None
+    category: str = Field(default="divers", max_length=64)
+
+
+@router.post("/materials/quick")
+def add_material_quick(body: QuickMaterialIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Ajout d'un matériau par le patron (nom, unité, prix de vente facultatif). Le chat le connaît tout de suite.
+    Un matériau retiré puis ré-ajouté est remis dans la liste (historique de ses prix gardé). Aucun prix inventé : sans prix, il reste « à saisir »."""
+    import math
+    from app import metier
+    from app.services import current_price
+    name = " ".join(body.name.split())
+    unit = " ".join(body.unit.split())
+    if len(name) < 2 or not unit:
+        raise HTTPException(400, "Donne un nom (2 lettres minimum) et une unité.")
+    price = body.price
+    if price is not None and (not math.isfinite(price) or price <= 0 or price > 1_000_000_000):
+        raise HTTPException(400, "Prix invalide (nombre positif attendu).")
+    twin = next((m for m in db.query(Material).filter(Material.is_active.is_(True)).all() if m.name.strip().lower() == name.lower()), None)
+    if twin is not None:
+        raise HTTPException(400, f"« {twin.name} » existe déjà dans la liste : modifie son prix.")
+    sku = metier._slug(name)
+    m = db.query(Material).filter(Material.sku == sku).first()
+    restored = m is not None
+    if m is None:
+        m = Material(sku=sku, name=name, category=(body.category.strip() or "divers"), unit=unit, waste_coefficient=0.0,
+                     notes="Ajouté par le patron.")
+        db.add(m)
+        db.flush()
+    else:
+        m.name, m.unit, m.is_active = name, unit, True
+    if price is not None:
+        cur = current_price(db, m.id, "selling")
+        if cur is None or abs(cur.amount - price) >= 0.005:
+            db.add(MaterialPrice(material_id=m.id, kind="selling", amount=round(price, 2), currency=(cur.currency if cur else ""),
+                                 source="saisie manuelle", created_by=user.id))
+    audit(db, user.id, "material_added", "material", m.id, f"{m.sku} {name} {unit}" + (f" prix={round(price, 2)}" if price is not None else ""))
+    db.commit()
+    return {"id": m.id, "sku": m.sku, "name": m.name, "restored": restored}
+
+
+@router.delete("/materials/{mid}")
+def remove_material(mid: str, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Retire un matériau de la liste ET du chat. Rien n'est effacé : les devis déjà faits ne changent pas, l'historique des prix est gardé,
+    et le ré-ajouter avec le même nom le remet. Les articles du calcul automatique ne se retirent pas."""
+    m = db.get(Material, mid)
+    if m is None or not m.is_active:
+        raise HTTPException(404, "Matériau introuvable")
+    if m.sku in _engine_skus():
+        raise HTTPException(400, f"« {m.name} » sert au calcul automatique des devis : change son prix, mais il ne peut pas être retiré.")
+    m.is_active = False
+    audit(db, user.id, "material_removed", "material", m.id, f"{m.sku} {m.name}")
+    db.commit()
+    return {"ok": True, "removed": m.name,
+            "note": "Retiré de la liste et du chat. Les devis déjà faits ne changent pas. Pour le remettre : ajoute-le à nouveau avec le même nom."}
 
 
 @router.post("/materials")

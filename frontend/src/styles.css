@@ -1331,6 +1331,13 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 /* Matériaux & prix : saisie des prix d'achat */
 .mat-progress { margin: 12px 0; font-size: 14px; }
 .mat-progress .sv-bar { margin-top: 6px; }
+.mat-add { margin: 4px 0 10px; display: inline-flex; align-items: center; gap: 8px; }
+.mat-new { border-color: var(--green-2); }
+.mat-saved { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--green-2); white-space: nowrap; }
+.mat-row .btn { width: auto; }
+.mat-row .row-actions { margin-top: 8px; align-items: center; }
+.mat-del { color: var(--muted); display: inline-flex; align-items: center; gap: 6px; padding-left: 0; }
+.mat-ask { align-items: center; flex-wrap: wrap; }
 .mat-list { display: grid; gap: 10px; margin-top: 12px; }
 .mat-row { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .mat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
