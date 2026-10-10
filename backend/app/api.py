@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
@@ -67,6 +68,12 @@ from app.services import (
 from app.models import QuotationItem
 
 router = APIRouter()
+
+# Texte obligatoire : espaces retirés aux deux bouts, jamais vide, longueur bornée.
+# Sans cela, une fiche client, un matériau ou un projet pouvait être enregistré SANS NOM
+# (l'interface affiche alors une ligne vide, et le numéro du devis finit par « XXX »).
+RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+OptionalText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
 # ---------- auth ----------
@@ -667,12 +674,12 @@ def _paginate(q, limit: int = 100):
 
 
 class CustomerIn(BaseModel):
-    name: str
-    contact_name: str = ""
-    email: str = ""
-    phone: str = ""
-    address: str = ""
-    city: str = ""
+    name: RequiredText
+    contact_name: OptionalText = ""
+    email: OptionalText = ""
+    phone: OptionalText = ""
+    address: OptionalText = ""
+    city: OptionalText = ""
     notes: str = ""
 
 
@@ -733,11 +740,11 @@ def _customer(c: Customer) -> dict:
 
 
 class SupplierIn(BaseModel):
-    name: str
-    contact_name: str = ""
-    email: str = ""
-    phone: str = ""
-    address: str = ""
+    name: RequiredText
+    contact_name: OptionalText = ""
+    email: OptionalText = ""
+    phone: OptionalText = ""
+    address: OptionalText = ""
     notes: str = ""
 
 
@@ -776,18 +783,18 @@ def _supplier(s: Supplier) -> dict:
 
 
 class MaterialIn(BaseModel):
-    sku: str
-    name: str
-    category: str
-    unit: str
-    waste_coefficient: float = 0.08
+    sku: RequiredText
+    name: RequiredText
+    category: RequiredText
+    unit: RequiredText
+    waste_coefficient: float = Field(default=0.08, ge=0, le=0.5)   # même borne que le moteur de calcul
     notes: str = ""
     availability: str = "unknown"
 
 
 class PriceIn(BaseModel):
     kind: str
-    amount: float
+    amount: float = Field(gt=0, le=1_000_000_000)   # même règle que la saisie en série : jamais 0 ni négatif
     currency: str = ""
     notes: str = ""
 
@@ -893,11 +900,11 @@ def services(db: Session = Depends(get_db), user: User = Depends(get_current_use
 
 
 class ProjectIn(BaseModel):
-    name: str
+    name: RequiredText
     customer_id: str | None = None
-    location: str = ""
+    location: OptionalText = ""
     description: str = ""
-    budget: float | None = None
+    budget: float | None = Field(default=None, ge=0)
     notes: str = ""
     status: str = "active"
 
@@ -1339,25 +1346,31 @@ def get_settings(db: Session = Depends(get_db), user: User = Depends(get_current
 
 
 class SettingsIn(BaseModel):
-    name: str | None = None
-    legal_name: str | None = None
-    address: str | None = None
-    city: str | None = None
-    country: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    website: str | None = None
-    tax_id: str | None = None
-    currency: str | None = None
-    vat_rate: float | None = None
-    quote_validity_days: int | None = None
+    """Bornes volontairement larges : elles n'interdisent que l'impossible.
+
+    Une valeur hors bornes était acceptée puis appliquée : une chute négative faisait échouer TOUS les calculs
+    (500 « erreur interne » sur chaque devis), une plaque de 0 m faussait les quantités, une TVA à 500 % faussait
+    les factures. Le refus arrive maintenant à la saisie, avec le message du moteur métier.
+    """
+    name: OptionalText | None = None
+    legal_name: OptionalText | None = None
+    address: OptionalText | None = None
+    city: OptionalText | None = None
+    country: OptionalText | None = None
+    phone: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    website: str | None = Field(default=None, max_length=255)
+    tax_id: str | None = Field(default=None, max_length=64)
+    currency: str | None = Field(default=None, max_length=8)
+    vat_rate: float | None = Field(default=None, ge=0, le=1)                  # 0 = sans TVA, 0,18 = 18 %
+    quote_validity_days: int | None = Field(default=None, ge=1, le=3650)
     invoice_due_days: int | None = Field(default=None, ge=0, le=365)
     payment_terms: str | None = None
-    default_waste: float | None = None
-    default_margin: float | None = None
-    board_width_m: float | None = None
-    board_height_m: float | None = None
-    stud_spacing_m: float | None = None
+    default_waste: float | None = Field(default=None, ge=0, le=0.5)           # borne du moteur (0 à 50 %)
+    default_margin: float | None = Field(default=None, ge=0, le=1)
+    board_width_m: float | None = Field(default=None, gt=0, le=3)
+    board_height_m: float | None = Field(default=None, gt=0, le=6)
+    stud_spacing_m: float | None = Field(default=None, gt=0, le=2)
     notes: str | None = None
 
 
@@ -1958,15 +1971,22 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
         "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
     }
-    if body.text:
+    if body.text and body.text.strip():
         r = calcmod.calculate_from_text(body.text, defaults)
         if r is None:
             raise HTTPException(400, "Calcul non interprété")
         return r.to_dict()
-    if body.kind == "partition" and body.length_m and body.height_m:
-        return calcmod.calculate_partition(body.length_m, body.height_m, body.sides, waste=defaults["waste"]).to_dict()
-    if body.kind == "ceiling" and body.length_m and body.width_m:
-        return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"]).to_dict()
+    # « is not None » et non « and » : 0 ou une valeur négative doit être REFUSÉ avec son message,
+    # pas silencieusement transformé en « paramètres insuffisants ».
+    try:
+        if body.kind == "partition" and body.length_m is not None and body.height_m is not None:
+            return calcmod.calculate_partition(body.length_m, body.height_m, body.sides, waste=defaults["waste"]).to_dict()
+        if body.kind == "ceiling" and body.length_m is not None and body.width_m is not None:
+            return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"]).to_dict()
+        if body.kind == "surface" and body.length_m is not None and body.width_m is not None:
+            return calcmod.calculate_surface(body.length_m, body.width_m).to_dict()
+    except ValueError as exc:   # saisie impossible : on renvoie la raison du moteur, pas une erreur interne
+        raise HTTPException(400, str(exc)) from exc
     raise HTTPException(400, "Paramètres insuffisants")
 
 
