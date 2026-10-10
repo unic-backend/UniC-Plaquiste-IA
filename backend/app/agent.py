@@ -482,7 +482,17 @@ TOOLS: list[dict] = [
                         "UNE phrase courte et précise par appel (plusieurs règles = plusieurs appels). Appelle-le sans attendre qu'on te le redise."),
         "input_schema": {"type": "object", "properties": {
             "text": {"type": "string", "description": "La règle, formulée seule et complète, ex. « 1 barre de fourrure coûte 1 200 FCFA ; barre ≠ paquet »."},
-            "kind": {"type": "string", "enum": ["fact", "preference", "correction"]}}, "required": ["text"], "additionalProperties": False},
+            "kind": {"type": "string", "enum": ["fact", "preference", "correction"]},
+            "client": {"type": "string", "description": ("Nom du client SI le souvenir ne concerne que lui ou son chantier (code du portail, "
+                                                          "accès, goût, décision, contrainte). Vide pour une règle générale du patron.")}},
+                         "required": ["text"], "additionalProperties": False},
+    },
+    {
+        "name": "site_memory",
+        "description": ("Fiche mémoire d'UN client/chantier : ce que le patron a retenu sur lui (contraintes, décisions, accès), ses devis, "
+                        "ce qu'il a versé et ce qui reste, son lieu. À appeler AVANT de parler d'un client ou d'un chantier précis. "
+                        "Rien n'est mélangé entre clients."),
+        "input_schema": {"type": "object", "properties": {"client": {"type": "string"}}, "required": ["client"], "additionalProperties": False},
     },
     {
         "name": "list_memory",
@@ -504,7 +514,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -572,6 +582,8 @@ AGENT_PROMPT = (
     "\nMÉMOIRE : tu AS une mémoire durable, via les outils remember / list_memory / forget_memory. Quand le patron énonce une règle, un prix, "
     "une unité, une habitude ou corrige une erreur (« toujours », « quand je dis », « pour toujours », « retiens »), appelle remember "
     "TOUT DE SUITE (une règle précise par appel), puis confirme en une ligne ce qui est enregistré, mot pour mot. "
+    "Un souvenir qui ne concerne qu'UN client ou son chantier (accès, contrainte, goût, décision) : remember avec « client » ; avant de parler "
+    "d'un client précis, appelle site_memory. Jamais d'un client à l'autre. "
     "Ne dis JAMAIS que tu n'as pas de mémoire ou pas d'outil pour retenir. Si une règle est ambiguë, enregistre ce qui est clair "
     "et pose UNE question sur le reste. Les souvenirs t'arrivent dans MÉMOIRE : applique-les sans les redemander ; "
     "s'ils se contredisent avec la demande du moment, la demande du moment gagne et tu le signales."
@@ -942,22 +954,36 @@ class AgentSession:
         return plans.analyze(self.db, fid, refresh=bool(refresh))
 
     # --- mémoire
-    def _t_remember(self, text: str, kind: str = "") -> dict:
+    def _t_remember(self, text: str, kind: str = "", client: str = "") -> dict:
         from app import memory as mem
+        subject = self._tracked(lambda: tracking.find_client(self.db, client)) if (client or "").strip() else ""   # ambigu/inconnu : on demande
         try:
-            m = mem.add(self.db, text, kind=kind or None, source="user", pinned=True)   # dit par le patron : fait confirmé, toujours présent
+            m = mem.add(self.db, text, kind=kind or None, source="user", pinned=not subject, subject=subject)   # dit par le patron : fait confirmé
         except mem.MemoryRefused as exc:
             return {"error": str(exc)}
         if m is None:
             return {"ok": True, "note": "Déjà en mémoire (compté une fois de plus) ou trop court pour être retenu."}
-        return {"ok": True, "id": m.id, "enregistre": m.text}
+        return {"ok": True, "id": m.id, "enregistre": m.text, "portee": f"client {client.strip()}" if subject else "règle générale"}
+
+    def _t_site_memory(self, client: str) -> dict:
+        from app import memory as mem
+        key = self._tracked(lambda: tracking.find_client(self.db, client))
+        fiche = self._tracked(lambda: tracking.client_file(self.db, key))
+        notes = [{"id": m.id, "texte": m.text, "nature": m.nature, "depuis": (m.created_at.date().isoformat() if m.created_at else None)}
+                 for m in mem.for_subject(self.db, key)]
+        return {"client": fiche["client"], "lieu": fiche.get("lieu"), "telephone": fiche.get("telephone"), "note_suivi": fiche.get("note"),
+                "etat": fiche["etat"], "accepte": fiche["accepte"], "recu": fiche["recu"], "reste": fiche["reste"], "nb_devis": fiche["nb_devis"],
+                "devis": [{"numero": d.get("numero"), "montant": d.get("montant"), "decision": d.get("decision")} for d in fiche["devis"]][:15],
+                "souvenirs": notes,
+                "note": ("Souvenirs de CE client seulement. " if notes else "Rien de retenu sur ce client pour l'instant. ")
+                        + "Ne les applique à aucun autre client."}
 
     def _t_list_memory(self, query: str = "") -> dict:
         from app.models import Memory
         rows = self.db.query(Memory).filter(Memory.state == "active").order_by(Memory.created_at.desc()).limit(60).all()
         q = (query or "").lower().split()
         rows = [m for m in rows if all(w in m.text.lower() for w in q)][:25]
-        return {"souvenirs": [{"id": m.id, "texte": m.text, "nature": m.nature} for m in rows]}
+        return {"souvenirs": [{"id": m.id, "texte": m.text, "nature": m.nature, **({"client_cle": m.subject} if m.subject else {})} for m in rows]}
 
     def _t_forget_memory(self, memory_id: str) -> dict:
         from app import memory as mem

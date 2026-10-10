@@ -22,7 +22,7 @@ MAX_ACTIVE = 10
 SAFE_TOOLS = {   # lecture et brouillons seulement
     "read_inbox", "read_email", "save_email_reply_draft", "list_google_reviews", "google_profile_audit",
     "save_google_review_reply_draft", "save_social_post_draft", "google_post_plan", "list_social_posts",
-    "get_prices", "list_directory", "list_documents", "list_agenda", "list_unpaid", "list_tracking", "list_memory", "quote_margin", "explain_quote",
+    "get_prices", "list_directory", "list_documents", "list_agenda", "list_unpaid", "list_tracking", "list_memory", "site_memory", "quote_margin", "explain_quote",
 }
 _running: set[str] = set()
 _lock = threading.Lock()
