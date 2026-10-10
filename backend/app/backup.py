@@ -113,7 +113,56 @@ def create(reason: str = "manuel") -> dict:
         _prune_local()
         size = (folder / name).stat().st_size
         _save_status(last_local=manifest["created_at"], last_name=name)
-        return {"name": name, "size": size, "counts": counts}
+        check = verify(name)   # relecture à blanc : la sauvegarde est PROUVÉE restaurable (ou le problème est signalé)
+        if check["ok"]:
+            _save_status(last_verified=manifest["created_at"], verify_error="")
+        else:
+            logger.error("Sauvegarde %s non restaurable : %s", name, check["problems"])
+            _save_status(verify_error=("; ".join(check["problems"]))[:300])
+        return {"name": name, "size": size, "counts": counts, "verified": check["ok"], "problems": check["problems"]}
+
+
+def verify(name: str) -> dict:
+    """TEST DE RESTAURATION à blanc : ouvre la sauvegarde dans un fichier temporaire (la vraie base n'est jamais touchée),
+    vérifie l'intégrité de la base, la cohérence des clés étrangères et que les chiffres correspondent au manifeste.
+    Une sauvegarde qu'on n'a jamais essayé de relire ne prouve rien : chaque sauvegarde est vérifiée à sa création."""
+    import tempfile
+    problems: list[str] = []
+    counts: dict = {}
+    try:
+        path = path_of(name)
+        with zipfile.ZipFile(path) as z:
+            manifest = json.loads(z.read("manifest.json")) if "manifest.json" in z.namelist() else {}
+            if "unic.db" not in z.namelist():
+                return {"ok": False, "problems": ["unic.db absent de l'archive."], "counts": {}}
+            if z.getinfo("unic.db").file_size > MAX_DB_MB * 1024 * 1024:
+                return {"ok": False, "problems": ["Base trop volumineuse."], "counts": {}}
+            with tempfile.TemporaryDirectory(dir=settings.backups_path) as tmp:
+                db_copy = Path(tmp) / "check.db"
+                with z.open("unic.db") as src_file, db_copy.open("wb") as dst:
+                    shutil.copyfileobj(src_file, dst, 1024 * 1024)
+                con = sqlite3.connect(str(db_copy))
+                try:
+                    if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                        problems.append("Base endommagée (integrity_check).")
+                    broken = con.execute("PRAGMA foreign_key_check").fetchall()
+                    if broken:
+                        problems.append(f"{len(broken)} lien(s) cassé(s) entre tables (clés étrangères).")
+                    for table in (manifest.get("counts") or {}):
+                        try:
+                            counts[table] = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # nosec B608 - noms issus de la liste fixe de _snapshot
+                        except sqlite3.Error:
+                            problems.append(f"Table {table} illisible.")
+                        else:
+                            if counts[table] != manifest["counts"][table]:
+                                problems.append(f"{table} : {counts[table]} lus, {manifest['counts'][table]} attendus.")
+                finally:
+                    con.close()
+    except BackupError as exc:
+        problems.append(str(exc))
+    except (zipfile.BadZipFile, OSError, ValueError, sqlite3.Error) as exc:
+        problems.append(f"Archive illisible ({type(exc).__name__}).")
+    return {"ok": not problems, "problems": problems, "counts": counts}
 
 
 def _prune_local() -> None:
