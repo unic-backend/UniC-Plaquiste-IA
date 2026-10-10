@@ -79,6 +79,36 @@ function AgentJournal({ id, runId }: { id: string; runId: string }) {
   );
 }
 
+/** Tableau qualité : chaque progrès est un chiffre mesuré sur des données réelles ; « non mesuré » dit pourquoi. Lecture seule. */
+function Quality() {
+  const [q, setQ] = useState<any>(null);
+  const [open, setOpen] = useState(false);
+  const load = useCallback(() => api.quality().then(setQ).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+  const mark = (e: string) => (e === "ok" ? "✅" : e === "bad" ? "🔴" : e === "warn" ? "🟠" : "⚪");
+  return (
+    <section className="card-box">
+      <div className="at-head"><h3>Qualité</h3>
+        <button className="btn btn-line btn-small" onClick={load}><I.Refresh size={15} /> Actualiser</button></div>
+      {!q && <p className="hint">Mesure en cours…</p>}
+      {q && (
+        <>
+          <p className={q.cle.etat === "ok" ? "hint ic" : "error"}><b>{mark(q.cle.etat)} {q.cle.titre} : {q.cle.valeur}</b></p>
+          <p className="hint">{q.cle.detail}</p>
+          <p className="hint">{q.mesures}/{q.total} indicateurs mesurés · {q.mal} à regarder.</p>
+          <button className="btn btn-line btn-small" onClick={() => setOpen(!open)}>{open ? "Masquer le détail" : "Voir tous les indicateurs"}</button>
+          {open && q.indicateurs.map((r: any) => (
+            <div key={r.id} className="at-item">
+              <b>{mark(r.etat)} {r.titre}</b> <span className="hint">· {r.valeur}</span>
+              {r.detail && <p className="hint">{r.detail}</p>}
+            </div>
+          ))}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Cohérence : documents dont les chiffres ne tombent pas juste, PDF manquants, erreurs serveur. Détection seulement. */
 function Integrity() {
   const [r, setR] = useState<any>(null);
@@ -294,6 +324,7 @@ export function Atelier() {
           {!connected && d.incidents.length > 0 && <p className="hint">Connecte GitHub (plus bas) pour que UniC corrige lui-même.</p>}
         </section>
 
+        <Quality />
         <Integrity />
         <Evals onMsg={setMsg} />
         <section className="card-box">
