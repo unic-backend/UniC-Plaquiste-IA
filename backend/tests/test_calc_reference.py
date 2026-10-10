@@ -260,3 +260,49 @@ def test_quote_margin_uses_only_recorded_purchase_prices():
         for m in mats:
             db.delete(m)
         db.commit()
+
+
+def test_partition_from_area_only_is_partial_honest_and_never_becomes_a_quote():
+    """« 200 m² de cloison » : plaques, vis, bande, enduit calculés (valeurs vérifiées à la main) ; ossature NON calculée, dite manquante."""
+    # 200 m² × 2 faces = 400 m² ; plaques 1,20 × 2,00 = 2,40 m² : ⌈400 × 1,08 / 2,40⌉ = ⌈180⌉ = 180
+    r = calc.calculate_partition_from_area(200, 2, waste=0.08, board_width=1.2, board_height=2.0)
+    d = r.to_dict()
+    assert _qty(r, "BA13-2000x1200") == 180
+    assert not any(q["sku"] in ("MONTANT-M48", "UC-RAILS-48-MM") for q in d["quantities"])      # aucune ossature inventée
+    assert _step(r, "Montants et rails")["result"] == "non calculable" and _step(r, "Montants et rails")["status"] == calc.STATUS_MISSING
+    assert _status(r, "Longueur / hauteur") == calc.STATUS_MISSING and _status(r, "Faces") == calc.STATUS_ASSUMED
+    assert any("NE SONT PAS calculés" in m for m in d["missing"]) and d["inputs"]["partial"] and d["verification"]["ok"]
+    r.quantities.append(calc.QuantityLine("MONTANT-M48", "Montant", 10, "u"))   # ossature inventée : le vérificateur la refuse
+    assert not calc.verify(r)["ok"]
+
+
+def test_agent_partial_calc_blocks_quotes_unless_the_owner_asks_for_a_partial_one():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    with TestClient(app):
+        db = SessionLocal()
+        s = AgentSession(db, None, {"owner_message": "Fais-moi un devis pour 200 m² de cloison"})
+        out = s("calculate_materials", {"kind": "partition", "area_m2": 200})
+        assert out["quantites"] and out["verification"]["ok"] and any("[missing]" in x for x in out["donnees"])
+        assert "PARTIEL" in s("create_quote", {"client_name": "Awa Ba"})["error"]
+        assert "PARTIEL" in s("create_purchase_order", {})["error"]
+        # le patron demande explicitement un devis partiel : autorisé
+        s.state["owner_message"] = "fais-le quand même, un devis partiel avec seulement les plaques"
+        made = s("create_quote", {"client_name": "Partiel Test", "objet": "Cloisons BA13 à Dakar, fourni et posé (plaques seulement).", "lieu": "Dakar", "checks": "client, surface, plaques, TVA vérifiés ; ossature non calculée"})
+        assert made.get("numero"), made
+        # un calcul complet n'est jamais bloqué
+        s2 = AgentSession(db, None, {"owner_message": "bon de commande cloison 6 m x 2,5 m"})
+        s2("calculate_materials", {"kind": "partition", "length_m": 6, "height_m": 2.5, "sides": 2})
+        assert "PARTIEL" not in str(s2("create_purchase_order", {}))
+        db.close()
+
+
+def test_eval_set_covers_the_surface_only_request():
+    from app import evals
+    case = next(c for c in evals.CASES if c["id"] == "surface-seule")
+    good = evals.score_case(case, [("calculate_materials", {"kind": "partition", "area_m2": 200})])
+    assert good["ok"]
+    bad = evals.score_case(case, [("create_quote", {}), ("calculate_materials", {"kind": "partition", "area_m2": 200, "sides": 2, "length_m": 20})])
+    assert not bad["ok"] and len(bad["problems"]) >= 3
