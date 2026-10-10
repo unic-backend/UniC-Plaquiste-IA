@@ -1339,3 +1339,4 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .mat-fields label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .mat-fields input { font: inherit; font-size: 16px; letter-spacing: 0; text-transform: none; color: var(--ink); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); min-width: 0; }
 .mat-fields input:focus { outline: 2px solid var(--green-2); outline-offset: 1px; }
+.mat-fields.one { grid-template-columns: 1fr; }

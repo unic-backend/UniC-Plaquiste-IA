@@ -341,3 +341,33 @@ def test_bulk_purchase_prices_are_validated_deduplicated_and_feed_the_margin():
         db.query(MaterialPrice).filter(MaterialPrice.material_id == mid).delete()
         db.delete(db.get(Material, mid))
         db.commit()
+
+
+def test_selling_price_edited_in_the_table_is_used_by_the_next_quote_only():
+    """Le tableau « Matériaux & prix » est la référence du chat : un prix modifié sert aux PROCHAINS devis ; un devis déjà fait ne change pas."""
+    from fastapi.testclient import TestClient
+    from app import services as svc
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models import Material, MaterialPrice, Quotation
+    with TestClient(app) as client, SessionLocal() as db:
+        m = Material(sku="TAB-1", name="Tableau test", unit="u", category="test")
+        db.add(m); db.flush(); mid = m.id; db.commit()
+        post = lambda amt: client.post("/api/materials/prices/bulk", json={"kind": "selling", "prices": [{"id": mid, "amount": amt}]}).json()  # noqa: E731
+        assert post(1000)["saved"] == 1
+        qty = [{"sku": "TAB-1", "name": "Tableau test", "quantity": 3, "unit": "u"}]
+        q1 = svc.quotation_from_quantities(db, title="t", quantities=qty, customer_id=None, project_id=None, user_id=None, client_name="Tableau Un")
+        db.commit()
+        assert q1.items[0].unit_price == 1000 and q1.subtotal == 3000
+        assert post(1200)["saved"] == 1                                                  # le patron change le prix dans le tableau
+        q2 = svc.quotation_from_quantities(db, title="t", quantities=qty, customer_id=None, project_id=None, user_id=None, client_name="Tableau Deux")
+        db.commit()
+        assert q2.items[0].unit_price == 1200 and q2.subtotal == 3600                    # le nouveau devis prend le nouveau prix
+        assert db.get(Quotation, q1.id).items[0].unit_price == 1000                      # l'ancien devis ne bouge pas
+        for q in (q1, q2):
+            for it in list(q.items):
+                db.delete(it)
+            db.delete(q)
+        db.query(MaterialPrice).filter(MaterialPrice.material_id == mid).delete()
+        db.delete(db.get(Material, mid))
+        db.commit()
