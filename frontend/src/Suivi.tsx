@@ -191,9 +191,15 @@ export function Suivi() {
               <section className="card-box sv-alert">
                 <h3>⏳ Sans réponse depuis 7 jours ou plus</h3>
                 {ov.sans_reponse.map((r: any) => (
-                  <button key={r.numero} className="sv-line" onClick={() => open(r.key)}>
-                    <span><b>{r.client}</b> · {money(r.montant)} {r.devise}</span><span>{r.jours} j</span>
-                  </button>
+                  <div key={r.numero} className="sv-line-wrap">
+                    <button className="sv-line" onClick={() => open(r.key)}>
+                      <span><b>{r.client}</b> · {money(r.montant)} {r.devise}</span><span>{r.jours} j</span>
+                    </button>
+                    {r.relance && (
+                      <button className="sv-relance" aria-label={`Relancer ${r.client}`}
+                        onClick={() => shareText(r.relance, `Relance devis ${r.numero}`).catch(() => {})}>Relancer</button>
+                    )}
+                  </div>
                 ))}
               </section>
             )}

@@ -180,10 +180,21 @@ def _conversion(groups: dict[str, dict]) -> dict:
     return {"acceptes": acc, "refuses": dec, "taux": _pct(acc, acc + dec), "en_attente": sum(1 for r in rows if r["decision"] == "pending")}
 
 
-def _no_reply(groups: dict[str, dict]) -> list[dict]:
+def follow_up_message(client: str, numero: str, montant: float, devise: str, jours: int, company: str) -> str:
+    """Relance polie d'un devis sans réponse : chiffres du suivi, sans IA. Le patron l'envoie lui-même."""
+    amount = f"{round(montant):,}".replace(",", " ")
+    return "\n".join([f"Bonjour {client},", "",
+                      f"Je reviens vers vous au sujet du devis {numero} ({amount} {devise}) envoyé il y a {jours} jours.",
+                      "Avez-vous pu l'étudier ? Je reste disponible pour toute question ou pour l'ajuster à votre besoin.", "",
+                      "Cordialement,", company or "UniC Plaquiste"])
+
+
+def _no_reply(groups: dict[str, dict], company: str = "") -> list[dict]:
     """Devis sans réponse du client depuis NO_REPLY_DAYS jours ou plus (brouillons exclus : pas encore envoyés)."""
     out = [{"key": g["key"], "client": g["client"], "numero": r["numero"], "montant": r["montant"], "devise": r["devise"],
-            "jours": r["attente_jours"]} for g in groups.values() for r in g["quotes"]
+            "jours": r["attente_jours"],
+            "relance": follow_up_message(g["client"], r["numero"], r["montant"], r["devise"], r["attente_jours"], company)}
+           for g in groups.values() for r in g["quotes"]
            if r["decision"] == "pending" and not r["brouillon"] and r["attente_jours"] >= NO_REPLY_DAYS]
     out.sort(key=lambda x: -x["jours"])
     return out
@@ -210,7 +221,7 @@ def overview(db: Session) -> dict:
             "en_attente": sum(c["en_attente"] for c in clients), "nb_attente": sum(c["nb_attente"] for c in clients),
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
-            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups), "retires": removed(db), "chantiers": _chantiers(groups),
+            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups, company_dict(db).get("name") or ""), "retires": removed(db), "chantiers": _chantiers(groups),
             "anciennete": _aging(groups), "conversion": _conversion(groups)}
 
 

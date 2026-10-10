@@ -3540,6 +3540,8 @@ def test_tracking_client_info_point_message_and_no_reply(client):
     db.close()
     ov = client.get("/api/tracking").json()
     assert any(x["numero"] == "UC-TRK-0011-QR" and x["jours"] >= 10 for x in ov["sans_reponse"])
+    nr = next(x for x in ov["sans_reponse"] if x["numero"] == "UC-TRK-0011-QR")
+    assert nr["relance"].startswith(f"Bonjour {nr['client']},") and "devis UC-TRK-0011-QR" in nr["relance"] and f"il y a {nr['jours']} jours" in nr["relance"]
     key = _tclient(ov, "Quentin Roy Suivi")["key"]
     assert client.get(f"/api/tracking/{key}").json()["message_point"] == ""   # rien d'accepté : pas de message
     client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000})
