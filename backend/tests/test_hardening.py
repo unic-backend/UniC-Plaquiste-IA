@@ -723,3 +723,24 @@ def test_backup_is_verified_on_creation_and_corruption_is_detected(client):
     assert unknown["ok"] is False and "invalide" in unknown["problems"][0]
     for n in (name, name2):
         (backup.settings.backups_path / n).unlink(missing_ok=True)
+
+
+def test_pdf_total_printed_equals_the_total_in_the_database(client):
+    """Le montant écrit sur le PDF du client est exactement celui du document (devis, facture, bons) : jamais un autre."""
+    import re
+
+    import pypdfium2 as pdfium
+    r = client.post("/api/chat", json={"message": "méthode UniC cloison 4,00 m x 2,50 m, 6 parois, fais le devis pour Total Check Pdf"}).json()
+    cid = r["conversation_id"]
+    client.post("/api/chat", json={"message": "prépare la facture", "conversation_id": cid})
+    for url in ("/api/quotes", "/api/invoices"):
+        rows = [x for x in client.get(url).json() if "Total Check Pdf" in str(x)]
+        assert rows, url
+        det = client.get(f"{url}/{rows[0]['id']}").json()
+        total = round(det.get("total") or 0)
+        assert total > 0, url
+        pdf = pdfium.PdfDocument(client.get(det["download_url"]).content)
+        text = "".join(pdf[i].get_textpage().get_text_range() for i in range(len(pdf)))
+        digits = re.sub(r"[^\d]", "", text)   # espaces fines, insécables, séparateurs : ignorés
+        assert str(total) in digits, f"{url} : total {total} absent du PDF"
+        assert str(total + 7919) not in digits, url   # le test sait aussi refuser un autre montant
