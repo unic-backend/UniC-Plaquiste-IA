@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, isNative, shareText } from "./api";
+import { api, isNative, shareDocument, shareText } from "./api";
 import * as I from "./Icons";
 
 /**
@@ -162,6 +162,26 @@ export function Suivi() {
                 ))}
               </section>
             )}
+            {ov.anciennete?.total > 0 && (
+              <section className="card-box sv-aging" aria-label="Ancienneté du reste à encaisser">
+                <h3>📅 Ancienneté du reste à encaisser</h3>
+                <div className="sv-aging-bar" aria-hidden>
+                  {ov.anciennete.tranches.map((t: any, i: number) => t.reste > 0 && <span key={t.label} className={`ag${i}`} style={{ flexGrow: t.reste }} />)}
+                </div>
+                {ov.anciennete.tranches.map((t: any, i: number) => (
+                  <div key={t.label} className={`sv-ag-row ${t.reste ? "" : "empty"}`}>
+                    <span><i className={`sv-dot ag${i}`} aria-hidden />{t.label}{t.nb ? <em> · {t.nb} devis</em> : null}</span>
+                    <span><b>{money(t.reste)}</b> <small>{pct(t.pct)}</small></span>
+                  </div>
+                ))}
+                {ov.anciennete.plus_ancien && ov.anciennete.plus_ancien.jours > 30 && (
+                  <button className="sv-line late" onClick={() => open(ov.anciennete.plus_ancien.key)}>
+                    <span>Plus ancien : <b>{ov.anciennete.plus_ancien.client}</b> · {money(ov.anciennete.plus_ancien.reste)} {ov.devise}</span>
+                    <span>{ov.anciennete.plus_ancien.jours} j</span>
+                  </button>
+                )}
+              </section>
+            )}
             {ov.sans_reponse.length > 0 && (
               <section className="card-box sv-alert">
                 <h3>⏳ Sans réponse depuis 7 jours ou plus</h3>
@@ -301,7 +321,10 @@ export function SuiviClient() {
               <Kpi label="Reçu" value={`${money(d.recu)} ${d.devise}`} tone="ok" />
               <Kpi label={`Reste · ${pct(d.pct_reste)}`} value={`${money(d.reste)} ${d.devise}`} tone="warn" />
             </div>
-            {d.message_point && <button className="btn btn-line btn-small" onClick={() => shareText(d.message_point, `Point ${d.client}`).catch(() => {})}>Envoyer le point au client</button>}
+            <div className="sv-actions">
+              {d.message_point && <button className="btn btn-line btn-small" onClick={() => shareText(d.message_point, `Point ${d.client}`).catch(() => {})}>Envoyer le point au client</button>}
+              <button className="btn btn-line btn-small" onClick={() => run(() => shareDocument(`/api/tracking/${encodeURIComponent(d.key)}/statement`, `Releve_${d.client}.pdf`, d.message_point || ""))}>📄 Relevé PDF</button>
+            </div>
           </section>
         )}
         {err && <p className="error">{err}</p>}

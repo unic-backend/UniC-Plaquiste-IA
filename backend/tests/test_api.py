@@ -3919,3 +3919,64 @@ def test_pdf_tool_merges_extracts_compresses_and_refuses_bad_requests(client):
     assert t("pdf_tool", {"action": "compress", "files": [b]})["ok"]
     assert "pdf_tool" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
     db.close()
+
+
+def test_uploads_are_capped_while_reading(client, monkeypatch):
+    """Un envoi trop gros est refusé (413) sans être chargé en entier ; les archives « bombe » sont refusées."""
+    import io, json, zipfile
+    from app import backup, memory
+    from app.config import settings
+    monkeypatch.setattr(settings, "max_upload_mb", 1)
+    r = client.post("/api/files", files={"file": ("gros.txt", b"x" * (1024 * 1024 + 10), "text/plain")})
+    assert r.status_code == 413 and "1 Mo" in r.json()["detail"]
+    big = b"\x89PNG\r\n\x1a\n" + b"0" * (15 * 1024 * 1024)
+    assert client.put("/api/settings/signature", files={"file": ("s.png", big, "image/png")}).status_code == 413
+    # export ChatGPT dont le JSON décompressé dépasse la limite : refusé sans le décompresser
+    monkeypatch.setattr(memory, "MAX_IMPORT_JSON_MB", 0.001)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("conversations.json", json.dumps([{"mapping": {}}]) + " " * 5000)
+    r = client.post("/api/memory/import", files={"file": ("export.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 400 and "trop volumineux" in r.json()["detail"]
+    # sauvegarde dont la base décompressée dépasse la limite : rien n'est remplacé
+    monkeypatch.setattr(backup, "MAX_DB_MB", 0.001)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps({"app": "UniC AI"}))
+        z.writestr("unic.db", b"\0" * 5000)
+    r = client.post("/api/backups/restore", files={"file": ("s.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 400 and "trop volumineuse" in r.json()["detail"]
+
+
+def test_tracking_aging_and_client_statement_pdf(client):
+    """Balance âgée par ancienneté d'acceptation + relevé de compte PDF (route et outil de l'IA), chiffres vérifiés à la main."""
+    import io
+    from datetime import timedelta
+    from pypdf import PdfReader
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Quotation, utcnow
+    qid = _track_quote("UC-TRK-0091-RL", "Rokhaya Lam Releve", 1_000_000)
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"}).status_code == 200
+    with SessionLocal() as db:   # acceptée il y a 75 jours
+        db.get(Quotation, qid).decided_at = utcnow() - timedelta(days=75); db.commit()
+    assert client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 250_000, "kind": "avance", "method": "Wave"}).status_code == 200
+    ov = client.get("/api/tracking").json()
+    t6190 = next(t for t in ov["anciennete"]["tranches"] if t["label"] == "61 – 90 jours")
+    assert t6190["reste"] >= 750_000 and t6190["nb"] >= 1
+    assert ov["anciennete"]["total"] == sum(t["reste"] for t in ov["anciennete"]["tranches"])
+    key = _tclient(ov, "Rokhaya Lam Releve")["key"]
+    r = client.get(f"/api/tracking/{key}/statement")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
+    assert "UC-TRK-0091-RL" in text and "750 000" in text and "250 000" in text
+    # client sans devis accepté : pas de relevé
+    _track_quote("UC-TRK-0092-RL", "Moussa Ndao Releve", 300_000)
+    key2 = _tclient(client.get("/api/tracking").json(), "Moussa Ndao Releve")["key"]
+    assert client.get(f"/api/tracking/{key2}/statement").status_code == 400
+    db = SessionLocal()
+    t = AgentSession(db, None, {})
+    out = t("client_statement", {"client": "Rokhaya Lam"})
+    assert out["ok"] and out["reste"] == 750_000 and t.files and t.files[-1]["filename"].startswith("UniC_Releve_")
+    assert "client_statement" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
+    db.close()

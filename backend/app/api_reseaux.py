@@ -19,7 +19,7 @@ from app import assistant, connectors, google_business as gbp, mailbox, memory a
 from app.database import get_db
 from app.models import EmailDraft, InboxMessage, SocialAccount, SocialPost, User, utcnow
 from app.security import get_current_user
-from app.services import audit
+from app.services import audit, read_upload
 from app.social import AUTO_PUBLISH_NOTE, NEXT_STATUS, PLATFORMS, check_post
 
 logger = logging.getLogger("unic.reseaux")
@@ -534,9 +534,7 @@ def memory_decide(mid: str, body: MemoryDecision, db: Session = Depends(get_db),
 @router.post("/memory/import")
 async def memory_import(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Importe un export ChatGPT / Claude (json, zip) ou un texte : suppositions à confirmer, jamais des faits."""
-    raw = await file.read()
-    if len(raw) > 60 * 1024 * 1024:
-        raise HTTPException(413, "Fichier trop volumineux (60 Mo max)")
+    raw = await read_upload(file, 60)
     try:
         texts = mem.candidates_from_export(raw, file.filename or "")
     except mem.UnknownImport as exc:
@@ -780,9 +778,7 @@ async def publish_linkedin(pid: str, target: str = Form("profile"), photo: Uploa
     err = check_post(p.platform, p.body, p.hashtags)
     if err:
         raise HTTPException(400, err)
-    data = await photo.read() if photo is not None else None
-    if data is not None and len(data) > 8 * 1024 * 1024:
-        raise HTTPException(400, "Photo trop lourde (8 Mo maximum).")
+    data = await read_upload(photo, 8, "Photo") if photo is not None else None
     out = _li(linkedin.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), data or None,
               "page" if target == "page" else "profile")
     p.status, p.published_at = "published", utcnow()
@@ -886,9 +882,7 @@ async def publish_instagram(pid: str, request: Request, photo: UploadFile = File
     err = check_post(p.platform, p.body, p.hashtags)
     if err:
         raise HTTPException(400, err)
-    raw = await photo.read()
-    if len(raw) > 12 * 1024 * 1024:
-        raise HTTPException(400, "Photo trop lourde (12 Mo maximum).")
+    raw = await read_upload(photo, 12, "Photo")
     jpeg = _ig(instagram.prepare_photo, raw)
     token = instagram.host_photo(jpeg)
     base = _ig_redirect(request).rsplit("/instagram/", 1)[0]

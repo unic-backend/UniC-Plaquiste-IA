@@ -45,6 +45,7 @@ from app import ai as ai_mod
 from app.orchestrator import AssistantReply, handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
+    read_upload,
     NUMBER_RE,
     _taken_numbers,
     client_name_of,
@@ -536,10 +537,7 @@ async def upload_file(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    data = await file.read()
-    max_b = settings.max_upload_mb * 1024 * 1024
-    if len(data) > max_b:
-        raise HTTPException(413, f"Fichier trop volumineux (max {settings.max_upload_mb} Mo)")
+    data = await read_upload(file, settings.max_upload_mb)
     try:
         rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
     except UploadRejected as exc:
@@ -1362,7 +1360,7 @@ async def put_signature(file: UploadFile = File(...), user: User = Depends(requi
                         db: Session = Depends(get_db)):
     """Signature du gérant (photo sur papier blanc) : fond retiré, recadrée, encre bleu foncé, PNG transparent."""
     from app.pdfs import owner_signature_path
-    out = _save_brand_image(await file.read(), owner_signature_path())
+    out = _save_brand_image(await read_upload(file, 15, "Image"), owner_signature_path())
     audit(db, user.id, "update", "signature", "owner")
     db.commit()
     return out
@@ -1382,7 +1380,7 @@ async def put_stamp(file: UploadFile = File(...), user: User = Depends(require_r
                     db: Session = Depends(get_db)):
     """Cachet de l'entreprise (photo du tampon sur papier) : posé à côté de la signature sur les documents."""
     from app.pdfs import uploaded_stamp_path
-    out = _save_brand_image(await file.read(), uploaded_stamp_path())
+    out = _save_brand_image(await read_upload(file, 15, "Image"), uploaded_stamp_path())
     audit(db, user.id, "update", "stamp", "owner")
     db.commit()
     return out
@@ -1669,6 +1667,14 @@ def tracking_chat_history(key: str, db: Session = Depends(get_db), user: User = 
     return {"messages": [{"id": m.id, "role": m.role, "content": m.content} for m in rows], "working": conv.id in RUNNING}
 
 
+@router.get("/tracking/{key}/statement")
+def tracking_statement(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Relevé de compte PDF du client (devis acceptés, versements, reste), recalculé à chaque demande."""
+    from app import tracking
+    path = _tracked(lambda: tracking.build_statement(db, key))
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
+
+
 @router.get("/tracking/{key}")
 def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import tracking
@@ -1742,7 +1748,7 @@ def backups_download(name: str, user: User = Depends(require_roles("admin", "man
 @router.post("/backups/restore")
 async def backups_restore(file: UploadFile = File(...), user: User = Depends(require_roles("admin"))):
     from app import backup
-    data = await file.read()
+    data = await read_upload(file, backup.MAX_RESTORE_MB, "Sauvegarde")
     try:
         out = backup.restore(data)
     except backup.BackupError as exc:

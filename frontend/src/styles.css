@@ -1186,6 +1186,21 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-chip.warn { color: var(--copper-text); border-color: var(--copper); }
 .sv-chip.wait { color: var(--muted); }
 .sv-chip.off { color: #b3261e; border-color: #b3261e66; }
+.sv-aging h3 { margin: 0 0 10px; font-size: 15px; }
+.sv-aging-bar { display: flex; gap: 2px; height: 10px; border-radius: 999px; overflow: hidden; background: var(--surface-2); margin-bottom: 10px; }
+.sv-aging-bar span { flex-basis: 0; min-width: 6px; }
+.sv-ag-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 5px 0; font-size: 13.5px; }
+.sv-ag-row > span:first-child { min-width: 0; }
+.sv-ag-row > span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sv-ag-row em { font-style: normal; color: var(--muted); }
+.sv-ag-row small { color: var(--muted); margin-left: 4px; }
+.sv-ag-row.empty { opacity: .55; }
+.sv-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+.ag0 { background: var(--green-2); }
+.ag1 { background: #c9a227; }
+.ag2 { background: var(--copper); }
+.ag3 { background: #b3261e; }
+.sv-hero .sv-actions { margin-top: 10px; }
 .sv-quote-card { display: grid; gap: 10px; margin-bottom: 10px; }
 .sv-seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .sv-seg button { padding: 10px 4px; font: inherit; font-size: 13.5px; background: transparent; color: inherit; border: 0; cursor: pointer; }
