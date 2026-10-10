@@ -1,0 +1,36 @@
+# PROPOSITION — mise à jour de sécurité des dépendances du serveur (à appliquer par le propriétaire)
+#
+# `backend/requirements.txt` est une zone protégée (AGENTS.md) : ce fichier n'est PAS utilisé, c'est une proposition vérifiée.
+# Vérifié le 2026-10-10 dans un environnement vierge : `pip install -r` OK, suite complète 428 tests réussis, `pip-audit` : 0 faille
+# sur les dépendances du serveur (avant : 96 failles connues — pypdf 49, pillow 17, PyJWT 16, starlette 7, python-multipart 6).
+# Seul reste `pytest` (outil de test, 2 avis) : sa mise à jour exige pytest-asyncio 1.x (non traitée ici).
+#
+# Pour appliquer : remplacer le contenu de backend/requirements.txt par celui-ci, ouvrir la pull request et poser l'étiquette
+# `core-change-approved`. Changements : fastapi (0.115.6 -> >=0.120, entraîne starlette 1.x), python-multipart 0.0.20 -> 0.0.31,
+# PyJWT 2.10.1 -> 2.15.0, pypdf 5.1.0 -> 6.20.0, pillow 11.0.0 -> 12.3.0.
+#
+fastapi>=0.120
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.31
+PyJWT==2.15.0
+pypdf==6.20.0
+python-docx==1.1.2
+openpyxl==3.1.5
+ezdxf==1.4.4
+cairosvg==2.9.1
+ifcopenshell==0.9.0
+reportlab==4.2.5
+pillow==12.3.0
+httpx==0.28.1
+python-dateutil==2.9.0.post0
+pytest==8.3.4
+pytest-asyncio==0.25.0
+email-validator==2.2.0
+pytesseract==0.3.13
+pypdfium2==5.13.0
+anthropic==1.11.0
+cryptography>=43,<51
+redis>=5,<7

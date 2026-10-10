@@ -1,0 +1,40 @@
+# PROPOSITION — contrôles de sécurité supplémentaires pour la CI (à copier dans .github/workflows/ par le propriétaire).
+# `.github/` est une zone protégée (AGENTS.md) : ce fichier n'est PAS exécuté ici.
+#
+# Déjà couvert par .github/workflows/tests.yml : tests serveur (dont authentification de toutes les routes, injections de prompts,
+# calculs de référence, cohérence), types et construction du frontend, ruff + bandit, garde-fous du dépôt (dont secrets visibles).
+# Ajouté ici : analyse des dépendances (le vrai manque : 96 failles connues n'étaient détectées par aucun contrôle).
+name: Sécurité des dépendances
+on:
+  pull_request:
+    paths: ["backend/requirements*.txt", "frontend/package*.json"]
+  schedule:
+    - cron: "17 5 * * 1"   # chaque lundi : une faille publiée après la dernière modification est aussi vue
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pip-audit
+      - name: Failles connues des dépendances du serveur
+        run: pip-audit -r backend/requirements.txt --ignore-vuln PYSEC-2025-183   # PyJWT : contesté par l'éditeur, sans correctif
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Failles connues (niveau élevé et plus)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high

@@ -497,13 +497,21 @@ def test_login_brute_force_capped_even_with_spoofed_ip(client, monkeypatch):
 
 
 def _all_api_routes():
+    """Toutes les routes /api, lues dans la description OpenAPI (indépendant de la version de FastAPI) ; les routes masquées sont ajoutées à part."""
     from fastapi.routing import APIRoute
     from app.main import app as fastapi_app
-    for r in fastapi_app.routes:
+    seen = set()
+    for path, ops in fastapi_app.openapi().get("paths", {}).items():
+        if path.startswith("/api/"):
+            for method in ops:
+                if method.upper() not in ("HEAD", "OPTIONS"):
+                    seen.add((method.upper(), path))
+    for r in fastapi_app.routes:   # routes hors schéma (include_in_schema=False) : médias publics, rappels OAuth…
         if isinstance(r, APIRoute) and r.path.startswith("/api/"):
-            path = r.path.replace("{", "").replace("}", "")   # paramètres remplacés par leur nom (valeur bidon)
-            for m in r.methods - {"HEAD", "OPTIONS"}:
-                yield m, path, r.path
+            for method in r.methods - {"HEAD", "OPTIONS"}:
+                seen.add((method, r.path))
+    for method, raw in sorted(seen):
+        yield method, raw.replace("{", "").replace("}", ""), raw
 
 
 def test_every_api_route_refuses_requests_without_valid_credentials(client, monkeypatch):
