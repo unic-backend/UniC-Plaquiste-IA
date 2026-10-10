@@ -39,8 +39,18 @@ jobs:
       - name: Unit tests (Android)
         working-directory: frontend/android
         run: ./gradlew :app:testDebugUnitTest --no-daemon
+      - name: Private signing key (secret UNIC_KEYSTORE_B64, optional)
+        env:
+          KEY_B64: ${{ secrets.UNIC_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEY_B64" ]; then
+            echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/unic.keystore"
+            echo "UNIC_KEYSTORE_FILE=$RUNNER_TEMP/unic.keystore" >> "$GITHUB_ENV"
+          fi
       - name: Build debug APK
         working-directory: frontend/android
+        env:
+          UNIC_KEYSTORE_PASSWORD: ${{ secrets.UNIC_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:

@@ -20,11 +20,20 @@ android {
     signingConfigs {
         // Clé de debug FIXE (installation personnelle) : mêmes signatures d'une version à l'autre → mise à jour sans désinstaller.
         // Avant une publication sur le Play Store : créer une vraie clé de release, hors du dépôt.
+        // Clé privée (secrets GitHub UNIC_KEYSTORE_*) si présente ; sinon l'ancienne clé publique du dépôt (rien ne casse).
         unicdebug {
-            storeFile file("unic-debug.keystore")
-            storePassword "android"
-            keyAlias "unicdebug"
-            keyPassword "android"
+            def privateStore = System.getenv("UNIC_KEYSTORE_FILE")
+            if (privateStore && file(privateStore).exists()) {
+                storeFile file(privateStore)
+                storePassword System.getenv("UNIC_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("UNIC_KEY_ALIAS") ?: "unic"
+                keyPassword System.getenv("UNIC_KEYSTORE_PASSWORD")
+            } else {
+                storeFile file("unic-debug.keystore")
+                storePassword "android"
+                keyAlias "unicdebug"
+                keyPassword "android"
+            }
         }
     }
     buildTypes {
