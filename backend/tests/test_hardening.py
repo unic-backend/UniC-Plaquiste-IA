@@ -474,3 +474,15 @@ def test_production_with_access_code_still_works(client, monkeypatch):
     monkeypatch.setattr(main.settings, "unic_env", "production")
     assert client.get("/api/materials").status_code == 401
     assert client.get("/api/materials", headers={"x-access-code": "secret-code"}).status_code == 200
+
+
+def test_login_brute_force_capped_even_with_spoofed_ip(client, monkeypatch):
+    from app import api
+    monkeypatch.setattr(api, "_login_fails", {})
+    for i in range(api._LOGIN_GLOBAL_MAX):
+        r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"},
+                        headers={"x-forwarded-for": f"10.0.0.{i}"})
+        assert r.status_code == 401
+    r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"},
+                    headers={"x-forwarded-for": "10.9.9.9"})   # nouvelle IP falsifiée : toujours bloqué
+    assert r.status_code == 429
