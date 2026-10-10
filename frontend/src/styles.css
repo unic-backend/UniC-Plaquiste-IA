@@ -1201,6 +1201,8 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .ag2 { background: var(--copper); }
 .ag3 { background: #b3261e; }
 .sv-hero .sv-actions { margin-top: 10px; }
+.sv-conv { margin: 10px 0 0; }
+.sv-conv b { color: var(--ink); }
 .sv-quote-card { display: grid; gap: 10px; margin-bottom: 10px; }
 .sv-seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .sv-seg button { padding: 10px 4px; font: inherit; font-size: 13.5px; background: transparent; color: inherit; border: 0; cursor: pointer; }
@@ -1221,6 +1223,10 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-line { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; font: inherit; font-size: 13.5px; color: inherit; background: transparent; border: 0; border-top: 1px solid var(--line); padding: 9px 0; cursor: pointer; }
 .sv-line span:last-child { color: var(--muted); white-space: nowrap; }
 .sv-line.late span:last-child { color: #b3261e; font-weight: 600; }
+.sv-line-wrap { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); }
+.sv-line-wrap .sv-line { border-top: 0; flex: 1; min-width: 0; }
+.sv-relance { flex: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--green-text); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.sv-relance:active { transform: scale(.97); }
 .sv-search { width: 100%; margin-bottom: 8px; }
 .sv-filters { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 4px; -webkit-overflow-scrolling: touch; }
 .sv-filters button { flex: none; padding: 7px 14px; font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: inherit; cursor: pointer; }

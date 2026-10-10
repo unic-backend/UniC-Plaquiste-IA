@@ -3540,6 +3540,8 @@ def test_tracking_client_info_point_message_and_no_reply(client):
     db.close()
     ov = client.get("/api/tracking").json()
     assert any(x["numero"] == "UC-TRK-0011-QR" and x["jours"] >= 10 for x in ov["sans_reponse"])
+    nr = next(x for x in ov["sans_reponse"] if x["numero"] == "UC-TRK-0011-QR")
+    assert nr["relance"].startswith(f"Bonjour {nr['client']},") and "devis UC-TRK-0011-QR" in nr["relance"] and f"il y a {nr['jours']} jours" in nr["relance"]
     key = _tclient(ov, "Quentin Roy Suivi")["key"]
     assert client.get(f"/api/tracking/{key}").json()["message_point"] == ""   # rien d'accepté : pas de message
     client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 100_000})
@@ -3980,3 +3982,33 @@ def test_tracking_aging_and_client_statement_pdf(client):
     assert out["ok"] and out["reste"] == 750_000 and t.files and t.files[-1]["filename"].startswith("UniC_Releve_")
     assert "client_statement" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
     db.close()
+
+
+def test_briefing_lists_collections_from_tracking(client):
+    """Le briefing du matin reprend le suivi : reste à encaisser, rappels échus, vieux restes (chiffres du suivi)."""
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.models import Quotation, utcnow
+    qid = _track_quote("UC-TRK-0095-BR", "Ibou Gaye Briefing", 600_000)
+    assert client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"}).status_code == 200
+    with SessionLocal() as db:
+        q = db.get(Quotation, qid)
+        q.decided_at = utcnow() - timedelta(days=70)
+        q.collect_on = utcnow() - timedelta(days=2)
+        db.commit()
+    sec = next(s for s in client.get("/api/briefing").json()["sections"] if s["title"] == "Encaissements")
+    assert sec["state"] == "OK" and "Reste à encaisser" in sec["text"]
+    assert "Ibou Gaye Briefing — 600 000 FCFA, 2 j de retard" in sec["text"] and "Plus de 60 jours" in sec["text"]
+
+
+def test_tracking_conversion_rate_counts_only_decided_quotes(client):
+    before = client.get("/api/tracking").json()["conversion"]
+    a = _track_quote("UC-TRK-0096-CV", "Conv Un", 100_000)
+    b = _track_quote("UC-TRK-0097-CV", "Conv Deux", 100_000)
+    _track_quote("UC-TRK-0098-CV", "Conv Trois", 100_000)   # reste en attente : hors calcul
+    client.post(f"/api/tracking/quotes/{a}/decision", json={"decision": "accepted"})
+    client.post(f"/api/tracking/quotes/{b}/decision", json={"decision": "declined"})
+    c = client.get("/api/tracking").json()["conversion"]
+    assert (c["acceptes"], c["refuses"]) == (before["acceptes"] + 1, before["refuses"] + 1)
+    assert c["en_attente"] == before["en_attente"] + 1
+    assert c["taux"] == round(100 * c["acceptes"] / (c["acceptes"] + c["refuses"]), 1)
