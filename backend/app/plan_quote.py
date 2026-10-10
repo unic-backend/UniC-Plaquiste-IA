@@ -102,7 +102,7 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             add(q)
         label = c.get("label") or "Cloison"
         steps.append(calc.CalcStep(label, "longueur × hauteur", {"L": length, "h": height, "faces": sides},
-                                   round(length * height, 2), "m²", calc.STATUS_CONFIRMED))
+                                   round(length * height, 2), "m²", calc.STATUS_CALCULATED))
         assumptions.append(f"{label} : {length:g} m × {height:g} m, {sides} face(s).")
 
     # plaques des cloisons fusionnées avec celles des plafonds de même référence

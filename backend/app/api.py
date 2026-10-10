@@ -1746,6 +1746,18 @@ def margin_setting_put(body: MarginIn, db: Session = Depends(get_db), user: User
     return {"min_margin_pct": body.min_margin_pct}
 
 
+@router.get("/quotes/{qid}/trace")
+def quote_trace(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Pourquoi ce montant : trace d'origine du devis (mesures, formules, hypothèses, prix retenus, version du moteur)."""
+    from app import provenance
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    out = provenance.explain(q)
+    out["prix_changes_depuis"] = provenance.price_changed_since(db, q)
+    return out
+
+
 @router.get("/quotes/{qid}/margin")
 def quote_margin(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Marge du devis (prix d'achat enregistrés contre prix de vente). Pour le patron seulement."""

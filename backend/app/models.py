@@ -239,6 +239,7 @@ class Quotation(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    calc_trace: Mapped[str] = mapped_column(Text, default="")   # preuves du calcul d'origine (JSON) : voir provenance.py
     client_decision: Mapped[str] = mapped_column(String(16), default="pending")   # suivi : pending / accepted / declined
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collect_on: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # prochain encaissement prévu (rappel)

@@ -12,7 +12,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, pricecheck, revise, tracking, trust, google_business as gbp, metier
+from app import calc, connectors, pricecheck, provenance, revise, tracking, trust, google_business as gbp, metier
 from app import services as svc
 from app.connectors import ConnectorError
 from app.models import ConstructionSite, Customer, Project, Supplier, Invoice, InboxMessage, Material, Quotation, SocialPost
@@ -295,6 +295,15 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"only_late": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
+        "name": "explain_quote",
+        "description": ("POURQUOI CE MONTANT : explique d'où vient un devis (mesures et leur statut, formules, hypothèses, ce qui manquait, prix de la grille "
+                        "retenus avec leur date, version du moteur, contrôle indépendant) à partir de la trace gardée à sa création, même des mois plus tard. "
+                        "À utiliser pour « pourquoi ce devis fait X », « comment tu as calculé », « d'où vient ce prix ». Indique aussi si des prix de la "
+                        "grille ont changé depuis. Ne reconstitue jamais de mémoire : lis ce que l'outil rend."),
+        "input_schema": {"type": "object", "properties": {"quote_number": {"type": "string", "description": "Numéro du devis ; omis = dernier devis de la conversation"}},
+                         "additionalProperties": False},
+    },
+    {
         "name": "quote_margin",
         "description": ("MARGE d'un devis (pour le patron seulement, jamais pour le client) : prix de vente contre prix d'ACHAT enregistrés, ligne par ligne, "
                         "ventes à perte, marge sous le seuil du patron, lignes sans prix d'achat. À utiliser pour « quelle marge sur ce devis », "
@@ -491,7 +500,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -787,6 +796,19 @@ class AgentSession:
             return self._tracked(lambda: tracking.client_file(self.db, key))
         out = tracking.overview(self.db)
         out["note"] = "Chiffres exacts calculés en code. Présente d'abord le reste à encaisser. Argent seulement, jamais l'avancement du chantier."
+        return out
+
+    def _t_explain_quote(self, quote_number: str = "") -> dict:
+        q = None
+        if quote_number.strip():
+            q = self.db.query(Quotation).filter(Quotation.number == quote_number.strip().upper()).first()
+        elif self.state.get("last_quote_id"):
+            q = self.db.get(Quotation, self.state["last_quote_id"])
+        if q is None:
+            return {"error": "Devis introuvable : donne son numéro."}
+        out = provenance.explain(q)
+        out.pop("trace", None)   # le résumé lisible suffit à la réponse
+        out["prix_changes_depuis"] = provenance.price_changed_since(self.db, q)
         return out
 
     def _margin_hint(self, q: Quotation) -> dict:
@@ -1173,6 +1195,7 @@ class AgentSession:
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
                         checks: str = "", objet: str = "", lines: list | None = None, lieu: str = "",
                         nouveau: bool = False) -> dict:
+        from_lines = bool(lines)
         if lines:
             qty = self._lines_to_quantities(lines)
             self.state["last_calc"] = {"quantities": qty, "assumptions": [], "missing": []}
@@ -1222,6 +1245,11 @@ class AgentSession:
                 f"Le devis {twin.number} existe déjà pour ce client, ce lieu et ces mêmes lignes : aucun second devis n'a été créé. "
                 "Montre-le au patron. S'il veut une correction : revise_document sur ce devis.", 400)
         audit(self.db, self.user_id, "quote_checks", "quotation", q.id, checks[:300])
+        try:   # preuves : pourquoi ce montant (mesures, formules, hypothèses, prix retenus, version du moteur) ; ne bloque jamais le devis
+            provenance.save(q, provenance.build_trace(self.db, q, None if from_lines else self.state.get("last_calc"),
+                                                      owner_request=str(self.state.get("owner_message") or "")))
+        except Exception:   # noqa: BLE001
+            logger.exception("Trace du devis %s non enregistrée", q.number)
         self.db.commit()
         self.state["last_quote_id"] = q.id
         self.state["calc_quote_id"] = q.id

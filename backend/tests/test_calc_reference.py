@@ -37,7 +37,7 @@ def test_case_320m_two_faces_openings_unknown():
     # montants : ⌊320 / 0,60⌋ + 1 = 533 + 1 = 534 ; rails : ⌈640 / 2,90⌉ = ⌈220,69⌉ = 221 barres
     r = calc.calculate_partition(320, 2.5, 2, **STD)
     d = r.to_dict()
-    assert _step(r, "Surface brute")["result"] == 1600 and _step(r, "Surface brute")["status"] == calc.STATUS_CONFIRMED
+    assert _step(r, "Surface brute")["result"] == 1600 and _step(r, "Surface brute")["status"] == calc.STATUS_CALCULATED
     assert _step(r, "Surface des ouvertures")["status"] == calc.STATUS_MISSING
     nette = _step(r, "Surface nette")
     assert nette["result"] == 1600 and nette["status"] == calc.STATUS_ESTIMATED and "sans déduction" in nette["label"]
@@ -54,7 +54,7 @@ def test_case_small_wall_with_confirmed_door():
     r = calc.calculate_partition(4, 2.5, 1, [calc.Opening("door", 0.9, 2.04)], waste=0.10, board_width=1.2,
                                  board_height=2.5, stud_spacing=0.6)
     assert _step(r, "Surface des ouvertures")["result"] == 1.836
-    assert _step(r, "Surface nette")["result"] == 8.164 and _step(r, "Surface nette")["status"] == calc.STATUS_CONFIRMED
+    assert _step(r, "Surface nette")["result"] == 8.164 and _step(r, "Surface nette")["status"] == calc.STATUS_CALCULATED
     assert _status(r, "Ouvertures") == calc.STATUS_CONFIRMED
     assert _qty(r, "BA13-2500x1200") == 3 and _qty(r, "MONTANT-M48") == 7 and _qty(r, "UC-RAILS-48-MM") == 3
     assert r.to_dict()["verification"]["ok"]
@@ -70,7 +70,7 @@ def test_unknown_faces_and_default_opening_size_are_assumed_not_confirmed():
 
 def test_owner_confirmed_no_openings_is_confirmed():
     r = calc.calculate_partition(6, 2.5, 2, openings_known=True, **STD)
-    assert _status(r, "Ouvertures") == calc.STATUS_CONFIRMED and _step(r, "Surface nette")["status"] == calc.STATUS_CONFIRMED
+    assert _status(r, "Ouvertures") == calc.STATUS_CONFIRMED and _step(r, "Surface nette")["status"] == calc.STATUS_CALCULATED
     assert not any("Ouvertures" in m for m in r.missing)
 
 
@@ -341,3 +341,72 @@ def test_bulk_purchase_prices_are_validated_deduplicated_and_feed_the_margin():
         db.query(MaterialPrice).filter(MaterialPrice.material_id == mid).delete()
         db.delete(db.get(Material, mid))
         db.commit()
+
+
+def test_quote_keeps_its_origin_trace_and_explains_it_later():
+    """« Pourquoi ce montant ? » des mois plus tard : mesures, formules, statuts, hypothèses, prix retenus (date), version du moteur."""
+    from fastapi.testclient import TestClient
+    from app import provenance
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models import Material, MaterialPrice, Quotation
+    with TestClient(app) as client, SessionLocal() as db:
+        m = Material(sku="PROV-BA13", name="Plaque de plâtre BA13 2000×1200", unit="u", category="test")
+        db.add(m); db.flush(); mid = m.id
+        db.commit()
+        assert client.post("/api/materials/prices/bulk", json={"kind": "selling", "prices": [{"id": mid, "amount": 5000}]}).json()["saved"] == 1
+        s = AgentSession(db, None, {"owner_message": "Devis pour une cloison de 4 m sur 2,5 m, une face, sans ouverture, pour Prov Test"})
+        calc_out = s("calculate_materials", {"kind": "partition", "length_m": 4, "height_m": 2.5, "sides": 1, "no_openings": True})
+        assert calc_out["verification"]["ok"]
+        # renomme la ligne de plaque du métré sur l'article de la grille de test pour que le prix soit celui du tableau
+        for q_ in s.state["last_calc"]["quantities"]:
+            if q_["sku"].startswith("BA13-2000x1200"):
+                q_["sku"] = "PROV-BA13"
+        made = s("create_quote", {"client_name": "Prov Test", "objet": "Cloison BA13 simple face à Dakar, fourni et posé (test de trace).",
+                                  "lieu": "Dakar", "checks": "client, dimensions, TVA, prix vérifiés"})
+        assert made.get("numero"), made
+        q = db.query(Quotation).filter(Quotation.number == made["numero"]).one()
+        t = provenance.load(q)
+        assert t["moteur"]["version"] == calc.ENGINE_VERSION and t["source"] == "calcul du moteur UniC"
+        assert t["entrees"]["length_m"] == 4 and t["entrees"]["sides"] == 1 and t["controle_independant"]["ok"]
+        steps = {e["etape"]: e for e in t["etapes"]}
+        assert steps["Surface brute"]["statut"] == "calculated" and steps["Surface brute"]["resultat"] == 10.0   # 4 × 2,5 × 1 face
+        ligne_plaque = next(l for l in t["lignes"] if l["ligne"].startswith("Plaque") or "BA13" in l["ligne"])
+        assert ligne_plaque["prix_unitaire"] == 5000 and "grille UniC (PROV-BA13)" in ligne_plaque["prix_source"] and ligne_plaque["prix_saisi_le"]
+        got = client.get(f"/api/quotes/{q.id}/trace").json()
+        assert got["disponible"] and "Moteur de calcul version" in got["resume"] and "Surface brute = 10.0 m²" in got["resume"]
+        assert "[calculé]" in got["resume"] and "Contrôle indépendant : recalcul concordant" in got["resume"] and got["prix_changes_depuis"] == []
+        # des mois plus tard : le prix de la grille a changé ; la trace d'origine, elle, ne bouge pas
+        assert client.post("/api/materials/prices/bulk", json={"kind": "selling", "prices": [{"id": mid, "amount": 5600}]}).json()["saved"] == 1
+        later = client.get(f"/api/quotes/{q.id}/trace").json()
+        assert later["prix_changes_depuis"][0]["prix_du_devis"] == 5000 and later["prix_changes_depuis"][0]["prix_actuel_grille"] == 5600
+        assert provenance.load(db.get(Quotation, q.id))["lignes"] == t["lignes"]
+        out = AgentSession(db, None, {})("explain_quote", {"quote_number": q.number})
+        assert out["disponible"] and "Surface brute" in out["resume"] and "trace" not in out
+        # devis ancien sans trace : réponse honnête
+        old = Quotation(number="UC-OLD-TRACE", title="o", status="draft", subtotal=0, total=0)
+        db.add(old); db.commit()
+        assert provenance.explain(old)["disponible"] is False
+        db.delete(old)
+        from app.models import QuotationItem
+        for it in list(q.items):
+            db.delete(it)
+        db.delete(q)
+        db.query(MaterialPrice).filter(MaterialPrice.material_id == mid).delete()
+        db.delete(db.get(Material, mid))
+        db.commit()
+
+
+def test_lines_given_by_the_owner_are_traced_as_such_and_plan_rooms_get_a_trust_status():
+    from app import plans
+    rooms = {r["nom"]: r for r in plans._clean({"unite_plan": "m", "pieces": [
+        {"nom": "Salon", "longueur_m": 5, "largeur_m": 4, "surface_m2": 20, "plafond": "oui"},
+        {"nom": "Chambre", "longueur_m": 4, "largeur_m": 3, "surface_m2": 20, "plafond": "oui"},
+        {"nom": "Bureau", "longueur_m": 3, "largeur_m": 3, "plafond": "oui"},
+        {"nom": "Cave", "plafond": "non"},
+        {"nom": "Cuisine", "surface_m2": 12}, {"nom": "cuisine", "surface_m2": 18},
+        {"nom": "Garage", "longueur_m": 400, "largeur_m": 1.2, "surface_m2": 480, "plafond": "oui"}]})["pieces"]}
+    assert rooms["Salon"]["statut"] == "confirmed" and rooms["Bureau"]["statut"] == "calculated" and rooms["Cave"]["statut"] == "missing"
+    assert rooms["Chambre"]["statut"] == "conflicting" and rooms["Cuisine"]["statut"] == "conflicting" and rooms["cuisine"]["statut"] == "conflicting"
+    assert rooms["Garage"]["statut"] == "assumed"   # cote improbable : lecture douteuse, pas une contradiction entre sources
