@@ -18,6 +18,9 @@ STATUS_CONFIRMED = "confirmed"
 STATUS_ESTIMATED = "estimated"
 STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
+STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
+STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
+ENGINE_VERSION = "2026.10.2"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -110,6 +113,7 @@ class CalcResult:
             "inputs": self.inputs,
             "next_step": self.next_step,
             "verification": verify(self),
+            "engine_version": ENGINE_VERSION,
         }
 
 
@@ -263,7 +267,7 @@ def calculate_partition(
             {"longueur": length_m, "hauteur": height_m, "faces": sides},
             areas["gross"],
             "m²",
-            STATUS_CONFIRMED if sides_known else STATUS_ESTIMATED,
+            STATUS_CALCULATED if sides_known else STATUS_ESTIMATED,
         ),
         CalcStep(
             "Surface des ouvertures",
@@ -271,7 +275,7 @@ def calculate_partition(
             {"ouvertures": [asdict(o) for o in openings], "faces": sides},
             areas["openings"] if openings_known else "inconnue",
             "m²",
-            open_status,
+            STATUS_CALCULATED if open_status == STATUS_CONFIRMED else open_status,
         ),
         CalcStep(
             "Surface nette" if openings_known else "Surface nette (sans déduction des ouvertures, inconnues)",
@@ -279,7 +283,7 @@ def calculate_partition(
             {"brute": areas["gross"], "ouvertures": areas["openings"]},
             areas["net"],
             "m²",
-            STATUS_CONFIRMED if openings_known and open_status == STATUS_CONFIRMED and sides_known else STATUS_ESTIMATED,
+            STATUS_CALCULATED if openings_known and open_status == STATUS_CONFIRMED and sides_known else STATUS_ESTIMATED,
         ),
         CalcStep(
             "Surface d'une plaque",
@@ -411,7 +415,7 @@ def calculate_partition_from_area(
     ]
     result.steps = [
         CalcStep("Surface totale à parementer", "surface × faces", {"surface": area_m2, "faces": sides}, total, "m²",
-                 STATUS_CONFIRMED if sides_known else STATUS_ESTIMATED),
+                 STATUS_CALCULATED if sides_known else STATUS_ESTIMATED),
         CalcStep("Nombre de plaques", "⌈ surface totale × (1 + déchet) / surface plaque ⌉",
                  {"totale": total, "dechet": waste, "plaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
         CalcStep("Montants et rails", "dépend de la longueur et de la hauteur", {}, "non calculable", "", STATUS_MISSING),
@@ -490,7 +494,7 @@ def calculate_ceiling(
     ]
     result.steps = [
         CalcStep("Surface", "longueur × largeur",
-                 {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CONFIRMED),
+                 {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CALCULATED if dims_known else STATUS_ESTIMATED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
         CalcStep("Lignes de fourrure (entraxe 0,50 m)", "⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
@@ -644,7 +648,7 @@ def calculate_surface(length_m: float, width_or_height_m: float, extra_factor: f
     result.steps = [
         CalcStep("Surface", "a × b × facteur",
                  {"a": length_m, "b": width_or_height_m, "facteur": extra_factor},
-                 area, "m²", STATUS_CONFIRMED),
+                 area, "m²", STATUS_CALCULATED),
     ]
     result.data_used = [
         {"label": "a", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED},

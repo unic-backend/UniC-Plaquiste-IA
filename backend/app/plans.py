@@ -125,8 +125,10 @@ def geometry_check(rooms: list[dict], data: dict) -> list[str]:
     « a_confirmer » : une mesure douteuse n'est jamais traitée comme confirmée. Rend les remarques pour le patron."""
     notes: list[str] = []
 
-    def doubt(room: dict, why: str) -> None:
+    def doubt(room: dict, why: str, conflict: bool = False) -> None:
         room["confiance"] = "incertaine"
+        if conflict:
+            room["conflit"] = True   # deux sources se contredisent : statut « conflicting », jamais « confirmed »
         room.setdefault("doutes", []).append(why)
         notes.append(f"{room['nom']} : {why}")
     seen: dict[str, dict] = {}
@@ -135,7 +137,7 @@ def geometry_check(rooms: list[dict], data: dict) -> list[str]:
         r["confiance"] = ("absente" if not S else "calculée" if r.get("surface_source") == "calculée"
                           else "surface seule" if not (L and l) else "lue")
         if L and l and S and abs(S - L * l) / S > SURFACE_GAP:
-            doubt(r, f"surface {S} m² ≠ {L} × {l} = {round(L * l, 2)} m² : une des cotes est fausse")
+            doubt(r, f"surface {S} m² ≠ {L} × {l} = {round(L * l, 2)} m² : une des cotes est fausse", conflict=True)
         if (L and L > MAX_SIDE_M) or (l and l > MAX_SIDE_M):
             doubt(r, f"côté de {max(L or 0, l or 0):g} m improbable (cote en cm ou mm ?)")
         if L and l and max(L, l) / min(L, l) > MAX_RATIO:
@@ -145,9 +147,9 @@ def geometry_check(rooms: list[dict], data: dict) -> list[str]:
         key = " ".join(r["nom"].lower().split())
         twin = seen.get(key)
         if twin is not None and S and twin["surface_m2"] and abs(S - twin["surface_m2"]) / max(S, twin["surface_m2"]) > SURFACE_GAP:
-            doubt(r, f"« {r['nom']} » apparaît deux fois avec {twin['surface_m2']} m² puis {S} m² : contradiction")
-            if twin.get("confiance") != "incertaine":
-                doubt(twin, f"« {r['nom']} » contredit une autre mention ({S} m²)")
+            doubt(r, f"« {r['nom']} » apparaît deux fois avec {twin['surface_m2']} m² puis {S} m² : contradiction", conflict=True)
+            if not twin.get("conflit"):
+                doubt(twin, f"« {r['nom']} » contredit une autre mention ({S} m²)", conflict=True)
         seen.setdefault(key, r)
     if str(data.get("unite_plan") or "inconnue").lower() == "inconnue":
         from_dims = [r for r in rooms if r.get("surface_source") == "calculée"]
@@ -162,6 +164,9 @@ def geometry_check(rooms: list[dict], data: dict) -> list[str]:
         n = _num(c.get("longueur_m")) if isinstance(c, dict) else None
         if n and n > 200:
             notes.append(f"Cloison de {n:g} m (« {str(c.get('texte') or '')[:40]} ») improbable : unité ?")
+    for r in rooms:   # statut de la donnée (modèle de confiance) : confirmed / calculated / assumed / missing / conflicting
+        r["statut"] = ("conflicting" if r.get("conflit") else "assumed" if r["confiance"] == "incertaine" else
+                       "missing" if r["confiance"] == "absente" else "calculated" if r["confiance"] == "calculée" else "confirmed")
     for r in rooms:   # une mesure douteuse n'est jamais « confirmée »
         if r["confiance"] == "incertaine" and r["plafond"] == "oui":
             r["plafond"] = "a_confirmer"

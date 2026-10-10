@@ -1340,3 +1340,9 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .mat-fields input { font: inherit; font-size: 16px; letter-spacing: 0; text-transform: none; color: var(--ink); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); min-width: 0; }
 .mat-fields input:focus { outline: 2px solid var(--green-2); outline-offset: 1px; }
 .mat-fields.one { grid-template-columns: 1fr; }
+
+/* Pourquoi ce montant ? */
+.doc-why { margin: 6px 0; }
+.doc-why-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--green-text); background: transparent; border: 0; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.doc-why-body { margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); max-height: 320px; overflow-y: auto; }
+.doc-why-body p { margin: 0 0 6px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
