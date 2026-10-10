@@ -54,11 +54,11 @@ export const Canva = ({ size }: P) => (
   </S>
 );
 
-/** Higgsfield : repère simplifié (monogramme), pas le logo officiel. */
+/** Higgsfield : approximation (carré jaune-vert, trait noir), pas le logo officiel. */
 export const Higgsfield = ({ size }: P) => (
   <S size={size}>
-    <rect x="2" y="2" width="20" height="20" rx="5.500" fill="#111" />
-    <path d="M8 7v10M16 7v10M8 12h8" stroke="#fff" strokeWidth="2.200" strokeLinecap="round" fill="none" />
+    <rect x="2" y="2" width="20" height="20" rx="5.500" fill="#D1FE17" />
+    <path d="M6.500 14.500c2-5 3.500-5 5-1.500s3 3.500 6-3" stroke="#0A0A0A" strokeWidth="2.200" strokeLinecap="round" strokeLinejoin="round" fill="none" />
   </S>
 );
 
