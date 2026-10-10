@@ -1,0 +1,64 @@
+name: Surveillance serveur
+
+# Vérifie de l'extérieur que le serveur répond (le serveur ne peut pas signaler sa propre panne).
+# Panne → une issue « 🔴 Serveur en panne » est ouverte (GitHub t'envoie un e-mail) ; retour à la normale → elle se ferme seule.
+# Adresse : variable de dépôt UNIC_HEALTH_BASE (Settings › Secrets and variables › Actions › Variables), sinon celle de Render.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE: ${{ vars.UNIC_HEALTH_BASE || 'https://unic-plaquiste-ia.onrender.com' }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: "🔴 Serveur en panne"
+    steps:
+      - name: Contrôle
+        id: probe
+        run: |
+          problems=""
+          # 1. Le serveur et sa base répondent (3 essais espacés : un redémarrage n'est pas une panne).
+          ready=$(curl -s -o /dev/null -w "%{http_code}" --retry 3 --retry-delay 20 --retry-all-errors --max-time 60 "$BASE/api/health/ready" || true)
+          [ "$ready" = "200" ] || problems="$problems- Santé (/api/health/ready) : code $ready (attendu 200)%0A"
+          # 2. L'API est bien fermée par le code d'accès (401). 503 = UNIC_ACCESS_CODE absent sur Render.
+          guard=$(curl -s -o /dev/null -w "%{http_code}" --retry 2 --retry-delay 10 --max-time 60 "$BASE/api/materials" || true)
+          [ "$guard" = "401" ] || problems="$problems- Protection (/api/materials sans code) : code $guard (attendu 401)%0A"
+          echo "ready=$ready guard=$guard"
+          echo "problems=$problems" >> "$GITHUB_OUTPUT"
+
+      - name: Signaler la panne
+        if: steps.probe.outputs.problems != ''
+        env:
+          PROBLEMS: ${{ steps.probe.outputs.problems }}
+        run: |
+          body="$(printf '%b' "${PROBLEMS//%0A/\\n}")
+
+          Contrôle du $(date -u '+%d/%m/%Y %H:%M') UTC sur $BASE.
+          Vérifie Render › Logs. Cette issue se ferme seule quand le serveur répond à nouveau."
+          open=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
+          exit 1
+
+      - name: Fermer l'alerte (retour à la normale)
+        if: steps.probe.outputs.problems == ''
+        run: |
+          open=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
+          [ -z "$open" ] || gh issue close "$open" --comment "✅ Serveur de nouveau en ligne ($(date -u '+%d/%m/%Y %H:%M') UTC)."
