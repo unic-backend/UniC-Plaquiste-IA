@@ -60,9 +60,17 @@ def test_malicious_uploads_rejected(name, data):
         validate_upload(data, name)
 
 
+def _tiny_xlsx() -> bytes:
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+    return buf.getvalue()
+
+
 @pytest.mark.parametrize("name,data", [
     ("a.pdf", b"%PDF-1.7 ..."), ("a.PNG", b"\x89PNG\r\n\x1a\nxx"), ("a.txt", b"bonjour"),
-    ("a.xlsx", b"PK\x03\x04zz"), ("a.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+    ("a.xlsx", _tiny_xlsx()), ("a.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 "),
 ])
 def test_valid_uploads_accepted(name, data):
     assert validate_upload(data, name).startswith(".")
@@ -486,3 +494,96 @@ def test_login_brute_force_capped_even_with_spoofed_ip(client, monkeypatch):
     r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"},
                     headers={"x-forwarded-for": "10.9.9.9"})   # nouvelle IP falsifiée : toujours bloqué
     assert r.status_code == 429
+
+
+def _all_api_routes():
+    from fastapi.routing import APIRoute
+    from app.main import app as fastapi_app
+    for r in fastapi_app.routes:
+        if isinstance(r, APIRoute) and r.path.startswith("/api/"):
+            path = r.path.replace("{", "").replace("}", "")   # paramètres remplacés par leur nom (valeur bidon)
+            for m in r.methods - {"HEAD", "OPTIONS"}:
+                yield m, path, r.path
+
+
+def test_every_api_route_refuses_requests_without_valid_credentials(client, monkeypatch):
+    """Audit de TOUTES les routes /api en production : sans code, code faux, jeton inconnu, expiré ou révoqué → 401.
+    Seules les routes publiques listées (sondes, connexion, rappels OAuth, médias/chat publics) répondent sans identifiant."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    from app import main, ratelimit
+    from app.database import SessionLocal
+    from app.models import AuthSession
+    monkeypatch.setattr(main.settings, "unic_access_code", "code-solide-de-test-2026")
+    monkeypatch.setattr(main.settings, "unic_env", "production")
+    monkeypatch.setattr(ratelimit, "blocked", lambda *a, **k: False)   # on teste l'authentification, pas la limite d'essais
+    monkeypatch.setattr(ratelimit, "fail", lambda *a, **k: None)
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        db.add(AuthSession(token_hash=hashlib.sha256(b"uat_expire").hexdigest(), device="t", created_at=now - timedelta(days=90),
+                           last_used=now - timedelta(days=90), expires_at=now - timedelta(days=1)))
+        db.add(AuthSession(token_hash=hashlib.sha256(b"uat_revoque").hexdigest(), device="t", created_at=now,
+                           last_used=now, expires_at=now + timedelta(days=1)))
+        db.commit()
+    from app import auth
+    with SessionLocal() as db:
+        auth.logout(db, "uat_revoque")
+        db.commit()
+    public = set(main._OPEN_PATHS) | {"/api/auth/login"}
+    checked = 0
+    for method, path, raw in _all_api_routes():
+        if raw in public or raw.startswith(("/api/public-media/", "/api/public/")):
+            continue
+        for headers in ({}, {"x-access-code": "mauvais"}, {"x-access-code": "uat_inconnu"},
+                        {"x-access-code": "uat_expire"}, {"x-access-code": "uat_revoque"}):
+            r = client.request(method, path, headers=headers)
+            assert r.status_code == 401, f"{method} {raw} {headers} → {r.status_code}"
+        checked += 1
+    assert checked > 150   # garde-fou : le test parcourt bien toutes les routes
+    # et la bonne clé ouvre l'accès
+    assert client.get("/api/materials", headers={"x-access-code": "code-solide-de-test-2026"}).status_code == 200
+
+
+def test_open_routes_leak_nothing_private(client, monkeypatch):
+    """Les routes publiques ne renvoient ni donnée d'entreprise ni secret."""
+    from app import main
+    monkeypatch.setattr(main.settings, "unic_access_code", "code-solide-de-test-2026")
+    monkeypatch.setattr(main.settings, "unic_env", "production")
+    for path in ("/api/ping", "/api/auth/status", "/api/health/live", "/api/health/ready"):
+        body = client.get(path).text.lower()
+        for word in ("sk-ant", "password", "mot de passe", "token", "secret", "api_key"):
+            assert word not in body, (path, word)
+    r = client.get("/api/public-media/../../etc/passwd.jpg")   # normalisé par le client : page de l'interface, jamais le fichier
+    assert "root:x:" not in r.text
+
+
+def test_spa_route_cannot_read_files_outside_the_frontend(client):
+    """Faille corrigée : « /%2e%2e/…/etc/passwd » servait n'importe quel fichier du serveur, sans code d'accès."""
+    from app import main
+    if not main.FRONTEND_DIST.exists():
+        pytest.skip("interface non compilée")
+    for url in ("/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd", "/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/proc/self/environ",
+                "/%2e%2e/backend/app/config.py", "/%2e%2e%2f%2e%2e%2fetc%2fpasswd", "/..%5c..%5cetc%5cpasswd"):
+        r = client.get(url)
+        assert "root:x:" not in r.text and "ANTHROPIC" not in r.text and "class Settings" not in r.text, url
+    assert client.get("/").status_code == 200   # l'interface reste servie
+
+
+def test_office_zip_bombs_and_traversal_are_refused():
+    import io, zipfile
+    from app.documents import validate_upload
+
+    def make(entries):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, data in entries:
+                z.writestr(name, data)
+        return buf.getvalue()
+    ok = make([("[Content_Types].xml", "<Types/>"), ("word/document.xml", "<w:document>Bonjour</w:document>")])
+    assert validate_upload(ok, "devis.docx") == ".docx"
+    with pytest.raises(UploadRejected, match="anormalement gros"):
+        validate_upload(make([("word/document.xml", b"0" * (20 * 1024 * 1024))]), "bombe.docx")   # 20 Mo → quelques Ko
+    with pytest.raises(UploadRejected, match="chemins internes"):
+        validate_upload(make([("../../evil.sh", "x")]), "piege.xlsx")
+    with pytest.raises(UploadRejected, match="endommagé"):
+        validate_upload(b"PK\x03\x04" + b"pas un zip", "faux.xlsx")

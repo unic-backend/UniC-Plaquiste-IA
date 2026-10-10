@@ -282,8 +282,11 @@ if FRONTEND_DIST.exists():
     def spa(full_path: str):
         if full_path.startswith("api/"):
             return {"detail": "Not Found"}
-        candidate = FRONTEND_DIST / full_path
-        if candidate.exists() and candidate.is_file():
+        # Jamais hors du dossier de l'interface : « ../ » (même encodé %2e%2e) lirait n'importe quel fichier du serveur
+        # (base, clés, variables d'environnement). Le chemin est résolu PUIS comparé au dossier autorisé.
+        root = FRONTEND_DIST.resolve()
+        candidate = (root / full_path).resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
             return FileResponse(candidate)
         return _index()
 else:

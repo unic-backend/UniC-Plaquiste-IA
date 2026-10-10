@@ -59,7 +59,34 @@ def validate_upload(data: bytes, filename: str) -> str:
         raise UploadRejected("Le contenu ne correspond pas à l'extension .webp.")
     if ext in _TEXT_EXT and b"\x00" in data[:4096]:
         raise UploadRejected(f"Le contenu ne ressemble pas à du texte ({ext}).")
+    if ext in _OFFICE_EXT:
+        _check_office_zip(data, ext)
     return ext
+
+
+_OFFICE_EXT = {".docx", ".xlsx", ".xlsm"}
+MAX_OFFICE_ENTRIES = 5000
+MAX_OFFICE_UNZIPPED = 300 * 1024 * 1024   # 300 Mo décompressés au plus
+MAX_OFFICE_RATIO = 200                    # un fichier Office normal se compresse ×2 à ×20
+
+
+def _check_office_zip(data: bytes, ext: str) -> None:
+    """Un .docx/.xlsx est une archive zip : on lit son sommaire (sans rien décompresser) pour refuser les « bombes »."""
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            infos = z.infolist()
+    except (zipfile.BadZipFile, ValueError):
+        raise UploadRejected(f"Fichier {ext} endommagé ou illisible.")
+    if len(infos) > MAX_OFFICE_ENTRIES:
+        raise UploadRejected(f"Fichier {ext} anormal (trop d'éléments internes).")
+    total = sum(i.file_size for i in infos)
+    packed = sum(i.compress_size for i in infos) or 1
+    if total > MAX_OFFICE_UNZIPPED or total / packed > MAX_OFFICE_RATIO:
+        raise UploadRejected(f"Fichier {ext} refusé : contenu décompressé anormalement gros (archive piégée ?).")
+    if any(i.filename.startswith(("/", "\\")) or ".." in i.filename.replace("\\", "/").split("/") for i in infos):
+        raise UploadRejected(f"Fichier {ext} refusé : chemins internes suspects.")
 
 
 def save_upload(data: bytes, filename: str, mime: str, user_id: str | None, project_id: str | None, db: Session) -> StoredFile:
