@@ -306,3 +306,38 @@ def test_eval_set_covers_the_surface_only_request():
     assert good["ok"]
     bad = evals.score_case(case, [("create_quote", {}), ("calculate_materials", {"kind": "partition", "area_m2": 200, "sides": 2, "length_m": 20})])
     assert not bad["ok"] and len(bad["problems"]) >= 3
+
+
+def test_bulk_purchase_prices_are_validated_deduplicated_and_feed_the_margin():
+    from fastapi.testclient import TestClient
+    from app import margin
+    from app.database import SessionLocal
+    from app.main import app
+    from app.models import Material, MaterialPrice, Quotation, QuotationItem
+    with TestClient(app) as client, SessionLocal() as db:
+        m = Material(sku="BULK-1", name="Bulk test", unit="u", category="test")
+        db.add(m); db.flush()
+        mid = m.id
+        db.commit()
+        post = lambda prices, kind="purchase": client.post("/api/materials/prices/bulk", json={"kind": kind, "prices": prices})  # noqa: E731
+        assert post([{"id": mid, "amount": 600}]).json() == {"saved": 1, "unchanged": 0, "errors": []}
+        assert post([{"id": mid, "amount": 600}]).json()["unchanged"] == 1                     # inchangé : pas de doublon d'historique
+        bad = post([{"id": mid, "amount": -5}, {"id": mid, "amount": 0}, {"id": "n-existe-pas", "amount": 10}, {"id": mid, "amount": None}]).json()
+        assert bad["saved"] == 0 and len(bad["errors"]) == 3                                   # négatif, nul, inconnu refusés ; vide ignoré
+        assert client.post("/api/materials/prices/bulk", json={"kind": "autre", "prices": []}).status_code == 400
+        assert post([{"id": mid, "amount": 1000}], kind="selling").json()["saved"] == 1
+        assert post([{"id": mid, "amount": 650.5}]).json()["saved"] == 1                         # nouveau prix : remplace l'ancien
+        got = next(x for x in client.get("/api/materials").json() if x["id"] == mid)
+        assert got["purchase_price"] == 650.5 and got["selling_price"] == 1000
+        q = Quotation(number="UC-BULK-1", title="b", status="draft", subtotal=0, total=0)
+        db.add(q); db.flush()
+        db.add(QuotationItem(quotation_id=q.id, position=1, description="Bulk", quantity=10, unit="u", unit_price=1000, total=10000, material_id=mid))
+        db.commit()
+        r = margin.analyze(q)
+        assert r["marge_connue"] == 3495.0 and r["marge_pct"] == 35.0                          # (1000 − 650,5) × 10 = 3 495 ; 34,95 % -> 35,0
+        for it in list(q.items):
+            db.delete(it)
+        db.delete(q)
+        db.query(MaterialPrice).filter(MaterialPrice.material_id == mid).delete()
+        db.delete(db.get(Material, mid))
+        db.commit()
