@@ -29,6 +29,7 @@ if settings.is_sqlite:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=15000")   # un écrivain attend jusqu'à 15 s son tour (agents, chat, sauvegarde en même temps)
         cursor.close()
 
 

@@ -1915,6 +1915,8 @@ function BackupCard() {
         <ul className="backup-status">
           <li>Dernière sauvegarde : <b>{when(st.last_local)}</b></li>
           <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b></li>
+          {st.last_verified && !st.verify_error && <li>Relecture de contrôle : <b>✓ restaurable</b> ({when(st.last_verified)})</li>}
+          {st.verify_error && <li className="error">Sauvegarde non restaurable : {st.verify_error}</li>}
           {st.last_remote_error && <li className="error">{st.last_remote_error}</li>}
           {st.last_error && <li className="error">{st.last_error}</li>}
         </ul>

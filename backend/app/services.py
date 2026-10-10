@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import random
 import re
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -177,6 +179,24 @@ def document_number(db: Session, party_name: str | None, on: date | None = None,
         number = f"{base}{i}"
         i += 1
     return number
+
+
+def add_with_unique_number(db: Session, obj, next_number) -> None:
+    """Ajoute un document numéroté. Si un autre document vient de prendre le même numéro (deux créations simultanées),
+    on retente avec le numéro suivant au lieu d'échouer : le numéro reste unique et l'utilisateur ne voit aucune erreur.
+    `next_number()` recalcule un numéro libre ; chaque essai est isolé dans un point de sauvegarde (le reste du travail est gardé)."""
+    from sqlalchemy.exc import IntegrityError
+    for attempt in range(10):
+        try:
+            with db.begin_nested():
+                db.add(obj)
+                db.flush()
+            return
+        except IntegrityError:
+            if attempt == 9:
+                raise
+            time.sleep(0.02 * (attempt + 1) + random.random() * 0.03)   # évite que les concurrents se re-heurtent ensemble
+            obj.number = next_number()
 
 
 def client_name_of(db: Session, doc) -> str:
@@ -425,8 +445,11 @@ def quotation_from_quantities(
         missing_info="\n".join(missing or []),
         created_by=user_id,
     )
-    db.add(q)
-    db.flush()
+    first_number = number
+    add_with_unique_number(db, q, lambda: document_number(db, label, lieu=lieu))
+    number = q.number
+    if not title and number != first_number:
+        q.title = f"Devis {number}"   # le titre automatique suit le numéro finalement attribué
     subtotal = 0.0
     complete = True
     any_price = False
@@ -571,8 +594,7 @@ def invoice_from_quote(db: Session, quote: Quotation, kind: str, user_id: str | 
         notes=f"Issue du devis {quote.number}",
         created_by=user_id,
     )
-    db.add(inv)
-    db.flush()
+    add_with_unique_number(db, inv, lambda: linked_number(db, DOC_CODES["credit" if kind == "credit" else "invoice"], quote_number=quote.number))
     for it in sorted(quote.items, key=lambda x: x.position):
         db.add(InvoiceItem(
             invoice_id=inv.id,
@@ -722,8 +744,10 @@ def create_purchase_order(db: Session, *, title: str, quantities: list[dict],
         title=title or f"Bon de commande {number}", status="draft",
         currency=company.get("currency") or "", notes=notes, created_by=user_id,
     )
-    db.add(po)
-    db.flush()
+    first_number = number
+    add_with_unique_number(db, po, lambda: linked_number(db, DOC_CODES["po"], quote_number=quote_number, party_name=client_name))
+    if not title and po.number != first_number:
+        po.title = f"Bon de commande {po.number}"
     subtotal = 0.0
     any_price = True
     for i, line in enumerate(quantities, start=1):
@@ -799,8 +823,11 @@ def create_delivery_note(db: Session, *, title: str, quantities: list[dict],
         title=title or f"Bon de livraison {number}", status="draft",
         notes=notes, created_by=user_id,
     )
-    db.add(dn)
-    db.flush()
+    first_number = number
+    add_with_unique_number(db, dn, lambda: linked_number(db, DOC_CODES["dn"], quote_number=quote_number,
+                                                         party_name=buyer.name if buyer else client_name))
+    if not title and dn.number != first_number:
+        dn.title = f"Bon de livraison {dn.number}"
     for i, line in enumerate(quantities, start=1):
         db.add(DeliveryNoteItem(
             note_id=dn.id, position=i,
