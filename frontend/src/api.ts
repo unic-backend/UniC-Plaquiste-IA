@@ -405,6 +405,7 @@ export const api = {
   trackingDismiss: (mailId: string) => request<any>(`/api/tracking/mail/${mailId}/dismiss`, { method: "POST" }),
   trackingDecide: (qid: string, decision: string) => request<any>(`/api/tracking/quotes/${qid}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
   trackingReceipt: (body: any) => request<any>("/api/tracking/receipts", { method: "POST", body: JSON.stringify(body) }),
+  trackingEditReceipt: (id: string, body: any) => request<any>(`/api/tracking/receipts/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   trackingCancelReceipt: (id: string) => request<any>(`/api/tracking/receipts/${id}`, { method: "DELETE" }),
   trackingCollect: (qid: string, date: string | null) => request<any>(`/api/tracking/quotes/${qid}/collect`, { method: "POST", body: JSON.stringify({ date }) }),
   trackingRemove: (qid: string) => request<any>(`/api/tracking/quotes/${qid}`, { method: "DELETE" }),

@@ -431,6 +431,14 @@ def chat(body: ChatIn, background: BackgroundTasks, db: Session = Depends(get_db
     return out
 
 
+class ReceiptPatch(BaseModel):
+    amount: float | None = None
+    kind: str | None = None
+    method: str | None = None
+    note: str | None = None
+    received_on: str | None = None   # AAAA-MM-JJ
+
+
 class StopIn(BaseModel):
     conversation_id: str
 
@@ -1554,6 +1562,19 @@ def tracking_add_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: U
         except ValueError:
             raise HTTPException(400, "Date invalide")
     return _tracked(lambda: tracking.record_receipt(db, q, body.amount, body.kind, body.method, body.note, user.id, when, body.mail_id))
+
+
+@router.patch("/tracking/receipts/{rid}")
+def tracking_edit_receipt(rid: str, body: ReceiptPatch, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from datetime import datetime as _dt, timezone as _tz
+    from app import tracking
+    when = None
+    if body.received_on:
+        try:
+            when = _dt.strptime(body.received_on, "%Y-%m-%d").replace(hour=12, tzinfo=_tz.utc)
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+    return _tracked(lambda: tracking.update_receipt(db, rid, user.id, body.amount, body.kind, body.method, body.note, when))
 
 
 @router.delete("/tracking/receipts/{rid}")

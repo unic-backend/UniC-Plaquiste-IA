@@ -1286,3 +1286,9 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 /* Bouton d'envoi : devient un petit carré « Arrêter » pendant que l'IA travaille */
 .send.round.stop { background: var(--ink); color: var(--card); }
 .send.round.stop svg { width: 18px; height: 18px; }
+
+.sv-pay-wrap { margin-bottom: 8px; }
+.sv-pay-wrap .sv-pay { margin-bottom: 0; }
+.sv-pay-wrap .sv-form { padding: 12px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--card); }
+.sv-pay-act { display: flex; align-items: center; gap: 6px; flex: none; }
+.sv-warn { margin: 0; font-size: 13px; }
