@@ -1760,6 +1760,13 @@ def backups_create(user: User = Depends(require_roles("admin", "manager"))):
     return {**made, "offsite": remote}
 
 
+@router.post("/backups/{name}/verify")
+def backups_verify(name: str, user: User = Depends(require_roles("admin"))):
+    """Test de restauration à blanc d'une sauvegarde (la vraie base n'est pas touchée)."""
+    from app import backup
+    return backup.verify(name)
+
+
 @router.get("/backups/{name}/download")
 def backups_download(name: str, user: User = Depends(require_roles("admin", "manager"))):
     from app import backup

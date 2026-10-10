@@ -645,3 +645,73 @@ def test_integrity_watch_flags_server_error_spike_and_slowness():
         integrity.record_request(200, 9000)
     assert any(p["ref"] == "lenteur" for p in integrity._server())
     integrity.reset_requests()
+
+def test_simultaneous_document_creation_never_fails_nor_duplicates_numbers(client):
+    """8 devis, 8 bons de commande, 8 bons de livraison créés EN MÊME TEMPS : aucune erreur, tous les numéros distincts."""
+    import threading
+    from app import services as svc
+    from app.database import SessionLocal
+    results, barrier = [], threading.Barrier(8)
+
+    def work(kind):
+        db = SessionLocal()
+        try:
+            barrier.wait()
+            if kind == "quote":
+                d = svc.quotation_from_quantities(db, title="", quantities=[], customer_id=None, project_id=None, user_id=None,
+                                                  client_name="Course Concurrente")
+            elif kind == "po":
+                d = svc.create_purchase_order(db, title="", quantities=[], supplier_id=None, project_id=None, user_id=None,
+                                              client_name="Course Concurrente")
+            else:
+                d = svc.create_delivery_note(db, title="", quantities=[], customer_id=None, project_id=None, user_id=None,
+                                             client_name="Course Concurrente")
+            db.commit()
+            results.append((kind, d.number, d.title))
+        except Exception as exc:   # noqa: BLE001
+            db.rollback()
+            results.append((kind, "ERR", type(exc).__name__))
+        finally:
+            db.close()
+    for kind in ("quote", "po", "dn"):
+        threads = [threading.Thread(target=work, args=(kind,)) for _ in range(8)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        got = [r for r in results if r[0] == kind]
+        assert len(got) == 8 and not [r for r in got if r[1] == "ERR"], got
+        assert len({r[1] for r in got}) == 8, got                       # numéros tous distincts
+        assert all(r[1] in r[2] for r in got), got                       # le titre automatique porte le numéro final
+
+
+def test_backup_is_verified_on_creation_and_corruption_is_detected(client):
+    import io, json, sqlite3, zipfile
+    from app import backup
+    made = backup.create("test")
+    assert made["verified"] and not made["problems"]
+    assert backup.status().get("last_verified") and not backup.status().get("verify_error")
+    assert backup.verify(made["name"])["ok"]
+    # archive dont la base est corrompue : détectée, la vraie base reste intacte
+    src = backup.path_of(made["name"])
+    with zipfile.ZipFile(src) as z:
+        db_bytes, manifest = z.read("unic.db"), json.loads(z.read("manifest.json"))
+    bad = bytearray(db_bytes)
+    for i in range(4096 * 3, 4096 * 3 + 600):   # écrase des pages au milieu de la base
+        bad[i] = 0xFF
+    name = f"{backup.PREFIX}9999-corrompue.zip"
+    with zipfile.ZipFile(backup.settings.backups_path / name, "w") as z:
+        z.writestr("unic.db", bytes(bad))
+        z.writestr("manifest.json", json.dumps(manifest))
+    res = backup.verify(name)
+    assert not res["ok"] and res["problems"]
+    # manifeste qui ne correspond pas à la base : détecté
+    name2 = f"{backup.PREFIX}9998-incoherente.zip"
+    manifest["counts"] = {k: v + 5 for k, v in manifest["counts"].items()}
+    with zipfile.ZipFile(backup.settings.backups_path / name2, "w") as z:
+        z.writestr("unic.db", db_bytes)
+        z.writestr("manifest.json", json.dumps(manifest))
+    assert any("attendus" in p for p in backup.verify(name2)["problems"])
+    assert client.post(f"/api/backups/{made['name']}/verify").json()["ok"] is True
+    unknown = client.post("/api/backups/n-existe-pas/verify").json()
+    assert unknown["ok"] is False and "invalide" in unknown["problems"][0]
+    for n in (name, name2):
+        (backup.settings.backups_path / n).unlink(missing_ok=True)
