@@ -1858,6 +1858,26 @@ def integrity_report(db: Session = Depends(get_db), user: User = Depends(get_cur
     return integrity.check(db)
 
 
+class AlertsIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/alerts")
+def alerts_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Alertes par e-mail au patron : désactivées tant qu'il ne les active pas (rien ne part sans son clic)."""
+    from app import alerts
+    return alerts.status(db)
+
+
+@router.put("/alerts")
+def alerts_set(body: AlertsIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    from app import alerts
+    alerts.set_enabled(db, body.enabled)
+    audit(db, user.id, "alerts_toggled", "setting", "alerts_enabled", "on" if body.enabled else "off")
+    db.commit()
+    return alerts.status(db)
+
+
 @router.get("/quality")
 def quality_report(days: int = 30, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Tableau qualité : indicateurs mesurés sur données enregistrées (lecture seule, aucun appel à Claude)."""

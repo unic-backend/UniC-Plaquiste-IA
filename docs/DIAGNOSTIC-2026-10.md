@@ -471,3 +471,75 @@ UNIC_DATA_DIR=$(mktemp -d) .venv/bin/python -m pytest -q --cov=app --cov-report=
 UNIC_DATA_DIR=/tmp/unic UNIC_ACCESS_CODE=essai UNIC_ENV=production .venv/bin/uvicorn app.main:app --port 8000
 cd ../frontend && npm ci && npx tsc --noEmit -p . && npm run build && npm run test:phone
 ```
+
+---
+
+## 11. Deuxième passe — le P0 mis en œuvre
+
+### 11.1 Les alertes : la surveillance prévient enfin
+
+Nouveau module `backend/app/alerts.py` (fil discret démarré par `main.py`, toutes les 5 minutes) et **9 tests**
+(`backend/tests/test_alerts.py`). Il lit les incidents de `selfcare` — sans modifier ce fichier, qui est protégé —
+et envoie **un seul courrier interne** regroupant les problèmes nouveaux.
+
+Garde-fous vérifiés par les tests :
+
+| Garde-fou | Pourquoi |
+|---|---|
+| **Destinataire = le patron, jamais un tiers.** L'adresse vient des réglages de l'entreprise (ou du compte d'envoi), donc du serveur — jamais d'un incident | Un incident dont le texte contient une adresse ne peut pas détourner l'alerte. Testé avec `pirate@ailleurs.example` dans le message |
+| **Une seule alerte par problème** (empreinte mémorisée) | Un problème connu ne revient pas à chaque tour : le patron continue de lire les messages |
+| **Plafond de 8 messages par jour** | Une tempête de messages finirait ignorée — le pire des cas pour une surveillance |
+| **Rien sans envoi configuré** (SMTP) ni si `UNIC_ALERTS_ENABLED=false` | Aucun envoi inventé, coupure immédiate possible |
+| **Un échec d'envoi ne perd pas l'alerte** : le problème reste à annoncer | Une panne d'e-mail ne doit pas masquer une panne de serveur |
+| **Aucun secret** dans le corps (nettoyage de la surveillance) | Une clé refusée dans un journal ne repart pas par courrier |
+| **Aucun fil en test** (`UNIC_NO_BACKGROUND`) | La suite reste déterministe |
+
+Le réglage est documenté dans `.env.example` (fichier prévu pour ça). Le message dit ce qu'il est :
+un message de surveillance, sans donnée client, qui n'a rien modifié.
+
+### 11.2 Content-Security-Policy : deux niveaux, pour ne rien casser
+
+L'interface ne contient **aucun script en ligne** (`index.html` ne charge que le module compilé) : la politique
+est donc décisive et gratuite.
+
+- **Appliquée** : `script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
+  Elle bloque l'injection de script — la faille la plus grave pour une application qui manipule argent et clients —
+  et ne devrait rien casser : rien n'utilise `<object>`, `<base>` ni formulaire externe (vérifié en navigateur, voir §12).
+- **Mesurée seulement** (`Content-Security-Policy-Report-Only`) : la politique large (images `data:`/`blob:`,
+  styles à l'exécution, `connect-src 'self'`, aperçu de site en cadre `srcdoc`). Elle n'est pas appliquée tant
+  qu'on n'a pas vu, dans la console du navigateur, ce qu'elle refuserait. C'est la partie qui touche à l'affichage :
+  on la mesure avant de l'imposer.
+
+### 11.3 Dépendances
+
+**Interface — fait et vérifié** (`frontend/package.json`, non protégé) :
+
+| Paquet | Avant | Après | Contrôles |
+|---|---|---|---|
+| `vite` | 5.4 | **8.3.4** | `npx tsc --noEmit` ✅ · `npm run build` ✅ (530 ms) |
+| `@vitejs/plugin-react` | 4.3 | **6.1.2** | (obligatoire avec vite 8) |
+| `react-router-dom` | 6.28 | **7.18.4** | navigation, liens et onglets : types et construction passent |
+| `esbuild` | implicite (via vite) | **0.28.2 explicite** | le script `test:phone` l'appelait déjà sans le déclarer : l'installation est maintenant honnête |
+| `npm audit` | **4 avis (1 élevé, 3 modérés)** | **0** | `npm run test:phone` : 105 tests ✅ |
+
+**Serveur — proposition vérifiée, à appliquer par le propriétaire** (`backend/requirements.txt` est protégé).
+Le seul reste est `pytest 8.3.4` (PYSEC-2026-1845). Montée testée dans un environnement **vierge** :
+`pytest 9.0.3` + `pytest-asyncio 1.4.0` (obligatoire avec pytest 9) donnent **exactement le même résultat** :
+463 tests réussis, mêmes 2 échecs d'environnement, aucun autre écart. Détail et fichier prêt à copier :
+`docs/dependances-securite-proposition.txt`.
+
+---
+
+## 12. Deuxième passe : vérification et corrections
+
+Seconde livraison de l'outil (commit `aa39784`). Rejouée avant d'être reprise ; ce qui suit est ce qui a été **gardé**, **changé** ou **écarté**.
+
+| Élément | Décision | Pourquoi (vérifié) |
+|---|---|---|
+| **Alertes e-mail** (`alerts.py`) | **Gardé, mais désactivé par défaut** | Écrit comme « actif sans demander ». Or `AGENTS.md` : rien n'est envoyé sans le clic du propriétaire. Désormais : interrupteur dans **Atelier › Alertes** (`GET/PUT /api/alerts`), coupe-circuit `UNIC_ALERTS_ENABLED=false` prioritaire, adresse masquée à l'écran, 12 tests |
+| Message d'alerte « sans donnée client » | **Corrigé** | Affirmation trop forte : le texte d'un incident vient d'une exception et peut contenir des données. Le message est tronqué à 200 caractères et ne promet plus l'absence de donnée client (il ne part qu'à l'adresse du patron) |
+| **CSP** (en-tête de sécurité du contenu) | **Gardé, restreint aux pages HTML** | Posée aussi sur les PDF et le JSON : `object-src 'none'` peut empêcher le lecteur PDF du navigateur d'afficher un PDF (non testable en navigateur sans interface). Elle ne protège de toute façon que les documents HTML. Vérifié dans un vrai navigateur : 17 pages + navigation, **0 violation, 0 erreur** |
+| **Vite 5→8, plugin-react 4→6, react-router 6→7** | **Gardé, vérifié** | `npm ci`, `tsc`, 105 tests, build : OK ; `npm audit` : 0 faille (avant : 4). Navigation (menu, retour arrière, 17 routes) vérifiée dans un navigateur. Node 22 partout (CI, Docker, Android) : compatible avec Vite 8. À surveiller au prochain APK |
+| `vite.config.ts` : `allowedHosts: true` | **Retiré** | Réglage de confort pour l'espace de travail de l'outil, qui désactive la protection du serveur de développement (nom d'hôte quelconque accepté). Aucun intérêt pour le projet |
+| pytest 9 / pytest-asyncio 1.4 (proposition) | **Gardé en proposition** | `requirements.txt` est protégé : à appliquer par le propriétaire avec l'étiquette `core-change-approved` |
+
