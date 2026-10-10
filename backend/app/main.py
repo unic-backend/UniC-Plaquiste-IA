@@ -204,6 +204,19 @@ async def watch_requests(request: Request, call_next):
             integrity.record_request(status, (_t.perf_counter() - start) * 1000)
 
 
+# Politique de sécurité du contenu. Deux niveaux, volontairement :
+#
+# 1. APPLIQUÉE (protège tout de suite, ne peut rien casser) : aucun script en ligne n'existe dans l'interface
+#    (`index.html` ne charge que le module compilé), donc `script-src 'self'` bloque l'injection de script —
+#    la faille qui ferait le plus de dégâts. Rien n'utilise <object>/<embed>, ni <base>, ni de formulaire externe.
+# 2. MESURÉE (report-only) : la politique large (images, styles, connexions, cadres). Elle est envoyée sans être
+#    appliquée pour voir dans la console ce qui serait refusé, avant de l'imposer. L'interface pose en effet des
+#    styles à l'exécution (thème, animation de révélation) et un aperçu de site dans un cadre `srcdoc`.
+_CSP_ENFORCED = ("script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+_CSP_REPORT_ONLY = ("default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+                    "font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self'")
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     resp = await call_next(request)
@@ -212,6 +225,8 @@ async def security_headers(request: Request, call_next):
     h.setdefault("X-Frame-Options", "DENY")
     h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     h.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
+    h.setdefault("Content-Security-Policy", _CSP_ENFORCED)
+    h.setdefault("Content-Security-Policy-Report-Only", _CSP_REPORT_ONLY)
     if settings.unic_env == "production":
         h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp
@@ -274,7 +289,12 @@ def startup():
             from app import selfcare
             selfcare.start()   # surveillance : incidents, agents endormis, contrôle quotidien, agents créés
         except Exception:
-            pass
+            logger.exception("Surveillance non démarrée : les incidents ne seront pas relevés")
+        try:
+            from app import alerts
+            alerts.start()     # alerte le patron (courrier interne) dès qu'un problème nouveau apparaît
+        except Exception:
+            logger.exception("Alertes non démarrées : un incident resterait invisible sans ouvrir l'appli")
         try:
             from app import mail_account
             mail_account.load_into_runtime(db)   # compte Gmail connecté depuis l'appli

@@ -1,15 +1,32 @@
 # PROPOSITION — mise à jour de sécurité des dépendances du serveur (à appliquer par le propriétaire)
 #
-# `backend/requirements.txt` est une zone protégée (AGENTS.md) : ce fichier n'est PAS utilisé, c'est une proposition vérifiée.
-# Vérifié le 2026-10-10 dans un environnement vierge : `pip install -r` OK, suite complète 428 tests réussis, `pip-audit` : 0 faille
-# sur les dépendances du serveur (avant : 96 failles connues — pypdf 49, pillow 17, PyJWT 16, starlette 7, python-multipart 6).
-# Seul reste `pytest` (outil de test, 2 avis) : sa mise à jour exige pytest-asyncio 1.x (non traitée ici).
+# `backend/requirements.txt` est une zone protégée (AGENTS.md) : ce fichier n'est PAS utilisé par le serveur,
+# c'est une proposition vérifiée. Pour appliquer : remplacer le contenu de backend/requirements.txt par celui-ci,
+# ouvrir la pull request et poser l'étiquette `core-change-approved`.
 #
-# Pour appliquer : remplacer le contenu de backend/requirements.txt par celui-ci, ouvrir la pull request et poser l'étiquette
-# `core-change-approved`. Changements : fastapi (0.115.6 -> >=0.120, entraîne starlette 1.x), python-multipart 0.0.20 -> 0.0.31,
-# PyJWT 2.10.1 -> 2.15.0, pypdf 5.1.0 -> 6.20.0, pillow 11.0.0 -> 12.3.0.
+# -----------------------------------------------------------------------------------------------------------
+# VÉRIFIÉ LE 2026-10-10 (1re vague — déjà appliquée, PR #37/#38) : fastapi 0.115.6 -> 0.143.0, starlette 1.x,
+# python-multipart 0.0.31, PyJWT 2.15.0, pypdf 6.20.0, pillow 12.3.0. Avant : 96 failles connues.
+# pip-audit ne voyait plus qu'un seul reste : pytest.
 #
-fastapi>=0.120
+# VÉRIFIÉ LE 2026-10-10 (2e vague — CE QUI RESTE À APPLIQUER) : pytest.
+#   - `pip-audit -r backend/requirements.txt` signale `pytest 8.3.4` (PYSEC-2026-1845, corrigé en 9.0.3).
+#   - Montée testée dans un environnement vierge (Python 3.11) : `pytest==9.0.3` + `pytest-asyncio==1.4.0`.
+#   - Résultat identique à avant, sur base vierge : 463 tests réussis, 2 échecs d'environnement
+#     (tesseract et libcairo absents de la machine de test ; présents en CI et dans l'image Docker), 0 autre écart.
+#   - `pytest-asyncio` doit suivre : pytest 9 exige la version 1.x (0.25.0 ne fonctionne plus).
+#     À noter : la suite ne contient AUCUN test asynchrone aujourd'hui. Le paquet pourrait donc être retiré,
+#     mais c'est une suppression — décision du propriétaire (AGENTS.md). Le plus sûr : monter les deux.
+#   - Ces deux paquets servent aux TESTS, pas au serveur en production : les sortir du fichier de production
+#     vers un `requirements-dev.txt` serait plus propre encore (là aussi, décision du propriétaire : un nouveau
+#     fichier de dépendances est une zone protégée).
+#
+# Côté interface : fait dans cette branche (fichier non protégé) — vite 8.3.4, @vitejs/plugin-react 6.1.2,
+# react-router-dom 7.18.4, esbuild 0.28.2 ajouté explicitement (le script `test:phone` l'appelait déjà).
+# `npm audit` : 4 avis (dont 1 élevé) -> 0. Types, construction et 105 tests frontend vérifiés.
+# -----------------------------------------------------------------------------------------------------------
+#
+fastapi==0.143.0
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 pydantic==2.10.4
@@ -26,8 +43,8 @@ reportlab==4.2.5
 pillow==12.3.0
 httpx==0.28.1
 python-dateutil==2.9.0.post0
-pytest==8.3.4
-pytest-asyncio==0.25.0
+pytest==9.0.3
+pytest-asyncio==1.4.0
 email-validator==2.2.0
 pytesseract==0.3.13
 pypdfium2==5.13.0

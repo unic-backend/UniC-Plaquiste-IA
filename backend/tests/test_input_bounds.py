@@ -208,3 +208,30 @@ def test_private_routes_are_not_opened_by_the_public_widget():
     c = MiniClient(mini)
     assert "access-control-allow-origin" not in c.get("/api/customers", headers={"Origin": "https://x.example"}).headers
     assert c.post("/api/public/chat", headers={"Origin": "https://x.example"}).headers["access-control-allow-origin"] == "*"
+
+
+# ---------------------------------------------------------------- politique de sécurité du contenu
+
+def test_content_security_policy_is_enforced(client):
+    """La politique appliquée bloque l'injection de script sans pouvoir casser l'interface.
+
+    L'interface ne contient aucun script en ligne : `script-src 'self'` suffit, et surtout n'autorise NI
+    `'unsafe-inline'` NI `'unsafe-eval'`. Rien n'utilise <object>/<embed>, base ou formulaire externe.
+    """
+    h = client.get("/api/ping").headers
+    csp = h.get("content-security-policy")
+    assert csp, "la politique de sécurité du contenu doit être envoyée"
+    assert "script-src 'self'" in csp
+    assert "unsafe-inline" not in csp.split("script-src")[1].split(";")[0], "pas de script en ligne autorisé"
+    assert "unsafe-eval" not in csp
+    assert "object-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_wider_policy_is_only_measured(client):
+    """La politique large part en « report-only » : mesurée, pas appliquée (aucune régression d'affichage possible)."""
+    h = client.get("/api/ping").headers
+    report = h.get("content-security-policy-report-only")
+    assert report and "default-src 'self'" in report
+    assert "connect-src 'self'" in report
+    assert "blob:" in report          # aperçus de PDF, photos et lectures vocales
