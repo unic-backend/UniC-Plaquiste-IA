@@ -1675,6 +1675,36 @@ def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depend
     return _tracked(lambda: tracking.client_file(db, key))
 
 
+class HiggsfieldIn(BaseModel):
+    key_id: str
+    secret: str
+
+
+@router.get("/higgsfield")
+def higgsfield_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import higgsfield
+    return higgsfield.status(db)
+
+
+@router.post("/higgsfield")
+def higgsfield_connect(body: HiggsfieldIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import higgsfield
+    try:
+        out = higgsfield.connect(db, body.key_id, body.secret)
+    except higgsfield.HiggsfieldError as exc:
+        raise HTTPException(exc.status, str(exc))
+    audit(db, user.id, "higgsfield_connect", "connector", "higgsfield")
+    db.commit()
+    return out
+
+
+@router.delete("/higgsfield")
+def higgsfield_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import higgsfield
+    higgsfield.disconnect(db)
+    return {"connected": False}
+
+
 @router.get("/backups")
 def backups_list(user: User = Depends(require_roles("admin", "manager"))):
     from app import backup

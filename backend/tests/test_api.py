@@ -3803,3 +3803,119 @@ def test_review_reply_draft_is_never_duplicated(client):
     assert "déjà traité" in c["statut"]
     assert db.query(SocialPost).filter(SocialPost.external_id == "revdup123").count() == 1
     db.close()
+
+
+class _HfR:
+    def __init__(self, code, data=None):
+        self.status_code, self._d = code, data if data is not None else {}
+
+    def json(self):
+        return self._d
+
+
+def _png_bytes():
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 180, 160)).save(b, "PNG")
+    return b.getvalue()
+
+
+def test_higgsfield_connect_validates_keys_stores_them_encrypted_and_never_returns_them(client, monkeypatch):
+    from app import higgsfield
+    from app.database import SessionLocal
+    from app.models import AppSetting
+    monkeypatch.setattr(higgsfield, "_http", lambda m, u, c, **k: _HfR(401))
+    assert client.post("/api/higgsfield", json={"key_id": "abcdef12", "secret": "zzzzzz99"}).status_code == 400
+    assert client.get("/api/higgsfield").json()["connected"] is False
+    monkeypatch.setattr(higgsfield, "_http", lambda m, u, c, **k: _HfR(404))   # clés bonnes : requête inconnue
+    r = client.post("/api/higgsfield", json={"key_id": "abcdef12", "secret": "zzzzzz99"})
+    assert r.status_code == 200 and r.json()["connected"] is True and "zzzzzz99" not in r.text
+    db = SessionLocal()
+    assert "zzzzzz99" not in db.get(AppSetting, "higgsfield_key_secret").value   # chiffré au repos
+    db.close()
+    assert client.post("/api/higgsfield", json={"key_id": "a", "secret": "b"}).status_code == 400
+    assert client.get("/api/connectors").json().get("higgsfield") is True
+    assert client.delete("/api/higgsfield").json() == {"connected": False}
+    assert client.get("/api/higgsfield").json()["connected"] is False
+
+
+def test_higgsfield_generates_one_image_with_a_daily_cap_and_safe_urls(client, monkeypatch):
+    from app import higgsfield
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    db = SessionLocal()
+    t = AgentSession(db, None, {})
+    assert "pas connecté" in t("generate_visual", {"prompt": "Plafond lambris chêne clair dans un salon"})["error"]
+    monkeypatch.setattr(higgsfield, "_http", lambda m, u, c, **k: _HfR(404))
+    higgsfield.connect(db, "abcdef12", "zzzzzz99")
+    calls = []
+
+    def fake_http(method, url, creds, **kw):
+        calls.append((method, url))
+        if method == "POST":
+            assert url.endswith("/higgsfield-ai/soul/v2/standard") and kw["json"]["prompt"].startswith("Plafond")
+            assert kw["headers"]["Idempotency-Key"]
+            return _HfR(200, {"request_id": "req-12345678", "status": "queued", "status_url": "https://api.higgsfield.ai/requests/req-12345678/status"})
+        return _HfR(200, {"status": "completed", "images": [{"url": "https://cdn.example.com/x.png"}]})
+    monkeypatch.setattr(higgsfield, "_http", fake_http)
+    monkeypatch.setattr(higgsfield, "_download", lambda u: (200, "image/png", _png_bytes()))
+    out = t("generate_visual", {"prompt": "Plafond lambris chêne clair dans un salon"})
+    assert out["ok"] and out["restantes_aujourdhui"] == higgsfield.MAX_PER_DAY - 1
+    assert t.images and t.images[0]["caption"] and t.images[0]["id"]
+    assert client.get(f"/api/artifacts/{t.images[0]['id']}/download").status_code == 200
+    # URL non sûre (adresse interne) : refusée ; statut refusé par la modération : message clair
+    monkeypatch.setattr(higgsfield, "_http", lambda m, u, c, **k: _HfR(200, {"request_id": "req-12345678", "status": "completed", "images": [{"url": "https://10.0.0.5/x.png"}]}))
+    assert "exploitable" in t("generate_visual", {"prompt": "Plafond lambris chêne clair dans un salon"})["error"]
+    monkeypatch.setattr(higgsfield, "_http", lambda m, u, c, **k: _HfR(200, {"request_id": "req-12345678", "status": "nsfw"}))
+    assert "modération" in t("generate_visual", {"prompt": "Plafond lambris chêne clair dans un salon"})["error"]
+    # plafond par jour : jamais de dépense au-delà
+    higgsfield._put(db, "higgsfield_count", f"{__import__('datetime').date.today().isoformat()}:{higgsfield.MAX_PER_DAY}")
+    db.commit()
+    assert "Limite" in t("generate_visual", {"prompt": "Plafond lambris chêne clair dans un salon"})["error"]
+    assert "generate_visual" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS   # jamais lancé par un agent ni par le relais
+    higgsfield.disconnect(db)
+    db.close()
+
+
+def _stored_pdf(db, name, pages):
+    from pathlib import Path
+    from reportlab.pdfgen import canvas
+    from app.config import settings
+    from app.models import StoredFile
+    folder = settings.artifacts_path / "test_pdftools"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = Path(folder) / name
+    c = canvas.Canvas(str(path))
+    for i in range(pages):
+        c.drawString(72, 720, f"{name} page {i + 1}")
+        c.showPage()
+    c.save()
+    rec = StoredFile(filename=name, mime_type="application/pdf", path=str(path), size=path.stat().st_size, kind="upload")
+    db.add(rec)
+    db.commit()
+    return rec.id
+
+
+def test_pdf_tool_merges_extracts_compresses_and_refuses_bad_requests(client):
+    from pypdf import PdfReader
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    from app.models import Artifact
+    db = SessionLocal()
+    a, b = _stored_pdf(db, "plan_A_x.pdf", 3), _stored_pdf(db, "devis_B_x.pdf", 2)
+    t = AgentSession(db, None, {})
+    assert t("pdf_tool", {"action": "info", "files": [a]})["pages"] == 3
+    m = t("pdf_tool", {"action": "merge", "files": ["plan_A_x", "devis_B_x"]})   # par nom
+    assert m["ok"] and m["pages"] == 5 and len(PdfReader(db.get(Artifact, t.files[-1]["id"]).path).pages) == 5
+    e = t("pdf_tool", {"action": "extract", "files": [a], "pages": "3,1"})
+    assert e["pages"] == 2
+    text = PdfReader(db.get(Artifact, t.files[-1]["id"]).path).pages[0].extract_text()
+    assert "page 3" in text                                                           # l'ordre demandé est respecté
+    assert t("pdf_tool", {"action": "extract", "files": [a], "pages": "9"})["error"].startswith("Pages hors du document")
+    assert "illisibles" in t("pdf_tool", {"action": "extract", "files": [a], "pages": "x-y"})["error"]
+    assert t("pdf_tool", {"action": "merge", "files": [a]})["error"].startswith("Donne de 2")
+    assert "introuvable" in t("pdf_tool", {"action": "info", "files": ["n-existe-pas"]})["error"]
+    assert t("pdf_tool", {"action": "compress", "files": [b]})["ok"]
+    assert "pdf_tool" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
+    db.close()

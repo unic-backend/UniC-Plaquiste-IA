@@ -53,3 +53,19 @@ export const Canva = ({ size }: P) => (
     <path d="M15.800 14.500c-.6 1.600-1.900 2.600-3.500 2.600-2.100 0-3.600-1.800-3.600-4.100 0-2.400 1.600-4.300 3.700-4.300 1.200 0 2.200.6 2.700 1.600" fill="none" stroke="#fff" strokeWidth="1.700" strokeLinecap="round" />
   </S>
 );
+
+/** Higgsfield : approximation (carré jaune-vert, trait noir), pas le logo officiel. */
+export const Higgsfield = ({ size }: P) => (
+  <S size={size}>
+    <rect x="2" y="2" width="20" height="20" rx="5.500" fill="#D1FE17" />
+    <path d="M6.500 14.500c2-5 3.500-5 5-1.500s3 3.500 6-3" stroke="#0A0A0A" strokeWidth="2.200" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  </S>
+);
+
+export const Pdf = ({ size }: P) => (
+  <S size={size}>
+    <path d="M6 2.500h8.500L19 7v13.500a1.500 1.500 0 0 1-1.500 1.500h-11A1.500 1.500 0 0 1 5 20.500v-16A2 2 0 0 1 6 2.500Z" fill="#E2231A" />
+    <path d="M14.500 2.500V7H19" fill="#F59A96" />
+    <text x="12" y="17.500" textAnchor="middle" fontSize="6.200" fontWeight="800" fill="#fff" fontFamily="Arial, sans-serif">PDF</text>
+  </S>
+);

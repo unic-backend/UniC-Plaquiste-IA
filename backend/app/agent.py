@@ -335,6 +335,24 @@ TOOLS: list[dict] = [
                          "additionalProperties": False},
     },
     {
+        "name": "generate_visual",
+        "description": ("IMAGE (Higgsfield) : crée UNE image à partir d'une description (rendu d'une pièce, d'un plafond, d'un style, d'une idée de décoration). "
+                        "Seulement quand le patron la demande explicitement : chaque image consomme ses crédits (10 par jour au plus). "
+                        "Décris précisément : pièce, matériaux, couleurs, lumière, style. L'image est une illustration, jamais un plan d'exécution ni un métré. "
+                        "Si l'outil dit que Higgsfield n'est pas connecté, renvoie le patron vers Plus › Higgsfield."),
+        "input_schema": {"type": "object", "properties": {"prompt": {"type": "string"}}, "required": ["prompt"], "additionalProperties": False},
+    },
+    {
+        "name": "pdf_tool",
+        "description": ("OUTILS PDF sur des PDF déjà reçus (copie, l'original reste intact) : action = info (nombre de pages), merge (fusionner, files = 2 à 20 "
+                        "PDF dans l'ordre voulu), extract (garder des pages : pages = « 1-3,5,8- »), compress (alléger sans perte). files = identifiants "
+                        "(list_files) ou noms. Sans files, utilise le dernier fichier joint."),
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["info", "merge", "extract", "compress"]},
+            "files": {"type": "array", "items": {"type": "string"}}, "pages": {"type": "string"}},
+            "required": ["action"], "additionalProperties": False},
+    },
+    {
         "name": "mail_signals",
         "description": ("SUIVI : e-mails récents de clients qui semblent dire « j'accepte » ou « j'ai payé ». Ce sont des SUGGESTIONS : montre-les au "
                         "patron et demande-lui de confirmer avant d'utiliser mark_quote_decision ou record_receipt. Ne synchronise pas la boîte seul."),
@@ -457,7 +475,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -721,6 +739,40 @@ class AgentSession:
     def _t_set_collect_reminder(self, date: str = "", client: str = "", quote_number: str = "") -> dict:
         q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))
         return self._tracked(lambda: tracking.set_collect_date(self.db, q, date.strip() or None, self.user_id))
+
+    def _t_generate_visual(self, prompt: str) -> dict:
+        from app import higgsfield
+        try:
+            res = higgsfield.generate_image(self.db, prompt, self.user_id)
+        except higgsfield.HiggsfieldError as exc:
+            return {"error": str(exc)}
+        art = res["artifact"]
+        self.images.append({"id": art["id"], "filename": art["filename"], "title": "Visuel Higgsfield",
+                            "caption": "Image générée par l'IA : une illustration, pas un plan d'exécution"})
+        return {"ok": True, "restantes_aujourdhui": res["restantes_aujourdhui"],
+                "note": "Image affichée dans la conversation avec un bouton Partager. Décris-la en une ligne ; rappelle qu'elle est illustrative."}
+
+    def _t_pdf_tool(self, action: str, files: list | None = None, pages: str = "") -> dict:
+        from app import pdftools
+        refs = [str(f) for f in (files or []) if f] or ([self.state["last_file_id"]] if self.state.get("last_file_id") else [])
+        try:
+            if action == "merge":
+                res = pdftools.merge(self.db, refs, self.user_id)
+            elif not refs:
+                return {"error": "Précise le PDF (files) ou demande au patron de le joindre."}
+            elif action == "info":
+                return pdftools.info(self.db, refs[0])
+            elif action == "extract":
+                res = pdftools.extract(self.db, refs[0], pages, self.user_id)
+            elif action == "compress":
+                res = pdftools.compress(self.db, refs[0], self.user_id)
+            else:
+                return {"error": "Action inconnue : info, merge, extract ou compress."}
+        except pdftools.PdfToolError as exc:
+            return {"error": str(exc)}
+        self.files.append(res.pop("artifact"))
+        self.changes.append(f"pdf_tool {action}")
+        return res
 
     def _t_mail_signals(self, refresh: bool = False) -> dict:
         if refresh:

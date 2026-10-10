@@ -57,7 +57,7 @@ export function CoverLetterBox({ quote, url, filename, onChanged }: { quote: any
 }
 
 /** Schéma dessiné par l'IA (PNG) : affiché dans la conversation, partageable. */
-export function DiagramCard({ id, filename, title }: { id: string; filename: string; title?: string }) {
+export function DiagramCard({ id, filename, title, caption }: { id: string; filename: string; title?: string; caption?: string }) {
   const [src, setSrc] = useState("");
   const [err, setErr] = useState("");
   const url = `/api/artifacts/${id}/download`;
@@ -70,7 +70,7 @@ export function DiagramCard({ id, filename, title }: { id: string; filename: str
     <figure className="diagram">
       {src ? <img src={src} alt={title || "Schéma"} /> : <span className="hint">{err || "Chargement du schéma…"}</span>}
       <figcaption>
-        <span>{title || "Schéma"} · dessin, pas un plan d'exécution</span>
+        <span>{title || "Schéma"} · {caption || "dessin, pas un plan d'exécution"}</span>
         <ShareButton url={url} filename={filename} />
       </figcaption>
     </figure>

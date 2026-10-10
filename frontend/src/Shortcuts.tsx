@@ -23,6 +23,8 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "notes", label: "Notes", icon: I.Note, prompt: "Montre-moi mes notes : ce que tu as retenu et mes consignes." },
   { id: "google", label: "Avis Google", icon: B.GoogleG, prompt: "Montre les derniers avis Google.", need: "gbp", setup: "/google" },
   { id: "site", label: "Site · GitHub", icon: B.GitHub, need: "website", setup: "/reseaux" },
+  { id: "higgs", label: "Higgsfield", icon: B.Higgsfield, prompt: "Je veux créer un visuel avec Higgsfield : pose-moi les questions utiles (pièce, matériaux, couleurs, style).", need: "higgsfield", setup: "/higgsfield" },
+  { id: "pdf", label: "Outils PDF", icon: B.Pdf, prompt: "Je veux fusionner, découper ou alléger des PDF. Dis-moi quels fichiers te donner." },
   { id: "canva", label: "Canva", icon: B.Canva, soon: true },
   { id: "gcal", label: "Google Agenda", icon: B.Calendar, soon: true },
 ];
