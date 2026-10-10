@@ -18,6 +18,9 @@ Après chaque fusion dans `main` :
 4. **Seulement si tu l'autorises** : retour arrière automatique vers la version précédente (API Render `POST /v1/services/{id}/rollback`).
 5. Si sain : ferme l'alerte.
 
+## Déclencheurs (corrigé après essai réel)
+Les fusions automatiques de GitHub ne déclenchent pas les workflows « push » (constaté sur #43). Le contrôle tourne donc aussi **toutes les 15 min** (état actuel, sans attente, sans retour arrière automatique : il n'est pas lié à un déploiement précis), en plus de la fusion manuelle et du lancement à la main.
+
 ## Trois niveaux, à ton choix
 | Niveau | À faire | Résultat |
 |---|---|---|

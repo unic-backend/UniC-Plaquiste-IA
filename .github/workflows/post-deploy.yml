@@ -1,8 +1,12 @@
 name: Contrôle après déploiement
 
+# Les fusions automatiques de GitHub (jeton du dépôt) ne déclenchent PAS les workflows « push » : le contrôle tourne donc aussi
+# toutes les 15 minutes (sans attente), en plus de la fusion manuelle et du lancement à la main.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -10,8 +14,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: post-deploy
-  cancel-in-progress: true   # un nouveau déploiement remplace le contrôle du précédent
+  group: post-deploy-${{ github.event_name }}   # le contrôle planifié n'annule jamais celui qui attend un déploiement
+  cancel-in-progress: true                      # un nouveau déploiement remplace le contrôle du précédent
 
 jobs:
   smoke:
@@ -27,6 +31,7 @@ jobs:
       TITLE: "🟠 Déploiement dégradé"
     steps:
       - name: Attendre la mise en ligne
+        if: github.event_name != 'schedule'   # contrôle planifié : on regarde l'état actuel, sans attendre
         run: |
           if [ -n "$RENDER_API_KEY" ] && [ -n "$RENDER_SERVICE_ID" ]; then
             for i in $(seq 1 40); do   # jusqu'à ~20 min : on attend que Render ait fini CE commit
@@ -55,7 +60,7 @@ jobs:
 
       - name: Retour arrière (seulement si autorisé par le propriétaire)
         id: rollback
-        if: steps.probe.outputs.problems != '' && env.AUTO_ROLLBACK == 'true' && env.RENDER_API_KEY != '' && env.RENDER_SERVICE_ID != ''
+        if: github.event_name != 'schedule' && steps.probe.outputs.problems != '' && env.AUTO_ROLLBACK == 'true' && env.RENDER_API_KEY != '' && env.RENDER_SERVICE_ID != ''
         run: |
           # Dernière version qui tournait avant celle-ci = le plus récent déploiement « deactivated ».
           prev=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=10" \
@@ -83,7 +88,8 @@ jobs:
           Commit ${GITHUB_SHA:0:7} · contrôle du $(date -u '+%d/%m/%Y %H:%M') UTC sur $BASE.
           $action"
           open=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')
-          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$TITLE" --body "$body"; fi
+          if [ -z "$open" ]; then gh issue create --title "$TITLE" --body "$body"
+          elif [ "${{ github.event_name }}" != "schedule" ]; then gh issue comment "$open" --body "$body"; fi   # planifié : pas de commentaire toutes les 15 min
           exit 1
 
       - name: Fermer l'alerte (déploiement sain)
