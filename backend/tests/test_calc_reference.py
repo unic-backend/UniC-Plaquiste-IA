@@ -349,7 +349,7 @@ def test_selling_price_edited_in_the_table_is_used_by_the_next_quote_only():
     from app import services as svc
     from app.database import SessionLocal
     from app.main import app
-    from app.models import Material, MaterialPrice, Quotation, QuotationItem
+    from app.models import Material, MaterialPrice, Quotation
     with TestClient(app) as client, SessionLocal() as db:
         m = Material(sku="TAB-1", name="Tableau test", unit="u", category="test")
         db.add(m); db.flush(); mid = m.id; db.commit()
