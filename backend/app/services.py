@@ -271,6 +271,26 @@ def company_dict(db: Session) -> dict:
     }
 
 
+async def read_upload(upload, max_mb: float, what: str = "Fichier") -> bytes:
+    """Lit un fichier envoyé par morceaux et s'arrête dès la limite : un envoi géant ne remplit jamais la mémoire du serveur."""
+    from fastapi import HTTPException
+    limit = int(max_mb * 1024 * 1024)
+    size = getattr(upload, "size", None)
+    if size is not None and size > limit:
+        raise HTTPException(413, f"{what} trop volumineux ({max_mb:g} Mo maximum).")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, f"{what} trop volumineux ({max_mb:g} Mo maximum).")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def audit(db: Session, user_id: str | None, action: str, entity_type: str, entity_id: str, details: str = ""):
     db.add(AuditLog(
         user_id=user_id, action=action, entity_type=entity_type,

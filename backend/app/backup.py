@@ -12,6 +12,7 @@ import imaplib
 import io
 import json
 import logging
+import shutil
 import sqlite3
 import threading
 import time
@@ -31,6 +32,9 @@ KEEP_REMOTE = 30
 REMOTE_FOLDER = "UniC-Sauvegardes"
 REMOTE_MAX_MB = 20
 EVERY_HOURS = 24
+MAX_RESTORE_MB = 300        # fichier .zip envoyé pour une restauration
+MAX_DB_MB = 1024            # base décompressée (protège d'une « bombe » zip)
+MAX_BRAND_MB = 15
 _lock = threading.Lock()
 
 
@@ -198,10 +202,13 @@ def restore(data: bytes) -> dict:
         raise BackupError("Fichier illisible : choisis un fichier UniC_Sauvegarde_….zip.") from exc
     if "unic.db" not in names or manifest.get("app") != "UniC AI":
         raise BackupError("Ce fichier n'est pas une sauvegarde UniC AI.")
+    if z.getinfo("unic.db").file_size > MAX_DB_MB * 1024 * 1024:
+        raise BackupError("Base trop volumineuse dans cette sauvegarde : rien n'a été changé.")
     safety = create("avant restauration")
     with _lock:
         tmp = settings.backups_path / ".restore.db"
-        tmp.write_bytes(z.read("unic.db"))
+        with z.open("unic.db") as src_file, tmp.open("wb") as dst_file:
+            shutil.copyfileobj(src_file, dst_file, 1024 * 1024)   # par morceaux : la base ne passe jamais entière en mémoire
         try:
             src = sqlite3.connect(str(tmp))
             try:
@@ -217,7 +224,7 @@ def restore(data: bytes) -> dict:
         finally:
             tmp.unlink(missing_ok=True)
         for name in ("signature.png", "stamp.png"):
-            if f"brand/{name}" in names:
+            if f"brand/{name}" in names and z.getinfo(f"brand/{name}").file_size <= MAX_BRAND_MB * 1024 * 1024:
                 _signature().parent.mkdir(parents=True, exist_ok=True)
                 _signature().with_name(name).write_bytes(z.read(f"brand/{name}"))
     _save_status(last_restore=datetime.now(timezone.utc).isoformat(), last_restore_from=manifest.get("created_at"))

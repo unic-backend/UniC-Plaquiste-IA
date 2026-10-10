@@ -3919,3 +3919,30 @@ def test_pdf_tool_merges_extracts_compresses_and_refuses_bad_requests(client):
     assert t("pdf_tool", {"action": "compress", "files": [b]})["ok"]
     assert "pdf_tool" not in __import__("app.agents", fromlist=["SAFE_TOOLS"]).SAFE_TOOLS
     db.close()
+
+
+def test_uploads_are_capped_while_reading(client, monkeypatch):
+    """Un envoi trop gros est refusé (413) sans être chargé en entier ; les archives « bombe » sont refusées."""
+    import io, json, zipfile
+    from app import backup, memory
+    from app.config import settings
+    monkeypatch.setattr(settings, "max_upload_mb", 1)
+    r = client.post("/api/files", files={"file": ("gros.txt", b"x" * (1024 * 1024 + 10), "text/plain")})
+    assert r.status_code == 413 and "1 Mo" in r.json()["detail"]
+    big = b"\x89PNG\r\n\x1a\n" + b"0" * (15 * 1024 * 1024)
+    assert client.put("/api/settings/signature", files={"file": ("s.png", big, "image/png")}).status_code == 413
+    # export ChatGPT dont le JSON décompressé dépasse la limite : refusé sans le décompresser
+    monkeypatch.setattr(memory, "MAX_IMPORT_JSON_MB", 0.001)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("conversations.json", json.dumps([{"mapping": {}}]) + " " * 5000)
+    r = client.post("/api/memory/import", files={"file": ("export.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 400 and "trop volumineux" in r.json()["detail"]
+    # sauvegarde dont la base décompressée dépasse la limite : rien n'est remplacé
+    monkeypatch.setattr(backup, "MAX_DB_MB", 0.001)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps({"app": "UniC AI"}))
+        z.writestr("unic.db", b"\0" * 5000)
+    r = client.post("/api/backups/restore", files={"file": ("s.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 400 and "trop volumineuse" in r.json()["detail"]

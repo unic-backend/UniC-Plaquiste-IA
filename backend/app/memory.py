@@ -575,6 +575,9 @@ def _user_texts_from_json(data) -> list[str]:
     return out
 
 
+MAX_IMPORT_JSON_MB = 200   # protège d'une « bombe » zip (archive minuscule, contenu géant)
+
+
 def candidates_from_export(raw: bytes, filename: str = "") -> list[str]:
     """Phrases du patron qui ressemblent à une règle, une préférence ou une tâche. Jamais exécutées, jamais des faits."""
     if raw[:2] == b"PK":
@@ -583,6 +586,8 @@ def candidates_from_export(raw: bytes, filename: str = "") -> list[str]:
                 name = next((n for n in z.namelist() if n.endswith("conversations.json")), None)
                 if name is None:
                     raise UnknownImport("Archive sans conversations.json.")
+                if z.getinfo(name).file_size > MAX_IMPORT_JSON_MB * 1024 * 1024:
+                    raise UnknownImport("conversations.json trop volumineux une fois décompressé.")
                 raw = z.read(name)
         except zipfile.BadZipFile:
             raise UnknownImport("Archive illisible.")

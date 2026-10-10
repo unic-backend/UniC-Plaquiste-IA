@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import voice
-from app.services import audit
+from app.services import audit, read_upload
 from app.database import get_db
 from app.models import User
 from app.security import get_current_user
@@ -71,7 +71,7 @@ def voice_select(body: SelectIn, db: Session = Depends(get_db), user: User = Dep
 @router.post("/clone")
 async def voice_clone(name: str = Form("Ma voix"), own_voice: bool = Form(False), file: UploadFile = File(...),
                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    audio = await file.read()
+    audio = await read_upload(file, 10, "Échantillon")
     out = _wrap(voice.clone, db, name, audio, file.filename or "", file.content_type or "", own_voice)
     audit(db, user.id, "voice_clone", "voice", out["id"])
     db.commit()
