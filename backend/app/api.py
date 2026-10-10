@@ -1681,6 +1681,24 @@ def tracking_client(key: str, db: Session = Depends(get_db), user: User = Depend
     return _tracked(lambda: tracking.client_file(db, key))
 
 
+@router.get("/evals")
+def evals_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Banc d'essai de l'IA : dernier rapport, nombre de cas, essai en cours."""
+    from app import evals
+    return {"last": evals.report_last(db), "cases": len(evals.CASES), "running": "run" in evals.RUNNING}
+
+
+@router.post("/evals/run")
+def evals_run(user: User = Depends(require_roles("admin"))):
+    """Lance le banc d'essai (≈ 10 appels à Claude, outils non exécutés). Une fois toutes les 10 minutes au plus."""
+    from app import evals
+    try:
+        evals.start_background()
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    return {"ok": True, "running": True}
+
+
 class HiggsfieldIn(BaseModel):
     key_id: str
     secret: str
