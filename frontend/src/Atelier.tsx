@@ -60,6 +60,25 @@ function Release({ connected, onMsg }: { connected: boolean; onMsg: (m: string) 
   );
 }
 
+/** Journal des décisions du dernier passage d'un agent (relié par un identifiant de corrélation). */
+function AgentJournal({ id, runId }: { id: string; runId: string }) {
+  const [open, setOpen] = useState(false);
+  const [ev, setEv] = useState<any[] | null>(null);
+  return (
+    <div className="doc-why">
+      <button className="doc-why-btn" aria-expanded={open} onClick={() => { setOpen(!open); if (!ev) api.agentJournal(id).then((j) => setEv(j.events || [])).catch(() => setEv([])); }}>
+        {open ? "Masquer le journal" : `Journal du dernier passage (${runId})`}</button>
+      {open && (
+        <div className="doc-why-body">
+          {!ev && <p className="hint">Lecture…</p>}
+          {ev && !ev.length && <p className="hint">Rien d'enregistré.</p>}
+          {ev?.map((e, i) => <p key={i} className={e.action === "agent_tool_refused" ? "error" : ""}>{e.action === "agent_tool" ? "▶ " : e.action === "agent_tool_refused" ? "⛔ " : "■ "}{e.outil || e.action} — {e.detail.replace(/^run=\S+ /, "")}</p>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Cohérence : documents dont les chiffres ne tombent pas juste, PDF manquants, erreurs serveur. Détection seulement. */
 function Integrity() {
   const [r, setR] = useState<any>(null);
@@ -315,14 +334,21 @@ export function Atelier() {
         </section>
 
         <section className="card-box">
-          <h3>Agents</h3>
-          <p className="hint">Une mission qui tourne seule (lecture et brouillons seulement). Ex. : « chaque matin, signale les demandes de devis reçues ».</p>
+          <div className="at-head"><h3>Agents</h3>
+            {d.agents_halted
+              ? <button className="btn btn-copper btn-small" disabled={!!busy} onClick={() => act("halt", () => api.resumeAgents(), () => "Agents relancés.")}>Reprendre</button>
+              : <button className="btn btn-line btn-small agents-stop" disabled={!!busy} onClick={() => window.confirm("Arrêter TOUS les agents maintenant ? Ceux en cours s'arrêtent à leur prochaine action.") && act("halt", () => api.haltAgents(), () => "Arrêt d'urgence activé.")}>⏹ Arrêt d'urgence</button>}
+          </div>
+          {d.agents_halted && <p className="error">⏹ Arrêt d'urgence actif : aucun agent ne démarre. Touche « Reprendre » pour les relancer.</p>}
+          <p className="hint">Une mission qui tourne seule (lecture et brouillons seulement, 2 min et 20 actions au plus par passage, jamais deux fois le même appel). Ex. : « chaque matin, signale les demandes de devis reçues ».</p>
           {d.agents.map((a: any) => (
             <article key={a.id} className="at-item">
               <div className="at-line"><b>{a.name}</b>
                 <span className={`at-tag s-${a.status}`}>{a.running ? "En cours" : a.status === "active" ? (d.auto_work ? "Actif" : "Actif · travail auto coupé") : a.status === "proposed" ? "Proposé par UniC" : "En pause"}</span></div>
               <p className="hint">{a.mission} · {d.auto_work && a.status === "active" ? `toutes les ${a.every_hours} h` : "ne tourne pas seul"} · dernier passage : {when(a.last_run)}</p>
               {a.last_result && <p className={a.last_ok ? "" : "error"}>{a.last_result}</p>}
+              {a.tools?.length > 0 && <p className="hint">Outils autorisés : {a.tools.length === d.agents_all_tools ? "tous les outils sûrs" : a.tools.join(", ")}</p>}
+              {a.last_run_id && <AgentJournal id={a.id} runId={a.last_run_id} />}
               <div className="row-actions">
                 {a.status !== "active"
                   ? <button className="btn btn-copper btn-small" onClick={() => act(a.id, () => api.setAgent(a.id, "active"))}>Activer</button>

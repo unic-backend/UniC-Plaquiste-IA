@@ -1985,6 +1985,7 @@ class AgentIn(BaseModel):
     name: str
     mission: str
     every_hours: int = 24
+    tools: list[str] | None = None
 
 
 class StatusIn(BaseModel):
@@ -2008,7 +2009,7 @@ def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)
     last = db.get(AppSetting, "selfcheck_last")
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
-            "slow_queries": list(reversed(SLOW_QUERIES)), "auto_work": selfcare.auto_enabled(db),
+            "slow_queries": list(reversed(SLOW_QUERIES)), "auto_work": selfcare.auto_enabled(db), "agents_halted": agents.halted(db), "agents_all_tools": len(agents.SAFE_TOOLS),
             "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
             "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
 
@@ -2181,7 +2182,7 @@ def selfcare_github_disconnect(db: Session = Depends(get_db), user: User = Depen
 def agents_create(body: AgentIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     from app import agents
     try:
-        return agents.to_dict(agents.create(db, body.name, body.mission, body.every_hours, by="owner"))
+        return agents.to_dict(agents.create(db, body.name, body.mission, body.every_hours, by="owner", tools=body.tools))
     except agents.AgentError as exc:
         raise HTTPException(400, str(exc))
 
@@ -2197,6 +2198,36 @@ def agents_status(aid: str, body: StatusIn, db: Session = Depends(get_db), user:
         return agents.to_dict(agents.set_status(db, a, body.status))
     except agents.AgentError as exc:
         raise HTTPException(400, str(exc))
+
+
+@router.post("/agents/halt")
+def agents_halt(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """ARRÊT D'URGENCE : plus aucun agent ne démarre (même à la main) et ceux en cours s'arrêtent à leur prochain outil."""
+    from app import agents
+    agents.set_halt(db, True)
+    audit(db, user.id, "agents_halt", "agents", "all", "arrêt d'urgence")
+    db.commit()
+    return {"halted": True}
+
+
+@router.post("/agents/resume")
+def agents_resume(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    from app import agents
+    agents.set_halt(db, False)
+    audit(db, user.id, "agents_resume", "agents", "all", "reprise")
+    db.commit()
+    return {"halted": False}
+
+
+@router.get("/agents/{aid}/journal")
+def agents_journal(aid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Journal des décisions du dernier passage d'un agent (outils appelés et refusés), relié par un identifiant de corrélation."""
+    from app import agents
+    from app.models import CustomAgent
+    a = db.get(CustomAgent, aid)
+    if a is None:
+        raise HTTPException(404, "Agent introuvable")
+    return {"run_id": a.last_run_id, "events": agents.journal(db, a)}
 
 
 @router.post("/agents/{aid}/run")
