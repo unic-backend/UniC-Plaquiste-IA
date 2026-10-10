@@ -374,6 +374,75 @@ def calculate_partition(
     return result
 
 
+def calculate_partition_from_area(
+    area_m2: float,
+    sides: int = 2,
+    *,
+    sides_known: bool = False,
+    waste: float = DEFAULTS["waste"],
+    board_width: float = DEFAULTS["board_width_m"],
+    board_height: float = DEFAULTS["board_height_m"],
+    include_finish: bool = True,
+    confirmed_large: bool = False,
+) -> CalcResult:
+    """Cloison dont seule la SURFACE est connue (« 200 m² de cloison ») : on calcule ce qui est déterminable (plaques, vis, bande, enduit,
+    qui ne dépendent que de la surface) et on dit CLAIREMENT ce qui ne l'est pas (ossature : montants et rails demandent la longueur et la
+    hauteur). Le résultat est marqué `partial` : aucun devis ni bon n'en est tiré sans demande explicite du patron."""
+    check_inputs(positive={"surface": area_m2, "largeur de plaque": board_width, "hauteur de plaque": board_height},
+                 surface_m2=area_m2 * sides, waste=waste, confirmed_large=confirmed_large)
+    b_area = board_area(board_width, board_height)
+    total = round_qty(area_m2 * sides, 3)
+    n_boards = boards_needed(total, waste, b_area)
+    screws = ceil_int(total * DEFAULTS["screws_per_m2"])
+    tape = round_qty(total * DEFAULTS["tape_m_per_m2"], 2)
+    compound = round_qty(total * DEFAULTS["compound_kg_per_m2_per_coat"] * DEFAULTS["compound_coats"], 2)
+    result = CalcResult(
+        kind="partition_area", title="Cloison : calcul partiel (surface seule)",
+        understanding=f"Cloison de {area_m2:g} m² (une face), {sides} face(s) parementée(s) : calcul PARTIEL, surface seulement.",
+        inputs={"area_m2": area_m2, "sides": sides, "waste": waste, "board_width": board_width, "board_height": board_height, "partial": True},
+        next_step="Donne la longueur et la hauteur de la cloison, le nombre de faces et les ouvertures pour l'ossature et un devis complet.")
+    result.data_used = [
+        {"label": "Surface de cloison (une face)", "value": area_m2, "unit": "m²", "status": STATUS_CONFIRMED},
+        {"label": "Faces", "value": sides, "unit": "", "status": STATUS_CONFIRMED if sides_known else STATUS_ASSUMED},
+        {"label": "Ouvertures", "value": "inconnues — à renseigner", "unit": "", "status": STATUS_MISSING},
+        {"label": "Longueur / hauteur", "value": "inconnues — à renseigner", "unit": "", "status": STATUS_MISSING},
+        {"label": "Plaque", "value": f"{board_width:g} × {board_height:g}", "unit": "m", "status": STATUS_ASSUMED},
+        {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
+    ]
+    result.steps = [
+        CalcStep("Surface totale à parementer", "surface × faces", {"surface": area_m2, "faces": sides}, total, "m²",
+                 STATUS_CONFIRMED if sides_known else STATUS_ESTIMATED),
+        CalcStep("Nombre de plaques", "⌈ surface totale × (1 + déchet) / surface plaque ⌉",
+                 {"totale": total, "dechet": waste, "plaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
+        CalcStep("Montants et rails", "dépend de la longueur et de la hauteur", {}, "non calculable", "", STATUS_MISSING),
+    ]
+    result.quantities = [
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u", "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
+        QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
+    ]
+    if include_finish:
+        result.quantities += [
+            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_ASSUMED),
+            QuantityLine("ENDUIT-JOINT", "Enduit à joint", compound, "kg",
+                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_ASSUMED),
+        ]
+    result.assumptions = [
+        f"Plaque standard BA13 {board_width:g} × {board_height:g} m = {b_area:.2f} m² (catalogue par défaut).",
+        f"Déchet {waste*100:.0f} % (paramètre par défaut).",
+        "« Surface de cloison » = une face ; multipliée par le nombre de faces.",
+    ]
+    if not sides_known:
+        result.assumptions.append(f"Nombre de faces = {sides} (non précisé : à confirmer, la surface en dépend directement).")
+    result.missing = [
+        "Longueur et hauteur de la cloison : sans elles, montants et rails NE SONT PAS calculés.",
+        "Ouvertures (portes, fenêtres) non déduites : quantités un peu surestimées.",
+        "Type de cloison (simple/double ossature, épaisseur, hydrofuge ?) et format de plaque si différent du défaut.",
+        "Prix d'achat et de vente (absents tant qu'ils n'ont pas été saisis) ; main-d'œuvre ; transport.",
+    ]
+    result.notes = ["CALCUL PARTIEL : seules les quantités qui dépendent de la surface sont données. Aucun devis complet n'est possible sans l'ossature."]
+    return result
+
+
 def calculate_ceiling(
     length_m: float,
     width_m: float,
@@ -852,6 +921,14 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             bars = _min_count(2 * L, _F(BAR_LENGTH_M))
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
+        elif result.kind == "partition_area" and inp:
+            net = _F(inp["area_m2"]) * int(inp["sides"])
+            sku, _ = board_sku(inp["board_width"], inp["board_height"])
+            boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
+            if qty.get(sku) != boards:
+                problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
+            if "MONTANT-M48" in qty or "UC-RAILS-48-MM" in qty:
+                problems.append("Ossature présente alors que la longueur est inconnue : quantité inventée.")
         elif result.kind == "ceiling" and inp:
             area = _F(inp["length_m"]) * _F(inp["width_m"])
             if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):

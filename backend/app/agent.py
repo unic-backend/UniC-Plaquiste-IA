@@ -602,6 +602,9 @@ def owner_backs(text: str, owner_message: str, ratio: float = 0.6) -> bool:
     return len(words & said) / len(words) >= ratio
 
 
+PARTIAL_OK = re.compile(r"quand m[eê]me|devis partiel|calcul partiel|seulement les plaques|sans (l')?ossature|sans (les )?montants", re.I)
+
+
 class AgentSession:
     """Exécute les appels d'outils d'un tour de conversation et garde la trace de ce qui a été préparé."""
 
@@ -1061,9 +1064,12 @@ class AgentSession:
                 res = metier.calculate_unic(surface, faces=sides, parois=parois, already_developed=already_developed)
                 if not sides_known:
                     res.assumptions.append("Nombre de faces = 2 (non précisé : à confirmer, la surface en dépend directement).")
+            elif kind == "partition" and not (length_m and height_m) and area_m2:
+                res = calc.calculate_partition_from_area(area_m2, sides, sides_known=sides_known, waste=cfg["waste"],
+                                                         board_width=cfg["board_width"], board_height=cfg["board_height"])
             elif kind == "partition":
                 if not (length_m and height_m):
-                    raise ConnectorError("Longueur et hauteur de la cloison requises.", 400)
+                    raise ConnectorError("Longueur et hauteur de la cloison requises (ou la surface seule pour un calcul partiel).", 400)
                 ops = [calc.Opening(o.get("kind", "door"), float(o.get("width_m") or (0.9 if o.get("kind") != "window" else 1.2)),
                                     float(o.get("height_m") or (2.04 if o.get("kind") != "window" else 1.2)), int(o.get("count") or 1),
                                     assumed_size=not (o.get("width_m") and o.get("height_m")))
@@ -1114,6 +1120,11 @@ class AgentSession:
         qs = last.get("quantities") or []
         if not qs:
             raise ConnectorError("Aucun métré en mémoire : appelle d'abord calculate_materials.", 400)
+        if (last.get("inputs") or {}).get("partial") and not PARTIAL_OK.search(str(self.state.get("owner_message") or "")):
+            raise ConnectorError(
+                "Calcul PARTIEL (surface seule : ossature non calculée). Aucun devis ni bon n'est créé dessus. Dis au patron ce qui manque "
+                "(longueur et hauteur, faces, ouvertures, type de cloison), calcule le reste, puis crée le devis. S'il veut quand même un devis "
+                "partiel, il doit le demander explicitement.", 409)
         check = last.get("verification") or {}
         if check and not check.get("ok", True):   # le contrôle indépendant a trouvé un écart : jamais de document dessus
             raise ConnectorError("Le contrôle indépendant du calcul a trouvé un écart (" + "; ".join(check.get("problems") or [])
