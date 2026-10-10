@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, isNative, shareDocument, shareText } from "./api";
 import * as I from "./Icons";
+import { ContactButton } from "./ContactPicker";
 
 /**
  * Suivi des encaissements : l'argent des devis, client par client. Jamais l'avancement du chantier.
@@ -102,6 +103,7 @@ function NewClient({ onCreated }: { onCreated: (key: string) => void }) {
   return (
     <section className="card-box sv-form sv-new">
       <b>Nouveau client</b>
+      <div className="contact-head"><span>Nouveau client</span><ContactButton onPick={(c) => setF({ ...f, name: c.name || f.name, phone: c.number || f.phone })} /></div>
       <label>Nom<input value={f.name} autoFocus onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="ex. Awa Ba" /></label>
       <div className="two-col">
         <label>Téléphone<input type="tel" inputMode="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
@@ -285,14 +287,15 @@ function ContactCard({ d, onSaved }: { d: any; onSaved: () => void }) {
   const [phone, setPhone] = useState(d.telephone || "");
   const [note, setNote] = useState(d.note || "");
   const [saved, setSaved] = useState("");
-  const save = async () => {
-    if (phone === (d.telephone || "") && note === (d.note || "")) return;
-    try { await api.trackingInfo(d.key, { phone, note }); setSaved("Enregistré"); onSaved(); } catch (e: any) { setSaved(e?.message || "Erreur"); }
+  const save = async (p = phone) => {
+    if (p === (d.telephone || "") && note === (d.note || "")) return;
+    try { await api.trackingInfo(d.key, { phone: p, note }); setSaved("Enregistré"); onSaved(); } catch (e: any) { setSaved(e?.message || "Erreur"); }
   };
   const wa = waLink(phone);
   return (
     <section className="card-box sv-contact">
-      <label>Téléphone<input type="tel" inputMode="tel" value={phone} placeholder="ex. 77 123 45 67" onChange={(e) => { setPhone(e.target.value); setSaved(""); }} onBlur={save} /></label>
+      <div className="contact-head"><span>Téléphone</span><ContactButton label="Depuis mes contacts" onPick={(c) => { if (c.number) { setPhone(c.number); save(c.number); } }} /></div>
+      <input type="tel" inputMode="tel" aria-label="Téléphone" value={phone} placeholder="ex. 77 123 45 67" onChange={(e) => { setPhone(e.target.value); setSaved(""); }} onBlur={() => save()} />
       {phone.replace(/\D/g, "").length >= 6 && (
         <div className="sv-actions">
           <a className="btn btn-line btn-small" href={`tel:${phone.replace(/[^\d+]/g, "")}`}>Appeler</a>
