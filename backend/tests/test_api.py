@@ -3202,7 +3202,7 @@ def _upload(client, name, data, mime):
 def _session_for(fid):
     from app.agent import AgentSession
     from app.database import SessionLocal
-    return AgentSession(SessionLocal(), None, {"last_file_id": fid})
+    return AgentSession(SessionLocal(), None, {"last_file_id": fid, "owner_message": "modifie ce fichier : change le prix"})   # le patron demande la modification
 
 
 def test_ai_edits_a_received_pdf_and_verifies_it(client, tmp_path):
