@@ -393,6 +393,49 @@ def record_receipt(db: Session, quote: Quotation, amount: float, kind: str = "av
     return row
 
 
+def update_receipt(db: Session, receipt_id: str, user_id: str | None, amount: float | None = None, kind: str | None = None,
+                   method: str | None = None, note: str | None = None, received_at: datetime | None = None) -> dict:
+    """Corrige un versement mal saisi (montant, type, date, moyen, note). Le paiement miroir et la facture suivent : le compteur est recalculé."""
+    rc = db.get(Receipt, receipt_id)
+    if rc is None:
+        raise TrackingError("Versement introuvable.")
+    quote = db.get(Quotation, rc.quotation_id)
+    old = rc.amount
+    if amount is not None:
+        try:
+            amount = round(float(amount), 2)
+        except (TypeError, ValueError):
+            raise TrackingError("Montant invalide.")
+        if not 0 < amount <= MAX_AMOUNT:
+            raise TrackingError("Le montant doit être supérieur à zéro.")
+        rc.amount = amount
+    if kind is not None:
+        rc.kind = kind if kind in KINDS else "autre"
+    if method is not None:
+        rc.method = method[:64]
+    if note is not None:
+        rc.note = note[:500]
+    if received_at is not None:
+        rc.received_at = received_at if received_at.tzinfo else received_at.replace(tzinfo=timezone.utc)
+    pay = db.get(Payment, rc.payment_id) if rc.payment_id else None
+    if pay is not None:
+        pay.amount, pay.method, pay.notes, pay.paid_at = rc.amount, rc.method, rc.note, rc.received_at
+        inv = db.get(Invoice, pay.invoice_id)
+        if inv is not None and inv.total is not None:
+            inv.paid = max(0.0, round((inv.paid or 0) - old + rc.amount, 2))
+            inv.remaining = max(0.0, round(inv.total - inv.paid, 2))
+            if inv.status != "draft":
+                inv.status = "paid" if inv.remaining <= 0 else ("partial" if inv.paid > 0 else "approved")
+            else:
+                generate_invoice_pdf(db, inv, user_id)
+    audit(db, user_id, "tracking_receipt_edit", "quotation", rc.quotation_id, f"{old} -> {rc.amount}")
+    db.commit()
+    row = _quote_row(db, quote)
+    if row["depasse"]:
+        row["alerte"] = f"Attention : {row['depasse']} {row['devise']} de plus que le devis."
+    return row
+
+
 def cancel_receipt(db: Session, receipt_id: str, user_id: str | None) -> dict:
     """Annule une erreur de saisie : retire aussi le paiement miroir et rend à la facture ce qu'elle avait."""
     rc = db.get(Receipt, receipt_id)

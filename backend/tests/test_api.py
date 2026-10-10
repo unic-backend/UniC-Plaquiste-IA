@@ -3759,3 +3759,28 @@ def test_stop_button_cancels_the_running_turn_and_keeps_a_note(client, monkeypat
 def test_cancelled_is_never_swallowed_by_provider_fallbacks():
     from app import ai
     assert not issubclass(ai.Cancelled, Exception)   # les « except Exception » des fournisseurs ne doivent pas l'avaler
+
+
+def test_receipt_can_be_corrected_and_counter_goes_back_to_the_real_percentage(client):
+    from app.database import SessionLocal
+    from app.models import Invoice
+    qid = _track_quote("UC-TRK-0016-WX", "Wally Xaba Suivi", 1_000_000)
+    client.post(f"/api/tracking/quotes/{qid}/decision", json={"decision": "accepted"})
+    r = client.post("/api/tracking/receipts", json={"quote_id": qid, "amount": 2_000_000}).json()   # erreur de saisie : dépasse le devis
+    assert r["pct_recu"] == 100.0 and r["alerte"]
+    key = _tclient(client.get("/api/tracking").json(), "Wally Xaba Suivi")["key"]
+    rid = client.get(f"/api/tracking/{key}").json()["versements"][0]["id"]
+    fixed = client.patch(f"/api/tracking/receipts/{rid}", json={"amount": 300_000, "method": "Wave", "note": "corrigé"}).json()
+    assert fixed["recu"] == 300_000 and fixed["pct_recu"] == 30.0 and fixed["reste"] == 700_000 and not fixed.get("alerte")
+    v = client.get(f"/api/tracking/{key}").json()["versements"][0]
+    assert v["montant"] == 300_000 and v["moyen"] == "Wave" and v["note"] == "corrigé"
+    assert client.patch(f"/api/tracking/receipts/{rid}", json={"amount": 0}).status_code == 400
+    assert client.patch(f"/api/tracking/receipts/{rid}", json={"received_on": "pas-une-date"}).status_code == 400
+    assert client.patch("/api/tracking/receipts/inconnu", json={"amount": 5}).status_code == 400
+    # la facture de reliquat (paiement miroir) suit la correction
+    inv_id = client.post(f"/api/tracking/quotes/{qid}/balance-invoice").json()["id"]
+    client.patch(f"/api/tracking/receipts/{rid}", json={"amount": 400_000})
+    db = SessionLocal()
+    inv = db.get(Invoice, inv_id)
+    assert inv.paid == 400_000 and inv.remaining == 600_000 and inv.payments[0].amount == 400_000
+    db.close()

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, isNative, shareText } from "./api";
+import * as I from "./Icons";
 
 /**
  * Suivi des encaissements : l'argent des devis, client par client. Jamais l'avancement du chantier.
@@ -215,16 +216,20 @@ export function Suivi() {
   );
 }
 
-function ReceiptForm({ quote, onDone }: { quote: any; onDone: () => void }) {
+function ReceiptForm({ quote, edit, onDone }: { quote?: any; edit?: any; onDone: () => void }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [f, setF] = useState({ amount: "", kind: "avance", received_on: today, method: "" });
+  const [f, setF] = useState(edit
+    ? { amount: String(edit.montant), kind: edit.type || "avance", received_on: edit.date || today, method: edit.moyen || "", note: edit.note || "" }
+    : { amount: "", kind: "avance", received_on: today, method: "", note: "" });
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const amount = Number(f.amount.replace(/\s/g, "").replace(",", "."));
   const save = async () => {
     setBusy(true); setMsg("");
     try {
-      const r = await api.trackingReceipt({ quote_id: quote.id, amount, kind: f.kind, received_on: f.received_on, method: f.method });
+      const r = edit
+        ? await api.trackingEditReceipt(edit.id, { amount, kind: f.kind, received_on: f.received_on, method: f.method, note: f.note })
+        : await api.trackingReceipt({ quote_id: quote.id, amount, kind: f.kind, received_on: f.received_on, method: f.method });
       if (r.alerte) window.alert(r.alerte);
       onDone();
     } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(false); }
@@ -238,7 +243,8 @@ function ReceiptForm({ quote, onDone }: { quote: any; onDone: () => void }) {
         <label>Date<input type="date" value={f.received_on} max={today} onChange={(e) => setF({ ...f, received_on: e.target.value })} /></label>
       </div>
       <label>Moyen (optionnel)<input value={f.method} onChange={(e) => setF({ ...f, method: e.target.value })} placeholder="Wave, Orange Money, espèces, virement…" /></label>
-      <button className="btn btn-copper" disabled={busy || !(amount > 0)} onClick={save}>Enregistrer le versement</button>
+      {edit && <label>Note (optionnel)<input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>}
+      <button className="btn btn-copper" disabled={busy || !(amount > 0)} onClick={save}>{edit ? "Enregistrer la correction" : "Enregistrer le versement"}</button>
       {msg && <p className="error">{msg}</p>}
     </div>
   );
@@ -275,6 +281,7 @@ export function SuiviClient() {
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState("");
   const [open, setOpen] = useState("");
+  const [editing, setEditing] = useState("");   // versement en cours de correction (crayon)
   const load = useCallback(() => { api.trackingClient(key).then(setD).catch((e) => setErr(e?.message || "Erreur")); }, [key]);
   useEffect(() => { load(); }, [load]);
   const run = async (fn: () => Promise<any>) => { setErr(""); try { await fn(); setOpen(""); load(); } catch (e: any) { setErr(e?.message || "Erreur"); } };
@@ -321,6 +328,7 @@ export function SuiviClient() {
             <div className="sv-small sv-muted">{[q.titre, q.lieu].filter(Boolean).join(" · ")}{q.brouillon ? " · brouillon" : ""}</div>
             <div className="sv-row"><span>Montant du devis</span><b>{money(q.montant)} {q.devise}</b></div>
             {q.decision === "pending" && !q.brouillon && q.attente_jours > 0 && <div className="sv-small sv-muted">Sans réponse depuis {q.attente_jours} j</div>}
+            {q.depasse > 0 && <p className="error sv-warn">⚠️ Le reçu dépasse le devis de {money(q.depasse)} {q.devise}. Corrige un versement avec le crayon, plus bas.</p>}
             {q.decision === "accepted" && (
               <>
                 <Bar value={q.pct_recu} />
@@ -370,13 +378,19 @@ export function SuiviClient() {
         <h2 className="sv-h2">Versements reçus</h2>
         {!d.versements.length && <p className="sv-muted">Aucun versement enregistré.</p>}
         {d.versements.map((v: any) => (
-          <div className="sv-pay" key={v.id}>
-            <div>
-              <b>{money(v.montant)} FCFA</b> <span className="sv-muted">· {v.type}{v.moyen ? ` · ${v.moyen}` : ""}</span>
-              <div className="sv-small sv-muted">{v.date ? new Date(v.date).toLocaleDateString("fr-FR") : ""} · {v.devis}{v.note ? ` · ${v.note}` : ""}</div>
+          <div className="sv-pay-wrap" key={v.id}>
+            <div className="sv-pay">
+              <div>
+                <b>{money(v.montant)} FCFA</b> <span className="sv-muted">· {v.type}{v.moyen ? ` · ${v.moyen}` : ""}</span>
+                <div className="sv-small sv-muted">{v.date ? new Date(v.date).toLocaleDateString("fr-FR") : ""} · {v.devis}{v.note ? ` · ${v.note}` : ""}</div>
+              </div>
+              <div className="sv-pay-act">
+                <button className="icon-btn" aria-label="Corriger ce versement" onClick={() => setEditing(editing === v.id ? "" : v.id)}><I.Pencil size={18} /></button>
+                <button className="btn btn-line btn-small" aria-label="Annuler ce versement"
+                  onClick={() => window.confirm(`Annuler le versement de ${money(v.montant)} FCFA ? (erreur de saisie)`) && run(() => api.trackingCancelReceipt(v.id))}>Annuler</button>
+              </div>
             </div>
-            <button className="btn btn-line btn-small" aria-label="Annuler ce versement"
-              onClick={() => window.confirm(`Annuler le versement de ${money(v.montant)} FCFA ? (erreur de saisie)`) && run(() => api.trackingCancelReceipt(v.id))}>Annuler</button>
+            {editing === v.id && <ReceiptForm edit={v} onDone={() => { setEditing(""); load(); }} />}
           </div>
         ))}
       </div>
