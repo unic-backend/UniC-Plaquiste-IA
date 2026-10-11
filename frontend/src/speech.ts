@@ -25,6 +25,11 @@ export function speakable(text: string): string {
     .replace(/\s*\n+\s*/g, ". ").replace(/\s{2,}/g, " ").replace(/\.{2,}/g, ".").trim();
 }
 
+/** Dernier problème de lecture à voix haute (voix absente, moteur en erreur) : l'écran vocal l'affiche, au lieu d'un silence inexpliqué. */
+let speechIssue = "";
+export const getSpeechIssue = (): string => speechIssue;
+const NO_VOICE = "Ce téléphone n'a pas de voix de lecture. Installe « Synthèse vocale Google » dans les réglages Android.";
+
 type Listener = () => void;
 let playing: string | null = null;
 let loading: string | null = null;
@@ -112,26 +117,28 @@ function sayQueued(text: string, rate = getVocalRate()): Promise<void> {
     const spoken = speakable(text);
     if (!spoken) return resolve();
     const pref = getPref();
-    const device = () => {
+    const device = (done: () => void) => {
       try {
         const synth = window.speechSynthesis;
-        if (!synth || typeof SpeechSynthesisUtterance === "undefined") return resolve();
+        if (!synth || typeof SpeechSynthesisUtterance === "undefined") { speechIssue = NO_VOICE; return done(); }
         const u = new SpeechSynthesisUtterance(spoken);
         u.lang = "fr-FR"; u.rate = rate;
         const v = deviceVoices().find((x) => x.voiceURI === pref.deviceVoice);
         if (v) u.voice = v;
-        u.onend = () => resolve(); u.onerror = () => resolve();
+        u.onstart = () => { speechIssue = ""; };
+        u.onend = () => done();
+        u.onerror = (e) => { speechIssue = `La voix du téléphone n'a pas pu parler (${(e as SpeechSynthesisErrorEvent).error || "erreur"}). Vérifie « Synthèse vocale Google » et la voix française.`; done(); };
         synth.speak(u);   // sans cancel() : la phrase précédente finit d'abord
-      } catch { resolve(); }
+      } catch { speechIssue = NO_VOICE; done(); }
     };
-    if (pref.engine === "device") { device(); return; }
+    if (pref.engine === "device") { device(resolve); return; }
     const blob = elevenBlob(spoken);   // téléchargement lancé maintenant, lecture quand la phrase précédente est finie
     elevenChain = elevenChain.then(() => blob.then((url) => new Promise<void>((done) => {
       audio = new Audio(url);
       audio.playbackRate = rate;
       audio.onended = () => done(); audio.onerror = () => done();
       audio.play().catch(() => done());
-    })).catch(() => {})).then(() => resolve());
+    })).catch(() => new Promise<void>((done) => device(done)))).then(() => resolve());   // voix ElevenLabs indisponible : voix du téléphone (avant : silence total)
   });
 }
 
@@ -194,7 +201,7 @@ export function say(text: string, rate?: number): Promise<void> {
     stop();
     const pref = getPref();
     const r = rate ?? pref.rate;
-    const device = () => { try { if (!speakDevice(spoken, pref.deviceVoice, r, resolve)) resolve(); } catch { resolve(); } };
+    const device = () => { try { if (!speakDevice(spoken, pref.deviceVoice, r, resolve)) { speechIssue = NO_VOICE; resolve(); } else speechIssue = ""; } catch { resolve(); } };
     if (pref.engine === "device") { device(); return; }
     elevenBlob(spoken).then((url) => {
       audio = new Audio(url);
