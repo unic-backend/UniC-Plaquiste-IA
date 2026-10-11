@@ -1398,3 +1398,17 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
   .hub-item:active, .plat:active, .app-row:active, .at-item:active { border-color: var(--copper); filter: brightness(1.12); }
   .card-box, .doc-card, .hub-item, .stat, .route-anim { animation-name: fadeOnly; }
 }
+
+/* Textes courts « · valeur » posés à la suite d'un titre : sans cadre ni marge intérieure, sinon, quand la ligne
+   passe à la suivante, le cadre sombre recouvre le titre (chevauchement vu dans Atelier › Qualité). */
+.at-item > span.hint, p > span.hint, p > span.error, h3 > span.hint { background: none; padding: 0; border-radius: 0; }
+.at-item > b { overflow-wrap: anywhere; }
+.card-box .at-item { padding-left: 14px; padding-right: 14px; }
+
+/* Barre du haut sur petit écran : plus de place pour le titre (il était coupé : « Bons de co… »). */
+@media (max-width: 480px) {
+  .pagebar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .pagebar-back { padding: 8px 6px; }
+  .pagebar-title { font-size: 14px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; text-overflow: clip; }
+  .pagebar-chat { font-size: 12.5px; padding: 6px 9px; }
+}
