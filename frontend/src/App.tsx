@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { FicheGoogle } from "./Google";
@@ -271,7 +271,8 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
   const [keepErr, setKeepErr] = useState("");
   const speech = useSpeech(m.id);
   const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
-  const html = m.role === "assistant" && m.fresh && !tw.done ? revealHtml(md(m.content)) : md(m.content);
+  const revealing = m.role === "assistant" && !!m.fresh && !tw.done;
+  const html = useMemo(() => (revealing ? revealHtml(md(m.content)) : md(m.content)), [m.content, revealing]);   // pas de re-découpage du Markdown à chaque appui ailleurs
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   // fichiers joints : cartes séparées, au-dessus de la question (aperçu de la photo ou du plan)
@@ -365,6 +366,9 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
     </div>
   );
 }
+
+/** Un message ne se redessine que si SON contenu change : appuyer sur « + », saisir du texte ou ouvrir un menu ne reparcourt plus toute la conversation. */
+const MessageRow = memo(MessageView);
 
 type Gate = "loading" | "connect" | "error" | "ok";
 
@@ -938,6 +942,11 @@ function Chat({ initialId }: { initialId?: string }) {
     return () => clearInterval(t);
   }, [messages.length]);
 
+  const editMsg = useCallback((t: string) => {   // identité stable : sinon chaque message se redessine à chaque frappe
+    setText(t);
+    setTimeout(() => { const el = document.querySelector<HTMLTextAreaElement>(".composer textarea"); el?.focus(); el?.setSelectionRange(t.length, t.length); }, 30);
+  }, [setText]);
+
   return (
     <>
       <div className="chat" onScroll={(e) => { const c = e.currentTarget; setShowDown(c.scrollHeight - c.scrollTop - c.clientHeight > 260); }}>
@@ -948,10 +957,10 @@ function Chat({ initialId }: { initialId?: string }) {
             </div>
           )}
           {messages.map((m, i) => (
-            <MessageView
+            <MessageRow
               key={m.id + i}
               m={m}
-              onEdit={(t) => { setText(t); setTimeout(() => { const el = document.querySelector<HTMLTextAreaElement>(".composer textarea"); el?.focus(); el?.setSelectionRange(t.length, t.length); }, 30); }}
+              onEdit={editMsg}
               onRegenerate={
                 !busy && i === messages.length - 1 && m.role === "assistant" && m.id !== "err"
                   ? () => {
