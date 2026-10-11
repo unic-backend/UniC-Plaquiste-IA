@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import FeedbackLayer from "./FeedbackLayer";
 import "./styles.css";
 import { applyTheme } from "./theme";
 import { syncDesktopWorker } from "./api";
@@ -27,6 +28,7 @@ detectWake().finally(() => {
     <React.StrictMode>
       <BrowserRouter>
         <App />
+        <FeedbackLayer />
       </BrowserRouter>
     </React.StrictMode>
   );

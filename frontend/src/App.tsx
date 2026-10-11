@@ -13,6 +13,7 @@ import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
+import { notify } from "./feedback";
 import { AppsList, QuickChips } from "./Shortcuts";
 import { Pointage, SignaturePanel } from "./Terrain";
 import { UnicVoice } from "./UnicVoice";
@@ -1184,8 +1185,9 @@ function Clients() {
           className="toolbar"
           onSubmit={async (e) => {
             e.preventDefault();
-            if (!name.trim()) return;
+            if (!name.trim()) { notify("Écris d'abord le nom du client."); return; }
             await api.createCustomer({ name });
+            notify(`✓ ${name.trim()} ajouté`);
             setName("");
             load();
           }}
@@ -1365,8 +1367,9 @@ function ProjetsManuels() {
           className="toolbar"
           onSubmit={async (e) => {
             e.preventDefault();
-            if (!name.trim()) return;
+            if (!name.trim()) { notify("Écris d'abord le nom du chantier."); return; }
             await api.createProject({ name });
+            notify(`✓ ${name.trim()} créé`);
             setName("");
             load();
           }}
@@ -1885,7 +1888,7 @@ function CompanyPage() {
           className="btn btn-copper"
           onClick={async () => {
             await api.saveSettings(s);
-            alert("Enregistré");
+            notify("✓ Enregistré");
           }}
         >
           Enregistrer

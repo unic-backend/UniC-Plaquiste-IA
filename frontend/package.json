@@ -9,7 +9,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "cap:sync": "vite build && cap sync android",
     "android:debug": "vite build && cap sync android && cd android && ./gradlew assembleDebug",
-    "test:phone": "esbuild tests/phone.check.ts --bundle --platform=node --format=esm --outfile=.phone-check.mjs --log-level=error && node .phone-check.mjs && esbuild tests/notifs.check.ts --bundle --platform=node --format=esm --outfile=.notifs-check.mjs --log-level=error && node .notifs-check.mjs && esbuild tests/speech.check.ts --bundle --platform=node --format=esm --outfile=.speech-check.mjs --log-level=error && node .speech-check.mjs"
+    "test:phone": "esbuild tests/phone.check.ts --bundle --platform=node --format=esm --outfile=.phone-check.mjs --log-level=error && node .phone-check.mjs && esbuild tests/notifs.check.ts --bundle --platform=node --format=esm --outfile=.notifs-check.mjs --log-level=error && node .notifs-check.mjs && esbuild tests/speech.check.ts --bundle --platform=node --format=esm --outfile=.speech-check.mjs --log-level=error && node .speech-check.mjs && esbuild tests/feedback.check.ts --bundle --platform=node --format=esm --outfile=.feedback-check.mjs --log-level=error && node .feedback-check.mjs"
   },
   "dependencies": {
     "@capacitor-community/speech-recognition": "^7.0.1",

@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
+import { netNote, netStart, notify } from "./feedback";
 
 const SERVER_KEY = "unic_server";
 const CODE_KEY = "unic_code";
@@ -113,6 +114,15 @@ function authHeaders(headers = new Headers()): Headers {
 const GET_RETRY_WAITS = [2000, 4000, 7000, 12000, 20000];
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const end = netStart();   // la barre d'activité s'allume si la réponse tarde
+  try {
+    return await requestInner<T>(path, init);
+  } finally {
+    end();
+  }
+}
+
+async function requestInner<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = authHeaders(new Headers(init.headers));
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -124,7 +134,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     try {
       res = await fetch(apiUrl(path), { ...init, headers });
     } catch {
-      if (i < waits.length) await new Promise((r) => setTimeout(r, waits[i]));
+      if (i < waits.length) {
+        netNote("Connexion au serveur… il redémarre peut-être après une mise à jour (1 à 2 min).");
+        await new Promise((r) => setTimeout(r, waits[i]));
+      }
     }
   }
   if (!res) {
@@ -548,6 +561,20 @@ export async function fetchBlobUrl(url: string): Promise<string> {
 }
 
 export async function downloadAuth(url: string, filename: string) {
+  notify(`Préparation de ${filename}…`, 8000);   // retour immédiat : sinon le bouton paraît mort pendant le téléchargement
+  const end = netStart();
+  try {
+    await downloadAuthInner(url, filename);
+    notify(`✓ ${filename} prêt`);
+  } catch (e) {
+    notify("Téléchargement impossible : réessaie.");
+    throw e;
+  } finally {
+    end();
+  }
+}
+
+async function downloadAuthInner(url: string, filename: string) {
   const res = await fetch(apiUrl(url), { headers: authHeaders() });
   if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) throw new Error("Téléchargement impossible");
