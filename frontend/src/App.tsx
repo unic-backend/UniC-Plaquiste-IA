@@ -9,6 +9,7 @@ import { Agenda } from "./Agenda";
 import { Suivi, SuiviClient } from "./Suivi";
 import { Prospects } from "./Prospects";
 import { prepareFile } from "./compress";
+import { listenOnce } from "./listen";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
 import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
@@ -671,6 +672,8 @@ function Chat({ initialId }: { initialId?: string }) {
   const [pending, setPending] = useState<File[]>([]);
   const [deep, setDeep] = useState(false);
   const [rec, setRec] = useState(false);
+  const dictation = useRef<AbortController | null>(null);   // dictée native en cours : l'abandonner l'arrête tout de suite
+  useEffect(() => () => dictation.current?.abort(), []);   // on quitte l'écran : le micro se referme
   const [sheet, setSheet] = useState(false);
   const [apps, setApps] = useState(false);
   useEffect(() => { if (!sheet) setApps(false); }, [sheet]);
@@ -782,7 +785,7 @@ function Chat({ initialId }: { initialId?: string }) {
   }, []);
   async function send(override?: string) {
     const msg = (override ?? text).trim();
-    if (rec) { setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
+    if (rec) { dictation.current?.abort(); setRec(false); import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {}); }
     if (!msg && pending.length === 0) { setNotice("Écrivez ou dictez un message d'abord."); return; }
     if (busy) return;
     if (!navigator.onLine) {   // sans réseau : texte gardé sur l'appareil, envoyé au retour ; fichiers impossibles
@@ -881,31 +884,34 @@ function Chat({ initialId }: { initialId?: string }) {
   }
 
   async function voice() {
-    if (rec) {   // arrêt immédiat côté écran : le plugin ne confirme jamais stop()
+    if (rec) {   // arrêt immédiat côté écran ; le texte déjà entendu reste dans la barre de saisie
+      dictation.current?.abort();
       setRec(false);
       import("@capacitor-community/speech-recognition").then((m) => m.SpeechRecognition.stop()).catch(() => {});
       return;
     }
     try {
       if (isNative) {
-        const { SpeechRecognition } = await import("@capacitor-community/speech-recognition");
-        const { available } = await SpeechRecognition.available();
-        if (!available) { setNotice("Reconnaissance vocale absente sur ce téléphone. Utilisez le micro du clavier."); return; }
-        const perm = await SpeechRecognition.requestPermissions();
-        if (perm.speechRecognition !== "granted") { setNotice("Micro refusé : autorisez-le dans Réglages › Applis › UniC AI › Autorisations."); return; }
-        const base = text ? text.trimEnd() + " " : "";
-        let heard = false;
-        await SpeechRecognition.removeAllListeners();
-        await SpeechRecognition.addListener("partialResults", (d: { matches: string[] }) => {
-          if (d.matches?.[0]) { heard = true; setText(base + d.matches[0]); }
-        });
-        // fin de phrase détectée par Android : le micro s'éteint, le texte final arrive juste après
-        await SpeechRecognition.addListener("listeningState", (d: { status: "started" | "stopped" }) => {
-          if (d.status === "stopped") setTimeout(() => setRec(false), 800);
-        });
+        // Même moteur que UniC vocal (listen.ts) : micro réellement ouvert + bip, erreurs affichées, reprise si le micro est occupé.
+        // Avant : le plugin générique avalait les erreurs (aucun message) et coupait la phrase à la première pause.
+        const ac = new AbortController();
+        dictation.current = ac;
+        let base = text ? text.trimEnd() + " " : "";
+        let silent = 0, any = false;
         setRec(true);
-        await SpeechRecognition.start({ language: "fr-FR", partialResults: true, popup: false, maxResults: 1 });
-        setTimeout(() => { if (!heard) { setRec(false); setNotice("Je n'ai rien entendu. Parlez plus près, puis réessayez."); } }, 8000);
+        try {
+          while (!ac.signal.aborted) {   // dictée continue : une phrase après l'autre, jusqu'au toucher « stop » ou 2 silences
+            const heard = await listenOnce((t) => setText(base + t), undefined, "fr-FR", ac.signal);
+            if (ac.signal.aborted) break;
+            if (heard) { any = true; silent = 0; base = base + heard + " "; setText(base.trimEnd()); }
+            else if (++silent >= 2) break;
+          }
+          if (!any && !ac.signal.aborted) setNotice("Je n'ai rien entendu. Parlez plus près, puis réessayez.");
+        } catch (e: any) {
+          setNotice(e?.message || "Micro indisponible.");
+        } finally {
+          if (dictation.current === ac) { dictation.current = null; setRec(false); }
+        }
         return;
       }
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
