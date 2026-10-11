@@ -112,6 +112,17 @@ MENTION_PU = "Les prix indiqués dans la colonne « Prix Unitaire » sont des pr
 GENERIC_UNITS = {"", "u", "unité", "unite"}
 
 
+def _logo_ok() -> bool:
+    """Logo présent ET lisible : un fichier corrompu ne doit jamais empêcher un document."""
+    try:
+        from PIL import Image
+        with Image.open(LOGO) as im:
+            im.verify()
+        return True
+    except Exception:
+        return False
+
+
 def _entreprise(company: dict) -> dict:
     """Identité du document : charte du patron, surchargée par les réglages société quand ils sont remplis."""
     try:
@@ -391,7 +402,7 @@ def _render(
     tsize = _fit_title(doc_label)
     titre = [Paragraph(doc_label, _st("titre", fontSize=tsize, textColor=BLUE, alignment=TA_RIGHT, leading=tsize + 2)),
              Paragraph(f"N° {number}", _st("num", fontSize=10, alignment=TA_RIGHT, leading=14))]
-    if LOGO.exists():
+    if _logo_ok():
         head = Table([[RLImage(str(LOGO), width=P(30) * mm, height=P(30) * mm), ident, titre]], colWidths=[P(33) * mm, (129 - P(33)) * mm, 51 * mm])
     else:
         head = Table([[ident, titre]], colWidths=[129 * mm, 51 * mm])

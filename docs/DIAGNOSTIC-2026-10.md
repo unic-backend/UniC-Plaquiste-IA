@@ -561,3 +561,12 @@ Chaque affirmation a été vérifiée dans le code et, quand c'était possible, 
 | 4c | Rafraîchissement non atomique / révocation mal gérée | **Mineur** | Une prolongation de jeton Instagram refusée est ignorée en silence ; la révocation est détectée à la publication suivante avec un message clair (« reconnecte-toi »). Aucun risque de sécurité ; amélioration cosmétique possible |
 
 **Trouvé en vérifiant (non cité par le diagnostic) et corrigé** : une route d'API inconnue répondait **HTTP 200** avec `{"detail": "Not Found"}` au lieu de 404, ce qui laissait l'interface prendre une erreur pour un succès. Les 156 appels `/api` de l'interface ont été comparés aux 187 routes du serveur : aucun appel orphelin, la correction est sans risque. Test ajouté.
+
+## 14. Troisième diagnostic externe (calculs, PDF, numérotation) — vérifié
+
+| Affirmation | Verdict | Preuve |
+|---|---|---|
+| Arrondis flottants FCFA | **Vrai, mineur** | `round(2.675, 2)` = 2.67 ; fuzz 200 000 devis : écart jusqu'à 3 centimes sur le total. Corrigé : `services.money_round` (arrondi commercial Decimal) sur lignes, sous-total, TVA, total. |
+| ReportLab : texte long déborde | **Faux** | Cellules déjà en `Paragraph` : libellé de 400 caractères sans espace → retour à la ligne, 1 page. Test ajouté. |
+| Logo absent → plantage | **Faux pour absent, vrai pour corrompu** | Absent : repli existant. Corrompu : `UnidentifiedImageError`. Corrigé : `_logo_ok()` vérifie l'image avant usage. |
+| Numérotation `UC-AAAA-MMJJ-[CODE_CLIENT]`, références libres | **Faux** | Format réel `UC-AAAA-BLOC-CLI`, généré par le serveur (`document_number`), colonne unique, aucun champ d'entrée `number`. |
