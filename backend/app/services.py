@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from decimal import ROUND_HALF_UP, Decimal
 import re
 import time
 from datetime import date, datetime, timezone
@@ -167,6 +168,11 @@ def _client_block(db: Session, party_name: str | None, day: date, lieu: str | No
 
 def _client_root(db: Session, party_name: str | None, day: date, lieu: str | None = None, new: bool = False) -> str:
     return f"UC-{day.year}-{_client_block(db, party_name, day, lieu, new):04d}-{client_initials(party_name)}"
+
+
+def money_round(value: float) -> float:
+    """Arrondi commercial au centime (0,5 vers le haut) : évite les écarts binaires de round() (2,675 → 2,67)."""
+    return float(Decimal(repr(round(value, 9))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def document_number(db: Session, party_name: str | None, on: date | None = None, lieu: str | None = None) -> str:
@@ -464,7 +470,7 @@ def quotation_from_quantities(
         if unit_price is None:
             complete = False
         else:
-            total = round(qty * unit_price, 2)
+            total = money_round(qty * unit_price)
             subtotal += total
             any_price = True
         db.add(QuotationItem(
@@ -482,10 +488,10 @@ def quotation_from_quantities(
         ))
     q.prices_complete = complete and any_price
     if any_price:
-        q.subtotal = round(subtotal, 2)
+        q.subtotal = money_round(subtotal)
         if q.vat_rate is not None:
-            q.vat_amount = round(subtotal * q.vat_rate, 2)
-            q.total = round(subtotal + q.vat_amount, 2)
+            q.vat_amount = money_round(subtotal * q.vat_rate)
+            q.total = money_round(subtotal + q.vat_amount)
         else:
             q.total = q.subtotal
     else:
