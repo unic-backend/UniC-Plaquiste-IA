@@ -1387,3 +1387,14 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 @media (prefers-reduced-motion: reduce) { .net-bar::before { animation: none; width: 100%; opacity: .7; } }
 .net-slow { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); z-index: 9998; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; background: rgba(26,35,32,.94); color: #efeae2; box-shadow: 0 6px 22px rgba(0,0,0,.28); pointer-events: none; }
 .toast.toast-global { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom, 0px)); z-index: 9997; max-width: calc(100vw - 32px); pointer-events: none; }
+
+/* Tactile : aucune carte ne bouge au toucher ni à l'apparition (ni survol collant, ni appui, ni glissement d'entrée).
+   Retour visible conservé : bordure cuivre + léger éclaircissement, sans jamais remplacer le fond « verre ». */
+@keyframes fadeOnly { from { opacity: 0; } to { opacity: 1; } }
+@media (hover: none) {
+  .hub-item, .plat, .app-row, .at-item, .side-brief { transition: border-color .12s, filter .12s; }
+  .hub-item:hover, .hub-item:active, .plat:hover, .plat:active, .app-row:active, .at-item:active,
+  .side-brief:active { transform: none; }
+  .hub-item:active, .plat:active, .app-row:active, .at-item:active { border-color: var(--copper); filter: brightness(1.12); }
+  .card-box, .doc-card, .hub-item, .stat, .route-anim { animation-name: fadeOnly; }
+}
