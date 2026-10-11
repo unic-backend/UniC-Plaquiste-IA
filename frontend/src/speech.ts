@@ -1,6 +1,7 @@
 import { apiUrl, getCode, isNative } from "./api";
 import { useEffect, useState } from "react";
 import { SpeechPipeline } from "./sentences";
+import { voiceOut } from "./phone";
 
 /** Lecture à voix haute des réponses. Moteurs : voix du téléphone (gratuit) ou voix ElevenLabs (serveur, voix clonée possible). */
 export type VoicePref = { engine: "device" | "eleven"; deviceVoice: string; rate: number };
@@ -39,6 +40,7 @@ const listeners = new Set<Listener>();
 const emit = () => listeners.forEach((l) => l());
 
 export function stop(): void {
+  if (isNative) voiceOut.stop();
   try { window.speechSynthesis?.cancel(); } catch { /* ignoré */ }
   if (audio) { audio.pause(); audio = null; }
   playing = null; loading = null; emit();
@@ -69,6 +71,10 @@ function armUtterance(u: SpeechSynthesisUtterance, text: string, rate: number, d
 }
 
 export function speakDevice(text: string, voiceURI = "", rate = 1, onEnd?: () => void): boolean {
+  if (isNative) {   // application Android : synthèse vocale native (le WebView n'a pas toujours speechSynthesis)
+    voiceOut.speak(text, rate, true).then(() => { speechIssue = ""; onEnd?.(); }).catch((e) => { speechIssue = e?.message || NO_VOICE; onEnd?.(); });
+    return true;
+  }
   const synth = window.speechSynthesis;
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
   synth.cancel();
@@ -137,6 +143,10 @@ function sayQueued(text: string, rate = getVocalRate()): Promise<void> {
     if (!spoken) return resolve();
     const pref = getPref();
     const device = (done: () => void) => {
+      if (isNative) {
+        voiceOut.speak(spoken, rate, false).then(() => { speechIssue = ""; done(); }).catch((e) => { speechIssue = e?.message || NO_VOICE; done(); });
+        return;
+      }
       try {
         const synth = window.speechSynthesis;
         if (!synth || typeof SpeechSynthesisUtterance === "undefined") { speechIssue = NO_VOICE; return done(); }
@@ -179,6 +189,10 @@ export function sayIn(text: string, lang: string, rate = 1): Promise<{ voice: bo
     if (pref.engine === "eleven") {   // voix ElevenLabs multilingue : lit n'importe quelle langue
       elevenBlob(spoken).then((url) => { stop(); audio = new Audio(url); audio.playbackRate = rate; audio.onended = () => resolve({ voice: true }); audio.onerror = () => resolve({ voice: true }); return audio.play(); })
         .catch(() => resolve({ voice: false }));
+      return;
+    }
+    if (isNative) {   // interprète : voix native de la langue demandée ; langue absente = { voice: false }
+      voiceOut.speak(spoken, rate, true, lang.replace("_", "-")).then(() => resolve({ voice: true })).catch(() => resolve({ voice: false }));
       return;
     }
     try {
@@ -238,5 +252,5 @@ export function useSpeech(id: string): "idle" | "loading" | "playing" {
   return playing === id ? "playing" : loading === id ? "loading" : "idle";
 }
 
-export const canSpeakOnDevice = (): boolean => typeof window !== "undefined" && "speechSynthesis" in window;
+export const canSpeakOnDevice = (): boolean => isNative || (typeof window !== "undefined" && "speechSynthesis" in window);
 export { isNative };

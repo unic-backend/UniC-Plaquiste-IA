@@ -28,10 +28,12 @@ const Native = registerPlugin<{
   endCall(): Promise<{ ended: boolean }>;
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
   listen(o: { language: string }): Promise<void>;
+  speak(o: { id: string; text: string; rate: number; lang: string; flush: boolean }): Promise<void>;
+  stopSpeak(): Promise<void>;
   stopListen(): Promise<void>;
   lastCrash(): Promise<{ text: string; time: number }>;
   clearCrash(): Promise<void>;
-  addListener(event: string, cb: (d: { text?: string; code?: number }) => void): Promise<{ remove(): Promise<void> }>;
+  addListener(event: string, cb: (d: { text?: string; code?: number; id?: string }) => void): Promise<{ remove(): Promise<void> }>;
 }>("UnicPhone");
 
 export const phone = {
@@ -44,6 +46,32 @@ export const phone = {
 
 /** Casque / AirPods : le micro passe par le casque pendant la conversation (sans casque : aucun effet). */
 export const audioRoute = (on: boolean): Promise<unknown> => Native.audioRoute({ on }).catch(() => null);
+
+const TTS_ERR: Record<number, string> = {
+  [-2]: "Aucun moteur de synthèse vocale sur ce téléphone. Installe « Synthèse vocale Google » dans les réglages Android.",
+  [-4]: "Langue non disponible dans la synthèse vocale du téléphone.",
+};
+let ttsSeq = 0;
+/** Voix de réponse native (synthèse vocale d'Android) : marche même quand le WebView n'a pas speechSynthesis. Rend la main à la fin de la phrase. */
+export const voiceOut = {
+  speak: (text: string, rate = 1, flush = false, lang = "fr-FR"): Promise<void> => new Promise<void>((resolve, reject) => {
+    const id = `t${Date.now()}_${++ttsSeq}`;
+    const handles: { remove(): Promise<void> }[] = [];
+    let over = false, guard: ReturnType<typeof setTimeout> | undefined;
+    const fin = (err?: string) => {
+      if (over) return; over = true; clearTimeout(guard);
+      handles.forEach((h) => h.remove().catch(() => {}));
+      if (err) reject(new Error(err)); else resolve();
+    };
+    guard = setTimeout(() => fin(), 8000 + (text.length * 110) / Math.max(rate, 0.5));   // le moteur ne répond jamais : on rend la main
+    (async () => {
+      handles.push(await Native.addListener("ttsDone", (d) => { if (d.id === id) fin(); }));
+      handles.push(await Native.addListener("ttsError", (d) => { if (d.id === id) fin(TTS_ERR[d.code ?? -1] || `La voix du téléphone n'a pas pu parler (code ${d.code ?? "?"}).`); }));
+      await Native.speak({ id, text, rate, lang, flush });
+    })().catch((e) => fin(e?.message || "La voix du téléphone n'a pas pu démarrer."));
+  }),
+  stop: (): Promise<void> => Native.stopSpeak().catch(() => {}),
+};
 
 /** Écoute native (une phrase) : « ready » = micro vraiment ouvert ; les erreurs arrivent avec leur code. */
 export const ear = {
