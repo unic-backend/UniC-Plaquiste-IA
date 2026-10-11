@@ -30,3 +30,11 @@ def test_describe_image_assemble_les_parties(tmp_path, monkeypatch):
     monkeypatch.setattr(vision, "_ask", lambda b64: calls.append(1) or f"texte {len(calls)}")
     out = vision.describe_image(p)
     assert len(calls) >= 2 and "[Partie 1/" in out and "texte 2" in out
+
+
+def test_une_tranche_vide_garde_la_bonne_numerotation(tmp_path, monkeypatch):
+    p = tmp_path / "devis.png"
+    Image.new("RGB", (1080, 2400), "white").save(p)
+    monkeypatch.setattr(vision, "disponible", lambda: True)
+    monkeypatch.setattr(vision, "_ask", lambda b64: "")
+    assert vision.describe_image(p) == ""

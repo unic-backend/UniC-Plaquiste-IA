@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from app.config import settings
@@ -83,10 +84,14 @@ def describe_image(path: Path) -> str:
             except Exception:
                 pass
             parts = tiles(img)
-            texts = [_ask(_jpeg_b64(t)) for t in parts]
-        texts = [t for t in texts if t]
-        if len(parts) > 1 and texts:
-            return "\n\n".join(f"[Partie {i + 1}/{len(parts)}]\n{t}" for i, t in enumerate(texts))
+            payloads = [_jpeg_b64(t) for t in parts]
+        if len(payloads) > 1:   # tranches lues en même temps : le délai d'attente ne s'additionne plus
+            with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
+                texts = list(pool.map(_ask, payloads))
+        else:
+            texts = [_ask(payloads[0])]
+        if len(parts) > 1:
+            return "\n\n".join(f"[Partie {i + 1}/{len(parts)}]\n{t}" for i, t in enumerate(texts) if t)
         return texts[0] if texts else ""
     except Exception as exc:
         logger.warning("Vision image impossible : %s", exc)   # visible dans le journal : sans ça l'IA « devient aveugle » en silence
