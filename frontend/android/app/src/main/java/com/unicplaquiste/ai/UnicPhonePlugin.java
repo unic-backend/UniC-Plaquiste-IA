@@ -573,12 +573,25 @@ public class UnicPhonePlugin extends Plugin {
         ui.post(() -> { destroyRecognizer(); call.resolve(); });
     }
 
-    // ---------- voix de réponse : synthèse vocale d'Android (le WebView n'a pas toujours speechSynthesis) ----------
+    // ---------- voix de réponse : synthèse vocale d'Android, sortie au choix (haut-parleur ou Bluetooth) ----------
+    // La phrase est d'abord synthétisée dans un fichier, puis lue par un MediaPlayer dont la SORTIE est imposée (setPreferredDevice) :
+    // sans cela Android envoie le son vers un appareil Bluetooth connecté (écouteurs, montre, voiture), même loin, et le téléphone « parle dans le vide ».
+
+    private static final class Utter {
+        final String id, text, lang, output;
+        final float rate;
+        Utter(String id, String text, float rate, String lang, String output) { this.id = id; this.text = text; this.rate = rate; this.lang = lang; this.output = output; }
+    }
 
     private android.speech.tts.TextToSpeech tts;
     private boolean ttsOk = false;
     private boolean ttsStarting = false;
-    private final java.util.LinkedHashMap<String, Runnable> ttsWaiting = new java.util.LinkedHashMap<>();
+    private final ArrayList<Utter> ttsQueue = new ArrayList<>();
+    private final java.util.HashMap<String, Utter> ttsFiles = new java.util.HashMap<>();   // phrases en cours de synthèse vers un fichier
+    private final java.util.HashSet<String> ttsDirect = new java.util.HashSet<>();   // repli : lecture directe du moteur
+    private boolean ttsBusy = false;
+    private android.media.MediaPlayer player;
+    private String playingId;   // phrase en cours de lecture
 
     private void emitTts(final String event, final String id, final int code) {
         ui.post(() -> {
@@ -589,34 +602,165 @@ public class UnicPhonePlugin extends Plugin {
         });
     }
 
-    /** Lance le travail quand le moteur de voix est prêt ; moteur absent : « ttsError » (code -2) pour chaque phrase en attente. */
-    private void withTts(final String id, final Runnable job) {
+    private static boolean isBluetoothOut(AudioDeviceInfo d) {
+        int t = d.getType();
+        return t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && (t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLE_SPEAKER));
+    }
+
+    /** Sortie imposée : « speaker » = haut-parleur du téléphone, « bluetooth » = l'appareil Bluetooth connecté ; « auto » ou introuvable = choix d'Android. */
+    private AudioDeviceInfo pickOutput(String output) {
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am == null || output == null) return null;
+            AudioDeviceInfo sco = null;
+            for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                if ("speaker".equals(output) && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return d;
+                if ("bluetooth".equals(output) && isBluetoothOut(d)) {
+                    if (d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) sco = d; else return d;
+                }
+            }
+            return sco;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Appareil Bluetooth de sortie connecté (nom), pour l'afficher dans UniC vocal. */
+    @PluginMethod
+    public void audioOutputs(PluginCall call) {
+        JSObject res = new JSObject();
+        res.put("bluetooth", "");
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                    if (isBluetoothOut(d)) {
+                        CharSequence n = d.getProductName();
+                        res.put("bluetooth", n == null || n.length() == 0 ? "Bluetooth" : n.toString());
+                        break;
+                    }
+                }
+                res.put("volume", am.getStreamVolume(AudioManager.STREAM_MUSIC));
+            }
+        } catch (Exception ignored) { /* pas d'information : on affiche le haut-parleur */ }
+        call.resolve(res);
+    }
+
+    private void withTts(final Runnable job, final String failId) {
         if (ttsOk && tts != null) { job.run(); return; }
-        ttsWaiting.put(id, job);
+        ttsWaitingJobs.add(new Object[]{failId, job});
         if (ttsStarting) return;
         ttsStarting = true;
         tts = new android.speech.tts.TextToSpeech(getContext().getApplicationContext(), status -> ui.post(() -> {
             ttsStarting = false;
             if (status == android.speech.tts.TextToSpeech.SUCCESS && tts != null) {
                 ttsOk = true;
-                // voix sur le flux « média » (comme une vidéo) : réglée par les touches de volume, jamais par le mode silencieux de la sonnerie
-                tts.setAudioAttributes(new android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build());
                 tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
                     @Override public void onStart(String utteranceId) { }
-                    @Override public void onDone(String utteranceId) { emitTts("ttsDone", utteranceId, 0); }
-                    @Override public void onError(String utteranceId) { emitTts("ttsError", utteranceId, -1); }
-                    @Override public void onError(String utteranceId, int errorCode) { emitTts("ttsError", utteranceId, errorCode); }
+                    @Override public void onDone(final String utteranceId) { ui.post(() -> ttsSynthDone(utteranceId)); }
+                    @Override public void onError(String utteranceId) { ui.post(() -> ttsSynthFailed(utteranceId, -1)); }
+                    @Override public void onError(String utteranceId, int errorCode) { ui.post(() -> ttsSynthFailed(utteranceId, errorCode)); }
                 });
-                for (Runnable w : new ArrayList<>(ttsWaiting.values())) w.run();
+                for (Object[] w : new ArrayList<>(ttsWaitingJobs)) ((Runnable) w[1]).run();
             } else {
-                for (String waiting : new ArrayList<>(ttsWaiting.keySet())) emitTts("ttsError", waiting, -2);
+                for (Object[] w : new ArrayList<>(ttsWaitingJobs)) emitTts("ttsError", (String) w[0], -2);
                 tts = null;
             }
-            ttsWaiting.clear();
+            ttsWaitingJobs.clear();
         }));
+    }
+    private final ArrayList<Object[]> ttsWaitingJobs = new ArrayList<>();
+
+    /** Synthèse terminée : lecture du fichier (sortie imposée) ou, en repli, fin de la lecture directe. */
+    private void ttsSynthDone(String id) {
+        if (ttsDirect.remove(id)) { emitTts("ttsDone", id, 0); ttsBusy = false; ttsNext(); return; }
+        Utter u = ttsFiles.remove(id);
+        if (u == null) return;
+        playFile(u);
+    }
+
+    private void ttsSynthFailed(String id, int code) {
+        if (ttsDirect.remove(id)) { emitTts("ttsError", id, code); ttsBusy = false; ttsNext(); return; }
+        Utter u = ttsFiles.remove(id);
+        if (u == null) return;
+        // la synthèse vers un fichier a échoué : repli, le moteur parle directement (sortie choisie par Android)
+        ttsDirect.add(u.id);
+        int r = tts.speak(u.text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, u.id);
+        if (r != android.speech.tts.TextToSpeech.SUCCESS) { ttsDirect.remove(u.id); emitTts("ttsError", u.id, -3); ttsBusy = false; ttsNext(); }
+    }
+
+    private java.io.File ttsFile(String id) {
+        return new java.io.File(getContext().getCacheDir(), "tts_" + id.replaceAll("[^A-Za-z0-9_]", "") + ".wav");
+    }
+
+    private void playFile(final Utter u) {
+        final java.io.File f = ttsFile(u.id);
+        try {
+            android.media.MediaPlayer mp = new android.media.MediaPlayer();
+            player = mp;
+            mp.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
+            mp.setDataSource(f.getAbsolutePath());
+            AudioDeviceInfo dev = pickOutput(u.output);
+            if (dev != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) mp.setPreferredDevice(dev);   // sortie imposée (Android 9+) ; avant : choix d'Android
+            playingId = u.id;
+            mp.setOnCompletionListener(m -> { releasePlayer(m); playingId = null; f.delete(); emitTts("ttsDone", u.id, 0); ttsBusy = false; ttsNext(); });
+            mp.setOnErrorListener((m, what, extra) -> { releasePlayer(m); playingId = null; f.delete(); emitTts("ttsError", u.id, -5); ttsBusy = false; ttsNext(); return true; });
+            mp.setOnPreparedListener(m -> m.start());
+            mp.prepareAsync();
+        } catch (Exception e) {
+            f.delete();
+            emitTts("ttsError", u.id, -5);
+            ttsBusy = false;
+            ttsNext();
+        }
+    }
+
+    private void releasePlayer(android.media.MediaPlayer m) {
+        try { m.release(); } catch (Exception ignored) { /* déjà libéré */ }
+        if (player == m) player = null;
+    }
+
+    /** Phrase suivante de la file : synthèse dans un fichier. */
+    private void ttsNext() {
+        if (ttsBusy || ttsQueue.isEmpty()) return;
+        final Utter u = ttsQueue.remove(0);
+        ttsBusy = true;
+        withTts(() -> {
+            try {
+                java.util.Locale loc = java.util.Locale.forLanguageTag(u.lang);
+                if (tts.isLanguageAvailable(loc) < android.speech.tts.TextToSpeech.LANG_AVAILABLE) { emitTts("ttsError", u.id, -4); ttsBusy = false; ttsNext(); return; }
+                tts.setLanguage(loc);
+                tts.setSpeechRate(u.rate > 0 ? u.rate : 1.0f);
+                AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+                if (am != null && am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) emitTts("ttsMuted", u.id, 0);   // volume média à zéro : il parle sans aucun son
+                ttsFiles.put(u.id, u);
+                int r = tts.synthesizeToFile(u.text, new Bundle(), ttsFile(u.id), u.id);
+                if (r != android.speech.tts.TextToSpeech.SUCCESS) ttsSynthFailed(u.id, -3);
+            } catch (Exception e) {
+                ttsFiles.remove(u.id);
+                emitTts("ttsError", u.id, -3);
+                ttsBusy = false;
+                ttsNext();
+            }
+        }, u.id);
+    }
+
+    private void ttsStopAll() {
+        for (Utter q : ttsQueue) emitTts("ttsDone", q.id, 0);   // phrases abandonnées : l'écran n'attend plus
+        for (String k : ttsFiles.keySet()) emitTts("ttsDone", k, 0);
+        for (String k : ttsDirect) emitTts("ttsDone", k, 0);
+        if (playingId != null) emitTts("ttsDone", playingId, 0);
+        playingId = null;
+        ttsQueue.clear();
+        ttsFiles.clear();
+        ttsDirect.clear();
+        ttsBusy = false;
+        try { if (player != null) { player.stop(); player.release(); } } catch (Exception ignored) { /* déjà arrêté */ }
+        player = null;
+        try { if (tts != null && ttsOk) tts.stop(); } catch (Exception ignored) { /* déjà arrêté */ }
     }
 
     /** Dit une phrase. Rend la main tout de suite ; « ttsDone » / « ttsError » (avec l'identifiant) arrivent ensuite. */
@@ -626,37 +770,26 @@ public class UnicPhonePlugin extends Plugin {
         final String id = call.getString("id", "t" + System.nanoTime());
         final float rate = call.getFloat("rate", 1.0f);
         final String lang = call.getString("lang", "fr-FR");
+        final String output = call.getString("output", "auto");
         final boolean flush = Boolean.TRUE.equals(call.getBoolean("flush", false));
         call.resolve();
-        if (text == null || text.trim().isEmpty()) { emitTts("ttsDone", id, 0); return; }
         ui.post(() -> {
-            try {
-                withTts(id, () -> {
-                    java.util.Locale loc = java.util.Locale.forLanguageTag(lang);
-                    int avail = tts.isLanguageAvailable(loc);
-                    if (avail < android.speech.tts.TextToSpeech.LANG_AVAILABLE) { emitTts("ttsError", id, -4); return; }
-                    tts.setLanguage(loc);
-                    AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
-                    if (am != null && am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) emitTts("ttsMuted", id, 0);   // volume média à zéro : il « parle » sans aucun son
-                    tts.setSpeechRate(rate > 0 ? rate : 1.0f);
-                    int r = tts.speak(text, flush ? android.speech.tts.TextToSpeech.QUEUE_FLUSH : android.speech.tts.TextToSpeech.QUEUE_ADD, null, id);
-                    if (r != android.speech.tts.TextToSpeech.SUCCESS) emitTts("ttsError", id, -3);
-                });
-            } catch (Exception e) {
-                emitTts("ttsError", id, -3);
-            }
+            if (flush) ttsStopAll();
+            if (text == null || text.trim().isEmpty()) { emitTts("ttsDone", id, 0); return; }
+            ttsQueue.add(new Utter(id, text, rate, lang, output));
+            ttsNext();
         });
     }
 
     @PluginMethod
     public void stopSpeak(PluginCall call) {
-        ui.post(() -> { try { if (tts != null && ttsOk) tts.stop(); } catch (Exception ignored) { /* déjà arrêté */ } call.resolve(); });
+        ui.post(() -> { ttsStopAll(); call.resolve(); });
     }
 
     @Override
     protected void handleOnDestroy() {
         ui.post(this::destroyRecognizer);
-        ui.post(() -> { try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Exception ignored) { /* déjà fermé */ } tts = null; ttsOk = false; });
+        ui.post(() -> { ttsStopAll(); try { if (tts != null) tts.shutdown(); } catch (Exception ignored) { /* déjà fermé */ } tts = null; ttsOk = false; });
         super.handleOnDestroy();
     }
 

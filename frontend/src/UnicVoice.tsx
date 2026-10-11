@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api, isNative, Stopped } from "./api";
 import * as I from "./Icons";
 import { listenOnce } from "./listen";
-import { audioRoute, getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
+import { audioOutputs, audioRoute, getPhoneWhenLocked, getReadWhenLocked, getVoiceOutput, notifApi, phone, setVoiceOutput, wakeApi, type VoiceOutput } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
 import { createSpeaker, ding, getSpeechIssue, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
 import { HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
@@ -27,6 +27,8 @@ export function UnicVoice() {
   const [err, setErr] = useState("");
   const [hearing, setHearing] = useState(false);
   const [ready, setReady] = useState(false);   // micro réellement ouvert
+  const [out, setOut] = useState<VoiceOutput>(getVoiceOutput());   // où UniC parle : haut-parleur ou Bluetooth
+  const [bt, setBt] = useState("");   // nom de l'appareil Bluetooth connecté ("" = aucun)
   const [said, setSaid] = useState("");   // dernière phrase comprise : on voit tout de suite si le micro entend
   const active = useRef(false);
   const cid = useRef<string | undefined>(undefined);
@@ -35,6 +37,17 @@ export function UnicVoice() {
   const manual = useRef(false);   // arrêt par un toucher : on ne ferme pas
   const interp = useRef("");   // l'interprète a été demandé à voix haute : on y va quand la conversation se termine
   const wake = useRef(!!(window as unknown as { __unicWake?: boolean }).__unicWake);   // ouvert par « Hey UniC »
+
+  const refreshBt = () => { if (isNative) audioOutputs().then((o) => setBt(o.bluetooth || "")); };
+  async function switchOut() {
+    const next: VoiceOutput = out === "speaker" ? "bluetooth" : "speaker";
+    if (next === "bluetooth" && !bt) { setErr("Aucun appareil Bluetooth connecté. Connecte-le dans les réglages du téléphone."); return; }
+    setErr("");
+    setVoiceOutput(next);
+    setOut(next);
+    audioRoute(next === "bluetooth");   // micro du casque seulement en mode Bluetooth
+    await say(next === "bluetooth" ? "Je parle dans le Bluetooth." : "Je parle dans le haut-parleur.");   // on entend tout de suite où part le son
+  }
 
   const end = () => { active.current = false; stopSpeech(); setPhase("idle"); };
 
@@ -125,7 +138,7 @@ export function UnicVoice() {
 
   useEffect(() => {
     // téléphone verrouillé : cet écran (seulement lui) peut s'afficher par-dessus l'écran de verrouillage
-    if (isNative) { notifApi.lockScreenMode(true).catch(() => {}); audioRoute(true); }   // casque Bluetooth / AirPods : micro du casque
+    if (isNative) { notifApi.lockScreenMode(true).catch(() => {}); audioRoute(getVoiceOutput() === "bluetooth"); refreshBt(); }   // micro du casque seulement si la sortie choisie est le Bluetooth
     const auto = wake.current ? window.setTimeout(() => { if (!active.current) begin(); }, 350) : 0;   // « Hey UniC » : il écoute tout de suite
     return () => { window.clearTimeout(auto); active.current = false; stopSpeech(); if (isNative) { notifApi.lockScreenMode(false).catch(() => {}); audioRoute(false); } };
   }, []);
@@ -137,6 +150,11 @@ export function UnicVoice() {
         <span className="unic-ring r1" /><span className="unic-ring r2" /><span className="unic-core"><I.Mic size={44} /></span>
       </button>
       <p className="unic-state" role="status" aria-live="polite">{phase === "listening" ? (hearing ? HEARING : ready ? LABEL.listening : WAITING) : LABEL[phase]}</p>
+      {isNative && (
+        <button className="unic-out" onClick={switchOut} aria-label="Changer la sortie du son : haut-parleur ou Bluetooth">
+          <I.Speaker size={16} /> {out === "bluetooth" ? `Bluetooth${bt ? " · " + bt : ""}` : "Haut-parleur"}{bt || out === "bluetooth" ? " ⇄" : ""}
+        </button>
+      )}
       {said && phase !== "idle" && <p className="unic-said">« {said} »</p>}
       {err && <p className="error" role="alert">{err}</p>}
     </div>,
