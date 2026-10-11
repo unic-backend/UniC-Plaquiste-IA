@@ -34,3 +34,20 @@ def test_money_round_is_commercial():
     from app.services import money_round
     assert money_round(2.675) == 2.68 and round(2.675, 2) == 2.67
     assert money_round(1.005) == 1.01 and money_round(1000.0) == 1000.0
+
+
+def test_pdfworker_timeout_is_logged_as_error(monkeypatch, caplog):
+    """Niveau ERROR = la surveillance (selfcare) en fait un incident, donc une alerte."""
+    import logging
+    import subprocess
+
+    import pytest
+
+    from app import pdfjob
+
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired("x", 1)
+    monkeypatch.setattr(pdfjob.subprocess, "run", boom)
+    with caplog.at_level(logging.ERROR, logger="unic.pdfjob"), pytest.raises(pdfjob.PdfJobError):
+        pdfjob.run("render", timeout=1)
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)

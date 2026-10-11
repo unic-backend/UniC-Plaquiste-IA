@@ -28,13 +28,14 @@ def run(op: str, timeout: int = 90, **kwargs) -> dict:
         r = subprocess.run([sys.executable, str(WORKER), json.dumps({"op": op, **kwargs})],
                            capture_output=True, text=True, timeout=timeout, preexec_fn=_limit)
     except subprocess.TimeoutExpired as exc:
+        logger.error("pdfworker %s : délai dépassé (%s s)", op, timeout)
         raise PdfJobError("Plan trop long à dessiner (délai dépassé).") from exc
     try:
         out = json.loads(r.stdout or "{}")
     except ValueError:
         out = {}
     if not out or out.get("error"):
-        logger.warning("pdfworker %s : %s (code %s) %s", op, out.get("error"), r.returncode, (r.stderr or "")[-300:])
+        logger.error("pdfworker %s : %s (code %s) %s", op, out.get("error"), r.returncode, (r.stderr or "")[-300:])
         raise PdfJobError("Plan trop lourd pour être dessiné par le serveur." if out.get("error") in (None, "memory")
                           else "Lecture du PDF impossible.")
     return out
