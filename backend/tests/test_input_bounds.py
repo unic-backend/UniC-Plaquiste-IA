@@ -261,8 +261,11 @@ def test_unknown_api_route_is_404_not_a_fake_success(client):
         assert r.status_code != 200, path
     r = client.get("/api/inexistant")
     assert r.headers["content-type"].startswith("application/json") and r.json() == {"detail": "Not Found"}
-    # l'interface (pages sans « /api ») continue de se charger même sur une adresse inconnue
-    assert client.get("/une-page-qui-nexiste-pas").status_code == 200
+    # l'interface (pages sans « /api ») continue de se charger même sur une adresse inconnue : seulement si elle est compilée ici
+    # (en CI le serveur est testé sans l'interface : la page inconnue y répond 404, normalement)
+    from app.main import FRONTEND_DIST
+    if FRONTEND_DIST.is_dir():
+        assert client.get("/une-page-qui-nexiste-pas").status_code == 200
 
 
 def test_upload_filename_cannot_escape_the_storage_folder(client, tmp_path):
