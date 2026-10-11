@@ -249,3 +249,38 @@ def test_wider_policy_is_only_measured(client):
     assert report and "default-src 'self'" in report
     assert "connect-src 'self'" in report
     assert "blob:" in report          # aperçus de PDF, photos et lectures vocales
+
+
+# ---------------------------------------------------------------- route d'API inconnue = 404, jamais 200
+
+def test_unknown_api_route_is_404_not_a_fake_success(client):
+    """Avant : GET /api/inexistant répondait 200 {"detail": "Not Found"} ; l'interface le prenait pour un succès."""
+    for path in ("/api/inexistant", "/api/files/zzz-inconnu-xyz", "/api/customers/n-existe-pas/zzz"):
+        r = client.get(path)
+        assert r.status_code in (404, 405, 401), (path, r.status_code)
+        assert r.status_code != 200, path
+    r = client.get("/api/inexistant")
+    assert r.headers["content-type"].startswith("application/json") and r.json() == {"detail": "Not Found"}
+    # l'interface (pages sans « /api ») continue de se charger même sur une adresse inconnue : seulement si elle est compilée ici
+    # (en CI le serveur est testé sans l'interface : la page inconnue y répond 404, normalement)
+    from app.main import FRONTEND_DIST
+    if FRONTEND_DIST.is_dir():
+        assert client.get("/une-page-qui-nexiste-pas").status_code == 200
+
+
+def test_upload_filename_cannot_escape_the_storage_folder(client, tmp_path):
+    """Noms de fichiers hostiles (../, \\, absolu, octet nul) : le fichier est rangé sous un identifiant, jamais hors du dossier de stockage."""
+    from app.config import settings
+    root = settings.storage_path.resolve()
+    for name in ("../../../../tmp/evil_upload.txt", "..\\..\\evil2.txt", "/etc/evil3.txt", "a/../../b.txt", "x\x00.txt"):
+        r = client.post("/api/files", files={"file": (name, b"hello", "text/plain")})
+        assert r.status_code == 200, (name, r.status_code)
+        from app.database import SessionLocal
+        from app.models import StoredFile
+        db = SessionLocal()
+        try:
+            rec = db.get(StoredFile, r.json()["id"])
+            assert Path(rec.path).resolve().is_relative_to(root), (name, rec.path)
+            assert ".." not in Path(rec.path).name and "/" not in Path(rec.path).name
+        finally:
+            db.close()
