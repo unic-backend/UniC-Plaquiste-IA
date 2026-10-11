@@ -1416,3 +1416,5 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
   .pagebar-title { font-size: 14px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; text-overflow: clip; }
   .pagebar-chat { font-size: 12.5px; padding: 6px 9px; }
 }
+
+.unic-said { max-width: 86%; margin: 6px auto 0; text-align: center; font-size: 13.5px; line-height: 1.35; opacity: .62; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

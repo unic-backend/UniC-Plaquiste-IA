@@ -6,7 +6,7 @@ import * as I from "./Icons";
 import { listenOnce } from "./listen";
 import { audioRoute, getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
-import { createSpeaker, ding, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
+import { createSpeaker, ding, getSpeechIssue, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
 import { HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
 
 /** UniC vocal : on lui parle, il répond à voix haute. Rien n'est écrit à l'écran. Dire « stop » ou « merci » termine. */
@@ -27,6 +27,7 @@ export function UnicVoice() {
   const [err, setErr] = useState("");
   const [hearing, setHearing] = useState(false);
   const [ready, setReady] = useState(false);   // micro réellement ouvert
+  const [said, setSaid] = useState("");   // dernière phrase comprise : on voit tout de suite si le micro entend
   const active = useRef(false);
   const cid = useRef<string | undefined>(undefined);
   const queue = useRef<{ items: Notif[]; index: number }>({ items: [], index: 0 });
@@ -40,6 +41,8 @@ export function UnicVoice() {
   async function conversation() {
     let silent = 0;
     while (active.current) {
+      const issue = getSpeechIssue();
+      if (issue) setErr(issue);   // la voix de réponse est muette : on le dit à l'écran (sinon « il ne répond pas » sans raison visible)
       setPhase("listening");
       setHearing(false);
       setReady(false);
@@ -47,8 +50,9 @@ export function UnicVoice() {
       try { heard = await listenOnce(() => setHearing(true), () => setReady(true)); } catch (e: any) { failed.current = true; setErr(e?.message || "Micro indisponible"); return; }
       setHearing(false);
       if (!active.current) return;
-      if (!heard) { if (++silent >= 3) { await say("Je ne t'entends pas. Touche la bille quand tu veux me parler."); return; } continue; }   // silence : on réécoute tout de suite, sans quitter
+      if (!heard) { if (++silent >= 3) { setErr("Je ne t'entends pas. Touche la bille quand tu veux me parler."); await say("Je ne t'entends pas. Touche la bille quand tu veux me parler."); return; } continue; }   // silence : on réécoute tout de suite, sans quitter
       silent = 0;
+      setSaid(heard.trim());
       ding();   // « j'ai entendu » : retour immédiat pendant que UniC réfléchit
       if (END_RE.test(heard.trim())) { await say("D'accord. À tout de suite."); return; }
       if (INTERP_RE.test(heard)) {   // l'interprète a son propre écran : il s'active seulement ici, sur demande
@@ -128,6 +132,7 @@ export function UnicVoice() {
         <span className="unic-ring r1" /><span className="unic-ring r2" /><span className="unic-core"><I.Mic size={44} /></span>
       </button>
       <p className="unic-state" role="status" aria-live="polite">{phase === "listening" ? (hearing ? HEARING : ready ? LABEL.listening : WAITING) : LABEL[phase]}</p>
+      {said && phase !== "idle" && <p className="unic-said">« {said} »</p>}
       {err && <p className="error" role="alert">{err}</p>}
     </div>,
     document.body,
