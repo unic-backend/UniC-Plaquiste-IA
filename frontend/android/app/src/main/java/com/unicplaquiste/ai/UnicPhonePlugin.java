@@ -538,6 +538,9 @@ public class UnicPhonePlugin extends Plugin {
                 i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
                 i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                 i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                // Pause tolérée avant de couper la phrase : par défaut Android ferme le micro après ~1 s de silence (phrases coupées).
+                i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2200L);
+                i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L);
                 i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
                 recognizer.startListening(i);
                 call.resolve();
