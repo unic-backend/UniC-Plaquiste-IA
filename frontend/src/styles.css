@@ -1353,3 +1353,37 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .doc-why-btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--green-text); background: transparent; border: 0; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .doc-why-body { margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); max-height: 320px; overflow-y: auto; }
 .doc-why-body p { margin: 0 0 6px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+
+
+/* ================= Toucher : zones, retour immédiat, aucun délai =================
+   Audit tactile (28 pages, 668 éléments cliquables) : 458 sous 44 px, 223 sous 32 px ; aucun `touch-action` ; 219 boutons sans retour
+   à l'appui ; 17 boutons désactivés qui avaient l'air actifs. Un appui qui ne change rien à l'écran = on retouche 2-3 fois. */
+button, a, [role=button], summary, select, label, input[type=checkbox], input[type=radio], input[type=range] {
+  touch-action: manipulation;                 /* pas de délai ni de zoom au double appui */
+  -webkit-tap-highlight-color: transparent;
+}
+button { min-height: 36px; }                  /* plancher global : Copier, Écouter, filtres, mots-clés étaient à 27-31 px */
+.btn { min-height: 40px; }
+.btn.btn-small { min-height: 36px; padding: 8px 12px; }
+.pagebar-chat, .icon-btn, .foot-link, .doc-act { min-height: 40px; }
+.sv-filters button, .quick-chip, .mode-chip { min-height: 38px; }
+
+/* un bouton désactivé doit LE DIRE (sinon on appuie, rien ne se passe, on réappuie) */
+.btn:disabled, button:disabled, .btn[aria-disabled="true"] { opacity: .42; cursor: not-allowed; filter: grayscale(.35); }
+
+/* retour à l'appui pour tout ce qui n'avait pas le sien (spécificité nulle : ne remplace aucun style existant) */
+:where(button, a[href], [role=button], summary):not(:disabled):active { opacity: .78; }
+
+/* éclat visible APRÈS le relâchement (l'état :active ne dure que quelques millisecondes) */
+@keyframes tapflash { 0% { box-shadow: 0 0 0 0 rgba(217,125,66,.55); } 100% { box-shadow: 0 0 0 11px rgba(217,125,66,0); } }
+.tap-flash { animation: tapflash .32s ease-out; }
+@media (prefers-reduced-motion: reduce) { .tap-flash { animation: none; } }
+
+/* barre d'activité réseau : prouve que l'appui est pris en compte pendant que le serveur répond */
+.net-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity .12s; overflow: hidden; }
+.net-bar.on { opacity: 1; }
+.net-bar::before { content: ""; position: absolute; inset: 0; width: 38%; background: var(--copper, #d97d42); border-radius: 0 3px 3px 0; animation: netslide 1.05s ease-in-out infinite; }
+@keyframes netslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(270%); } }
+@media (prefers-reduced-motion: reduce) { .net-bar::before { animation: none; width: 100%; opacity: .7; } }
+.net-slow { position: fixed; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); z-index: 9998; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; background: rgba(26,35,32,.94); color: #efeae2; box-shadow: 0 6px 22px rgba(0,0,0,.28); pointer-events: none; }
+.toast.toast-global { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom, 0px)); z-index: 9997; max-width: calc(100vw - 32px); pointer-events: none; }

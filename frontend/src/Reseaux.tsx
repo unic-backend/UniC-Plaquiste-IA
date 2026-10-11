@@ -1,4 +1,5 @@
 import * as I from "./Icons";
+import { notify } from "./feedback";
 import { LinkedInConnect, LinkedInPublish } from "./LinkedIn";
 import { InstagramConnect, InstagramPublish } from "./Instagram";
 import { SiteConnect, SitePageActions } from "./Site";
@@ -493,6 +494,7 @@ export function Memoire() {
   const decide = async (id: string, action: string) => {
     try {
       await net.decideMemory(id, action);
+      notify(action === "pin" ? "✓ Souvenir gardé" : action === "archive" ? "✓ Souvenir archivé" : "✓ Enregistré");
       load();
     } catch (e: any) {
       say(e.message);
