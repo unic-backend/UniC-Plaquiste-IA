@@ -578,3 +578,15 @@ Chaque affirmation a été vérifiée dans le code et, quand c'était possible, 
 | Erreurs PDF / délais non signalés | **Vrai, corrigé** | `pdfjob` journalisait en `warning` : la surveillance ne capte que `ERROR`. Passé en `error` (+ le délai dépassé) → incident → alerte (si activée). |
 | Sauvegarde sans SHA256 | **Partiel** | Pas de SHA256, mais : CRC32 du zip, `integrity_check`, comptes du manifeste, relecture à blanc après chaque sauvegarde, `integrity_check` à la restauration, zip tronqué refusé. SHA256 apporterait peu. |
 | Conflits hors-ligne | **Faux / hors sujet** | `offline.ts` ne garde que des messages de chat. Les pointages terrain ont un `client_id` idempotent (rejouer = aucun doublon). Pas d'édition concurrente de données. |
+
+## 16. Cinquième diagnostic externe (vérification de fusion de l'Atelier) — vérifié
+
+| Affirmation | Verdict | Preuve |
+|---|---|---|
+| `skipped` et `neutral` comptent comme succès | **Vrai, corrigé** | `repair.checks` acceptait `("success", "skipped", "neutral")`. Seul `success` est accepté ; ignoré, neutre, annulé, expiré, sans résultat = refusé. |
+| Contrôles obligatoires incomplets | **Vrai, plus grave que dit** | `REQUIRED_CHECKS = ("backend", "frontend")` : `guardrails` (zones protégées) et `quality` (Ruff, Bandit) n'étaient pas exigés. Les quatre le sont maintenant ; un absent → « pas encore lancés ou absents ». |
+| Commit testé ≠ commit fusionné | **Vrai, corrigé** | La fusion n'envoyait pas `sha` à GitHub. Elle envoie le commit exact lu avec les contrôles ; GitHub refuse (409) si la proposition a bougé. |
+| Lecture de secours (jeton sans permission Checks) | **Défaut voisin, corrigé** | Elle prenait le premier run « Tests », éventuellement un run `push` sans `guardrails`. Elle prend maintenant le run de la pull request. |
+| Aucun test négatif | **Vrai, corrigé** | 8 tests ajoutés : chaque conclusion non verte, chaque contrôle absent, en cours, doublon en échec, lecture de secours, `sha` lié, refus 409. |
+
+Non démontré (comme le dit le diagnostic) : qu'une pull request ait réellement été fusionnée ainsi. La fusion exige le clic du propriétaire ; la protection de branche GitHub peut aussi la bloquer (non vérifiable depuis le code).
