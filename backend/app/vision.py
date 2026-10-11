@@ -12,6 +12,9 @@ logger = logging.getLogger("unic.vision")
 
 MAX_SIDE = 1568  # au-delà, Claude réduit l'image lui-même : on économise l'envoi
 MAX_PDF_PAGES = 6  # pages scannées lues par vision par PDF (coût borné)
+TILE_RATIO = 1.5   # image plus allongée que ça (capture de téléphone d'un devis) : lue par tranches, sinon le texte devient minuscule
+MAX_TILES = 4      # coût borné
+OVERLAP = 0.08     # recouvrement entre tranches : une ligne coupée reste lisible
 
 PROMPT = (
     "Le document peut être en français ou en anglais (ceiling, partition, drywall, bedroom…) : transcris dans la langue d'origine et traduis en français.\n"
@@ -20,7 +23,8 @@ PROMPT = (
     "1. Type : plan, croquis, photo de chantier, devis, facture, autre.\n"
     "2. Tout le texte lisible, cotes et unités incluses (L, l, h, surface, échelle).\n"
     "3. Pièces ou zones avec leurs dimensions, une ligne par pièce.\n"
-    "4. Si les dimensions permettent de déduire une surface, donne le calcul (L × l = m²). Jamais de valeur non lisible.\n"
+    "4. Tableau (devis, facture, liste de matériaux) : une ligne par ligne du tableau, colonnes séparées par « | », quantités et unités exactes.\n"
+    "5. Si les dimensions permettent de déduire une surface, donne le calcul (L × l = m²). Jamais de valeur non lisible.\n"
     "Ce qui est illisible ou incertain : écris « illisible » ou « à confirmer ». Pas d'introduction."
 )
 
@@ -49,17 +53,43 @@ def _ask(b64: str) -> str:
     return res.text.strip() if res.available else ""
 
 
+def tiles(img) -> list:
+    """Image très allongée (capture d'un devis) : tranches qui se recouvrent, chacune lue à pleine taille.
+    Image normale : inchangée. Au plus MAX_TILES tranches."""
+    w, h = img.size
+    long_, short = max(w, h), min(w, h)
+    if short == 0 or long_ / short <= TILE_RATIO:
+        return [img]
+    n = min(MAX_TILES, max(2, round(long_ / (short * TILE_RATIO)) + 1))
+    step = long_ / n
+    pad = int(step * OVERLAP)
+    out = []
+    for i in range(n):
+        a, b = max(0, int(i * step) - pad), min(long_, int((i + 1) * step) + pad)
+        out.append(img.crop((0, a, w, b)) if h >= w else img.crop((a, 0, b, h)))
+    return out
+
+
 def describe_image(path: Path) -> str:
     """Description + texte + cotes d'une image. Chaîne vide si vision impossible."""
     if not disponible():
         return ""
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         with Image.open(path) as img:
-            return _ask(_jpeg_b64(img))
+            try:
+                img = ImageOps.exif_transpose(img) or img   # photo prise en travers : à l'endroit avant lecture
+            except Exception:
+                pass
+            parts = tiles(img)
+            texts = [_ask(_jpeg_b64(t)) for t in parts]
+        texts = [t for t in texts if t]
+        if len(parts) > 1 and texts:
+            return "\n\n".join(f"[Partie {i + 1}/{len(parts)}]\n{t}" for i, t in enumerate(texts))
+        return texts[0] if texts else ""
     except Exception as exc:
-        logger.debug("Vision image impossible : %s", exc)
+        logger.warning("Vision image impossible : %s", exc)   # visible dans le journal : sans ça l'IA « devient aveugle » en silence
         return ""
 
 
