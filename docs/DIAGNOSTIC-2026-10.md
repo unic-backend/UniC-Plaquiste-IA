@@ -366,13 +366,12 @@ manque plutôt qu'un faux résultat).
 ### P0 — cette semaine (sécurité et disponibilité)
 
 1. **Protection de `main` activée** sur GitHub (relecture du propriétaire + contrôles obligatoires). Sans elle,
-   `AGENTS.md` et `CODEOWNERS` ne bloquent rien — c'est écrit dans le dépôt lui-même. ⏳ *action du propriétaire*
+   `AGENTS.md` et `CODEOWNERS` ne bloquent rien — c'est écrit dans le dépôt lui-même.
 2. **Dépendances** : `pytest` (serveur) hors du fichier de production, puis `vite` / `react-router-dom`
-   sur une branche dédiée. Ajouter **Dependabot**. ✅ *interface faite, serveur proposé et vérifié (voir §11)*
+   sur une branche dédiée. Ajouter **Dependabot**.
 3. **`UNIC_SECRET_KEY`** défini dans Render (protège les secrets enregistrés, y compris en cas de fuite de la base seule).
-   ⏳ *action du propriétaire*
-4. **Canal d'alerte** sur incident critique et échec de sauvegarde (SMTP déjà branché). ✅ *fait (voir §11)*
-5. **En-tête CSP** ajouté. ✅ *fait (voir §11)*
+4. **Canal d'alerte** sur incident critique et échec de sauvegarde (SMTP déjà branché).
+5. **En-tête CSP** ajouté.
 
 ### P1 — ce mois (qualité et preuve)
 
@@ -385,8 +384,6 @@ manque plutôt qu'un faux résultat).
 ### P2 — le trimestre (métier et autonomie)
 
 11. **Fidélité du métré** : comparer métré estimé et métré exécuté (pointage déjà présent) → indicateur par chantier.
-    *(Les pistes du §6.1 et du §8 ont été écartées au §0 : trop lourdes pour un usage mono-propriétaire, ou
-    contraires au principe « fiabilité d'abord, pas plus d'agents ». Elles restent ici comme archive, pas comme plan.)*
 12. **Reconnaissance des symboles de plans** et lecture du cartouche (échelle) — gains de précision importants.
 13. **Agents autonomes utiles** (section 8), deux ou trois à la fois, chacun avec son journal et son plafond.
 14. **Postgres** si et seulement si plusieurs utilisateurs arrivent (décision documentée dans `ARCHITECTURE.md`).
@@ -479,12 +476,6 @@ cd ../frontend && npm ci && npx tsc --noEmit -p . && npm run build && npm run te
 
 ## 11. Deuxième passe — le P0 mis en œuvre
 
-**Contexte :** les six défauts du §5 ont été repris dans `main` par la pull request #46 (« reprise vérifiée »),
-avec la revue indépendante du §0 (dont la correction de gravité du CORS, justifiée : sans code d'accès, un site
-tiers ne peut rien lire — l'application n'utilise aucun cookie). Cette section décrit donc **ce que la branche
-apporte en plus de `main`** : les points 2 (interface), 4 et 5 du P0. Les pistes écartées au §0 (`/api/metrics`,
-liste d'agents, double moteur) sont retirées des propositions : elles ne sont pas reprises ici.
-
 ### 11.1 Les alertes : la surveillance prévient enfin
 
 Nouveau module `backend/app/alerts.py` (fil discret démarré par `main.py`, toutes les 5 minutes) et **9 tests**
@@ -500,7 +491,7 @@ Garde-fous vérifiés par les tests :
 | **Plafond de 8 messages par jour** | Une tempête de messages finirait ignorée — le pire des cas pour une surveillance |
 | **Rien sans envoi configuré** (SMTP) ni si `UNIC_ALERTS_ENABLED=false` | Aucun envoi inventé, coupure immédiate possible |
 | **Un échec d'envoi ne perd pas l'alerte** : le problème reste à annoncer | Une panne d'e-mail ne doit pas masquer une panne de serveur |
-| **Aucun secret** dans le corps (nettoyage de la surveillance + le nôtre) | Une clé refusée dans un journal ne repart pas par courrier |
+| **Aucun secret** dans le corps (nettoyage de la surveillance) | Une clé refusée dans un journal ne repart pas par courrier |
 | **Aucun fil en test** (`UNIC_NO_BACKGROUND`) | La suite reste déterministe |
 
 Le réglage est documenté dans `.env.example` (fichier prévu pour ça). Le message dit ce qu'il est :
@@ -513,7 +504,7 @@ est donc décisive et gratuite.
 
 - **Appliquée** : `script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
   Elle bloque l'injection de script — la faille la plus grave pour une application qui manipule argent et clients —
-  et ne peut rien casser : rien n'utilise `<object>`, `<base>` ni formulaire externe.
+  et ne devrait rien casser : rien n'utilise `<object>`, `<base>` ni formulaire externe (vérifié en navigateur, voir §12).
 - **Mesurée seulement** (`Content-Security-Policy-Report-Only`) : la politique large (images `data:`/`blob:`,
   styles à l'exécution, `connect-src 'self'`, aperçu de site en cadre `srcdoc`). Elle n'est pas appliquée tant
   qu'on n'a pas vu, dans la console du navigateur, ce qu'elle refuserait. C'est la partie qui touche à l'affichage :
@@ -534,26 +525,21 @@ est donc décisive et gratuite.
 **Serveur — proposition vérifiée, à appliquer par le propriétaire** (`backend/requirements.txt` est protégé).
 Le seul reste est `pytest 8.3.4` (PYSEC-2026-1845). Montée testée dans un environnement **vierge** :
 `pytest 9.0.3` + `pytest-asyncio 1.4.0` (obligatoire avec pytest 9) donnent **exactement le même résultat** :
-sur l'état de `main` fusionné avec les alertes, 469 tests réussis, mêmes 2 échecs d'environnement, aucun autre écart. Détail et fichier prêt à copier :
+463 tests réussis, mêmes 2 échecs d'environnement, aucun autre écart. Détail et fichier prêt à copier :
 `docs/dependances-securite-proposition.txt`.
 
-### 11.4 Aperçu en direct
+---
 
-État vérifié après rebasage sur `main` (donc avec la fonctionnalité matériaux de la PR #45 et ses tests) :
-**469 tests serveur réussis** (+9 pour les alertes), `ruff` et `bandit` propres, garde-fous du dépôt OK,
-`tsc`/`build`/`test:phone` (105) et `npm audit` à 0 côté interface.
+## 12. Deuxième passe : vérification et corrections
 
-L'application tourne dans cet espace de travail (serveur + interface) : vous pouvez cliquer dans vos écrans,
-lancer un calcul et produire un devis PDF. Le moteur répond réellement — « cloison 320 m × 2,50 m, deux faces »
-donne **1 600 m²**, 720 plaques, 534 montants, 221 rails. `vite.config.ts` accepte désormais les noms d'hôte
-distants (sinon Vite affiche « Blocked request ») : cette ligne ne concerne que le poste de développement.
+Seconde livraison de l'outil (commit `aa39784`). Rejouée avant d'être reprise ; ce qui suit est ce qui a été **gardé**, **changé** ou **écarté**.
 
-### 11.5 Ce qui reste du P0
+| Élément | Décision | Pourquoi (vérifié) |
+|---|---|---|
+| **Alertes e-mail** (`alerts.py`) | **Gardé, mais désactivé par défaut** | Écrit comme « actif sans demander ». Or `AGENTS.md` : rien n'est envoyé sans le clic du propriétaire. Désormais : interrupteur dans **Atelier › Alertes** (`GET/PUT /api/alerts`), coupe-circuit `UNIC_ALERTS_ENABLED=false` prioritaire, adresse masquée à l'écran, 12 tests |
+| Message d'alerte « sans donnée client » | **Corrigé** | Affirmation trop forte : le texte d'un incident vient d'une exception et peut contenir des données. Le message est tronqué à 200 caractères et ne promet plus l'absence de donnée client (il ne part qu'à l'adresse du patron) |
+| **CSP** (en-tête de sécurité du contenu) | **Gardé, restreint aux pages HTML** | Posée aussi sur les PDF et le JSON : `object-src 'none'` peut empêcher le lecteur PDF du navigateur d'afficher un PDF (non testable en navigateur sans interface). Elle ne protège de toute façon que les documents HTML. Vérifié dans un vrai navigateur : 17 pages + navigation, **0 violation, 0 erreur** |
+| **Vite 5→8, plugin-react 4→6, react-router 6→7** | **Gardé, vérifié** | `npm ci`, `tsc`, 105 tests, build : OK ; `npm audit` : 0 faille (avant : 4). Navigation (menu, retour arrière, 17 routes) vérifiée dans un navigateur. Node 22 partout (CI, Docker, Android) : compatible avec Vite 8. À surveiller au prochain APK |
+| `vite.config.ts` : `allowedHosts: true` | **Retiré** | Réglage de confort pour l'espace de travail de l'outil, qui désactive la protection du serveur de développement (nom d'hôte quelconque accepté). Aucun intérêt pour le projet |
+| pytest 9 / pytest-asyncio 1.4 (proposition) | **Gardé en proposition** | `requirements.txt` est protégé : à appliquer par le propriétaire avec l'étiquette `core-change-approved` |
 
-- **Protection de `main`** sur GitHub : réglage à faire dans l'interface GitHub (relecture du propriétaire +
-  contrôles obligatoires), impossible depuis le code.
-- **`UNIC_SECRET_KEY`** dans Render : une valeur à saisir.
-- **Dependabot** : ajouter `.github/dependabot.yml` — `.github/` est une zone protégée, le fichier est prêt
-  à copier dans `docs/ci-securite-proposition.yml` (section dépendances).
-- **Application de la montée de `pytest`** : copier `docs/dependances-securite-proposition.txt` dans
-  `backend/requirements.txt` et poser l'étiquette `core-change-approved`.

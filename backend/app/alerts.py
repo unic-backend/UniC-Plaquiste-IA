@@ -11,7 +11,9 @@ Règles (volontairement strictes) :
   contient une adresse ne peut pas détourner l'alerte vers un tiers.
 - **Une seule alerte par problème** (empreinte mémorisée) et un **plafond quotidien** : pas de tempête de messages
   qui finirait ignorée. Les problèmes déjà connus ne sont pas répétés à chaque tour.
-- **Rien ne part sans SMTP configuré** (Paramètres › Courrier) et `UNIC_ALERTS_ENABLED=false` coupe tout.
+- **Rien ne part sans le clic du propriétaire** (règle d'AGENTS.md) : les alertes sont DÉSACTIVÉES tant que le patron ne les active
+  pas (Atelier › Alertes). `UNIC_ALERTS_ENABLED=false` les coupe quoi qu'il arrive.
+- **Rien ne part sans SMTP configuré** (Paramètres › Courrier).
 - **Aucun secret** : le texte des incidents est déjà nettoyé par `selfcare.scrub` avant d'être enregistré.
 - Le message est **interne** (un courrier au patron, jamais à un client, jamais une publication) : il informe,
   il ne déclenche aucune action sur les documents.
@@ -51,9 +53,42 @@ KIND_LABEL = {
 }
 
 
-def enabled() -> bool:
-    """Interrupteur : `UNIC_ALERTS_ENABLED=false` coupe toutes les alertes."""
-    return (os.environ.get("UNIC_ALERTS_ENABLED", "true") or "").strip().lower() not in ("false", "0", "non", "off")
+SETTING_KEY = "alerts_enabled"
+
+
+def forced_off() -> bool:
+    """Coupe-circuit : `UNIC_ALERTS_ENABLED=false` coupe toutes les alertes, quoi qu'ait choisi le patron."""
+    return (os.environ.get("UNIC_ALERTS_ENABLED", "") or "").strip().lower() in ("false", "0", "non", "off")
+
+
+def enabled(db: Session) -> bool:
+    """Actives seulement si le patron les a activées (clic dans l'Atelier) ET que le coupe-circuit n'est pas posé."""
+    if forced_off():
+        return False
+    row = db.get(AppSetting, SETTING_KEY)
+    return bool(row and (row.value or "") == "1")
+
+
+def set_enabled(db: Session, on: bool) -> None:
+    row = db.get(AppSetting, SETTING_KEY)
+    if row is None:
+        db.add(AppSetting(key=SETTING_KEY, value="1" if on else "0"))
+    else:
+        row.value = "1" if on else "0"
+    db.flush()
+
+
+def _mask(addr: str) -> str:
+    name, _, dom = addr.partition("@")
+    return (name[:1] + "***@" + dom) if name and dom else ""
+
+
+def status(db: Session) -> dict:
+    """État pour l'Atelier : actives ou non, envoi configuré, adresse (masquée) du patron, messages du jour."""
+    st = _state(db)
+    today = datetime.now(timezone.utc).date().isoformat()
+    return {"enabled": enabled(db), "forced_off": forced_off(), "smtp": mailbox.smtp_configured(),
+            "to": _mask(owner_address(db)), "sent_today": st["sent_today"] if st["day"] == today else 0, "max_per_day": MAX_PER_DAY}
 
 
 def owner_address(db: Session) -> str:
@@ -107,14 +142,14 @@ def compose(items: list[Incident], link: str = "") -> tuple[str, str]:
     for it in items[:MAX_LISTED]:
         when = it.last_at.isoformat(timespec="minutes") if it.last_at else ""
         label = KIND_LABEL.get(it.kind, it.kind)
-        lines.append(f"- [{label}] {it.source or 'sans source'} : {it.message or '(sans détail)'}")
+        lines.append(f"- [{label}] {it.source or 'sans source'} : {(it.message or '(sans détail)')[:200]}")
         lines.append(f"  vu {it.count} fois, dernière fois le {when}")
     if n > MAX_LISTED:
         lines.append(f"- … et {n - MAX_LISTED} autre(s) problème(s), voir l'Atelier.")
     lines += ["", "Ouvre l'application : Atelier › Surveillance (liste, correctif proposé, réparation)."]
     if link:
         lines.append(f"{link.rstrip('/')}/atelier")
-    lines += ["", "Message automatique de surveillance. Il ne contient aucune donnée client et n'a rien modifié."]
+    lines += ["", "Message automatique de surveillance (activé par toi). Il n'a rien modifié."]
     return subject, "\n".join(lines)
 
 
@@ -122,8 +157,8 @@ def send_pending(db: Session, sender=None) -> dict:
     """Envoie au patron un message regroupant les nouveaux problèmes. Rend ce qui a été fait."""
     sender = sender or mailbox.send
     out = {"sent": False, "count": 0, "reason": ""}
-    if not enabled():
-        out["reason"] = "alertes désactivées"
+    if not enabled(db):
+        out["reason"] = "alertes désactivées (à activer dans l'Atelier)"
         return out
     items = pending(db)
     if not items:

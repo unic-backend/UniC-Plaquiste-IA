@@ -225,8 +225,11 @@ async def security_headers(request: Request, call_next):
     h.setdefault("X-Frame-Options", "DENY")
     h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     h.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
-    h.setdefault("Content-Security-Policy", _CSP_ENFORCED)
-    h.setdefault("Content-Security-Policy-Report-Only", _CSP_REPORT_ONLY)
+    if h.get("content-type", "").lower().startswith("text/html"):
+        # La politique ne protège que les DOCUMENTS HTML (l'interface). Elle n'est pas posée sur les PDF, images, téléchargements et
+        # réponses JSON : `object-src 'none'` sur un PDF peut empêcher le lecteur PDF du navigateur de l'afficher (non testable ici).
+        h.setdefault("Content-Security-Policy", _CSP_ENFORCED)
+        h.setdefault("Content-Security-Policy-Report-Only", _CSP_REPORT_ONLY)
     if settings.unic_env == "production":
         h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp

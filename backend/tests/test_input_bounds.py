@@ -212,15 +212,29 @@ def test_private_routes_are_not_opened_by_the_public_widget():
 
 # ---------------------------------------------------------------- politique de sécurité du contenu
 
+
+def _html_headers(client):
+    """En-têtes d'une page HTML (la page de documentation du serveur : toujours présente, sans dépendre de l'interface compilée)."""
+    r = client.get("/docs")
+    assert r.headers["content-type"].startswith("text/html")
+    return r.headers
+
+
+def test_csp_is_only_on_html_documents_never_on_pdf_or_json(client):
+    """Pas de politique sur un PDF ou une réponse JSON : `object-src 'none'` peut empêcher le lecteur PDF du navigateur de l'afficher."""
+    assert "content-security-policy" not in client.get("/api/ping").headers
+    assert "content-security-policy-report-only" not in client.get("/api/ping").headers
+    assert "content-security-policy" in _html_headers(client)
+
 def test_content_security_policy_is_enforced(client):
     """La politique appliquée bloque l'injection de script sans pouvoir casser l'interface.
 
     L'interface ne contient aucun script en ligne : `script-src 'self'` suffit, et surtout n'autorise NI
     `'unsafe-inline'` NI `'unsafe-eval'`. Rien n'utilise <object>/<embed>, base ou formulaire externe.
     """
-    h = client.get("/api/ping").headers
+    h = _html_headers(client)
     csp = h.get("content-security-policy")
-    assert csp, "la politique de sécurité du contenu doit être envoyée"
+    assert csp, "la politique de sécurité du contenu doit être envoyée sur les pages HTML"
     assert "script-src 'self'" in csp
     assert "unsafe-inline" not in csp.split("script-src")[1].split(";")[0], "pas de script en ligne autorisé"
     assert "unsafe-eval" not in csp
@@ -230,7 +244,7 @@ def test_content_security_policy_is_enforced(client):
 
 def test_wider_policy_is_only_measured(client):
     """La politique large part en « report-only » : mesurée, pas appliquée (aucune régression d'affichage possible)."""
-    h = client.get("/api/ping").headers
+    h = _html_headers(client)
     report = h.get("content-security-policy-report-only")
     assert report and "default-src 'self'" in report
     assert "connect-src 'self'" in report

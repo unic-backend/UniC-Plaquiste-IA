@@ -54,7 +54,19 @@ def env(monkeypatch):
     monkeypatch.setattr(mailbox, "smtp_configured", lambda: True)
     monkeypatch.setattr(alerts.mailbox, "smtp_configured", lambda: True)
     monkeypatch.delenv("UNIC_ALERTS_ENABLED", raising=False)
+    db = SessionLocal()
+    try:
+        alerts.set_enabled(db, True)    # le patron a activé les alertes (clic dans l'Atelier)
+        db.commit()
+    finally:
+        db.close()
     yield sent
+    db = SessionLocal()
+    try:
+        alerts.set_enabled(db, False)   # état d'origine : désactivées
+        db.commit()
+    finally:
+        db.close()
 
 
 @pytest.fixture()
@@ -243,3 +255,45 @@ def test_no_thread_is_started_in_tests(monkeypatch):
     monkeypatch.setenv("UNIC_NO_BACKGROUND", "1")
     alerts.start()
     assert threading.active_count() == before
+
+
+def test_alerts_are_off_until_the_owner_turns_them_on(client, env, owner):
+    """Règle d'AGENTS.md : rien ne part sans le clic du propriétaire. Par défaut, aucune alerte, même avec un envoi configuré."""
+    from app import alerts
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        alerts.set_enabled(db, False)
+        db.commit()
+    finally:
+        db.close()
+    _incident("problème pendant que les alertes sont éteintes")
+    out = _run(env)
+    assert out["sent"] == [] and not alerts_enabled_now()
+
+
+def alerts_enabled_now() -> bool:
+    from app import alerts
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        return alerts.enabled(db)
+    finally:
+        db.close()
+
+
+def test_owner_can_turn_alerts_on_and_off_from_the_api(client, env, owner):
+    from app import alerts
+    st = client.get("/api/alerts").json()
+    assert set(st) >= {"enabled", "forced_off", "smtp", "to", "sent_today", "max_per_day"}
+    off = client.put("/api/alerts", json={"enabled": False}).json()
+    assert off["enabled"] is False
+    on = client.put("/api/alerts", json={"enabled": True}).json()
+    assert on["enabled"] is True and "@" in on["to"] and on["to"].count("*") == 3   # adresse masquée
+    assert alerts.forced_off() is False
+
+
+def test_the_kill_switch_beats_the_owner_choice(client, env, owner, monkeypatch):
+    monkeypatch.setenv("UNIC_ALERTS_ENABLED", "false")
+    client.put("/api/alerts", json={"enabled": True})
+    assert client.get("/api/alerts").json()["enabled"] is False

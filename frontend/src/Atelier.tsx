@@ -79,6 +79,39 @@ function AgentJournal({ id, runId }: { id: string; runId: string }) {
   );
 }
 
+/** Alertes par e-mail : désactivées tant que le patron ne les active pas. Un message par problème, à sa propre adresse seulement. */
+function Alerts() {
+  const [a, setA] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = useCallback(() => api.alerts().then(setA).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+  const toggle = async () => {
+    setBusy(true); setErr("");
+    try { setA(await api.setAlerts(!a.enabled)); } catch (e: any) { setErr(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card-box">
+      <div className="at-head"><h3>Alertes par e-mail</h3>
+        {a && <button className={`btn btn-small ${a.enabled ? "btn-line" : "btn-copper"}`} disabled={busy || a.forced_off} onClick={toggle}>
+          {a.enabled ? "Désactiver" : "Activer"}</button>}</div>
+      {!a && <p className="hint">Lecture…</p>}
+      {a && (
+        <>
+          <p className={a.enabled && a.smtp ? "hint ic" : "hint"}>{a.enabled
+            ? (a.smtp ? <><I.Check size={16} /> Activées : tu reçois un e-mail dès qu'un problème nouveau apparaît.</> : "Activées.")
+            : "Désactivées : rien ne part tant que tu ne les actives pas."}</p>
+          <p className="hint">Un seul message par problème, 8 par jour au maximum, envoyé uniquement à ton adresse{a.to ? ` (${a.to})` : ""}. Jamais à un client, aucune action déclenchée.</p>
+          {!a.smtp && <p className="error">Aucun envoi d'e-mail configuré : règle d'abord Paramètres › Courrier.</p>}
+          {a.forced_off && <p className="error">Coupées par le serveur (UNIC_ALERTS_ENABLED=false).</p>}
+          {a.enabled && <p className="hint">Aujourd'hui : {a.sent_today}/{a.max_per_day} message(s).</p>}
+        </>
+      )}
+      {err && <p className="error" role="status">{err}</p>}
+    </section>
+  );
+}
+
 /** Tableau qualité : chaque progrès est un chiffre mesuré sur des données réelles ; « non mesuré » dit pourquoi. Lecture seule. */
 function Quality() {
   const [q, setQ] = useState<any>(null);
@@ -324,6 +357,7 @@ export function Atelier() {
           {!connected && d.incidents.length > 0 && <p className="hint">Connecte GitHub (plus bas) pour que UniC corrige lui-même.</p>}
         </section>
 
+        <Alerts />
         <Quality />
         <Integrity />
         <Evals onMsg={setMsg} />
