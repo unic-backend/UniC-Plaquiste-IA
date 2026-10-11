@@ -573,9 +573,83 @@ public class UnicPhonePlugin extends Plugin {
         ui.post(() -> { destroyRecognizer(); call.resolve(); });
     }
 
+    // ---------- voix de réponse : synthèse vocale d'Android (le WebView n'a pas toujours speechSynthesis) ----------
+
+    private android.speech.tts.TextToSpeech tts;
+    private boolean ttsOk = false;
+    private boolean ttsStarting = false;
+    private final java.util.LinkedHashMap<String, Runnable> ttsWaiting = new java.util.LinkedHashMap<>();
+
+    private void emitTts(final String event, final String id, final int code) {
+        ui.post(() -> {
+            JSObject o = new JSObject();
+            o.put("id", id);
+            o.put("code", code);
+            notifyListeners(event, o);
+        });
+    }
+
+    /** Lance le travail quand le moteur de voix est prêt ; moteur absent : « ttsError » (code -2) pour chaque phrase en attente. */
+    private void withTts(final String id, final Runnable job) {
+        if (ttsOk && tts != null) { job.run(); return; }
+        ttsWaiting.put(id, job);
+        if (ttsStarting) return;
+        ttsStarting = true;
+        tts = new android.speech.tts.TextToSpeech(getContext().getApplicationContext(), status -> ui.post(() -> {
+            ttsStarting = false;
+            if (status == android.speech.tts.TextToSpeech.SUCCESS && tts != null) {
+                ttsOk = true;
+                tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                    @Override public void onStart(String utteranceId) { }
+                    @Override public void onDone(String utteranceId) { emitTts("ttsDone", utteranceId, 0); }
+                    @Override public void onError(String utteranceId) { emitTts("ttsError", utteranceId, -1); }
+                    @Override public void onError(String utteranceId, int errorCode) { emitTts("ttsError", utteranceId, errorCode); }
+                });
+                for (Runnable w : new ArrayList<>(ttsWaiting.values())) w.run();
+            } else {
+                for (String waiting : new ArrayList<>(ttsWaiting.keySet())) emitTts("ttsError", waiting, -2);
+                tts = null;
+            }
+            ttsWaiting.clear();
+        }));
+    }
+
+    /** Dit une phrase. Rend la main tout de suite ; « ttsDone » / « ttsError » (avec l'identifiant) arrivent ensuite. */
+    @PluginMethod
+    public void speak(final PluginCall call) {
+        final String text = call.getString("text", "");
+        final String id = call.getString("id", "t" + System.nanoTime());
+        final float rate = call.getFloat("rate", 1.0f);
+        final String lang = call.getString("lang", "fr-FR");
+        final boolean flush = Boolean.TRUE.equals(call.getBoolean("flush", false));
+        call.resolve();
+        if (text == null || text.trim().isEmpty()) { emitTts("ttsDone", id, 0); return; }
+        ui.post(() -> {
+            try {
+                withTts(id, () -> {
+                    java.util.Locale loc = java.util.Locale.forLanguageTag(lang);
+                    int avail = tts.isLanguageAvailable(loc);
+                    if (avail < android.speech.tts.TextToSpeech.LANG_AVAILABLE) { emitTts("ttsError", id, -4); return; }
+                    tts.setLanguage(loc);
+                    tts.setSpeechRate(rate > 0 ? rate : 1.0f);
+                    int r = tts.speak(text, flush ? android.speech.tts.TextToSpeech.QUEUE_FLUSH : android.speech.tts.TextToSpeech.QUEUE_ADD, null, id);
+                    if (r != android.speech.tts.TextToSpeech.SUCCESS) emitTts("ttsError", id, -3);
+                });
+            } catch (Exception e) {
+                emitTts("ttsError", id, -3);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void stopSpeak(PluginCall call) {
+        ui.post(() -> { try { if (tts != null && ttsOk) tts.stop(); } catch (Exception ignored) { /* déjà arrêté */ } call.resolve(); });
+    }
+
     @Override
     protected void handleOnDestroy() {
         ui.post(this::destroyRecognizer);
+        ui.post(() -> { try { if (tts != null) { tts.stop(); tts.shutdown(); } } catch (Exception ignored) { /* déjà fermé */ } tts = null; ttsOk = false; });
         super.handleOnDestroy();
     }
 
