@@ -570,3 +570,11 @@ Chaque affirmation a été vérifiée dans le code et, quand c'était possible, 
 | ReportLab : texte long déborde | **Faux** | Cellules déjà en `Paragraph` : libellé de 400 caractères sans espace → retour à la ligne, 1 page. Test ajouté. |
 | Logo absent → plantage | **Faux pour absent, vrai pour corrompu** | Absent : repli existant. Corrompu : `UnidentifiedImageError`. Corrigé : `_logo_ok()` vérifie l'image avant usage. |
 | Numérotation `UC-AAAA-MMJJ-[CODE_CLIENT]`, références libres | **Faux** | Format réel `UC-AAAA-BLOC-CLI`, généré par le serveur (`document_number`), colonne unique, aucun champ d'entrée `number`. |
+
+## 15. Quatrième diagnostic externe (surveillance, sauvegardes, hors-ligne) — vérifié
+
+| Affirmation | Verdict | Preuve |
+|---|---|---|
+| Erreurs PDF / délais non signalés | **Vrai, corrigé** | `pdfjob` journalisait en `warning` : la surveillance ne capte que `ERROR`. Passé en `error` (+ le délai dépassé) → incident → alerte (si activée). |
+| Sauvegarde sans SHA256 | **Partiel** | Pas de SHA256, mais : CRC32 du zip, `integrity_check`, comptes du manifeste, relecture à blanc après chaque sauvegarde, `integrity_check` à la restauration, zip tronqué refusé. SHA256 apporterait peu. |
+| Conflits hors-ligne | **Faux / hors sujet** | `offline.ts` ne garde que des messages de chat. Les pointages terrain ont un `client_id` idempotent (rejouer = aucun doublon). Pas d'édition concurrente de données. |
