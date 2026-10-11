@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -201,8 +202,15 @@ class ClaudeAIProvider(AIProvider):
 
     id = "claude"
     kind = "chat"
-    # `_20260209` : recherche avec filtrage dynamique (Sonnet 5.5, Opus 5.5)
+    # `_20260209` : recherche avec filtrage dynamique (Opus 4.6+ / 5.x, Sonnet 4.6 / 5.x). Les autres modèles (Haiku 4.5 d'UniC vocal…)
+    # refusent cette version : il leur faut la recherche de base `_20250305`. Sinon la requête échouait et l'IA répondait « pas d'accès à Internet ».
     WEB_TOOL = {"type": "web_search_20260209", "name": "web_search"}
+    WEB_TOOL_BASIC = {"type": "web_search_20250305", "name": "web_search"}
+    _DYNAMIC_WEB_RE = re.compile(r"^claude-(?:opus-(?:5|4-[6-9])|sonnet-(?:5|4-[6-9]))")
+
+    @classmethod
+    def web_tool(cls, model: str) -> dict:
+        return cls.WEB_TOOL if cls._DYNAMIC_WEB_RE.match(model or "") else cls.WEB_TOOL_BASIC
 
     def health(self) -> dict:
         ok = bool(settings.anthropic_api_key)
@@ -334,7 +342,7 @@ class ClaudeAIProvider(AIProvider):
         web = bool(kwargs.get("web")) and settings.web_search_enabled
         client_tools = list(kwargs.get("tools") or [])
         handler = kwargs.get("tool_handler")
-        tools = ([{**self.WEB_TOOL, "max_uses": settings.web_search_max_uses}] if web else []) + client_tools
+        tools = ([{**self.web_tool(model), "max_uses": settings.web_search_max_uses}] if web else []) + client_tools
         if tools:
             params["tools"] = tools
         used: list[str] = []
@@ -345,10 +353,11 @@ class ClaudeAIProvider(AIProvider):
             client = self._client()
             try:
                 resp = self._run(client, params, handler, used)
-            except Exception:
+            except Exception as exc:
                 if not web:
                     raise
                 # la recherche Internet est refusée (non activée sur le compte Anthropic ?) : on répond sans elle
+                logger.warning("Recherche Internet refusée (modèle %s) : %s", model, explain_error(exc))   # visible : sans trace, l'IA disait « pas d'accès à Internet » sans raison connue
                 params["messages"], web, used = turns, False, []
                 if client_tools:
                     params["tools"] = client_tools

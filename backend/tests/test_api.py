@@ -432,6 +432,21 @@ def test_claude_web_search_tool_and_sources(claude):
     assert "[Météo Dakar](https://meteo.sn/dakar)" in r.text and "**Sources**" in r.text
 
 
+def test_claude_web_search_tool_version_matches_the_model(claude):
+    from app import ai
+    from app.config import settings
+    fake = claude(lambda kind, kw: _resp("ok"))
+    msgs = [{"role": "user", "content": "match de Barcelone ?"}]
+    ai.chat_complete(msgs, web=True, model=settings.anthropic_voice_model)   # UniC vocal : Haiku 4.5
+    assert fake.calls[-1][1]["model"] == settings.anthropic_voice_model
+    assert fake.calls[-1][1]["tools"][0]["type"] == "web_search_20250305"   # Haiku refuse la version à filtrage dynamique
+    ai.chat_complete(msgs, web=True)   # modèle courant
+    assert fake.calls[-1][1]["tools"][0]["type"] == "web_search_20260209"
+    for m, kind in (("claude-opus-5-5", "web_search_20260209"), ("claude-sonnet-5-5", "web_search_20260209"), ("claude-sonnet-4-6", "web_search_20260209"),
+                    ("claude-haiku-4-5-20251001", "web_search_20250305"), ("claude-sonnet-4-5", "web_search_20250305"), ("", "web_search_20250305")):
+        assert ai.ClaudeAIProvider.web_tool(m)["type"] == kind, m
+
+
 def test_claude_web_search_refused_by_account_falls_back_to_plain_answer(claude):
     from app import ai
     def reply(kind, kw):
