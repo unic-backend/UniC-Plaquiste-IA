@@ -28,7 +28,8 @@ const Native = registerPlugin<{
   endCall(): Promise<{ ended: boolean }>;
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
   listen(o: { language: string }): Promise<void>;
-  speak(o: { id: string; text: string; rate: number; lang: string; flush: boolean }): Promise<void>;
+  speak(o: { id: string; text: string; rate: number; lang: string; flush: boolean; output: string }): Promise<void>;
+  audioOutputs(): Promise<{ bluetooth: string; volume?: number }>;
   stopSpeak(): Promise<void>;
   stopListen(): Promise<void>;
   lastCrash(): Promise<{ text: string; time: number }>;
@@ -54,6 +55,14 @@ const TTS_ERR: Record<number, string> = {
 const MUTED = "Le volume média est à zéro : UniC parle sans son. Monte le volume avec les touches du téléphone.";
 let ttsSeq = 0;
 /** Voix de réponse native (synthèse vocale d'Android) : marche même quand le WebView n'a pas speechSynthesis. Rend la main à la fin de la phrase. */
+export type VoiceOutput = "speaker" | "bluetooth";
+const OUT_KEY = "unic.voiceOutput";
+/** Sortie de la voix d'UniC : haut-parleur du téléphone (par défaut) ou appareil Bluetooth. Mémorisée. */
+export function getVoiceOutput(): VoiceOutput { try { return localStorage.getItem(OUT_KEY) === "bluetooth" ? "bluetooth" : "speaker"; } catch { return "speaker"; } }
+export function setVoiceOutput(o: VoiceOutput): void { try { localStorage.setItem(OUT_KEY, o); } catch { /* ignoré */ } }
+/** Appareil Bluetooth de sortie connecté (nom, "" si aucun). */
+export const audioOutputs = (): Promise<{ bluetooth: string; volume?: number }> => Native.audioOutputs().catch(() => ({ bluetooth: "" }));
+
 export const voiceOut = {
   speak: (text: string, rate = 1, flush = false, lang = "fr-FR"): Promise<void> => new Promise<void>((resolve, reject) => {
     const id = `t${Date.now()}_${++ttsSeq}`;
@@ -69,7 +78,7 @@ export const voiceOut = {
       handles.push(await Native.addListener("ttsMuted", (d) => { if (d.id === id) muted = true; }));
       handles.push(await Native.addListener("ttsDone", (d) => { if (d.id === id) fin(muted ? MUTED : undefined); }));
       handles.push(await Native.addListener("ttsError", (d) => { if (d.id === id) fin(TTS_ERR[d.code ?? -1] || `La voix du téléphone n'a pas pu parler (code ${d.code ?? "?"}).`); }));
-      await Native.speak({ id, text, rate, lang, flush });
+      await Native.speak({ id, text, rate, lang, flush, output: getVoiceOutput() });
     })().catch((e) => fin(e?.message || "La voix du téléphone n'a pas pu démarrer."));
   }),
   stop: (): Promise<void> => Native.stopSpeak().catch(() => {}),
