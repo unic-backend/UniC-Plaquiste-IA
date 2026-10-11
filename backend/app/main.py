@@ -397,7 +397,9 @@ if FRONTEND_DIST.exists():
     @app.get("/{full_path:path}")
     def spa(full_path: str):
         if full_path.startswith("api/"):
-            return {"detail": "Not Found"}
+            # Une route d'API inconnue répond 404 (et non 200) : sinon l'interface prend « Not Found » pour une réponse valide
+            # et un fichier supprimé ou une adresse fausse passe pour un succès.
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         # Jamais hors du dossier de l'interface : « ../ » (même encodé %2e%2e) lirait n'importe quel fichier du serveur
         # (base, clés, variables d'environnement). Le chemin est résolu PUIS comparé au dossier autorisé.
         root = FRONTEND_DIST.resolve()

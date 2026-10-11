@@ -543,3 +543,21 @@ Seconde livraison de l'outil (commit `aa39784`). Rejouée avant d'être reprise 
 | `vite.config.ts` : `allowedHosts: true` | **Retiré** | Réglage de confort pour l'espace de travail de l'outil, qui désactive la protection du serveur de développement (nom d'hôte quelconque accepté). Aucun intérêt pour le projet |
 | pytest 9 / pytest-asyncio 1.4 (proposition) | **Gardé en proposition** | `requirements.txt` est protégé : à appliquer par le propriétaire avec l'étiquette `core-change-approved` |
 
+---
+
+## 13. Troisième diagnostic externe (Gemini / DeepSeek) : vérification point par point
+
+Chaque affirmation a été vérifiée dans le code et, quand c'était possible, **rejouée** (attaque réelle sur un serveur de test).
+
+| # | Affirmation | Verdict | Preuve |
+|---|---|---|---|
+| 1 | Clé Android commitée dans le dépôt | **Vrai, à nuancer** | `unic-debug.keystore` est bien versionnée, mot de passe public `android`. Mais `build.gradle` prend TA clé privée si les secrets `UNIC_KEYSTORE_*` existent (déjà en place). Je ne peux pas voir tes secrets. Guide : `docs/ANDROID-CLE-PRIVEE.md`. Risque faible à modéré (il faut te faire installer un faux APK) |
+| 2a | Path traversal dans `exports.py` | **Faux** | Ce fichier ne manipule **aucun chemin** : il construit des CSV/XLSX en mémoire à partir de la base |
+| 2b | Path traversal dans `fileedit.py` | **Faux** | Le chemin vient de la base (`StoredFile.path`), jamais d'un paramètre ; l'identifiant n'est qu'une clé de recherche |
+| 2c | (test sur toute la surface) | **Rien trouvé** | 5 noms de fichiers hostiles envoyés (`../../`, `\..\`, chemin absolu, `a/../../b`, octet nul) : rangés sous `storage/uploads/xx/<uuid>.ext`, **rien hors du dossier**. Identifiants traversants : aucun fichier lu (aucun contenu `/etc/passwd`). Test permanent ajouté |
+| 3 | `secrets_box.py` : algorithme fort, pas de repli codé en dur, sel unique | **Surtout faux** | Fernet (AES + HMAC) via `cryptography` ✔ ; IV aléatoire par chiffrement ✔ ; **aucune clé de repli codée en dur** (sinon clé aléatoire dans un fichier 0600) ✔. Seul vrai point : la clé issue de `UNIC_SECRET_KEY` passe par un simple SHA-256 sans sel ni KDF lent → **sans danger si la valeur est longue et aléatoire**, faible si c'est une phrase courte. Zone protégée : pas de modification ; recommandation : valeur ≥ 32 caractères aléatoires |
+| 4a | Jetons dans les journaux / erreurs détaillées (Google, Instagram, LinkedIn) | **Faux** | Ces trois modules n'écrivent **aucun** journal ; les erreurs réseau sont remplacées par des messages génériques ; les erreurs de l'API sont tronquées (220 / 200 caractères) et ne contiennent pas de jeton |
+| 4b | Appels pouvant bloquer les tâches de fond | **Faux** | Des délais maximaux existent partout (60 s, 45 s, constante `TIMEOUT`) |
+| 4c | Rafraîchissement non atomique / révocation mal gérée | **Mineur** | Une prolongation de jeton Instagram refusée est ignorée en silence ; la révocation est détectée à la publication suivante avec un message clair (« reconnecte-toi »). Aucun risque de sécurité ; amélioration cosmétique possible |
+
+**Trouvé en vérifiant (non cité par le diagnostic) et corrigé** : une route d'API inconnue répondait **HTTP 200** avec `{"detail": "Not Found"}` au lieu de 404, ce qui laissait l'interface prendre une erreur pour un succès. Les 156 appels `/api` de l'interface ont été comparés aux 187 routes du serveur : aucun appel orphelin, la correction est sans risque. Test ajouté.
