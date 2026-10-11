@@ -40,7 +40,9 @@ MAX_FILES_READ = 10
 MAX_CHARS = 260_000
 MAX_EDITS = 30
 BRANCH_PREFIX = "unic-ai/"
-REQUIRED_CHECKS = ("backend", "frontend")   # jobs de .github/workflows/tests.yml
+# Jobs de .github/workflows/tests.yml : TOUS sont exigés (les garde-fous protègent les zones protégées, la qualité cherche les failles).
+# Un contrôle absent, ignoré (skipped), neutre, annulé ou en échec ne vaut jamais « vert ».
+REQUIRED_CHECKS = ("guardrails", "quality", "backend", "frontend")
 
 
 RELEASE_RE = re.compile(r"\b(apk|d[ée]ploie\w*|red[ée]ploie\w*|mise? en ligne|render|nouveau lien|new lien)\b", re.I)
@@ -399,7 +401,9 @@ def _test_runs(tok: str, repo: str, sha: str) -> list[dict]:
     if r.status_code < 300:
         return r.json().get("check_runs", [])
     runs = _ok(_gh("GET", f"/repos/{repo}/actions/runs", tok, params={"head_sha": sha, "per_page": 20}), "tests").get("workflow_runs", [])
-    latest = next((w for w in runs if w.get("name") == "Tests"), None)   # la plus récente d'abord
+    tests = [w for w in runs if w.get("name") == "Tests"]   # la plus récente d'abord
+    # le run de la pull request (seul à contenir « guardrails ») avant un éventuel run « push »
+    latest = next((w for w in tests if w.get("event") == "pull_request"), None) or (tests[0] if tests else None)
     if latest is None:
         return []
     jobs = _ok(_gh("GET", f"/repos/{repo}/actions/runs/{latest['id']}/jobs", tok), "tests").get("jobs", [])
@@ -416,14 +420,18 @@ def checks(db: Session, job: RepairJob) -> dict:
         return {"state": "merged"}
     if pr.get("state") == "closed":
         return {"state": "closed"}
-    runs = _test_runs(tok, repo, pr["head"]["sha"])
-    runs = [r for r in runs if r.get("name") in REQUIRED_CHECKS]   # les tests (workflow « Tests »), pas l'APK
-    if {r.get("name") for r in runs} != set(REQUIRED_CHECKS):
-        return {"state": "pending", "detail": "Tests pas encore lancés."}
+    sha = pr["head"]["sha"]
+    runs = [r for r in _test_runs(tok, repo, sha) if r.get("name") in REQUIRED_CHECKS]   # les tests (workflow « Tests »), pas l'APK
+    seen = {r.get("name") for r in runs}
+    if seen != set(REQUIRED_CHECKS):
+        absent = ", ".join(n for n in REQUIRED_CHECKS if n not in seen)
+        return {"state": "pending", "sha": sha, "detail": f"Contrôles pas encore lancés ou absents : {absent}."}
     if any(r.get("status") != "completed" for r in runs):
-        return {"state": "pending", "detail": "Tests en cours…"}
-    bad = [r["name"] for r in runs if r.get("conclusion") not in ("success", "skipped", "neutral")]
-    return {"state": "failure", "detail": "Échec : " + ", ".join(bad)} if bad else {"state": "success", "detail": "Tous les tests passent."}
+        return {"state": "pending", "sha": sha, "detail": "Tests en cours…"}
+    bad = sorted({f"{r['name']} ({r.get('conclusion') or 'sans résultat'})" for r in runs if r.get("conclusion") != "success"})   # skipped, neutral, cancelled… : refusés
+    if bad:
+        return {"state": "failure", "sha": sha, "detail": "Échec ou contrôle ignoré : " + ", ".join(bad)}
+    return {"state": "success", "sha": sha, "detail": "Tous les contrôles passent."}
 
 
 def sync(db: Session, job: RepairJob) -> None:
@@ -511,7 +519,11 @@ def merge(db: Session, job: RepairJob) -> dict:
     if st["state"] != "success":
         raise RepairError("Fusion refusée : les tests ne sont pas verts (" + st.get("detail", st["state"]) + ").", 409)
     tok, repo, _ = _ctx(db)
-    _ok(_gh("PUT", f"/repos/{repo}/pulls/{job.pr_number}/merge", tok, json={"merge_method": "squash"}), "fusion")
+    # « sha » = le commit exact qui a passé les contrôles : si la proposition a bougé depuis, GitHub refuse (409) au lieu de fusionner du code non testé
+    r = _gh("PUT", f"/repos/{repo}/pulls/{job.pr_number}/merge", tok, json={"merge_method": "squash", "sha": st["sha"]})
+    if r.status_code == 409:
+        raise RepairError("Fusion refusée : la proposition a changé depuis les contrôles. Attends les nouveaux contrôles, puis réessaie.", 409)
+    _ok(r, "fusion")
     _gh("DELETE", f"/repos/{repo}/git/refs/heads/{job.branch}", tok)
     job.status = "merged"
     if job.incident_id:

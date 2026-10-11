@@ -3004,8 +3004,13 @@ def test_repair_job_opens_a_pull_request_and_merges_only_when_tests_are_green(cl
     assert r.status_code == 409 and "tests" in r.json()["detail"]       # jamais de fusion sans tests verts
     state["runs"] = [{"name": "backend", "status": "completed", "conclusion": "success"},
                      {"name": "frontend", "status": "completed", "conclusion": "success"}]
+    r = client.post(f"/api/selfcare/jobs/{job.id}/merge")
+    assert r.status_code == 409 and "guardrails" in r.json()["detail"]   # garde-fous et qualité absents : jamais de fusion
+    state["runs"] = [{"name": n, "status": "completed", "conclusion": "success"} for n in ("guardrails", "quality", "backend", "frontend")]
     out = client.post(f"/api/selfcare/jobs/{job.id}/merge").json()
     assert out["ok"] and any(m == "PUT" and p.endswith("/pulls/7/merge") for m, p, _ in calls)
+    put = next(j for m, p, j in calls if m == "PUT" and p.endswith("/pulls/7/merge"))
+    assert put["sha"] == "c1"   # le commit exact qui a passé les contrôles
     db.expire_all()
     assert job.status == "merged" and db.get(Incident, inc.id).status == "fixed"
     db.close()
@@ -3675,7 +3680,7 @@ def test_repair_checks_fall_back_to_actions_jobs_when_token_has_no_checks_permis
     job = RepairJob(kind="fix", status="proposed", pr_number=81)
     db.add(job)
     db.commit()
-    jobs = [{"name": "backend", "status": "completed", "conclusion": "success"}, {"name": "frontend", "status": "completed", "conclusion": "success"}]
+    jobs = [{"name": n, "status": "completed", "conclusion": "success"} for n in ("guardrails", "quality", "backend", "frontend")]
 
     def gh(method, path, token, **kw):
         if path.endswith("/pulls/81"):
@@ -4012,3 +4017,120 @@ def test_tracking_conversion_rate_counts_only_decided_quotes(client):
     assert (c["acceptes"], c["refuses"]) == (before["acceptes"] + 1, before["refuses"] + 1)
     assert c["en_attente"] == before["en_attente"] + 1
     assert c["taux"] == round(100 * c["acceptes"] / (c["acceptes"] + c["refuses"]), 1)
+
+
+# ---------- fusion de l'Atelier : tout contrôle obligatoire doit être « success » ----------
+
+_ALL_CHECKS = ("guardrails", "quality", "backend", "frontend")
+
+
+def _atelier_checks(monkeypatch, runs, sha="s90", check_runs_ok=True):
+    from app import repair
+    from app.database import SessionLocal
+    from app.models import RepairJob
+    db = SessionLocal()
+    _repair_ready(db)
+    job = RepairJob(kind="fix", status="proposed", pr_number=90)
+    db.add(job)
+    db.commit()
+
+    def gh(method, path, token, **kw):
+        if path.endswith("/pulls/90"):
+            return _GhR(200, {"merged": False, "state": "open", "head": {"sha": sha}})
+        if "/check-runs" in path:
+            return _GhR(200, {"check_runs": runs}) if check_runs_ok else _GhR(403)
+        if path.endswith("/actions/runs"):
+            return _GhR(200, {"workflow_runs": [{"id": 1, "name": "Tests", "event": "push"}, {"id": 2, "name": "Tests", "event": "pull_request"}]})
+        if path.endswith("/actions/runs/2/jobs"):
+            return _GhR(200, {"jobs": runs})
+        if path.endswith("/actions/runs/1/jobs"):
+            return _GhR(200, {"jobs": [r for r in runs if r["name"] != "guardrails"]})   # le run « push » n'a pas de garde-fous
+        return _GhR(200, {})
+    monkeypatch.setattr(repair, "_gh", gh)
+    return repair, db, job
+
+
+def _run(name, conclusion="success", status="completed"):
+    return {"name": name, "status": status, "conclusion": conclusion}
+
+
+def test_atelier_merge_check_passes_only_when_every_required_job_succeeds(client, monkeypatch):
+    repair, db, job = _atelier_checks(monkeypatch, [_run(n) for n in _ALL_CHECKS])
+    out = repair.checks(db, job)
+    assert out["state"] == "success" and out["sha"] == "s90"
+    db.close()
+
+
+def test_atelier_merge_check_refuses_skipped_neutral_and_other_non_success(client, monkeypatch):
+    for bad in ("skipped", "neutral", "cancelled", "timed_out", "action_required", "stale", "failure", None):
+        runs = [_run(n) for n in _ALL_CHECKS]
+        runs[0] = _run("guardrails", bad)   # garde-fous : ignorés, neutres, annulés… = pas verts
+        repair, db, job = _atelier_checks(monkeypatch, runs)
+        out = repair.checks(db, job)
+        assert out["state"] == "failure" and "guardrails" in out["detail"], (bad, out)
+        db.close()
+
+
+def test_atelier_merge_check_refuses_missing_required_job(client, monkeypatch):
+    for missing in _ALL_CHECKS:
+        repair, db, job = _atelier_checks(monkeypatch, [_run(n) for n in _ALL_CHECKS if n != missing])
+        out = repair.checks(db, job)
+        assert out["state"] == "pending" and missing in out["detail"], (missing, out)
+        db.close()
+
+
+def test_atelier_merge_check_waits_for_jobs_still_running(client, monkeypatch):
+    runs = [_run(n) for n in _ALL_CHECKS]
+    runs[1] = _run("quality", None, "in_progress")
+    repair, db, job = _atelier_checks(monkeypatch, runs)
+    assert repair.checks(db, job)["state"] == "pending"
+    db.close()
+
+
+def test_atelier_merge_check_one_bad_duplicate_of_a_job_blocks(client, monkeypatch):
+    runs = [_run(n) for n in _ALL_CHECKS] + [_run("backend", "failure")]   # ancienne exécution en échec, même nom
+    repair, db, job = _atelier_checks(monkeypatch, runs)
+    out = repair.checks(db, job)
+    assert out["state"] == "failure" and "backend" in out["detail"]
+    db.close()
+
+
+def test_atelier_merge_check_fallback_reads_the_pull_request_run_not_the_push_run(client, monkeypatch):
+    repair, db, job = _atelier_checks(monkeypatch, [_run(n) for n in _ALL_CHECKS], check_runs_ok=False)
+    assert repair.checks(db, job)["state"] == "success"   # le run « push » (sans garde-fous) n'est pas pris
+    db.close()
+
+
+def test_atelier_merge_binds_the_tested_commit_and_refuses_when_it_moved(client, monkeypatch):
+    from app import repair
+    repair_, db, job = _atelier_checks(monkeypatch, [_run(n) for n in _ALL_CHECKS], sha="tested1")
+    puts = []
+    base_gh = repair._gh
+
+    def gh(method, path, token, **kw):
+        if method == "PUT" and path.endswith("/pulls/90/merge"):
+            puts.append(kw.get("json"))
+            return _GhR(409, {"message": "Head branch was modified"})
+        return base_gh(method, path, token, **kw)
+    monkeypatch.setattr(repair, "_gh", gh)
+    try:
+        repair.merge(db, job)
+        raise AssertionError("la fusion aurait dû être refusée")
+    except repair.RepairError as e:
+        assert e.status == 409 and "changé" in str(e)
+    assert puts == [{"merge_method": "squash", "sha": "tested1"}]
+    assert job.status == "proposed"
+    db.close()
+
+
+def test_atelier_merge_is_refused_when_any_required_job_is_not_green(client, monkeypatch):
+    runs = [_run(n) for n in _ALL_CHECKS]
+    runs[0] = _run("guardrails", "skipped")
+    repair, db, job = _atelier_checks(monkeypatch, runs)
+    try:
+        repair.merge(db, job)
+        raise AssertionError("la fusion aurait dû être refusée")
+    except repair.RepairError as e:
+        assert e.status == 409
+    assert job.status == "proposed"
+    db.close()
