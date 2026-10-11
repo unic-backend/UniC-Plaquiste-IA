@@ -48,6 +48,26 @@ export function deviceVoices(): SpeechSynthesisVoice[] {
   try { return (window.speechSynthesis?.getVoices() || []).filter((v) => v.lang.toLowerCase().startsWith("fr")); } catch { return []; }
 }
 
+/** Branche début / fin / erreur d'une phrase, avec garde-fous : certains moteurs de voix Android ne déclenchent jamais « fin » ni « erreur »
+ *  (rien ne se dit, et l'écran restait bloqué pour toujours). Sans démarrage en 5 s ou après la durée plausible, on rend la main et on le signale. */
+function armUtterance(u: SpeechSynthesisUtterance, text: string, rate: number, done: () => void): void {
+  let over = false, started = false;
+  const end = () => { if (over) return; over = true; clearTimeout(t1); clearTimeout(t2); done(); };
+  const t1 = setTimeout(() => {
+    if (started) return;
+    speechIssue = "La voix du téléphone ne démarre pas. Vérifie « Synthèse vocale Google » et la voix française.";
+    try { window.speechSynthesis.cancel(); } catch { /* ignoré */ }
+    end();
+  }, 5000);
+  const t2 = setTimeout(end, 6000 + (text.length * 110) / Math.max(rate, 0.5));
+  u.onstart = () => { started = true; speechIssue = ""; };
+  u.onend = () => end();
+  u.onerror = (e) => {
+    speechIssue = `La voix du téléphone n'a pas pu parler (${(e as SpeechSynthesisErrorEvent).error || "erreur"}). Vérifie « Synthèse vocale Google » et la voix française.`;
+    end();
+  };
+}
+
 export function speakDevice(text: string, voiceURI = "", rate = 1, onEnd?: () => void): boolean {
   const synth = window.speechSynthesis;
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
@@ -56,8 +76,7 @@ export function speakDevice(text: string, voiceURI = "", rate = 1, onEnd?: () =>
   u.lang = "fr-FR"; u.rate = rate;
   const v = deviceVoices().find((x) => x.voiceURI === voiceURI);
   if (v) u.voice = v;
-  u.onend = () => onEnd?.();
-  u.onerror = () => onEnd?.();
+  armUtterance(u, text, rate, () => onEnd?.());
   synth.speak(u);
   return true;
 }
@@ -125,9 +144,7 @@ function sayQueued(text: string, rate = getVocalRate()): Promise<void> {
         u.lang = "fr-FR"; u.rate = rate;
         const v = deviceVoices().find((x) => x.voiceURI === pref.deviceVoice);
         if (v) u.voice = v;
-        u.onstart = () => { speechIssue = ""; };
-        u.onend = () => done();
-        u.onerror = (e) => { speechIssue = `La voix du téléphone n'a pas pu parler (${(e as SpeechSynthesisErrorEvent).error || "erreur"}). Vérifie « Synthèse vocale Google » et la voix française.`; done(); };
+        armUtterance(u, spoken, rate, done);
         synth.speak(u);   // sans cancel() : la phrase précédente finit d'abord
       } catch { speechIssue = NO_VOICE; done(); }
     };

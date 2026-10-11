@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { api, isNative } from "./api";
+import { api, isNative, Stopped } from "./api";
 import * as I from "./Icons";
 import { listenOnce } from "./listen";
 import { audioRoute, getPhoneWhenLocked, getReadWhenLocked, notifApi, phone, wakeApi } from "./phone";
@@ -93,17 +93,22 @@ export function UnicVoice() {
         }
         let speaker = createSpeaker();
         let started = false;
-        const out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true, locked }, (ev) => {
-          if (!active.current) { speaker.cancel(); return; }
-          if (ev.t === "delta") { if (!started) { started = true; setPhase("speaking"); } speaker.push(ev.text || ""); }   // il parle dès la première phrase
-          else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); started = false; }
-        });
+        const ac = new AbortController();
+        const stuck = window.setTimeout(() => ac.abort(), 70000);   // le serveur ne répond pas : on le dit au lieu de rester sur « Je réfléchis… » pour toujours
+        let out;
+        try {
+          out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true, locked }, (ev) => {
+            if (!active.current) { speaker.cancel(); return; }
+            if (ev.t === "delta") { if (!started) { started = true; setPhase("speaking"); } speaker.push(ev.text || ""); }   // il parle dès la première phrase
+            else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); started = false; }
+          }, ac.signal);
+        } finally { window.clearTimeout(stuck); }
         cid.current = out.conversation_id;
         if (!out.streamed) speaker.push(out.message?.content || "");
         setPhase("speaking");
         await speaker.finish();
         continue;
-      } catch (e: any) { reply = e?.message || "Je n'arrive pas à joindre le serveur."; }
+      } catch (e: any) { reply = e instanceof Stopped ? "Le serveur met trop de temps à répondre. Réessaie dans un instant." : (e?.message || "Je n'arrive pas à joindre le serveur."); setErr(reply); }
       if (!active.current) return;
       setPhase("speaking");
       await say(reply);
