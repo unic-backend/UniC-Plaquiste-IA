@@ -4,11 +4,11 @@
 
 ## Ce qui existe déjà
 - Render : `healthCheckPath: /api/ping`. Si la nouvelle version ne démarre pas, Render garde l'ancienne en ligne.
-- `uptime.yml` : contrôle externe toutes les 30 min (santé + API fermée), issue « 🔴 Serveur en panne ».
+- `uptime.yml` : contrôle externe prévu « toutes les 30 min » (santé + API fermée), issue « 🔴 Serveur en panne ». **Réel : GitHub exécute les crons au mieux ; mesuré ici, ~2 passages en 10 h** (voir « Limite constatée »).
 - Base de données : colonnes ajoutées seulement (`ensure_columns`) → l'ancienne version fonctionne avec la nouvelle base. **Le retour arrière est donc sans danger pour les données.**
 
 ## Le trou
-Une version qui démarre (ping OK) mais qui est cassée (base injoignable, API ouverte, erreurs) reste en ligne jusqu'au prochain contrôle (≤ 30 min), et personne ne revient en arrière.
+Une version qui démarre (ping OK) mais qui est cassée (base injoignable, API ouverte, erreurs) reste en ligne jusqu'au prochain contrôle (**de quelques heures** avec les crons GitHub, voir « Limite constatée »), et personne ne revient en arrière.
 
 ## Ce que propose `docs/deploiement-retour-arriere-proposition.yml`
 Après chaque fusion dans `main` :
@@ -19,7 +19,13 @@ Après chaque fusion dans `main` :
 5. Si sain : ferme l'alerte.
 
 ## Déclencheurs (corrigé après essai réel)
-Les fusions automatiques de GitHub ne déclenchent pas les workflows « push » (constaté sur #43). Le contrôle tourne donc aussi **toutes les 15 min** (état actuel, sans attente, sans retour arrière automatique : il n'est pas lié à un déploiement précis), en plus de la fusion manuelle et du lancement à la main.
+Les fusions automatiques de GitHub ne déclenchent pas les workflows « push » (constaté sur #43). Le contrôle a donc aussi un déclencheur planifié (état actuel, sans attente, sans retour arrière automatique : il n'est pas lié à un déploiement précis), en plus de la fusion manuelle et du lancement à la main.
+
+## Limite constatée (honnête)
+Le cron « `*/15` » de `post-deploy.yml` n'a produit **aucun passage planifié en 53 minutes**, et le cron « `*/30` » de `uptime.yml` n'a tourné que **2 fois en environ 10 heures**. GitHub traite les crons comme « au mieux » et les retarde beaucoup sur un dépôt calme. **Il ne faut donc pas compter sur un contrôle toutes les 15 ou 30 minutes** : le rythme réel est de quelques heures. Ce qui fonctionne de façon sûre : le lancement à la main et la fusion manuelle.
+
+### Ce qu'il faut pour une vraie surveillance (hors dépôt, sans clé ni secret dans le code)
+Un moniteur externe gratuit qui interroge le serveur toutes les 5 minutes et t'envoie un e-mail en cas de panne. Exemple : UptimeRobot (compte gratuit). Réglage : type « HTTP(s) », adresse `https://<ton-serveur>/api/health/ready`, intervalle 5 minutes, alerte par e-mail. Réponse attendue : 200. Render envoie aussi des notifications d'échec de déploiement (Dashboard › Notifications) : à activer.
 
 ## Trois niveaux, à ton choix
 | Niveau | À faire | Résultat |

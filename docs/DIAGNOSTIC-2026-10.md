@@ -300,7 +300,7 @@ L'usage local au poste de travail reste possible, la faille non.
 **Déjà là.** Incidents persistés et regroupés par empreinte ; pouls des fils de fond (sauvegarde, agents,
 surveillance) avec relance automatique ; contrôle quotidien (base, disque, mémoire, Claude, sauvegardes) ;
 surveillance de cohérence des documents (total ≠ somme des lignes, TVA incohérente, PDF manquant, montants
-négatifs, numéros dupliqués) ; tableau de qualité qui refuse d'inventer ; workflow externe toutes les 15 minutes
+négatifs, numéros dupliqués) ; tableau de qualité qui refuse d'inventer ; workflow externe planifié (en pratique toutes les quelques heures : GitHub retarde les crons)
 et contrôle après déploiement avec retour arrière proposé.
 
 **Les trois trous, par ordre d'importance :**
@@ -313,8 +313,8 @@ et contrôle après déploiement avec retour arrière proposé.
    toutes les 5 minutes (table `HealthSample`) et exposer `/api/metrics` au format Prometheus, ce que Render
    peut surveiller directement.
 3. **Pas de transaction synthétique.** Le contrôle après déploiement vérifie la santé, pas le **parcours
-   réel**. → un test de bout en bout en lecture seule (connexion, lecture clients, calcul témoin) toutes
-   les 15 minutes, avec alerte si le résultat change.
+   réel**. → un test de bout en bout en lecture seule (connexion, lecture clients, calcul témoin) à intervalle régulier
+   (par un moniteur externe plutôt que par un cron GitHub, trop lent), avec alerte si le résultat change.
 
 ### 6.2 Précision — la bonne méthode, à étendre
 
