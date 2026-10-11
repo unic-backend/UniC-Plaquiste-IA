@@ -51,21 +51,23 @@ const TTS_ERR: Record<number, string> = {
   [-2]: "Aucun moteur de synthèse vocale sur ce téléphone. Installe « Synthèse vocale Google » dans les réglages Android.",
   [-4]: "Langue non disponible dans la synthèse vocale du téléphone.",
 };
+const MUTED = "Le volume média est à zéro : UniC parle sans son. Monte le volume avec les touches du téléphone.";
 let ttsSeq = 0;
 /** Voix de réponse native (synthèse vocale d'Android) : marche même quand le WebView n'a pas speechSynthesis. Rend la main à la fin de la phrase. */
 export const voiceOut = {
   speak: (text: string, rate = 1, flush = false, lang = "fr-FR"): Promise<void> => new Promise<void>((resolve, reject) => {
     const id = `t${Date.now()}_${++ttsSeq}`;
     const handles: { remove(): Promise<void> }[] = [];
-    let over = false, guard: ReturnType<typeof setTimeout> | undefined;
+    let over = false, muted = false, guard: ReturnType<typeof setTimeout> | undefined;
     const fin = (err?: string) => {
       if (over) return; over = true; clearTimeout(guard);
       handles.forEach((h) => h.remove().catch(() => {}));
       if (err) reject(new Error(err)); else resolve();
     };
-    guard = setTimeout(() => fin(), 8000 + (text.length * 110) / Math.max(rate, 0.5));   // le moteur ne répond jamais : on rend la main
+    guard = setTimeout(() => fin("La voix du téléphone ne répond pas. Redémarre l'appli ; si ça continue, vérifie « Synthèse vocale Google »."), 8000 + (text.length * 110) / Math.max(rate, 0.5));   // le moteur ne répond jamais : on rend la main et on le dit
     (async () => {
-      handles.push(await Native.addListener("ttsDone", (d) => { if (d.id === id) fin(); }));
+      handles.push(await Native.addListener("ttsMuted", (d) => { if (d.id === id) muted = true; }));
+      handles.push(await Native.addListener("ttsDone", (d) => { if (d.id === id) fin(muted ? MUTED : undefined); }));
       handles.push(await Native.addListener("ttsError", (d) => { if (d.id === id) fin(TTS_ERR[d.code ?? -1] || `La voix du téléphone n'a pas pu parler (code ${d.code ?? "?"}).`); }));
       await Native.speak({ id, text, rate, lang, flush });
     })().catch((e) => fin(e?.message || "La voix du téléphone n'a pas pu démarrer."));

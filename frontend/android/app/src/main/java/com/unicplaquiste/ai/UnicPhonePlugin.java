@@ -599,6 +599,11 @@ public class UnicPhonePlugin extends Plugin {
             ttsStarting = false;
             if (status == android.speech.tts.TextToSpeech.SUCCESS && tts != null) {
                 ttsOk = true;
+                // voix sur le flux « média » (comme une vidéo) : réglée par les touches de volume, jamais par le mode silencieux de la sonnerie
+                tts.setAudioAttributes(new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build());
                 tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
                     @Override public void onStart(String utteranceId) { }
                     @Override public void onDone(String utteranceId) { emitTts("ttsDone", utteranceId, 0); }
@@ -631,6 +636,8 @@ public class UnicPhonePlugin extends Plugin {
                     int avail = tts.isLanguageAvailable(loc);
                     if (avail < android.speech.tts.TextToSpeech.LANG_AVAILABLE) { emitTts("ttsError", id, -4); return; }
                     tts.setLanguage(loc);
+                    AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+                    if (am != null && am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) emitTts("ttsMuted", id, 0);   // volume média à zéro : il « parle » sans aucun son
                     tts.setSpeechRate(rate > 0 ? rate : 1.0f);
                     int r = tts.speak(text, flush ? android.speech.tts.TextToSpeech.QUEUE_FLUSH : android.speech.tts.TextToSpeech.QUEUE_ADD, null, id);
                     if (r != android.speech.tts.TextToSpeech.SUCCESS) emitTts("ttsError", id, -3);
