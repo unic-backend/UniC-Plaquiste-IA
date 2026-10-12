@@ -4215,3 +4215,30 @@ def test_files_stay_known_in_later_messages_and_the_ai_is_told_it_can_look_again
     assert "FICHIER(S) JOINT(S)" in first and "question=" in first
     assert "FICHIERS DÉJÀ ENVOYÉS" in later and "Plan RH.png" in later and f"file_id={fid}" in later
     assert "read_plan(file_id, question=" in later
+
+
+# ---------- surveillance : une sauvegarde absente, corrompue ou non restaurable est signalée ----------
+
+def test_self_check_flags_a_backup_that_became_unrestorable_after_creation(client):
+    from app import backup, selfcare
+    from app.database import SessionLocal
+    from app.models import Incident
+    made = backup.create("test")
+    assert made["verified"] is True
+    db = SessionLocal()
+    try:
+        ok = {c["nom"]: c for c in selfcare.self_check(db)["checks"]}
+        assert ok["Sauvegarde"]["ok"] and ok["Sauvegarde restaurable"]["ok"]            # sauvegarde saine : tout vert
+        p = backup.path_of(made["name"])
+        p.write_bytes(p.read_bytes()[: p.stat().st_size // 2])                        # zip tronqué APRÈS la création
+        res = {c["nom"]: c for c in selfcare.self_check(db)["checks"]}
+        assert res["Sauvegarde"]["ok"] is True                                         # l'âge seul ne voit rien…
+        assert res["Sauvegarde restaurable"]["ok"] is False and res["Sauvegarde restaurable"]["detail"]   # …la relecture à blanc, si
+        inc = db.query(Incident).filter(Incident.source == "check:Sauvegarde restaurable", Incident.status == "open").all()
+        assert len(inc) == 1 and "restaurable" in inc[0].message                       # alerte exploitable : nom du contrôle + cause
+        backup.create("test2")                                                         # nouvelle sauvegarde saine
+        again = {c["nom"]: c for c in selfcare.self_check(db)["checks"]}
+        assert again["Sauvegarde restaurable"]["ok"] is True                           # revenu à la normale
+        assert db.query(Incident).filter(Incident.source == "check:Sauvegarde restaurable", Incident.status == "open").count() == 0
+    finally:
+        db.close()
