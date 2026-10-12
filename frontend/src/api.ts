@@ -304,7 +304,7 @@ export const net = {
   journal: (action = "") => request<JournalRow[]>(`/api/journal${action ? `?action=${encodeURIComponent(action)}` : ""}`),
   deleteMemory: (id: string) => request(`/api/memory/${id}`, { method: "DELETE" }),
   mailStatus: () => request<{ read: boolean; send: boolean; ai: boolean; note: string }>("/api/mail/status"),
-  mailAccount: () => request<{ connected: boolean; address: string; env_override: boolean }>("/api/mail/account"),
+  mailAccount: () => request<{ connected: boolean; address: string; env_override: boolean; unreadable?: boolean }>("/api/mail/account"),
   connectGmail: (address: string, password: string) =>
     request<{ connected: boolean; address: string }>("/api/mail/account", { method: "PUT", ...json({ address, password }) }),
   disconnectGmail: () => request<{ connected: boolean }>("/api/mail/account", { method: "DELETE" }),

@@ -321,7 +321,7 @@ export function Courrier() {
   const [draft, setDraft] = useState<MailDraft | null>(null);
   const [instr, setInstr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [acct, setAcct] = useState<{ connected: boolean; address: string; env_override: boolean } | null>(null);
+  const [acct, setAcct] = useState<{ connected: boolean; address: string; env_override: boolean; unreadable?: boolean } | null>(null);
   const [gAddr, setGAddr] = useState("");
   const [gPwd, setGPwd] = useState("");
   const { msg, say } = useToast();
@@ -371,6 +371,7 @@ export function Courrier() {
           ) : (
             <section className="card-box">
               <label>Connecter Gmail</label>
+              {acct.unreadable && <p className="hint" role="alert">Le mot de passe enregistré est devenu illisible (la clé de chiffrement du serveur a changé). Colle un nouveau mot de passe d'application pour reconnecter Gmail.</p>}
               <p className="hint">Étape 1 : écris l'adresse du compte à connecter (ton Gmail d'entreprise).</p>
               <input type="email" inputMode="email" autoComplete="off" placeholder="ton.adresse@gmail.com" value={gAddr} onChange={(e) => setGAddr(e.target.value)} />
               <ol className="steps" start={2}>

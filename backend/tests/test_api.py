@@ -1608,6 +1608,23 @@ def test_gmail_secret_survives_restart_and_bad_key_is_harmless(client, monkeypat
     client.delete("/api/mail/account")
 
 
+def test_gmail_reported_connected_only_when_the_saved_password_is_readable(client, monkeypatch):
+    import imaplib
+    from app import mail_account
+    from app.database import SessionLocal
+    from app.models import AppSetting
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", _FakeImap)
+    out = client.put("/api/mail/account", json={"address": "patron@gmail.com", "password": "abcdefghijklmnop"}).json()
+    assert out["connected"] is True and out["unreadable"] is False
+    db = SessionLocal()
+    db.get(AppSetting, "mail_secret").value = "gAAAAA-chiffre-d-une-ancienne-cle"      # clé de chiffrement changée : le secret ne se lit plus
+    db.commit()
+    st = mail_account.status(db)
+    assert st["connected"] is False and st["unreadable"] is True                       # plus de « connecté » trompeur
+    db.close()
+    client.delete("/api/mail/account")
+
+
 def test_google_plan_cadence_checklist_and_manual_publish(client, claude):
     from datetime import datetime, timedelta, timezone
     from app import gbp_plan

@@ -98,5 +98,8 @@ def mask(address: str) -> str:
 
 
 def status(db: Session) -> dict:
-    address = _get(db, "mail_address")
-    return {"connected": bool(address and _get(db, "mail_secret")), "address": mask(address) if address else ""}
+    address, secret = _get(db, "mail_address"), _get(db, "mail_secret")
+    readable = bool(secret) and secrets_box.decrypt(secret) is not None
+    # « connecté » seulement si le mot de passe enregistré est lisible : après un changement de clé de chiffrement il ne l'est plus
+    return {"connected": bool(address and readable), "address": mask(address) if address else "",
+            "unreadable": bool(address and secret and not readable)}
