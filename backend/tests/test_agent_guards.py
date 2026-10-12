@@ -137,8 +137,7 @@ def test_emergency_stop_blocks_every_start_and_stops_a_run_in_progress(db, clien
 
 def test_clock_starts_at_most_two_agents_and_none_without_credit(db, monkeypatch):
     from app import usage
-    for i in range(4):
-        _agent(db, f"Agent parallèle {i}", tools=["list_unpaid"])
+    mine = [_agent(db, f"Agent parallèle {i}", tools=["list_unpaid"]) for i in range(4)]
     started_ids = []
     monkeypatch.setattr(agents, "start", lambda aid: started_ids.append(aid) or agents._running.add(aid) or True)
     monkeypatch.setattr(usage, "summary", lambda d, now=None: {"reste_usd": None})
@@ -151,3 +150,5 @@ def test_clock_starts_at_most_two_agents_and_none_without_credit(db, monkeypatch
         assert agents.run_due(db) == [] and started_ids == []                  # crédit épuisé : rien ne part
     finally:
         agents._running.clear()
+        for a in mine:   # base partagée entre tests : ne laisse aucun agent actif derrière
+            agents.set_status(db, a, "paused")
