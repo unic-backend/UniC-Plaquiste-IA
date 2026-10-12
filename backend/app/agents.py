@@ -56,12 +56,18 @@ def set_halt(db: Session, on: bool) -> bool:
 
 
 def tools_for(a: CustomAgent) -> set[str]:
-    """Outils autorisés pour CET agent : sa liste (si le patron ou l'IA l'a réduite) ∩ SAFE_TOOLS. Jamais plus que les outils sûrs."""
+    """Outils autorisés pour CET agent : sa liste ∩ SAFE_TOOLS. Jamais plus que les outils sûrs.
+    Liste vide (agent créé sans restriction) = tous les outils sûrs. Liste illisible, mal formée ou sans aucun outil sûr = AUCUN outil :
+    une corruption ne doit jamais élargir silencieusement les accès d'un agent qui devait être limité."""
+    if not a.allowed_tools:
+        return set(SAFE_TOOLS)
     try:
-        wanted = set(json.loads(a.allowed_tools)) if a.allowed_tools else set()
+        wanted = json.loads(a.allowed_tools)
     except (ValueError, TypeError):
-        wanted = set()
-    return (wanted & SAFE_TOOLS) if wanted else set(SAFE_TOOLS)
+        return set()
+    if not isinstance(wanted, list) or not all(isinstance(t, str) for t in wanted):
+        return set()
+    return set(wanted) & SAFE_TOOLS
 
 
 class RunControl:
@@ -209,6 +215,13 @@ def run(db: Session, a: CustomAgent) -> dict:
     from app.database import SessionLocal
 
     allowed = tools_for(a)
+    if not allowed:   # liste d'outils corrompue : l'agent ne tourne pas (pas d'appel IA), le patron est prévenu
+        text = "Passage non lancé : la liste d'outils de cet agent est illisible ou vide. Ouvre l'agent et choisis ses outils."
+        a.last_run, a.last_ok, a.last_result = datetime.now(timezone.utc), False, text
+        db.commit()
+        from app import selfcare
+        selfcare.report(f"agent:{a.name}", f"Agent « {a.name} » : {text}"[:200], kind="tool")
+        return {"ok": False, "rapport": text, "brouillons": 0, "run_id": "", "arret": "liste d'outils invalide"}
     tools = [t for t in ag.TOOLS if t["name"] in allowed]
     run_id = uuid.uuid4().hex[:12]
     ctl = RunControl(run_id, allowed)

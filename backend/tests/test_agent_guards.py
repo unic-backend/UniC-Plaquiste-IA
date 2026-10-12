@@ -152,3 +152,22 @@ def test_clock_starts_at_most_two_agents_and_none_without_credit(db, monkeypatch
         agents._running.clear()
         for a in mine:   # base partagée entre tests : ne laisse aucun agent actif derrière
             agents.set_status(db, a, "paused")
+
+
+def test_corrupted_tool_list_never_widens_access_and_the_agent_does_not_run(db, monkeypatch):
+    a = _agent(db, "Agent liste abîmée", tools=["list_unpaid"])
+    for bad in ("{pas du json", '"list_unpaid"', '{"a": 1}', '[1, 2]', '["create_quote"]', "[]"):
+        a.allowed_tools = bad
+        assert agents.tools_for(a) == set(), bad                                              # aucune liste abîmée n'ouvre quoi que ce soit
+    a.allowed_tools = ""
+    assert agents.tools_for(a) == agents.SAFE_TOOLS                                           # nouvel agent sans restriction : défaut voulu
+    called = []
+    monkeypatch.setattr(agents, "_complete", lambda *x, **k: called.append(1) or _ok())
+    a.allowed_tools = "{pas du json"
+    db.commit()
+    out = agents.run(db, a)
+    assert out["ok"] is False and "illisible" in out["rapport"] and not called                 # aucun appel IA, message clair
+    db.refresh(a)
+    assert a.last_ok is False and "illisible" in a.last_result
+    a.allowed_tools = '["list_unpaid"]'
+    db.commit()
