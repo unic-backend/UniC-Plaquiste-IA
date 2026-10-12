@@ -181,6 +181,13 @@ def self_check(db) -> dict:
         age_h = None
     if settings.is_sqlite:
         add("Sauvegarde", age_h is not None and age_h < 30, f"dernière il y a {age_h:.0f} h" if age_h is not None else "aucune sauvegarde encore")
+        if st.get("last_name"):
+            # La dernière sauvegarde est RELUE à blanc à chaque contrôle : un zip tronqué ou une base abîmée après coup ne passe plus pour « OK »
+            # (avant : seul l'âge comptait, et l'erreur de relecture n'était gardée qu'à la création).
+            check = backup.verify(st["last_name"])
+            add("Sauvegarde restaurable", check["ok"],
+                "relue à blanc : la base s'ouvre et les chiffres correspondent" if check["ok"]
+                else ("; ".join(check["problems"]) or "relecture impossible")[:200])
         if st.get("last_remote_error"):
             add("Sauvegarde Gmail", False, st["last_remote_error"][:160])
     sl = sleeping()
