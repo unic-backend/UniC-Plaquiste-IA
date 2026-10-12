@@ -242,7 +242,7 @@ def render_line(m: Memory, conflict: str = "") -> str:
     if exp is not None:
         tail += f" (valable jusqu'au {exp.strftime('%d/%m')})"
     if conflict:
-        tail += f" ⚠ CONTREDIT par « {conflict[:80]} » : ne tranche pas, demande au patron"
+        tail += f" ⚠ CONTREDIT par « {conflict[:150]} » : ne tranche pas, demande au patron"
     return f"- ({m.kind}) {prefix}{m.text}{tail}"
 
 
@@ -301,8 +301,13 @@ def numbers(text: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+# Mots qui reviennent dans presque toutes les lignes de prix : ils ne disent PAS que deux lignes parlent de la même chose.
+_GENERIC = frozenset({"fcfa", "cfa", "franc", "francs", "prix", "coute", "coutent", "paquet", "paquets", "unite", "unites", "piece", "pieces",
+                      "tarif", "montant", "total", "par", "defaut", "seulement", "jamais", "toujours", "patron", "devis"})
+
+
 def _subject(text: str) -> frozenset:
-    return frozenset(w for w in retrieval.useful_words(text) if not w.isdigit())
+    return frozenset(w for w in retrieval.useful_words(text) if not w.isdigit() and w not in _GENERIC)
 
 
 def conflicts(db: Session) -> list[dict]:
@@ -321,9 +326,12 @@ def conflicts(db: Session) -> list[dict]:
             common = sa & sb
             if a.subject != b.subject:   # deux clients différents peuvent avoir des chiffres différents : pas une contradiction
                 continue
-            if len(common) < 2:
+            # même CHOSE, pas seulement deux mots communs : sinon « barre mesure 2,90 m » contredirait « barre coûte 1 200 FCFA »
+            if len(common) < 2 or len(common) / len(sa | sb) < 0.5:
                 continue
+            newer = a if (a.created_at or _now()) >= (b.created_at or _now()) else b
             out.append({"a": {"id": a.id, "text": a.text, "nature": a.nature}, "b": {"id": b.id, "text": b.text, "nature": b.nature},
+                        "plus_recent": newer.id,
                         "sujet": sorted(common),
                         "raison": f"Même sujet ({', '.join(sorted(common))}) et nombres différents : "
                                   f"{', '.join(n for n in na if n not in nb) or '—'} contre {', '.join(n for n in nb if n not in na) or '—'}."})
@@ -336,12 +344,19 @@ def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS) -> str:
     if not hits:
         return ""
     clash: dict[str, str] = {}
+
+    def _other(c: dict, mine: str) -> str:   # l'AUTRE version, avec son statut : une supposition ne vaut jamais une valeur confirmée
+        o = c["b"] if c["a"]["id"] == mine else c["a"]
+        tag = "plus récente" if c["plus_recent"] == o["id"] else "plus ancienne"
+        kind = "supposition non confirmée" if o["nature"] == "inference" else "confirmée par le patron"
+        return f"{o['text']} [{tag}, {kind}]"
     for c in conflicts(db):
-        clash.setdefault(c["a"]["id"], c["b"]["text"])
-        clash.setdefault(c["b"]["id"], c["a"]["text"])
+        clash.setdefault(c["a"]["id"], _other(c, c["a"]["id"]))
+        clash.setdefault(c["b"]["id"], _other(c, c["b"]["id"]))
     lines = [render_line(h.memory, clash.get(h.memory.id, "")) for h in hits]
     head = ("MÉMOIRE UNIC (ce que le patron t'a appris). Les lignes « supposition non confirmée » sont des déductions : "
-            "ne les présente jamais comme des faits. Une ligne CONTREDIT = deux versions : demande laquelle est juste.")
+            "ne les présente jamais comme des faits. Une ligne CONTREDIT = deux versions : une supposition, un ancien export ou un document "
+            "ne remplace JAMAIS une valeur confirmée par le patron ; entre deux valeurs confirmées, cite les deux avec leur ordre et demande laquelle est juste.")
     return head + "\n" + "\n".join(lines)
 
 
