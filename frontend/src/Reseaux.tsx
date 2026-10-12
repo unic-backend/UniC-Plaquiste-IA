@@ -324,6 +324,8 @@ export function Courrier() {
   const [acct, setAcct] = useState<{ connected: boolean; address: string; env_override: boolean; unreadable?: boolean } | null>(null);
   const [gAddr, setGAddr] = useState("");
   const [gPwd, setGPwd] = useState("");
+  const [clean, setClean] = useState<{ id: string; from_addr: string; subject: string; category: string; reason: string }[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const { msg, say } = useToast();
   const refresh = () => {
     net.mailStatus().then(setStatus).catch((e) => say(e.message));
@@ -393,7 +395,31 @@ export function Courrier() {
             onClick={() => run(async () => { const r = await net.mailSync(); await load(); say(`${r.new} nouveau(x) mail(s).`); })}>
             Relever la boîte
           </button>
+          <button className="btn btn-line" disabled={busy || !status.read || mails.length === 0}
+            onClick={() => run(async () => { const r = await net.mailCleanup(); setClean(r.candidates); setPicked(new Set(r.candidates.map((c) => c.id))); if (!r.candidates.length) say("Rien à nettoyer parmi les mails relevés."); })}>
+            Nettoyer la boîte
+          </button>
         </div>
+        {clean && clean.length > 0 && (
+          <section className="card-box" aria-label="Mails à nettoyer">
+            <h3>À nettoyer ({clean.length})</h3>
+            <p className="hint">Pubs, newsletters et notifications GitHub déjà traitées. Rien n'est supprimé : les mails cochés vont à la corbeille de Gmail (récupérables 30 jours). Décoche ceux que tu veux garder.</p>
+            {clean.map((c) => (
+              <label key={c.id} className="check-row">
+                <input type="checkbox" checked={picked.has(c.id)}
+                  onChange={() => setPicked((p) => { const n = new Set(p); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} />
+                <span><b>{c.subject || "(sans objet)"}</b><br /><small>{c.from_addr} · {c.reason}</small></span>
+              </label>
+            ))}
+            <div className="toolbar">
+              <button className="btn btn-copper" disabled={busy || picked.size === 0}
+                onClick={() => { if (window.confirm(`Mettre ${picked.size} mail(s) à la corbeille de Gmail ?`)) run(async () => { const r = await net.mailTrash([...picked]); setClean(null); await load(); say(`${r.trashed} mail(s) mis à la corbeille.`); }); }}>
+                Mettre à la corbeille ({picked.size})
+              </button>
+              <button className="btn btn-line" disabled={busy} onClick={() => setClean(null)}>Annuler</button>
+            </div>
+          </section>
+        )}
         {mails.length === 0 && <div className="empty">Aucun mail relevé.</div>}
         <div className="two-col">
           <div>
