@@ -111,3 +111,38 @@ def test_general_rule_without_client_is_unchanged(db):
     out = _session(db, "retiens pour toujours")("remember", {"text": "Toujours arrondir les plaques au supérieur sur mes devis"})
     assert out["ok"] and out["portee"] == "règle générale"
     assert "arrondir les plaques" in memory.block(db, "arrondir plaques devis")
+
+
+# ---------- une ancienne information, une hypothèse ou un document ne remplace jamais une valeur confirmée ----------
+
+def test_unrelated_price_lines_are_not_reported_as_conflicts(db):
+    memory.add(db, "Une barre de fourrure coûte 1 200 FCFA (prix d'une barre, pas d'un paquet).", source="user", pinned=True)
+    memory.add(db, "Une barre (fourrure, montant, rail) mesure 2,90 m.", source="user", pinned=True)
+    memory.add(db, "Pivot = 6 500 FCFA le paquet de 100 ; chevilles à laiton = 6 000 FCFA le paquet de 100.", source="user", pinned=True)
+    db.commit()
+    mine = [c for c in memory.conflicts(db) if any(w in c["a"]["text"] + c["b"]["text"] for w in ("barre", "Pivot"))]
+    assert mine == []   # avant : « fcfa », « prix », « paquet » suffisaient à crier au conflit
+
+
+def test_imported_old_value_never_replaces_a_confirmed_one_and_is_flagged(db):
+    memory.add(db, "La plaque BA13 coûte 5500 FCFA chez le fournisseur Sodimat", source="user", pinned=True)
+    old = memory.add(db, "La plaque BA13 coûte 4500 FCFA chez le fournisseur Sodimat", source="import")   # ancien export
+    db.commit()
+    assert old is not None and old.nature == "inference"                      # jamais « valable maintenant »
+    active = [m.text for m in db.query(memory.Memory).filter(memory.Memory.state == "active")]
+    assert any("5500" in t for t in active)                                   # la valeur confirmée est toujours là
+    cs = [c for c in memory.conflicts(db) if "Sodimat" in c["a"]["text"]]
+    assert len(cs) == 1
+    text = memory.block(db, "prix plaque BA13 Sodimat")
+    assert "supposition non confirmée" in text and "confirmée par le patron" in text and "ne remplace JAMAIS" in text
+
+
+def test_two_confirmed_values_are_both_kept_and_the_order_is_shown(db):
+    first = memory.add(db, "Le sac de ciment colle coûte 5000 FCFA chez le fournisseur Cimenco", source="user", pinned=True)
+    db.commit()
+    second = memory.add(db, "Le sac de ciment colle coûte 5500 FCFA chez le fournisseur Cimenco", source="user", pinned=True)
+    db.commit()
+    assert first is not None and second is not None and first.id != second.id   # rien n'est écrasé en silence
+    c = [x for x in memory.conflicts(db) if "Cimenco" in x["a"]["text"]][0]
+    assert c["plus_recent"] in (first.id, second.id)
+    assert "plus récente" in memory.block(db, "prix sac ciment colle Cimenco")
