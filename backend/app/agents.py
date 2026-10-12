@@ -19,6 +19,7 @@ from app.models import CustomAgent
 logger = logging.getLogger("unic.agents")
 
 MAX_ACTIVE = 10
+MAX_PARALLEL = 2         # agents lancés par l'horloge en même temps : les autres attendent le prochain tour (mémoire, limites de débit, coût)
 SAFE_TOOLS = {   # lecture et brouillons seulement
     "read_inbox", "read_email", "save_email_reply_draft", "list_google_reviews", "google_profile_audit",
     "save_google_review_reply_draft", "save_social_post_draft", "google_post_plan", "list_social_posts",
@@ -159,9 +160,15 @@ def _due(a: CustomAgent, now: datetime) -> bool:
 
 def run_due(db: Session) -> list[str]:
     """Lance (en fond) les agents dont c'est l'heure."""
+    from app import usage
+    left = usage.summary(db).get("reste_usd")
+    if left is not None and left <= 0:
+        return []   # crédit IA épuisé : aucun agent ne dépense de plus ; le patron recharge ou règle le budget
     now = datetime.now(timezone.utc)
     started = []
     for a in db.query(CustomAgent).filter(CustomAgent.status == "active").all():
+        if len(_running) >= MAX_PARALLEL:
+            break   # les agents restants (toujours « dus ») passent au prochain tour de l'horloge
         if _due(a, now) and start(a.id):
             started.append(a.name)
     return started
