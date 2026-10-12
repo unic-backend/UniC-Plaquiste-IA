@@ -590,3 +590,15 @@ Chaque affirmation a été vérifiée dans le code et, quand c'était possible, 
 | Aucun test négatif | **Vrai, corrigé** | 8 tests ajoutés : chaque conclusion non verte, chaque contrôle absent, en cours, doublon en échec, lecture de secours, `sha` lié, refus 409. |
 
 Non démontré (comme le dit le diagnostic) : qu'une pull request ait réellement été fusionnée ainsi. La fusion exige le clic du propriétaire ; la protection de branche GitHub peut aussi la bloquer (non vérifiable depuis le code).
+
+## 17. Audit de lancement (mémoire, surveillance, performance, mobile, sauvegarde) — vérifié
+
+| Point | Verdict | Preuve |
+|---|---|---|
+| Une ancienne info ou une supposition remplace une valeur confirmée | **Faux** (mais détecteur de conflits faux-positif, corrigé #71) | Un import est ajouté en `inference`, la valeur du patron reste active. 31 faux conflits → 3 vrais ; chaque version est annotée (plus récente / plus ancienne, confirmée / supposée). |
+| Surveillance : sauvegarde absente ou inrestaurable | **Partiel, corrigé #72** | « Sauvegarde » ne vérifiait que l'âge. Chaque contrôle relit maintenant la dernière sauvegarde à blanc (« Sauvegarde restaurable ») ; incident ouvert si elle est corrompue. API inaccessible : sonde externe `uptime.yml` (hôte confirmé, `/api/health/ready` 200 en 0,25–0,63 s). Contrôles planifiés actifs seulement si « Travail automatique » est activé (activé par le patron). |
+| Performance : agents en parallèle, coûts IA | **Défauts, corrigés #74** | L'horloge pouvait lancer 10 agents d'un coup ; aucun arrêt si le crédit IA était épuisé. Maintenant 2 au plus par tour, aucun si crédit ≤ 0. Coût IA mesuré par message (déjà en place). Non mesuré : mémoire et latence IA en production. |
+| Mobile : permissions, interruptions, Bluetooth | **Défaut, corrigé #73** | Permissions : messages clairs en cas de refus. Bluetooth : sortie choisie (#68). Aucun focus audio : un appel ou la musique ne coupait pas la voix d'UniC ; UniC vocal continuait appli quittée. Corrigé. À tester sur téléphone. |
+| Sauvegarde : copie du fichier SQLite en mode WAL | **Faux** | `backup.py` utilise l'API `sqlite3.backup()` (cohérente en usage) + `integrity_check` ; la restauration aussi. |
+| `.secret_key` absente de l'archive | **Vrai, voulu** | L'archive part dans la boîte Gmail du patron : y mettre la clé annulerait le chiffrement. `UNIC_SECRET_KEY` est défini dans Render (fait par le patron) : la clé survit à la perte du disque. |
+| Test de restauration complet | **Existe en test ; réel non exécuté** | `test_backup_create_download_restore_and_offsite`. Une restauration réelle sur la production exige le clic du patron. |
