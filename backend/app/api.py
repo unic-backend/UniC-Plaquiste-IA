@@ -98,7 +98,7 @@ class AccountIn(BaseModel):
 
 
 _login_fails: dict[str, list[float]] = {}
-_LOGIN_GLOBAL_MAX = 30   # échecs, toutes IP confondues, sur 15 minutes
+_LOGIN_GLOBAL_MAX = 150   # frein de dernier recours (attaque répartie), toutes sources confondues, sur 15 minutes ; la limite par source (8) fait le vrai travail
 
 
 @router.get("/auth/status")
@@ -111,9 +111,10 @@ def auth_status(db: Session = Depends(get_db)):
 def auth_login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     import time as _time
     from app import auth
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    from app.ratelimit import client_ip
+    ip = client_ip(request)   # source fiable (fin de X-Forwarded-For) : un attaquant seul ne peut ni contourner sa limite ni épuiser celle des autres
     recent = [t for t in _login_fails.get(ip, []) if _time.time() - t < 900]
-    # Plafond global : l'IP lue dans X-Forwarded-For peut être falsifiée à chaque essai ; le code d'accès reste utilisable.
+    # Plafond global élevé : ne bloque que si l'attaque est répartie sur de nombreuses sources ; le code d'accès reste utilisable.
     total = sum(1 for ts in _login_fails.values() for t in ts if _time.time() - t < 900)
     if len(recent) >= 8 or total >= _LOGIN_GLOBAL_MAX:
         raise HTTPException(429, "Trop d'essais. Réessaie dans 15 minutes.")

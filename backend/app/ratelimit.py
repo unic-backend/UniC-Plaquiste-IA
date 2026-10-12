@@ -62,3 +62,13 @@ def reset(key: str) -> None:
         except Exception:
             pass
     _mem.pop(key, None)
+
+
+def client_ip(request) -> str:
+    """Adresse source retenue pour les limites d'essais. X-Forwarded-For : le client peut y écrire ce qu'il veut, mais le relais de
+    l'hébergeur AJOUTE l'adresse réelle à la FIN de la liste. On lit donc la dernière entrée (la plus proche de nous), jamais la
+    première (falsifiable à chaque essai). Sans relais, adresse de la connexion."""
+    chain = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    if chain:
+        return chain[-1][:64]
+    return request.client.host if request.client else "?"

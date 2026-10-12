@@ -324,7 +324,8 @@ async def site_chat(request: Request):
         body = await request.json()
     except Exception:
         return JSONResponse({"detail": "Requête invalide"}, status_code=400)
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+    from app.ratelimit import client_ip
+    ip = client_ip(request)
     db = SessionLocal()
     try:
         out = sitechat.reply(db, body.get("session_id"), str(body.get("message") or ""), ip, str(body.get("page") or ""))
