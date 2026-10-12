@@ -140,7 +140,10 @@ export function UnicVoice() {
     // téléphone verrouillé : cet écran (seulement lui) peut s'afficher par-dessus l'écran de verrouillage
     if (isNative) { notifApi.lockScreenMode(true).catch(() => {}); audioRoute(getVoiceOutput() === "bluetooth"); refreshBt(); }   // micro du casque seulement si la sortie choisie est le Bluetooth
     const auto = wake.current ? window.setTimeout(() => { if (!active.current) begin(); }, 350) : 0;   // « Hey UniC » : il écoute tout de suite
-    return () => { window.clearTimeout(auto); active.current = false; stopSpeech(); if (isNative) { notifApi.lockScreenMode(false).catch(() => {}); audioRoute(false); } };
+    // appli quittée (hors « Hey UniC » par-dessus l'écran verrouillé) : plus d'écoute ni de voix en arrière-plan
+    const away = () => { if (document.hidden && !wake.current && active.current) { manual.current = true; end(); } };
+    document.addEventListener("visibilitychange", away);
+    return () => { document.removeEventListener("visibilitychange", away); window.clearTimeout(auto); active.current = false; stopSpeech(); if (isNative) { notifApi.lockScreenMode(false).catch(() => {}); audioRoute(false); } };
   }, []);
 
   return createPortal(
