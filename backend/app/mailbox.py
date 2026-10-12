@@ -1,4 +1,4 @@
-"""Boîte mail : lecture IMAP (lecture seule) et envoi SMTP. Rien n'est envoyé sans appel explicite."""
+"""Boîte mail : lecture IMAP (lecture seule), mise à la corbeille sur clic du patron, et envoi SMTP. Rien n'est envoyé sans appel explicite."""
 from __future__ import annotations
 
 import email
@@ -86,6 +86,58 @@ def fetch_recent(limit: int = 20) -> list[dict]:
                 "body": _text_of(msg).strip()[:20000],
             })
     return out
+
+
+_TRASH_FALLBACKS = ("[Gmail]/Trash", "[Gmail]/Corbeille", "[Google Mail]/Trash", "Trash")
+
+
+def _trash_folder(box: imaplib.IMAP4_SSL) -> str | None:
+    """Dossier corbeille du compte : repéré par son attribut \\Trash (quelle que soit la langue), sinon noms usuels."""
+    try:
+        _, rows = box.list()
+        for row in rows or []:
+            line = row.decode(errors="replace") if isinstance(row, bytes) else str(row)
+            if "\\Trash" in line:
+                name = line.rsplit(' "/" ', 1)[-1].strip() if ' "/" ' in line else line.rsplit(" ", 1)[-1]
+                return name.strip().strip('"')
+    except imaplib.IMAP4.error:
+        pass
+    for name in _TRASH_FALLBACKS:
+        try:
+            if box.select(f'"{name}"', readonly=True)[0] == "OK":
+                return name
+        except imaplib.IMAP4.error:
+            continue
+    return None
+
+
+def trash(message_ids: list[str]) -> dict:
+    """Met à la CORBEILLE de Gmail (récupérable ~30 jours) les mails identifiés par leur Message-ID. Jamais de suppression définitive.
+    Appelé seulement après le clic du patron."""
+    host, port, user, pwd = _imap()
+    moved, missing = [], []
+    with imaplib.IMAP4_SSL(host, port) as box:
+        box.login(user, pwd)
+        folder = _trash_folder(box)
+        if not folder:
+            raise RuntimeError("Dossier Corbeille introuvable sur ce compte : rien n'a été touché.")
+        box.select("INBOX")
+        for mid in message_ids:
+            safe = mid.replace('"', "").strip()
+            typ, data = box.uid("SEARCH", None, "HEADER", "Message-ID", f'"{safe}"')
+            uids = (data[0] or b"").split() if typ == "OK" else []
+            if not uids:
+                missing.append(mid)
+                continue
+            uid = uids[-1].decode()
+            if box.uid("COPY", uid, f'"{folder}"')[0] != "OK":   # copie réussie d'abord : sinon le mail reste où il est
+                missing.append(mid)
+                continue
+            box.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+            moved.append(mid)
+        if moved:
+            box.expunge()
+    return {"moved": moved, "missing": missing}
 
 
 def send(to_addr: str, subject: str, body: str) -> None:

@@ -297,6 +297,41 @@ def mail_purge(db: Session = Depends(get_db), user: User = Depends(get_current_u
     return {"purged": n}
 
 
+@router.get("/mail/cleanup")
+def mail_cleanup_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Propose (sans rien toucher) les pubs, newsletters et notifications GitHub déjà traitées parmi les mails relevés."""
+    from app import mail_cleanup
+    return {"candidates": mail_cleanup.candidates(db)}
+
+
+class TrashIn(BaseModel):
+    ids: list[str] = Field(max_length=100)
+
+
+@router.post("/mail/cleanup/trash")
+def mail_cleanup_trash(body: TrashIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Clic du patron : met à la corbeille de Gmail (récupérable 30 jours) les mails choisis. Seuls ceux que la liste de nettoyage
+    propose sont acceptés ; jamais de suppression définitive ; l'IA et les agents n'y ont pas accès."""
+    from app import mail_cleanup
+    allowed = {c["id"] for c in mail_cleanup.candidates(db)}
+    rows = [db.get(InboxMessage, i) for i in dict.fromkeys(body.ids) if i in allowed]
+    rows = [m for m in rows if m is not None]
+    if not rows:
+        raise HTTPException(400, "Aucun de ces mails n'est proposé au nettoyage.")
+    try:
+        out = mailbox.trash([m.uid for m in rows])
+    except Exception as exc:
+        logger.warning("Mise à la corbeille Gmail impossible : %s", exc)
+        raise HTTPException(502, str(exc) if isinstance(exc, RuntimeError) else "Gmail n'a pas répondu : rien n'a été touché.")
+    done = set(out["moved"])
+    for m in rows:
+        if m.uid in done:
+            db.delete(m)
+    audit(db, user.id, "mail_trash", "mail", f"{len(done)} mail(s) mis à la corbeille")
+    db.commit()
+    return {"trashed": len(done), "missing": len(out["missing"])}
+
+
 @router.get("/mail")
 def mail_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     return [_mail_out(m) for m in db.query(InboxMessage).order_by(InboxMessage.fetched_at.desc()).limit(100).all()]
