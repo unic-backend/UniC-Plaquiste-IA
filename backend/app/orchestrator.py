@@ -479,6 +479,8 @@ def handle_turn(
         info = process_file(rec, db)
         state["last_file_id"] = rec.id
         state["last_filename"] = rec.filename
+        known = [f for f in (state.get("files") or []) if f.get("id") != rec.id]
+        state["files"] = ([{"id": rec.id, "name": rec.filename}] + known)[:6]   # les fichiers de la conversation restent connus d'un message à l'autre
         caps.append("read_pdf" if (rec.filename or "").lower().endswith(".pdf") else "analyze_site_photo")
         pages = info.get("pages") or info.get("processed")
         warn = info.get("warning") or info.get("error") or ""
@@ -990,7 +992,14 @@ def handle_turn(
                     msgs[1]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)
                                            + ". Le patron parle de CE fichier : plan, métré, photo, tableur ou document. "
                                            "Plan, PDF d'architecte, DXF, IFC ou « lis le plan » → appelle read_plan (file_id ci-dessus) puis présente le résultat ; "
-                                           "autre document → réponds d'après son contenu indexé. Ne réponds jamais hors sujet.")
+                                           "autre document → réponds d'après son contenu indexé. Question précise sur l'image ou le plan (angles, jonctions, équerres, "
+                                           "cloisons, cotes) → read_plan(file_id, question=«…»). Ne réponds jamais hors sujet.")
+                if tools_on and state.get("files") and not attached:
+                    # message sans nouveau fichier : l'IA doit savoir que les fichiers d'avant existent et qu'elle peut les REVOIR
+                    msgs[1]["content"] += ("\n\nFICHIERS DÉJÀ ENVOYÉS DANS CETTE CONVERSATION (tu peux les revoir à tout moment) : "
+                                           + " ; ".join(f"{f.get('name')} (file_id={f.get('id')})" for f in state["files"])
+                                           + ". Pour REGARDER de nouveau un plan ou une image avec une question précise (angles, jonctions en T, équerres, "
+                                           "nombre de cloisons, cotes…) : read_plan(file_id, question=«…»). Ne dis jamais que tu ne peux plus ouvrir le fichier : appelle l'outil.")
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT          # texte fixe : dans la partie en cache
                     msgs[1]["content"] += agent.availability_note(db)   # varie (connecteurs branchés) : hors cache

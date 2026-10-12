@@ -262,9 +262,12 @@ TOOLS: list[dict] = [
         "name": "read_plan",
         "description": ("Analyse le PLAN joint (PDF, scan ou photo) : liste les pièces avec surfaces et cotes, dit lesquelles ont un plafond, "
                         "relève les références placo/cloisons écrites sur le plan, et totalise les surfaces (calcul fait en code). "
-                        "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture."),
+                        "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture. "
+                        "QUESTION PRÉCISE sur l'image ou le plan (angles, jonctions en T, équerres, nombre de cloisons, cotes, orientation…) : "
+                        "passe question=« … » : l'image est REGARDÉE de nouveau (pas le résumé) et tu réponds d'après elle. "
+                        "Fonctionne à tout moment de la conversation, même plusieurs messages après l'envoi du fichier."),
         "input_schema": {"type": "object", "properties": {
-            "file_id": {"type": "string"}, "refresh": {"type": "boolean"}}, "additionalProperties": False},
+            "file_id": {"type": "string"}, "refresh": {"type": "boolean"}, "question": {"type": "string"}}, "additionalProperties": False},
     },
     {
         "name": "add_appointment",
@@ -949,11 +952,13 @@ class AgentSession:
                 "hypotheses": data["assumptions"], "manquant": data["missing"],
                 "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
 
-    def _t_read_plan(self, file_id: str = "", refresh: bool = False) -> dict:
+    def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "") -> dict:
         from app import plans
         fid = file_id or self.state.get("last_file_id")
         if not fid:
             return {"error": "Aucun plan joint à la conversation."}
+        if (question or "").strip():   # question précise (angles, jonctions…) : on REGARDE l'image, le résumé en cache ne répond pas à cela
+            return plans.ask(self.db, fid, question)
         return plans.analyze(self.db, fid, refresh=bool(refresh))
 
     # --- mémoire

@@ -4149,3 +4149,69 @@ def test_atelier_merge_is_refused_when_any_required_job_is_not_green(client, mon
         assert e.status == 409
     assert job.status == "proposed"
     db.close()
+
+
+# ---------- un plan déjà envoyé reste consultable, et une question précise REGARDE l'image ----------
+
+def _plan_file(client, name="plan.png"):
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 600), "white").save(buf, format="PNG")
+    return client.post("/api/files", files={"file": (name, buf.getvalue(), "image/png")}).json()["id"]
+
+
+def test_read_plan_with_question_looks_at_the_image_again_and_ignores_the_cache(client, monkeypatch):
+    import json
+    from app import plans, vision
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    monkeypatch.setattr(vision.settings, "anthropic_api_key", "test")
+    monkeypatch.setattr(plans.settings, "anthropic_api_key", "test")
+    monkeypatch.setattr(vision, "_ask", lambda b64: "plan")
+    calls = []
+    monkeypatch.setattr(plans, "_call", lambda content: calls.append(content) or (
+        json.dumps({"unite_plan": "m", "pieces": [], "cloisons": [], "references": [], "remarques": []}) if len(calls) == 1
+        else "1. angle en L haut-gauche\n2. T bas\nTotal : 2 angles, 1 T"))
+    fid = _plan_file(client)
+    with SessionLocal() as db:
+        s = AgentSession(db, None, {"last_file_id": fid})
+        s("read_plan", {})                                   # lecture générale, mise en cache
+        out = s("read_plan", {"question": "Compte les angles et les jonctions en T"})
+    assert len(calls) == 2                                   # la question n'est PAS servie par le cache
+    kinds = [c["type"] for c in calls[1]]
+    assert kinds.count("image") >= 1 and kinds[-1] == "text"   # l'image est renvoyée à Claude
+    assert "Compte les angles" in calls[1][-1]["text"] and "à l'envers" in calls[1][-1]["text"]
+    assert "2 angles" in out["reponse"] and out["fichier"] == "plan.png"
+
+
+def test_plan_question_errors_are_clear(client, monkeypatch):
+    from app import plans
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        assert "introuvable" in plans.ask(db, "inconnu", "angles ?")["error"]
+        fid = _plan_file(client)
+        monkeypatch.setattr(plans.settings, "anthropic_api_key", "")
+        assert "clé Claude absente" in plans.ask(db, fid, "angles ?")["error"]
+
+
+def test_files_stay_known_in_later_messages_and_the_ai_is_told_it_can_look_again(client, monkeypatch):
+    from app import orchestrator
+    seen = []
+
+    class R:
+        text, provider, model, available, error, raw = "ok", "claude", "m", True, "", None
+
+    def fake(msgs, **kw):
+        seen.append(msgs)
+        return R()
+    monkeypatch.setattr(orchestrator, "chat_complete", fake)
+    monkeypatch.setattr(orchestrator, "provider_chain", lambda deep=False: [type("P", (), {"id": "claude"})()])
+    fid = _plan_file(client, "Plan RH.png")
+    cid = client.post("/api/chat", json={"message": "Lis le plan", "file_ids": [fid]}).json()["conversation_id"]
+    for i in range(3):   # plusieurs messages sans nouveau fichier
+        client.post("/api/chat", json={"message": f"Vérifie les angles ({i})", "conversation_id": cid})
+    first, later = seen[0][1]["content"], seen[-1][1]["content"]
+    assert "FICHIER(S) JOINT(S)" in first and "question=" in first
+    assert "FICHIERS DÉJÀ ENVOYÉS" in later and "Plan RH.png" in later and f"file_id={fid}" in later
+    assert "read_plan(file_id, question=" in later
