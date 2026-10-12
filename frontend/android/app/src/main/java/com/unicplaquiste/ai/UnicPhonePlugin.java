@@ -706,6 +706,7 @@ public class UnicPhonePlugin extends Plugin {
             AudioDeviceInfo dev = pickOutput(u.output);
             if (dev != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) mp.setPreferredDevice(dev);   // sortie imposée (Android 9+) ; avant : choix d'Android
             playingId = u.id;
+            takeFocus();
             mp.setOnCompletionListener(m -> { releasePlayer(m); playingId = null; f.delete(); emitTts("ttsDone", u.id, 0); ttsBusy = false; ttsNext(); });
             mp.setOnErrorListener((m, what, extra) -> { releasePlayer(m); playingId = null; f.delete(); emitTts("ttsError", u.id, -5); ttsBusy = false; ttsNext(); return true; });
             mp.setOnPreparedListener(m -> m.start());
@@ -718,9 +719,46 @@ public class UnicPhonePlugin extends Plugin {
         }
     }
 
+    private AudioManager.OnAudioFocusChangeListener focusListener;
+    private android.media.AudioFocusRequest focusReq;
+
+    /** Prend la parole « en priorité courte » : la musique se met en pause, et un appel entrant ou une autre appli qui prend le son coupe la voix d'UniC. */
+    private void takeFocus() {
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am == null || focusListener != null) return;
+            focusListener = change -> {
+                if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) ui.post(this::ttsStopAll);
+            };
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                focusReq = new android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(new android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                        .setOnAudioFocusChangeListener(focusListener).build();
+                am.requestAudioFocus(focusReq);
+            } else {
+                am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+            }
+        } catch (Exception ignored) { /* pas de focus : la voix parle quand même */ }
+    }
+
+    private void giveFocus() {
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am != null && focusListener != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusReq != null) am.abandonAudioFocusRequest(focusReq);
+                else am.abandonAudioFocus(focusListener);
+            }
+        } catch (Exception ignored) { /* déjà rendu */ }
+        focusListener = null;
+        focusReq = null;
+    }
+
     private void releasePlayer(android.media.MediaPlayer m) {
         try { m.release(); } catch (Exception ignored) { /* déjà libéré */ }
         if (player == m) player = null;
+        giveFocus();
     }
 
     /** Phrase suivante de la file : synthèse dans un fichier. */
@@ -760,6 +798,7 @@ public class UnicPhonePlugin extends Plugin {
         ttsBusy = false;
         try { if (player != null) { player.stop(); player.release(); } } catch (Exception ignored) { /* déjà arrêté */ }
         player = null;
+        giveFocus();
         try { if (tts != null && ttsOk) tts.stop(); } catch (Exception ignored) { /* déjà arrêté */ }
     }
 
