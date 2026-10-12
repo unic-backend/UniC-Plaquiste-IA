@@ -484,15 +484,27 @@ def test_production_with_access_code_still_works(client, monkeypatch):
     assert client.get("/api/materials", headers={"x-access-code": "secret-code"}).status_code == 200
 
 
-def test_login_brute_force_capped_even_with_spoofed_ip(client, monkeypatch):
+def test_login_limit_uses_the_trusted_source_and_one_attacker_cannot_lock_everyone(client, monkeypatch):
     from app import api
     monkeypatch.setattr(api, "_login_fails", {})
-    for i in range(api._LOGIN_GLOBAL_MAX):
-        r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"},
-                        headers={"x-forwarded-for": f"10.0.0.{i}"})
+    bad = {"email": "a@b.com", "password": "mauvais-mdp"}
+    for i in range(8):   # le client falsifie le début de la liste à chaque essai ; le relais ajoute SA vraie adresse à la fin
+        r = client.post("/api/auth/login", json=bad, headers={"x-forwarded-for": f"10.0.0.{i}, 203.0.113.7"})
         assert r.status_code == 401
-    r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"},
-                    headers={"x-forwarded-for": "10.9.9.9"})   # nouvelle IP falsifiée : toujours bloqué
+    r = client.post("/api/auth/login", json=bad, headers={"x-forwarded-for": "10.9.9.9, 203.0.113.7"})
+    assert r.status_code == 429                                  # même source réelle : bloquée malgré l'adresse falsifiée
+    r = client.post("/api/auth/login", json=bad, headers={"x-forwarded-for": "198.51.100.20"})
+    assert r.status_code == 401                                  # une autre source n'est PAS bloquée par l'attaquant
+
+
+def test_login_global_brake_still_stops_a_widely_distributed_attack(client, monkeypatch):
+    from app import api
+    monkeypatch.setattr(api, "_login_fails", {})
+    monkeypatch.setattr(api, "_LOGIN_GLOBAL_MAX", 20)
+    for i in range(20):
+        r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"}, headers={"x-forwarded-for": f"192.0.2.{i}"})
+        assert r.status_code == 401
+    r = client.post("/api/auth/login", json={"email": "a@b.com", "password": "mauvais-mdp"}, headers={"x-forwarded-for": "192.0.2.250"})
     assert r.status_code == 429
 
 
