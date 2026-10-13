@@ -413,7 +413,7 @@ export function Courrier() {
             ))}
             <div className="toolbar">
               <button className="btn btn-copper" disabled={busy || picked.size === 0}
-                onClick={() => { if (window.confirm(`Mettre ${picked.size} mail(s) à la corbeille de Gmail ?`)) run(async () => { const r = await net.mailTrash([...picked]); setClean(null); await load(); say(`${r.trashed} mail(s) mis à la corbeille.`); }); }}>
+                onClick={() => { if (window.confirm(`Mettre ${picked.size} mail(s) à la corbeille de Gmail ?`)) run(async () => { const r = await net.mailTrash([...picked]); setClean(null); await load(); say(`${r.trashed} mail(s) mis à la corbeille.${r.missing ? ` ${r.missing} introuvable(s) dans Gmail (déjà rangés ou supprimés ?) : rien n'a été touché pour eux.` : ""}`); }); }}>
                 Mettre à la corbeille ({picked.size})
               </button>
               <button className="btn btn-line" disabled={busy} onClick={() => setClean(null)}>Annuler</button>
