@@ -1052,27 +1052,32 @@ def _project(p: Project) -> dict:
 
 # ---------- documents métier ----------
 
-def _quote_out(q: Quotation) -> dict:
-    return {
-        "id": q.id, "number": q.number, "title": q.title, "cover_letter": q.cover_letter or "", "object_text": q.object_text, "site_location": q.site_location, "client_name": _client_of(q), "status": q.status,
+def _quote_out(q: Quotation, light: bool = False) -> dict:
+    """`light` : ce que le tableau des devis affiche ou filtre. Sans lignes, lettre, notes ni contrôle de prix (qui interroge la base
+    pour chaque ligne) : liste ~85 % plus légère et sans requêtes en plus. Le détail s'ouvre avec GET /quotes/{id}."""
+    base = {
+        "id": q.id, "number": q.number, "title": q.title, "client_name": _client_of(q), "status": q.status,
         "customer_id": q.customer_id, "customer_name": q.customer.name if q.customer else None,
         "client_label": q.client_label,
         "project_id": q.project_id, "currency": q.currency,
         "subtotal": q.subtotal, "vat_rate": q.vat_rate, "vat_amount": q.vat_amount,
         "total": q.total, "prices_complete": q.prices_complete,
-        "notes": q.notes, "assumptions": q.assumptions, "missing_info": q.missing_info,
         "artifact_id": q.artifact_id, "version": q.version,
-        "price_check": pricecheck.check_quote(q),
         "created_at": q.created_at.isoformat() if q.created_at else None,
-        "items": [
-            {
-                "id": it.id, "position": it.position, "description": it.description,
-                "quantity": it.quantity, "unit": it.unit, "unit_price": it.unit_price,
-                "total": it.total, "data_status": it.data_status, "formula": it.formula,
-            }
-            for it in sorted(q.items, key=lambda x: x.position)
-        ],
     }
+    if light:
+        return base
+    return {**base, "cover_letter": q.cover_letter or "", "object_text": q.object_text, "site_location": q.site_location,
+            "notes": q.notes, "assumptions": q.assumptions, "missing_info": q.missing_info,
+            "price_check": pricecheck.check_quote(q),
+            "items": [
+                {
+                    "id": it.id, "position": it.position, "description": it.description,
+                    "quantity": it.quantity, "unit": it.unit, "unit_price": it.unit_price,
+                    "total": it.total, "data_status": it.data_status, "formula": it.formula,
+                }
+                for it in sorted(q.items, key=lambda x: x.position)
+            ]}
 
 
 
@@ -1101,10 +1106,13 @@ def export_accounting(kind: str, fmt: str, start: str = "", end: str = "", db: S
     return Response(body, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 @router.get("/quotes")
-def quotes(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = page.apply(db.query(Quotation).options(selectinload(Quotation.items), joinedload(Quotation.customer))
-                      .order_by(Quotation.created_at.desc()), response)
-    return [_quote_out(q) for q in rows]
+def quotes(response: Response, page: Page = Depends(), summary: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """`?summary=1` : liste légère pour le tableau ; sans, le devis complet (lignes, lettre, contrôle de prix) comme avant."""
+    query = db.query(Quotation).options(joinedload(Quotation.customer))
+    if not summary:
+        query = query.options(selectinload(Quotation.items))
+    rows = page.apply(query.order_by(Quotation.created_at.desc()), response)
+    return [_quote_out(q, light=summary) for q in rows]
 
 
 @router.get("/quotes/{qid}")
@@ -1240,10 +1248,13 @@ def quote_to_invoice(qid: str, kind: str = "invoice", db: Session = Depends(get_
 
 
 @router.get("/invoices")
-def invoices(response: Response, page: Page = Depends(), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = page.apply(db.query(Invoice).options(selectinload(Invoice.items), selectinload(Invoice.payments), joinedload(Invoice.customer))
-                      .order_by(Invoice.created_at.desc()), response)
-    return [_invoice(i) for i in rows]
+def invoices(response: Response, page: Page = Depends(), summary: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """`?summary=1` : liste légère pour le tableau (sans lignes ni détail des paiements ; « payé » et « reste » restent calculés)."""
+    query = db.query(Invoice).options(selectinload(Invoice.payments), joinedload(Invoice.customer))
+    if not summary:
+        query = query.options(selectinload(Invoice.items))
+    rows = page.apply(query.order_by(Invoice.created_at.desc()), response)
+    return [_invoice(i, light=summary) for i in rows]
 
 
 @router.get("/invoices/{iid}")
@@ -1306,8 +1317,8 @@ def _client_of(doc) -> str:
     return client_name_of(db, doc) if db is not None else ""
 
 
-def _invoice(i: Invoice) -> dict:
-    return {
+def _invoice(i: Invoice, light: bool = False) -> dict:
+    base = {
         "id": i.id, "number": i.number, "kind": i.kind, "title": i.title, "status": i.status,
         "customer_name": i.customer.name if i.customer else None,
         "client_name": _client_of(i),
@@ -1315,19 +1326,22 @@ def _invoice(i: Invoice) -> dict:
         "paid": i.paid, "remaining": i.remaining, "currency": i.currency,
         "artifact_id": i.artifact_id,
         "created_at": i.created_at.isoformat() if i.created_at else None,
-        "items": [
-            {
-                "position": it.position, "description": it.description, "quantity": it.quantity,
-                "unit": it.unit, "unit_price": it.unit_price, "total": it.total,
-            }
-            for it in sorted(i.items, key=lambda x: x.position)
-        ],
-        "payments": [
-            {"id": p.id, "amount": p.amount, "method": p.method, "reference": p.reference,
-             "paid_at": p.paid_at.isoformat() if p.paid_at else None}
-            for p in i.payments
-        ],
     }
+    if light:
+        return base
+    return {**base,
+            "items": [
+                {
+                    "position": it.position, "description": it.description, "quantity": it.quantity,
+                    "unit": it.unit, "unit_price": it.unit_price, "total": it.total,
+                }
+                for it in sorted(i.items, key=lambda x: x.position)
+            ],
+            "payments": [
+                {"id": p.id, "amount": p.amount, "method": p.method, "reference": p.reference,
+                 "paid_at": p.paid_at.isoformat() if p.paid_at else None}
+                for p in i.payments
+            ]}
 
 
 @router.get("/purchase-orders")
