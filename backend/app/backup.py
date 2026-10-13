@@ -12,6 +12,7 @@ import imaplib
 import io
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import threading
@@ -314,6 +315,9 @@ def run_daily() -> dict | None:
 
 def start_scheduler() -> None:
     """Fil discret : vérifie toutes les heures si la sauvegarde du jour est faite."""
+    if os.environ.get("UNIC_NO_BACKGROUND"):   # tests : pas de fil de fond (comme la surveillance et les alertes) ; run_daily() s'appelle à la main
+        return
+
     def loop():
         from app import selfcare
         selfcare.beat("sauvegarde", 3600, restart=start_scheduler)
