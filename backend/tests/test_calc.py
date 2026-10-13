@@ -123,3 +123,44 @@ def test_huge_surface_needs_confirmation():
 def test_waste_out_of_range_rejected():
     with pytest.raises(ValueError):
         calc.calculate_partition(5, 2.5, waste=0.9)
+
+
+def test_engine_agrees_with_the_independent_exact_verifier_on_thousands_of_random_jobs():
+    """Cloisons, plafonds et phrases au hasard (graine fixe) : le moteur ne plante pas et le vérificateur indépendant (fractions exactes)
+    ne trouve aucune différence. Une entrée invalide doit être REFUSÉE proprement (ValueError), jamais donner un faux chiffre."""
+    import random
+    rnd = random.Random(7)
+    checked = refused = 0
+    for _ in range(500):
+        ops = [Opening(kind="porte", width=round(rnd.uniform(0.6, 1.5), 2), height=round(rnd.uniform(1.8, 2.4), 2), quantity=rnd.randint(1, 3))
+               for _ in range(rnd.randint(0, 3))]
+        try:
+            r = calc.calculate_partition(round(rnd.choice([0.4, 1, 2.5, 3.3, 7.77, 12, 25.5, 40, 80]) * rnd.uniform(0.5, 1.5), 2),
+                                         round(rnd.choice([2.2, 2.5, 2.7, 3, 3.6, 4.5]) * rnd.uniform(0.8, 1.2), 2), rnd.choice([1, 2]), ops,
+                                         waste=rnd.choice([0, 0.05, 0.08, 0.1, 0.15]), confirmed_large=True)
+        except ValueError:
+            refused += 1
+            continue
+        assert calc.verify(r)["problems"] == [], r.inputs
+        checked += 1
+    for _ in range(300):
+        try:
+            r = calc.calculate_ceiling(round(rnd.uniform(1, 30), 2), round(rnd.uniform(1, 20), 2), waste=rnd.choice([0, 0.08, 0.12]), confirmed_large=True)
+        except ValueError:
+            refused += 1
+            continue
+        assert calc.verify(r)["problems"] == [], r.inputs
+        checked += 1
+    words = ["cloison", "faux plafond", "plafond", "peinture", "enduit", "12 m2", "5x4", "4,5 m", "hauteur 2,7", "longueur 8", "deux faces",
+             "une face", "porte", "fenêtre", "BA13", "10 m²", "3 m par 4", "0", "-3", "1e9", "abc", "30m2 de cloison hauteur 2.5"]
+    for _ in range(600):
+        text = " ".join(rnd.sample(words, rnd.randint(1, 5)))
+        try:
+            r = calculate_from_text(text)
+        except ValueError:
+            refused += 1
+            continue
+        if r is not None:
+            assert calc.verify(r)["problems"] == [], text
+            checked += 1
+    assert checked > 700 and refused >= 1                                                     # beaucoup de cas vérifiés ; l'invalide est bien refusé
