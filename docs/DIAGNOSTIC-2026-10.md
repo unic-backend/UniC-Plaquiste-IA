@@ -602,3 +602,28 @@ Non démontré (comme le dit le diagnostic) : qu'une pull request ait réellemen
 | Sauvegarde : copie du fichier SQLite en mode WAL | **Faux** | `backup.py` utilise l'API `sqlite3.backup()` (cohérente en usage) + `integrity_check` ; la restauration aussi. |
 | `.secret_key` absente de l'archive | **Vrai, voulu** | L'archive part dans la boîte Gmail du patron : y mettre la clé annulerait le chiffrement. `UNIC_SECRET_KEY` est défini dans Render (fait par le patron) : la clé survit à la perte du disque. |
 | Test de restauration complet | **Existe en test ; réel non exécuté** | `test_backup_create_download_restore_and_offsite`. Une restauration réelle sur la production exige le clic du patron. |
+
+## 18. Nuit du 12 au 13 octobre : améliorations mesurées
+
+Chaque ligne = une PR fusionnée, testée ; les chiffres viennent de mesures faites sur une base d'essai (200 devis de 6 lignes, 400 souvenirs, etc.). Rien n'a été envoyé, publié ni supprimé ; aucune zone protégée touchée.
+
+| Domaine | Constat mesuré | Changement | PR |
+|---|---|---|---|
+| Rapidité au démarrage | Fichier principal de l'appli : 494 Ko (147 Ko compressé) | Écrans secondaires chargés à la demande : 301 Ko (95 Ko), −39 % ; reprise automatique (une fois) si une nouvelle version est en ligne | #81, #94 |
+| Listes | `GET /api/materials` : 53 requêtes SQL | 3 requêtes (prix chargés d'un coup) | #82 |
+| Listes | Tableau des devis : 348 Ko, 186 ms (lettre, lignes et contrôle de prix de chaque devis) | Mode léger `?summary=1` : 85 Ko, 37 ms ; réponse complète inchangée sans l'option | #83 |
+| Message du patron | Mémoire à 400 souvenirs : 450 à 740 ms ajoutés à chaque message (balayage de toutes les paires) | Contradictions cherchées seulement parmi les souvenirs montrés à l'IA : 45 à 180 ms ; texte envoyé à l'IA identique (test) | #84 |
+| Fiabilité de l'appli | Une erreur d'affichage vidait tout l'écran | Message clair, « Réessayer », « Accueil » ; menu intact ; changer d'écran remet à zéro | #85 |
+| Fiabilité du serveur | Balayage de 605 requêtes piégées sur toutes les routes : 1 vraie erreur 500 (`PUT /api/settings` avec `null`) | Valeur obligatoire gardée, plus de 500 | #89 |
+| Connexions | Clé de chiffrement changée → « non connecté » sans explication | Carte « Connexions à refaire » (liste des connexions illisibles) ; détection exacte | #87, #91 |
+| Calculs | 8 139 calculs au hasard comparés au vérificateur exact : 0 différence | Contrôle permanent (1 400 cas, graine fixe) | #86 |
+| Sécurité | `ratelimit.py` couvert à 59 % | 5 tests (blocage, expiration, Redis simulé, repli, source fiable) | #92 |
+| Courrier | Nettoyage de la boîte jamais essayé sur un vrai Gmail | Garde-fous testés avec faux serveur (corbeille introuvable ou copie refusée : rien n'est touché ; recherche non injectable) ; message des mails introuvables | #90, #93 |
+| Vocal | Le son était rendu entre deux phrases | Gardé jusqu'à la fin de la réponse, puis rendu | #95 |
+| Web | Fichiers à empreinte redemandés à chaque visite | Cache d'un an pour ces seuls fichiers | #96 |
+| Accessibilité | 26 écrans × 3 largeurs : 0 débordement ; 6 champs sans nom | 6 champs nommés | #88 |
+| Tests | 1 échec intermittent sur ~25 exécutions (test de sauvegarde) | Le fil de sauvegarde automatique ne démarre plus en test (cause probable, non démontrée) | #97 |
+
+Mesuré aussi, sans rien à corriger : latence du serveur de production (`/api/health/ready` 0,25 à 0,8 s), dépendances (0 faille connue côté interface ; 1 côté serveur, `pytest`, outil de test non déployé, et le fichier `requirements*` est une zone protégée), couverture des tests (~85 %), `GET /api/tracking` (30 à 45 ms), préparation d'un message hors appel IA (110 à 130 ms).
+
+Non vérifié (à faire par le patron) : sur un vrai téléphone, appel entrant pendant que UniC parle, Bluetooth, « Nettoyer la boîte » sur Gmail avec un seul mail d'abord, question sur un plan après plusieurs messages.
