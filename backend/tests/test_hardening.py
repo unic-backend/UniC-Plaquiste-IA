@@ -798,3 +798,14 @@ def test_unreadable_saved_secrets_are_reported_by_name_and_readable_ones_are_not
     db.commit()
     db.close()
     assert client.get("/api/selfcare").json()["secrets_unreadable"] == []
+
+
+def test_settings_null_on_a_required_field_keeps_the_value_instead_of_a_500(client):
+    before = client.get("/api/settings").json()
+    r = client.put("/api/settings", json={"name": None, "quote_validity_days": None, "default_waste": None, "board_width_m": None})
+    assert r.status_code == 200
+    after = r.json()
+    for k in ("name", "quote_validity_days", "default_waste", "board_width_m"):
+        assert after[k] == before[k], k                                                       # rien n'est effacé ni cassé
+    r2 = client.put("/api/settings", json={"vat_rate": None})                                  # champ facultatif : « sans valeur » reste possible
+    assert r2.status_code == 200 and r2.json()["vat_rate"] is None
