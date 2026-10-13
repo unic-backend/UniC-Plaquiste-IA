@@ -310,26 +310,32 @@ def _subject(text: str) -> frozenset:
     return frozenset(w for w in retrieval.useful_words(text) if not w.isdigit() and w not in _GENERIC)
 
 
-def conflicts(db: Session) -> list[dict]:
+def conflicts(db: Session, only: set[str] | None = None) -> list[dict]:
     """Même sujet, nombres différents (prix, surface, délai). Rapporté, jamais arbitré.
 
+    `only` : ne garde que les divergences où l'un des deux souvenirs est dans cet ensemble (le prompt n'en montre que quelques-uns :
+    comparer seulement ceux-là coûte une fraction du balayage complet, qui reste quadratique).
+
     Portée : seules les divergences NUMÉRIQUES sont vues ; une négation ou un sens contraire ne le sont pas."""
-    items = [(m, _subject(m.text), numbers(m.text)) for m in _active_all(db, _now())
+    now = _now()
+    items = [(m, _subject(m.text), numbers(m.text)) for m in _active_all(db, now)
              if m.nature != "temporary" and m.kind != "task"]
+    items = [(m, sm, nm, frozenset(nm)) for m, sm, nm in items if nm]   # sans nombre, aucune divergence possible
     out = []
-    for i, (a, sa, na) in enumerate(items):
-        if not na:
-            continue
-        for b, sb, nb in items[i + 1:]:
-            if not nb or set(na) == set(nb):
+    for i, (a, sa, na, nsa) in enumerate(items):
+        a_in = only is None or a.id in only
+        for b, sb, nb, nsb in items[i + 1:]:
+            if not a_in and b.id not in only:
                 continue
-            common = sa & sb
             if a.subject != b.subject:   # deux clients différents peuvent avoir des chiffres différents : pas une contradiction
                 continue
+            if nsa == nsb:
+                continue
+            common = sa & sb
             # même CHOSE, pas seulement deux mots communs : sinon « barre mesure 2,90 m » contredirait « barre coûte 1 200 FCFA »
             if len(common) < 2 or len(common) / len(sa | sb) < 0.5:
                 continue
-            newer = a if (a.created_at or _now()) >= (b.created_at or _now()) else b
+            newer = a if (a.created_at or now) >= (b.created_at or now) else b
             out.append({"a": {"id": a.id, "text": a.text, "nature": a.nature}, "b": {"id": b.id, "text": b.text, "nature": b.nature},
                         "plus_recent": newer.id,
                         "sujet": sorted(common),
@@ -350,7 +356,7 @@ def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS) -> str:
         tag = "plus récente" if c["plus_recent"] == o["id"] else "plus ancienne"
         kind = "supposition non confirmée" if o["nature"] == "inference" else "confirmée par le patron"
         return f"{o['text']} [{tag}, {kind}]"
-    for c in conflicts(db):
+    for c in conflicts(db, only={h.memory.id for h in hits}):   # seuls les souvenirs montrés comptent (le balayage complet est quadratique)
         clash.setdefault(c["a"]["id"], _other(c, c["a"]["id"]))
         clash.setdefault(c["b"]["id"], _other(c, c["b"]["id"]))
     lines = [render_line(h.memory, clash.get(h.memory.id, "")) for h in hits]
