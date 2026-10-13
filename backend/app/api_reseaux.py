@@ -11,7 +11,7 @@ import re
 from app import trust
 from app.config import settings
 from fastapi.responses import FileResponse
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -285,6 +285,16 @@ def mail_account_disconnect(db: Session = Depends(get_db), user: User = Depends(
 def mail_sync(limit: int = 20, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     try:
         return connectors.sync_inbox(db, limit)
+    except connectors.ConnectorError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+@router.get("/mail/search")
+def mail_search(q: str = Query(min_length=1, max_length=200), limit: int = Query(15, ge=1, le=25),
+                db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Cherche dans TOUTE la boîte (reçus, envoyés, archivés), lecture seule ; les résultats sont gardés pour les lire et y répondre."""
+    try:
+        return [_mail_out(m) for m in connectors.search_inbox(db, q, limit)]
     except connectors.ConnectorError as exc:
         raise HTTPException(exc.status, str(exc))
 

@@ -89,7 +89,7 @@ def registry_snapshot(db=None) -> list[dict]:
                    {"query": "str"}, {"articles": "list"}, ["user"], True),
         Capability("draft_email", "Rédiger un brouillon d'e-mail (sans envoi auto)",
                    {"to": "str", "subject": "str"}, {"draft": "object"}, ["user"], True),
-        Capability("read_email", "Lire la boîte mail (IMAP), résumer, proposer des réponses",
+        Capability("read_email", "Lire la boîte mail (IMAP) et la fouiller en entier (reçus, envoyés, archivés : search_inbox), résumer des discussions, rédiger des brouillons de réponse",
                    {}, {}, ["user"], conn["email"],
                    "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),
         Capability("clean_mailbox", "Nettoyer la boîte : le PATRON touche Courrier › « Nettoyer la boîte » (pubs, newsletters, notifications GitHub traitées → corbeille Gmail, récupérable 30 jours, après sa confirmation). Toi, tu ne supprimes rien : tu l'envoies vers ce bouton",

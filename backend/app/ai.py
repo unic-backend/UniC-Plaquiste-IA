@@ -190,7 +190,7 @@ TOOL_LABELS = {
     "create_quote": "Je prépare le devis…", "create_invoice": "Je prépare la facture…",
     "create_purchase_order": "Je prépare le bon de commande…", "create_delivery_note": "Je prépare le bon de livraison…",
     "revise_document": "Je corrige le document…", "list_documents": "Je cherche dans tes documents…",
-    "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "read_email": "Je lis le mail…",
+    "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "search_inbox": "Je cherche dans ta boîte mail…", "read_email": "Je lis le mail…",
     "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
     "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
     "create_agent": "Je crée l'agent…",

@@ -77,6 +77,14 @@ TOOLS: list[dict] = [
             "additionalProperties": False},
     },
     {
+        "name": "search_inbox",
+        "description": "Cherche dans TOUTE la boîte mail (reçus, envoyés, archivés ; lecture seule), pour retrouver une discussion : expéditeur, sujet, période, mot. Syntaxe Gmail : from:awa, to:client@x.com, subject:devis, after:2026/09/01, has:attachment, ou simples mots. Retourne les mails les plus récents (id, expéditeur, objet, extrait) ; lis-en un avec read_email, réponds avec save_email_reply_draft.",
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Recherche (syntaxe Gmail ou mots)"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "Nombre de mails (défaut 10)"}},
+            "required": ["query"], "additionalProperties": False},
+    },
+    {
         "name": "read_email",
         "description": "Lit le texte complet d'un e-mail par son id (retourné par read_inbox).",
         "input_schema": {"type": "object", "properties": {"email_id": {"type": "string"}},
@@ -510,7 +518,7 @@ TOOLS: list[dict] = [
 ]
 
 TOOL_LABELS = {
-    "read_inbox": "Courrier consulté", "read_email": "E-mail lu",
+    "read_inbox": "Courrier consulté", "search_inbox": "Boîte mail fouillée", "read_email": "E-mail lu",
     "save_email_reply_draft": "Brouillon de réponse préparé", "list_google_reviews": "Avis Google consultés",
     "google_profile_audit": "Fiche Google auditée", "save_google_review_reply_draft": "Réponse à un avis préparée",
     "save_social_post_draft": "Brouillon de publication préparé", "list_social_posts": "Publications consultées",
@@ -607,7 +615,7 @@ SELF_EDIT = re.compile(
 # Contenu de tiers lu pendant le tour (e-mail, fichier, plan, avis) : à partir de là, certaines actions exigent que le
 # patron les ait demandées DANS SON MESSAGE. Contrôle déterministe côté serveur : une consigne cachée dans un document
 # ne suffit jamais, quoi que le modèle en pense.
-UNTRUSTED_SOURCES = {"read_inbox", "read_email", "inspect_file", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan"}
+UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan"}
 OWNER_ASK = {
     "forget_memory": re.compile(r"oubli|retire|supprime|efface|enl[eè]ve|m[ée]moire", re.I),
     "generate_visual": re.compile(r"visuel|image|photo|illustr|affiche|dessin|g[ée]n[èe]re|higgsfield|rendu|cr[ée]e", re.I),
@@ -1003,6 +1011,11 @@ class AgentSession:
         info = connectors.sync_inbox(self.db, limit)
         rows = self.db.query(InboxMessage).order_by(InboxMessage.fetched_at.desc()).limit(max(1, min(int(limit), 15))).all()
         return {"nouveaux": info["new"], "emails": [_mail_row(m) for m in rows], "note": UNTRUSTED_NOTE}
+
+    def _t_search_inbox(self, query: str, limit: int = 10) -> dict:
+        rows = connectors.search_inbox(self.db, query, limit)
+        flag = self._flag(" ".join(m.body[:2000] for m in rows), "recherche dans la boîte mail")
+        return {"trouves": len(rows), "emails": [_mail_row(m) for m in rows], "note": UNTRUSTED_NOTE, **flag}
 
     def _flag(self, content: str, origin: str) -> dict:
         """Motifs de manipulation dans un contenu de tiers : signalés à l'IA ET au patron."""

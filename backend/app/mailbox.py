@@ -63,29 +63,73 @@ def _text_of(msg: email.message.Message) -> str:
     return payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
 
 
+def _row(num: bytes, raw: bytes) -> dict:
+    msg = email.message_from_bytes(raw)
+    return {
+        "uid": (msg.get("Message-ID") or f"imap-{num.decode()}").strip(),
+        "from_addr": parseaddr(_dec(msg.get("From")))[1] or _dec(msg.get("From")),
+        "subject": _dec(msg.get("Subject")),
+        "date": msg.get("Date", ""),
+        "body": _text_of(msg).strip()[:20000],
+    }
+
+
+def _load(box: imaplib.IMAP4_SSL, ids: list[bytes]) -> list[dict]:
+    """Charge les mails (du plus récent au plus ancien) sans les marquer lus (BODY.PEEK)."""
+    out: list[dict] = []
+    for num in reversed(ids):
+        _, parts = box.fetch(num, "(BODY.PEEK[])")
+        raw = parts[0][1] if parts and isinstance(parts[0], tuple) else None
+        if raw:
+            out.append(_row(num, raw))
+    return out
+
+
 def fetch_recent(limit: int = 20) -> list[dict]:
     """Derniers e-mails de la boîte de réception, sans les marquer lus (BODY.PEEK)."""
     host, port, user, pwd = _imap()
-    out: list[dict] = []
     with imaplib.IMAP4_SSL(host, port) as box:
         box.login(user, pwd)
         box.select("INBOX", readonly=True)
         _, data = box.search(None, "ALL")
-        ids = (data[0] or b"").split()[-limit:]
-        for num in reversed(ids):
-            _, parts = box.fetch(num, "(BODY.PEEK[])")
-            raw = parts[0][1] if parts and isinstance(parts[0], tuple) else None
-            if not raw:
-                continue
-            msg = email.message_from_bytes(raw)
-            out.append({
-                "uid": (msg.get("Message-ID") or f"imap-{num.decode()}").strip(),
-                "from_addr": parseaddr(_dec(msg.get("From")))[1] or _dec(msg.get("From")),
-                "subject": _dec(msg.get("Subject")),
-                "date": msg.get("Date", ""),
-                "body": _text_of(msg).strip()[:20000],
-            })
-    return out
+        return _load(box, (data[0] or b"").split()[-limit:])
+
+
+def _quoted(text: str) -> str:
+    """Texte de recherche rendu inoffensif pour IMAP : une seule ligne, guillemets et barres échappés, longueur bornée."""
+    flat = " ".join(str(text).split())[:200]
+    return '"' + flat.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _all_mail_folder(box: imaplib.IMAP4_SSL) -> str | None:
+    """Dossier « Tous les messages » de Gmail (reçus ET envoyés, archivés compris), repéré par son attribut \\All."""
+    try:
+        _, rows = box.list()
+        for row in rows or []:
+            line = row.decode(errors="replace") if isinstance(row, bytes) else str(row)
+            if "\\All" in line and ' "/" ' in line:
+                return line.rsplit(' "/" ', 1)[-1].strip().strip('"')
+    except imaplib.IMAP4.error:
+        pass
+    return None
+
+
+def search(query: str, limit: int = 10) -> list[dict]:
+    """Recherche dans TOUTE la boîte (lecture seule). Gmail : syntaxe Gmail (from:, to:, subject:, after:2026/01/01, has:attachment…)
+    sur « Tous les messages », donc les envoyés et les conversations entières. Autre fournisseur : objet, expéditeur ou texte dans la réception."""
+    host, port, user, pwd = _imap()
+    limit = max(1, min(int(limit), 25))
+    with imaplib.IMAP4_SSL(host, port) as box:
+        box.login(user, pwd)
+        if host == "imap.gmail.com":
+            folder = _all_mail_folder(box) or "INBOX"
+            box.select(f'"{folder}"', readonly=True)
+            _, data = box.search("UTF-8", "X-GM-RAW", _quoted(query))
+        else:
+            box.select("INBOX", readonly=True)
+            q = _quoted(query)
+            _, data = box.search("UTF-8", "OR", "OR", "SUBJECT", q, "FROM", q, "BODY", q)
+        return _load(box, (data[0] or b"").split()[-limit:])
 
 
 _TRASH_FALLBACKS = ("[Gmail]/Trash", "[Gmail]/Corbeille", "[Google Mail]/Trash", "Trash")

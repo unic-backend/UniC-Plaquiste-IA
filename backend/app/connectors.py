@@ -43,6 +43,28 @@ def sync_inbox(db: Session, limit: int = 20) -> dict:
     return {"fetched": len(rows), "new": new}
 
 
+def search_inbox(db: Session, query: str, limit: int = 10) -> list[InboxMessage]:
+    """Cherche dans toute la boîte (reçus, envoyés, archivés) et garde chaque résultat en base : ses id servent à lire et à répondre."""
+    if not mailbox.imap_configured():
+        raise ConnectorError("Lecture e-mail NON DISPONIBLE : IMAP non configuré.")
+    if not (query or "").strip():
+        raise ConnectorError("Recherche vide.", 400)
+    try:
+        rows = mailbox.search(query, limit)
+    except Exception as exc:
+        logger.warning("IMAP recherche échec : %s", exc)
+        raise ConnectorError("Recherche dans la boîte mail impossible (connexion ou syntaxe de recherche).", 502)
+    out: list[InboxMessage] = []
+    for r in rows:
+        m = db.query(InboxMessage).filter(InboxMessage.uid == r["uid"]).first()
+        if m is None:
+            m = InboxMessage(**r)
+            db.add(m)
+        out.append(m)
+    db.commit()
+    return out
+
+
 def save_email_reply_draft(db: Session, mail: InboxMessage, body: str, subject: str = "", user_id: str | None = None) -> EmailDraft:
     body = (body or "").strip()
     if not body:

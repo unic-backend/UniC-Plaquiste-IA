@@ -1471,3 +1471,12 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .at-tile.warn b { color: var(--copper-text, var(--copper)); }
 .atelier .card-box > h3, .atelier .at-head h3 { font-size: 17px; letter-spacing: -.01em; }
 .atelier .card-box > .hint:first-of-type, .atelier .at-head + .hint { margin-top: 8px; }
+
+/* Courrier : recherche dans toute la boîte, liste en lignes avec initiale */
+.mail-search { display: flex; gap: 8px; margin: 4px 0 12px; }
+.mail-search input { flex: 1; min-width: 0; }
+.plat.mail { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; }
+.plat.mail .mail-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.plat.mail .mail-txt b, .plat.mail .mail-txt > span:not(.badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-av { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 16px; background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green-text, var(--green)); }
+.plat.mail.on .mail-av { background: var(--copper); color: #fff; }

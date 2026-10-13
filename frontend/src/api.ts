@@ -310,6 +310,7 @@ export const net = {
   disconnectGmail: () => request<{ connected: boolean }>("/api/mail/account", { method: "DELETE" }),
   mailSync: () => request<{ fetched: number; new: number }>("/api/mail/sync", { method: "POST" }),
   mails: () => request<Mail[]>("/api/mail"),
+  mailSearch: (q: string) => request<Mail[]>(`/api/mail/search?q=${encodeURIComponent(q)}`),
   mailCleanup: () => request<{ candidates: { id: string; from_addr: string; subject: string; category: string; reason: string }[] }>("/api/mail/cleanup"),
   mailTrash: (ids: string[]) => request<{ trashed: number; missing: number }>("/api/mail/cleanup/trash", { method: "POST", ...json({ ids }) }),
   mailPurge: () => request<{ purged: number }>("/api/mail/purge", { method: "POST" }),
