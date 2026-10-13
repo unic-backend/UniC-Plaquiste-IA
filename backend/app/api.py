@@ -1453,6 +1453,8 @@ def put_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = D
         row = CompanySettings()
         db.add(row)
     for k, v in body.model_dump(exclude_unset=True).items():
+        if v is None and not CompanySettings.__table__.c[k].nullable:
+            continue   # « null » sur un champ obligatoire : on garde la valeur actuelle (avant : erreur 500 « interne »)
         setattr(row, k, v)
     row.updated_at = utcnow()
     audit(db, user.id, "update", "settings", row.id)
