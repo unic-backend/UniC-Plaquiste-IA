@@ -564,7 +564,7 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   useEffect(() => {
     if (!open) return;
     api.selfcare().then((d) => setWork(d.incidents.filter((i: any) => i.kind === "error" || i.kind === "tool").length
-      + d.jobs.filter((j: any) => j.status === "proposed").length)).catch(() => {});
+      + d.jobs.filter((j: any) => j.status === "proposed").length + (d.secrets_unreadable?.length ? 1 : 0))).catch(() => {});
   }, [open]);
   useEffect(() => {
     let off: (() => void) | undefined;
