@@ -798,4 +798,3 @@ def test_unreadable_saved_secrets_are_reported_by_name_and_readable_ones_are_not
     db.commit()
     db.close()
     assert client.get("/api/selfcare").json()["secrets_unreadable"] == []
-
