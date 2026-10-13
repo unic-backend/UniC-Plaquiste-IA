@@ -758,12 +758,12 @@ public class UnicPhonePlugin extends Plugin {
     private void releasePlayer(android.media.MediaPlayer m) {
         try { m.release(); } catch (Exception ignored) { /* déjà libéré */ }
         if (player == m) player = null;
-        giveFocus();
     }
 
     /** Phrase suivante de la file : synthèse dans un fichier. */
     private void ttsNext() {
-        if (ttsBusy || ttsQueue.isEmpty()) return;
+        if (ttsBusy) return;
+        if (ttsQueue.isEmpty()) { giveFocus(); return; }   // plus rien à dire : on rend le son (la musique reprend) ; entre deux phrases on le garde
         final Utter u = ttsQueue.remove(0);
         ttsBusy = true;
         withTts(() -> {
