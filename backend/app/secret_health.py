@@ -21,7 +21,7 @@ _FERNET_PREFIX = "gAAAAA"
 def unreadable(db: Session) -> list[dict]:
     out, seen = [], set()
     for row in db.query(AppSetting).filter(AppSetting.value.like(f"{_FERNET_PREFIX}%")).all():
-        if secrets_box.decrypt(row.value) is None:
+        if row.value.startswith(_FERNET_PREFIX) and secrets_box.decrypt(row.value) is None:   # LIKE ignore la casse en SQLite : on revérifie exactement
             label = LABELS.get(row.key, row.key)
             if label not in seen:
                 seen.add(label)
