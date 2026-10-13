@@ -23,21 +23,34 @@ REVIEW_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{4,200}$")
 
 _token_cache: dict = {"value": "", "exp": 0.0}
 
+#: fiche connectée depuis l'appli (mémoire du serveur, rechargée au démarrage) ; les variables d'environnement gagnent
+_RT = {"google_client_id": "", "google_client_secret": "", "google_refresh_token": "", "gbp_account_id": "", "gbp_location_id": ""}
+
+
+def set_runtime(values: dict | None) -> None:
+    for k in _RT:
+        _RT[k] = (values or {}).get(k, "") or ""
+    _token_cache["value"], _token_cache["exp"] = "", 0.0
+
+
+def _v(name: str) -> str:
+    return getattr(settings, name, "") or _RT[name]
+
 
 class GoogleError(Exception):
     """Erreur lisible, sans secret."""
 
 
 def configured() -> bool:
-    return all([settings.google_client_id, settings.google_client_secret, settings.google_refresh_token,
-                settings.gbp_account_id, settings.gbp_location_id])
+    return all([_v("google_client_id"), _v("google_client_secret"), _v("google_refresh_token"),
+                _v("gbp_account_id"), _v("gbp_location_id")])
 
 
 def missing_settings() -> list[str]:
     names = {
-        "GOOGLE_CLIENT_ID": settings.google_client_id, "GOOGLE_CLIENT_SECRET": settings.google_client_secret,
-        "GOOGLE_REFRESH_TOKEN": settings.google_refresh_token, "GBP_ACCOUNT_ID": settings.gbp_account_id,
-        "GBP_LOCATION_ID": settings.gbp_location_id,
+        "GOOGLE_CLIENT_ID": _v("google_client_id"), "GOOGLE_CLIENT_SECRET": _v("google_client_secret"),
+        "GOOGLE_REFRESH_TOKEN": _v("google_refresh_token"), "GBP_ACCOUNT_ID": _v("gbp_account_id"),
+        "GBP_LOCATION_ID": _v("gbp_location_id"),
     }
     return [k for k, v in names.items() if not v]
 
@@ -50,8 +63,8 @@ def _access_token(client: httpx.Client) -> str:
     if _token_cache["value"] and _token_cache["exp"] > time.time() + 60:
         return _token_cache["value"]
     r = client.post(TOKEN_URL, data={
-        "client_id": settings.google_client_id, "client_secret": settings.google_client_secret,
-        "refresh_token": settings.google_refresh_token, "grant_type": "refresh_token",
+        "client_id": _v("google_client_id"), "client_secret": _v("google_client_secret"),
+        "refresh_token": _v("google_refresh_token"), "grant_type": "refresh_token",
     })
     if r.status_code != 200:
         raise GoogleError("Google a refusé l'authentification. Régénérez le refresh token.")
@@ -87,11 +100,11 @@ def _call(method: str, url: str, **kw) -> dict:
 
 
 def _loc_path() -> str:
-    return f"accounts/{settings.gbp_account_id}/locations/{settings.gbp_location_id}"
+    return f"accounts/{_v('gbp_account_id')}/locations/{_v('gbp_location_id')}"
 
 
 def get_location() -> dict:
-    data = _call("GET", f"{INFO}/locations/{settings.gbp_location_id}", params={
+    data = _call("GET", f"{INFO}/locations/{_v('gbp_location_id')}", params={
         "readMask": "title,phoneNumbers,websiteUri,regularHours,categories,profile,storefrontAddress"})
     return data
 

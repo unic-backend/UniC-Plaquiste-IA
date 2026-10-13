@@ -463,6 +463,40 @@ def _gbp_call(fn, *args):
         raise HTTPException(502, str(exc))
 
 
+class GoogleAccountIn(BaseModel):
+    client_id: str = Field(max_length=300)
+    client_secret: str = Field(max_length=300)
+    refresh_token: str = Field(max_length=600)
+
+
+@router.get("/google/account")
+def google_account_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import google_account
+    return {**google_account.status(db), "env_override": bool(settings.google_refresh_token)}
+
+
+@router.put("/google/account")
+def google_account_connect(body: GoogleAccountIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Connecte la fiche Google : les identifiants sont testés auprès de Google AVANT d'être gardés (chiffrés)."""
+    from app import google_account
+    try:
+        out = google_account.connect(db, body.client_id, body.client_secret, body.refresh_token)
+    except google_account.GoogleAccountError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "google_connect", "google", out.get("title", ""))
+    db.commit()
+    return out
+
+
+@router.delete("/google/account")
+def google_account_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import google_account
+    out = google_account.disconnect(db)
+    audit(db, user.id, "google_disconnect", "google", "")
+    db.commit()
+    return out
+
+
 @router.get("/google/status")
 def google_status(user: User = Depends(get_current_user)):
     return {"configured": gbp.configured(), "missing": gbp.missing_settings(), "ai": assistant.ai_available()}
