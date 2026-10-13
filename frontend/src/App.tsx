@@ -1,28 +1,34 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazyPage } from "./lazyPage";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { FicheGoogle } from "./Google";
-import { Voix } from "./Voix";
+const FicheGoogle = lazyPage(() => import("./Google"), "FicheGoogle");
+const Voix = lazyPage(() => import("./Voix"), "Voix");
 import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
-import { Agenda } from "./Agenda";
-import { Suivi, SuiviClient } from "./Suivi";
-import { Prospects } from "./Prospects";
+const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
+const Suivi = lazyPage(() => import("./Suivi"), "Suivi");
+const SuiviClient = lazyPage(() => import("./Suivi"), "SuiviClient");
+const Prospects = lazyPage(() => import("./Prospects"), "Prospects");
 import { prepareFile } from "./compress";
 import { listenOnce } from "./listen";
 import { toggle as toggleSpeech, useSpeech } from "./speech";
-import { Couts, Courrier, Journal, Memoire, Reseaux } from "./Reseaux";
+const Couts = lazyPage(() => import("./Reseaux"), "Couts");
+const Courrier = lazyPage(() => import("./Reseaux"), "Courrier");
+const Journal = lazyPage(() => import("./Reseaux"), "Journal");
+const Memoire = lazyPage(() => import("./Reseaux"), "Memoire");
+const Reseaux = lazyPage(() => import("./Reseaux"), "Reseaux");
 import { DraftCards, groupByDate, PageBar, ToolChips, Typing } from "./Chrome";
 import * as I from "./Icons";
 import { notify } from "./feedback";
 import { AppsList, QuickChips } from "./Shortcuts";
 import { Pointage, SignaturePanel } from "./Terrain";
-import { UnicVoice } from "./UnicVoice";
-import { Interpreter } from "./Interpreter";
-import { Atelier } from "./Atelier";
+const UnicVoice = lazyPage(() => import("./UnicVoice"), "UnicVoice");
+const Interpreter = lazyPage(() => import("./Interpreter"), "Interpreter");
+const Atelier = lazyPage(() => import("./Atelier"), "Atelier");
 import { ConvMenu } from "./ConvTools";
-import { Higgsfield } from "./Higgsfield";
-import { Chantiers } from "./Chantiers";
+const Higgsfield = lazyPage(() => import("./Higgsfield"), "Higgsfield");
+const Chantiers = lazyPage(() => import("./Chantiers"), "Chantiers");
 import { useBackHandler, useScrollMemory } from "./navMemory";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
@@ -2153,6 +2159,7 @@ export default function App() {
       {isChat ? (
         <Chat initialId={chatMatch?.params.id} />
       ) : (
+      <Suspense fallback={<div className="page"><p className="hint">Chargement…</p></div>}>
       <Routes>
         <Route path="/clients" element={<Clients />} />
         <Route path="/materiaux" element={<Materiaux />} />
@@ -2189,6 +2196,7 @@ export default function App() {
         <Route path="/interprete" element={<Interpreter />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
       )}
     </Shell>
   );
