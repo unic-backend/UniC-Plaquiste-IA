@@ -5,7 +5,10 @@ import { lazy, type ComponentType } from "react";
 export function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType<any>>>, name: K) {
   return lazy(() =>
     load()
-      .then((m) => ({ default: m[name] }))
+      .then((m) => {
+        try { sessionStorage.removeItem("unic-chunk-reload"); } catch { /* stockage indisponible */ }   // chargement réussi : un prochain échec pourra de nouveau recharger une fois
+        return { default: m[name] };
+      })
       .catch((e) => {
         try {
           if (!sessionStorage.getItem("unic-chunk-reload")) {
