@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from pathlib import Path
 
@@ -386,10 +387,22 @@ def _index():
     }
 
 
+class HashedAssets(StaticFiles):
+    """Fichiers de l'interface dont le nom porte l'empreinte du contenu (Atelier-Dz18C-go.js) : ils ne changent jamais sous ce nom,
+    le navigateur les garde un an sans redemander (écrans suivants plus rapides). Un fichier modifié a un autre nom."""
+    _HASHED = re.compile(r"-[A-Za-z0-9_-]{8}\.(js|mjs|css|woff2?|png|svg|webp|jpg)$")
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200 and self._HASHED.search(path):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 if FRONTEND_DIST.exists():
     assets = FRONTEND_DIST / "assets"
     if assets.exists():
-        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+        app.mount("/assets", HashedAssets(directory=assets), name="assets")
 
     @app.get("/")
     def root():
