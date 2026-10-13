@@ -1,5 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lazyPage } from "./lazyPage";
+import ErrorBoundary from "./ErrorBoundary";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 const FicheGoogle = lazyPage(() => import("./Google"), "FicheGoogle");
@@ -2156,6 +2157,7 @@ export default function App() {
   if (gate === "loading" || !user) return <div className="login">Chargement…</div>;
   return (
     <Shell user={user}>
+      <ErrorBoundary resetKey={loc.pathname}>
       {isChat ? (
         <Chat initialId={chatMatch?.params.id} />
       ) : (
@@ -2198,6 +2200,7 @@ export default function App() {
       </Routes>
       </Suspense>
       )}
+      </ErrorBoundary>
     </Shell>
   );
 }
