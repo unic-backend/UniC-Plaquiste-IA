@@ -14,6 +14,7 @@ LABELS = {
     "mail_secret": "Gmail (Courrier)", "repair_gh_token": "GitHub (Atelier)", "repair_deploy_hook": "Render (publication)",
     "site_gh_token": "GitHub du site", "li_token": "LinkedIn", "li_client_secret": "LinkedIn", "ig_token": "Instagram",
     "ig_app_secret": "Instagram", "higgsfield_key_id": "Higgsfield", "higgsfield_key_secret": "Higgsfield", "elevenlabs_key": "Voix ElevenLabs",
+    "gbp_client_secret": "Fiche Google", "gbp_refresh_token": "Fiche Google",
 }
 _FERNET_PREFIX = "gAAAAA"
 

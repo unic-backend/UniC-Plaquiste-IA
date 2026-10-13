@@ -36,9 +36,14 @@ function GoogleFiche({ say, onDraft }: { say: (m: string) => void; onDraft: () =
   const [prof, setProf] = useState<GProfile | null>(null);
   const [reviews, setReviews] = useState<GReview[]>([]);
   const [busy, setBusy] = useState(false);
+  const [acct, setAcct] = useState<{ connected: boolean; title: string; unreadable: boolean; env_override: boolean } | null>(null);
+  const [cid, setCid] = useState("");
+  const [csec, setCsec] = useState("");
+  const [rtok, setRtok] = useState("");
 
   useEffect(() => {
     net.gStatus().then(setSt).catch((e) => say(e.message));
+    net.gAccount().then(setAcct).catch(() => {});
   }, []);
 
   const load = async () => {
@@ -57,17 +62,46 @@ function GoogleFiche({ say, onDraft }: { say: (m: string) => void; onDraft: () =
   if (!st.configured)
     return (
       <section className="card-box">
-        <h3>Fiche Google — connexion</h3>
-        <p className="hint">NON DISPONIBLE. Variables manquantes sur le serveur :</p>
-        <pre className="plan">{st.missing.join("\n")}</pre>
-        <p className="hint">Voir le guide « Connecter la fiche Google » dans le README. En attendant : brouillons + copier/coller.</p>
+        <h3>Connecter la fiche Google</h3>
+        {acct?.unreadable && <p className="hint" role="alert">Les identifiants enregistrés sont devenus illisibles (la clé de chiffrement du serveur a changé). Colle-les à nouveau.</p>}
+        <p className="hint">Il te faut l'accès API approuvé par Google (e-mail « Félicitations »), puis ces 3 valeurs. Elles sont testées, chiffrées sur ton serveur, jamais affichées. Le compte et la fiche sont trouvés tout seuls.</p>
+        <ol className="steps">
+          <li>Google Cloud → projet approuvé → <b>Bibliothèque d'API</b> : active « My Business Account Management », « My Business Business Information » et « Google My Business ».</li>
+          <li>Écran de consentement OAuth (Externe, mode test, ton Gmail en testeur), puis un identifiant <b>Application Web</b> avec la redirection <code>https://developers.google.com/oauthplayground</code>.</li>
+          <li>OAuth Playground → roue crantée → « Use your own OAuth credentials » → portée <code>https://www.googleapis.com/auth/business.manage</code> → autorise → échange le code → copie le <b>Refresh token</b>.</li>
+        </ol>
+        <label htmlFor="g-cid">Identifiant client</label>
+        <input id="g-cid" autoComplete="off" placeholder="xxxx.apps.googleusercontent.com" value={cid} onChange={(e) => setCid(e.target.value)} />
+        <label htmlFor="g-sec">Secret client</label>
+        <input id="g-sec" type="password" autoComplete="off" placeholder="GOCSPX-…" value={csec} onChange={(e) => setCsec(e.target.value)} />
+        <label htmlFor="g-tok">Refresh token</label>
+        <input id="g-tok" type="password" autoComplete="off" placeholder="1//…" value={rtok} onChange={(e) => setRtok(e.target.value)} />
+        <button className="btn btn-copper" disabled={busy || !cid.trim() || !csec.trim() || !rtok.trim()}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await net.gConnect(cid, csec, rtok);
+              setCid(""); setCsec(""); setRtok("");
+              say(`Fiche connectée : ${r.title || "OK"}.`);
+              setSt(await net.gStatus()); setAcct(await net.gAccount());
+            } catch (e: any) { say(e.message); } finally { setBusy(false); }
+          }}>
+          Connecter la fiche
+        </button>
       </section>
     );
   return (
     <section className="card-box">
       <h3>Fiche Google</h3>
+      {acct?.connected && <p className="hint"><I.Check size={16} /> Connectée{acct.title ? ` : ${acct.title}` : ""}. Chaque publication et réponse attend ton approbation.</p>}
       <div className="toolbar">
         <button className="btn btn-copper" disabled={busy} onClick={load}>Charger fiche et avis</button>
+        {acct?.connected && !acct.env_override && (
+          <button className="btn btn-ghost btn-small" disabled={busy}
+            onClick={() => { if (window.confirm("Déconnecter la fiche Google ? Les identifiants seront effacés du serveur.")) { setBusy(true); net.gDisconnect().then(async () => { setProf(null); setReviews([]); setSt(await net.gStatus()); setAcct(await net.gAccount()); say("Fiche Google déconnectée."); }).catch((e) => say(e.message)).finally(() => setBusy(false)); } }}>
+            Déconnecter
+          </button>
+        )}
       </div>
       {prof && (
         <div>

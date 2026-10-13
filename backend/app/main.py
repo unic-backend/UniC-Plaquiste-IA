@@ -304,6 +304,11 @@ def startup():
             mail_account.load_into_runtime(db)   # compte Gmail connecté depuis l'appli
         except Exception:   # un secret illisible ne doit jamais empêcher le démarrage
             pass
+        try:
+            from app import google_account
+            google_account.load_into_runtime(db)   # fiche Google connectée depuis l'appli
+        except Exception:
+            pass
     finally:
         db.close()
 

@@ -262,6 +262,10 @@ export const net = {
   boost: (b: { target: string; facts?: string }) =>
     request<{ plan: string; note: string }>("/api/reseaux/boost", { method: "POST", ...json(b) }),
   publish: (id: string) => request<Post>(`/api/reseaux/posts/${id}/publish`, { method: "POST" }),
+  gAccount: () => request<{ connected: boolean; title: string; unreadable: boolean; env_override: boolean }>("/api/google/account"),
+  gConnect: (client_id: string, client_secret: string, refresh_token: string) =>
+    request<{ connected: boolean; title: string }>("/api/google/account", { method: "PUT", ...json({ client_id, client_secret, refresh_token }) }),
+  gDisconnect: () => request<{ connected: boolean }>("/api/google/account", { method: "DELETE" }),
   gStatus: () => request<{ configured: boolean; missing: string[]; ai: boolean }>("/api/google/status"),
   gProfile: () => request<GProfile>("/api/google/profile"),
   gReviews: () => request<GReview[]>("/api/google/reviews"),
