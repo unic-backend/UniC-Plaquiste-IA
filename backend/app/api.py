@@ -802,7 +802,8 @@ class PriceIn(BaseModel):
 
 @router.get("/materials")
 def materials(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Material).filter(Material.is_active.is_(True)).order_by(Material.category, Material.name).all()
+    rows = (db.query(Material).options(selectinload(Material.prices)).filter(Material.is_active.is_(True))   # prix chargés d'un coup (avant : 1 requête par matériau)
+            .order_by(Material.category, Material.name).all())
     locked = _engine_skus()
     out = []
     for m in rows:

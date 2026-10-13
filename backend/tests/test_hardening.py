@@ -756,3 +756,19 @@ def test_pdf_total_printed_equals_the_total_in_the_database(client):
         digits = re.sub(r"[^\d]", "", text)   # espaces fines, insécables, séparateurs : ignorés
         assert str(total) in digits, f"{url} : total {total} absent du PDF"
         assert str(total + 7919) not in digits, url   # le test sait aussi refuser un autre montant
+
+
+def test_materials_list_loads_prices_in_one_query_not_one_per_material(client):
+    from sqlalchemy import event
+    from app.database import engine
+    n = {"v": 0}
+
+    def count(*a, **k):
+        n["v"] += 1
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        r = client.get("/api/materials")
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    assert r.status_code == 200 and len(r.json()) > 20
+    assert n["v"] <= 8, f"{n['v']} requêtes pour {len(r.json())} matériaux"   # avant : une requête par matériau (53)
