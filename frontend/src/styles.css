@@ -1451,3 +1451,13 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .sidebar .side-search::placeholder { color: rgba(239,234,226,.55); }
 .sidebar .side-search:focus-visible { outline: 2px solid #8fc2ad; outline-offset: 1px; }
 .side-foot { border-top: 1px solid rgba(255,255,255,.08); padding-top: 6px; }
+
+/* Paramètres : sections en listes groupées (une carte par section, lignes séparées, chevron) */
+.hub-grid { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--g-edge); border-radius: 18px; overflow: hidden; background: var(--g-grad), var(--g-base); box-shadow: var(--g-hi), var(--g-shadow); margin: 8px 0 26px; }
+.hub-item { position: relative; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; padding: 14px 40px 14px 16px; gap: 2px; }
+.hub-item + .hub-item { border-top: 1px solid var(--g-edge); }
+.hub-item::after { content: "›"; position: absolute; right: 16px; top: 50%; transform: translateY(-52%); font-size: 24px; line-height: 1; color: var(--muted); }
+.hub-item b { font-size: 16px; }
+.hub-item span { font-size: 13px; line-height: 1.35; opacity: .72; }
+.hub-item:hover, .hub-item:active { transform: none; box-shadow: none; background: color-mix(in srgb, var(--copper) 7%, transparent); }
+.hub-item:focus-visible { outline: 2px solid var(--copper); outline-offset: -2px; }
