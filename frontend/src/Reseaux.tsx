@@ -326,6 +326,8 @@ export function Courrier() {
   const [gPwd, setGPwd] = useState("");
   const [clean, setClean] = useState<{ id: string; from_addr: string; subject: string; category: string; reason: string }[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<string | null>(null);   // recherche en cours d'affichage (null = boîte relevée)
   const { msg, say } = useToast();
   const refresh = () => {
     net.mailStatus().then(setStatus).catch((e) => say(e.message));
@@ -420,14 +422,24 @@ export function Courrier() {
             </div>
           </section>
         )}
-        {mails.length === 0 && <div className="empty">Aucun mail relevé.</div>}
+        <form className="mail-search" role="search" onSubmit={(e) => { e.preventDefault(); const t = q.trim(); if (t) run(async () => { const r = await net.mailSearch(t); setMails(r); setFound(t); setOpen(null); say(r.length ? `${r.length} mail(s) trouvé(s).` : "Rien trouvé."); }); }}>
+          <input type="search" aria-label="Chercher dans toute la boîte mail" placeholder="Chercher dans toute la boîte (nom, sujet, mot…)" value={q} onChange={(e) => setQ(e.target.value)} disabled={!status.read} />
+          <button className="btn btn-line" type="submit" disabled={busy || !status.read || !q.trim()}>Chercher</button>
+        </form>
+        {found !== null && (
+          <p className="hint">Résultats pour « {found} » (reçus, envoyés, archivés). <button className="btn btn-ghost btn-small" onClick={() => { setFound(null); setQ(""); setOpen(null); load(); }}>Retour à la boîte</button></p>
+        )}
+        {mails.length === 0 && <div className="empty">{found !== null ? "Aucun mail trouvé." : "Aucun mail relevé."}</div>}
         <div className="two-col">
           <div>
             {mails.map((m) => (
               <button key={m.id} className={`plat mail ${open?.id === m.id ? "on" : ""}`}
                 onClick={() => { setOpen(m); setInfo({}); setDraft(null); }}>
-                <b>{m.subject || "(sans objet)"}</b>{m.suspect && <span className="badge" title="Contient des consignes suspectes : ignorées par l'IA"> <I.Alert size={12} /> suspect</span>}
-                <span>{m.from_addr}{m.category ? ` · ${m.category}` : ""}</span>
+                <i className="mail-av" aria-hidden>{(m.from_addr.replace(/[^a-zA-Z0-9]/g, "")[0] || "?").toUpperCase()}</i>
+                <span className="mail-txt">
+                  <b>{m.subject || "(sans objet)"}</b>{m.suspect && <span className="badge" title="Contient des consignes suspectes : ignorées par l'IA"> <I.Alert size={12} /> suspect</span>}
+                  <span>{m.from_addr}{m.category ? ` · ${m.category}` : ""}</span>
+                </span>
               </button>
             ))}
           </div>
