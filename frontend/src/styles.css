@@ -1439,3 +1439,15 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 @media (max-height: 700px) { .hero-orb { display: none; } }
 @media (min-width: 861px) { .quick-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .hero-orb { animation: none; } }
+
+/* Menu latéral : navigation en lignes sobres, recherche intégrée, bouton principal seul en relief */
+.side-nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.side-nav .side-brief { margin: 0; padding: 0 12px; height: 44px; border: 0; border-radius: 12px; background: transparent; box-shadow: none; font-size: 15px; text-align: left; }
+.side-nav .side-brief:hover { background: rgba(255,255,255,.06); }
+.side-nav .side-brief.active { background: rgba(255,255,255,.1); }
+.side-nav .side-brief.active svg { color: #e0a06f; }
+.side-nav .side-brief span:not(.side-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar .side-search { background: rgba(255,255,255,.06); color: #efeae2; border: 1px solid rgba(255,255,255,.1); }
+.sidebar .side-search::placeholder { color: rgba(239,234,226,.55); }
+.sidebar .side-search:focus-visible { outline: 2px solid #8fc2ad; outline-offset: 1px; }
+.side-foot { border-top: 1px solid rgba(255,255,255,.08); padding-top: 6px; }
