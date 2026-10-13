@@ -966,7 +966,9 @@ function Chat({ initialId }: { initialId?: string }) {
         <div className="chat-inner">
           {messages.length === 0 && (
             <div className="hero">
+              <div className="hero-orb" aria-hidden><Logo size={44} /></div>
               <GreetingTyper g={greet} />
+              <div className="hero-date">{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</div>
             </div>
           )}
           {messages.map((m, i) => (
