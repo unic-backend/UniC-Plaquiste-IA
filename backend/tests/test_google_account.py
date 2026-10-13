@@ -45,7 +45,12 @@ class FakeHttp:
         return self.plan["token"]
 
     def get(self, url, headers=None, params=None, **k):
-        return self.plan["accounts"] if url.endswith("/accounts") else self.plan["locations"]
+        if url.endswith("/accounts"):
+            return self.plan["accounts"]
+        by_account = self.plan.get("by_account")
+        if by_account is not None:
+            return by_account[url.split("/accounts/")[1].split("/")[0]]
+        return self.plan["locations"]
 
 
 @pytest.fixture(autouse=True)
@@ -191,3 +196,27 @@ def test_endpoints_never_return_secrets():
         d = c.delete("/api/google/account")
         assert d.status_code == 200 and d.json()["connected"] is False
         assert c.get("/api/google/status").json()["configured"] is False
+
+
+def test_fiche_is_found_in_a_later_account_not_only_the_first():
+    FakeHttp.plan["accounts"] = Resp(200, {"accounts": [{"name": "accounts/AAA"}, {"name": "accounts/BBB"}]})
+    FakeHttp.plan["by_account"] = {"AAA": Resp(200, {}), "BBB": Resp(200, {"locations": [{"name": "locations/999", "title": "UniC Plaquiste"}]})}
+    db = _db()
+    try:
+        out = google_account.connect(db, CID, SECRET, TOKEN)
+        assert out["connected"] and gb._v("gbp_account_id") == "BBB" and gb._v("gbp_location_id") == "999"
+    finally:
+        db.close()
+
+
+def test_no_fiche_in_any_account_says_how_many_accounts_were_seen():
+    FakeHttp.plan["accounts"] = Resp(200, {"accounts": [{"name": "accounts/AAA"}, {"name": "accounts/BBB"}]})
+    FakeHttp.plan["by_account"] = {"AAA": Resp(200, {}), "BBB": Resp(403)}
+    db = _db()
+    try:
+        with pytest.raises(google_account.GoogleAccountError) as e:
+            google_account.connect(db, CID, SECRET, TOKEN)
+        assert "2 compte(s)" in str(e.value) and "PROPRIÉTAIRE" in str(e.value)
+        assert db.get(AppSetting, "gbp_refresh_token") is None
+    finally:
+        db.close()

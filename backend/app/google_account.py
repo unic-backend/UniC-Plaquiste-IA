@@ -57,14 +57,19 @@ def _discover(client_id: str, client_secret: str, refresh_token: str) -> tuple[s
             accounts = acc.json().get("accounts") or []
             if not accounts:
                 raise GoogleAccountError("Aucun compte Business Profile sur ce compte Google : connecte-toi avec le compte propriétaire de la fiche.")
-            account_id = accounts[0]["name"].split("/")[-1]
-            loc = c.get(f"{INFO}/accounts/{account_id}/locations", headers=head, params={"readMask": "name,title", "pageSize": 10})
-            if loc.status_code != 200:
-                raise GoogleAccountError(f"Google a répondu {loc.status_code} en cherchant ta fiche.")
-            locations = loc.json().get("locations") or []
-            if not locations:
-                raise GoogleAccountError("Aucune fiche trouvée sur ce compte.")
-            return account_id, locations[0]["name"].split("/")[-1], str(locations[0].get("title", ""))[:120]
+            # un compte Google peut avoir plusieurs « comptes » Business Profile (personnel, groupes) : la fiche est dans l'un d'eux
+            for account in accounts:
+                account_id = account["name"].split("/")[-1]
+                loc = c.get(f"{INFO}/accounts/{account_id}/locations", headers=head, params={"readMask": "name,title", "pageSize": 10})
+                if loc.status_code == 429:
+                    raise GoogleAccountError("Quota Google dépassé : réessaie dans une minute.")
+                if loc.status_code != 200:
+                    continue
+                locations = loc.json().get("locations") or []
+                if locations:
+                    return account_id, locations[0]["name"].split("/")[-1], str(locations[0].get("title", ""))[:120]
+            raise GoogleAccountError(f"Google voit {len(accounts)} compte(s) Business Profile pour ce Google, mais aucune fiche dedans. "
+                                     "Refais l'autorisation (Playground) en choisissant le compte Google PROPRIÉTAIRE de la fiche.")
     except GoogleAccountError:   # (sous-classe de ValueError) : ses messages lisibles passent tels quels
         raise
     except httpx.HTTPError:
