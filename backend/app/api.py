@@ -802,7 +802,8 @@ class PriceIn(BaseModel):
 
 @router.get("/materials")
 def materials(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(Material).filter(Material.is_active.is_(True)).order_by(Material.category, Material.name).all()
+    rows = (db.query(Material).options(selectinload(Material.prices)).filter(Material.is_active.is_(True))   # prix chargés d'un coup (avant : 1 requête par matériau)
+            .order_by(Material.category, Material.name).all())
     locked = _engine_skus()
     out = []
     for m in rows:
@@ -2134,14 +2135,14 @@ def _repair_call(fn, *a):
 
 @router.get("/selfcare")
 def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
-    from app import agents, repair, selfcare
+    from app import agents, repair, secret_health, selfcare
     from app.models import AppSetting, CustomAgent, RepairJob
     selfcare.ensure_running()
     repair.sync_all(db)   # une proposition fusionnée par GitHub n'est plus « à voir » : la pastille disparaît
     last = db.get(AppSetting, "selfcheck_last")
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
-            "slow_queries": list(reversed(SLOW_QUERIES)), "auto_work": selfcare.auto_enabled(db), "agents_halted": agents.halted(db), "agents_all_tools": len(agents.SAFE_TOOLS),
+            "slow_queries": list(reversed(SLOW_QUERIES)), "secrets_unreadable": secret_health.unreadable(db), "auto_work": selfcare.auto_enabled(db), "agents_halted": agents.halted(db), "agents_all_tools": len(agents.SAFE_TOOLS),
             "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
             "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
 

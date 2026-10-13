@@ -306,6 +306,18 @@ export function Atelier() {
           </p>
         </section>
 
+        {d.secrets_unreadable?.length > 0 && (
+          <section className="card-box" role="alert">
+            <div className="at-head"><h3>Connexions à refaire</h3></div>
+            <p className="hint">Ces connexions sont enregistrées mais le serveur ne peut plus les lire (la clé de chiffrement a changé). Rien n'est perdu : reconnecte-les une fois.</p>
+            <ul className="at-checks">
+              {d.secrets_unreadable.map((s: any) => (
+                <li key={s.label} className="ko"><I.Alert size={16} /><b>{s.label}</b></li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <section className="card-box">
           <div className="at-head"><h3>Santé</h3>
             <button className="btn btn-line btn-small" disabled={busy === "check"} onClick={() => act("check", async () => setCheck(await api.selfCheck()))}>

@@ -146,3 +146,31 @@ def test_two_confirmed_values_are_both_kept_and_the_order_is_shown(db):
     c = [x for x in memory.conflicts(db) if "Cimenco" in x["a"]["text"]][0]
     assert c["plus_recent"] in (first.id, second.id)
     assert "plus récente" in memory.block(db, "prix sac ciment colle Cimenco")
+
+
+def test_conflicts_limited_to_shown_memories_equal_the_full_scan_restricted_and_prompt_is_unchanged(db):
+    ids = []
+    for txt in ("La plaque hydrofuge Zorba coûte 7 100 FCFA chez Alpha", "La plaque hydrofuge Zorba coûte 8 300 FCFA chez Alpha",
+                "Le rail Zorba mesure 3 m chez Beta pour 2 500 FCFA", "Le rail Zorba mesure 3 m chez Beta pour 2 900 FCFA"):
+        m = memory.add(db, txt, source="user")
+        ids.append(m.id if hasattr(m, "id") else None)
+    db.commit()
+    full = memory.conflicts(db)
+    assert full, "le jeu d'essai doit contenir des divergences"
+    some = {c["a"]["id"] for c in full[:1]}
+    part = memory.conflicts(db, only=some)
+    expected = [c for c in full if c["a"]["id"] in some or c["b"]["id"] in some]
+    assert [(c["a"]["id"], c["b"]["id"]) for c in part] == [(c["a"]["id"], c["b"]["id"]) for c in expected]   # même résultat, même ordre
+    assert memory.conflicts(db, only=set()) == []
+    real = memory.conflicts
+
+    def old_style(db_, only=None):   # ancien comportement : balayage complet à chaque message
+        return real(db_)
+    for query in ("plaque hydrofuge Zorba", "rail Zorba Beta", "bonjour"):
+        fast = memory.block(db, query)
+        memory.conflicts = old_style
+        try:
+            slow = memory.block(db, query)
+        finally:
+            memory.conflicts = real
+        assert fast == slow, query                                                                              # le texte envoyé à l'IA ne change pas

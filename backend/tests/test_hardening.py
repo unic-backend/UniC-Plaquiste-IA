@@ -783,3 +783,44 @@ def test_document_lists_have_a_light_mode_and_the_full_mode_is_unchanged(client)
     assert len(json.dumps(light)) < len(json.dumps(full)) / 2
     inv = client.get("/api/invoices?summary=1")
     assert inv.status_code == 200 and all("items" not in r and "payments" not in r for r in inv.json())
+
+def test_materials_list_loads_prices_in_one_query_not_one_per_material(client):
+    from sqlalchemy import event
+    from app.database import engine
+    n = {"v": 0}
+
+    def count(*a, **k):
+        n["v"] += 1
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        r = client.get("/api/materials")
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    assert r.status_code == 200 and len(r.json()) > 20
+    assert n["v"] <= 8, f"{n['v']} requêtes pour {len(r.json())} matériaux"   # avant : une requête par matériau (53)
+
+
+def test_unreadable_saved_secrets_are_reported_by_name_and_readable_ones_are_not(client):
+    from app import secret_health, secrets_box
+    from app.database import SessionLocal
+    from app.models import AppSetting
+    db = SessionLocal()
+    for key, val in (("mail_secret", "gAAAAAB-ancienne-cle"), ("li_token", secrets_box.encrypt("jeton-lisible")), ("site_title", "pas un secret"),
+                     ("repair_gh_token", "gAAAAAB-autre-ancienne-cle")):
+        row = db.get(AppSetting, key)
+        if row:
+            row.value = val
+        else:
+            db.add(AppSetting(key=key, value=val))
+    db.commit()
+    bad = {x["label"] for x in secret_health.unreadable(db)}
+    assert bad == {"Gmail (Courrier)", "GitHub (Atelier)"}                       # lisible et non chiffré : jamais signalés
+    r = client.get("/api/selfcare")
+    assert r.status_code == 200 and {x["label"] for x in r.json()["secrets_unreadable"]} == bad
+    for key in ("mail_secret", "li_token", "site_title", "repair_gh_token"):
+        row = db.get(AppSetting, key)
+        if row:
+            db.delete(row)
+    db.commit()
+    db.close()
+    assert client.get("/api/selfcare").json()["secrets_unreadable"] == []

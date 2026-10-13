@@ -205,7 +205,7 @@ export function Reseaux() {
             <label>Sujet (l'IA rédige à partir de faits que vous donnez)</label>
             <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Ex. cloison terminée à Diamniadio" />
             <label>Avis / commentaire à répondre (optionnel)</label>
-            <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+            <textarea aria-label="Avis ou commentaire à répondre" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
             <div className="toolbar">
               <button className="btn btn-line" disabled={busy || (!topic && !comment)}
                 onClick={() => run(async () => {
@@ -217,12 +217,12 @@ export function Reseaux() {
               </button>
             </div>
             <label>Titre (optionnel)</label>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input aria-label="Titre" value={title} onChange={(e) => setTitle(e.target.value)} />
             <label>Texte</label>
-            <textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+            <textarea aria-label="Texte" rows={6} value={body} onChange={(e) => setBody(e.target.value)} />
             <div className={`hint ${full.length > p.max_chars ? "error" : ""}`}>{full.length}/{p.max_chars}</div>
             <label>Hashtags</label>
-            <input value={tags} onChange={(e) => setTags(e.target.value)} />
+            <input aria-label="Hashtags" value={tags} onChange={(e) => setTags(e.target.value)} />
             <div className="toolbar">
               <button className="btn btn-copper" disabled={busy || !body.trim()}
                 onClick={() => run(async () => {
@@ -573,10 +573,10 @@ export function Memoire() {
         )}
         <section className="card-box">
           <label>Nouveau souvenir</label>
-          <textarea rows={2} value={text} maxLength={500} onChange={(e) => setText(e.target.value)}
+          <textarea aria-label="Nouveau souvenir" rows={2} value={text} maxLength={500} onChange={(e) => setText(e.target.value)}
             placeholder="Ex. Je facture toujours un acompte de 30 % avant de commencer" />
           <div className="toolbar">
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <select aria-label="Type de souvenir" value={kind} onChange={(e) => setKind(e.target.value)}>
               {Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <button className="btn btn-copper" disabled={text.trim().length < 5}
