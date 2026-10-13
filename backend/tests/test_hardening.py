@@ -758,6 +758,32 @@ def test_pdf_total_printed_equals_the_total_in_the_database(client):
         assert str(total + 7919) not in digits, url   # le test sait aussi refuser un autre montant
 
 
+def test_document_lists_have_a_light_mode_and_the_full_mode_is_unchanged(client):
+    import json
+    from app.database import SessionLocal
+    from app.models import Quotation, QuotationItem
+    db = SessionLocal()
+    q = Quotation(number="D-LEGER-1", title="Liste légère", client_label="Client Léger", status="draft", subtotal=1000.0, vat_rate=0.18,
+                  vat_amount=180.0, total=1180.0, notes="note longue " * 50, cover_letter="lettre " * 80)
+    db.add(q)
+    db.flush()
+    db.add(QuotationItem(quotation_id=q.id, position=1, description="Ligne", quantity=10, unit="m2", unit_price=100, total=1000))
+    db.commit()
+    qid = q.id
+    db.close()
+    full = next(x for x in client.get("/api/quotes").json() if x["id"] == qid)
+    light_r = client.get("/api/quotes?summary=1")
+    light = next(x for x in light_r.json() if x["id"] == qid)
+    assert "items" in full and "price_check" in full and full["notes"].startswith("note")          # complet : comme avant
+    for dropped in ("items", "price_check", "cover_letter", "notes", "assumptions", "object_text"):
+        assert dropped not in light, dropped                                                         # léger : rien de lourd
+    for kept in ("id", "number", "title", "client_name", "client_label", "customer_name", "status", "total", "prices_complete", "created_at"):
+        assert kept in light, kept                                                                   # ce que le tableau affiche et filtre
+    assert light["client_name"] == full["client_name"] == "Client Léger" and light["total"] == full["total"]
+    assert len(json.dumps(light)) < len(json.dumps(full)) / 2
+    inv = client.get("/api/invoices?summary=1")
+    assert inv.status_code == 200 and all("items" not in r and "payments" not in r for r in inv.json())
+
 def test_materials_list_loads_prices_in_one_query_not_one_per_material(client):
     from sqlalchemy import event
     from app.database import engine
