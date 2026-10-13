@@ -586,6 +586,7 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/" className="btn new-chat" onClick={() => setOpen(false)}>
           + Nouvelle conversation
         </Link>
+        <nav className="side-nav" aria-label="Navigation">
         <button className="side-brief" onClick={() => {
           try { sessionStorage.setItem(AUTO_KEY, "briefing"); } catch { /* ignoré */ }
           setOpen(false);
@@ -601,17 +602,19 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
           <I.Globe size={18} /> Interprète
         </Link>
         <Link to="/suivi" className={`side-brief side-code ${loc.pathname.startsWith("/suivi") ? "active" : ""}`} onClick={() => setOpen(false)}>
-          <I.Receipt size={18} /> Suivi des encaissements
+          <I.Receipt size={18} /> <span>Encaissements</span>
         </Link>
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
           {work > 0 && <span className="side-badge" aria-label={`${work} élément(s) à voir`}>{work}</span>}
         </Link>
+        </nav>
         <input
+          className="side-search"
+          aria-label="Rechercher une conversation"
           placeholder="Rechercher…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          style={{ background: "#24302c", color: "#efeae2", borderColor: "#3d4a45" }}
         />
         <div className="conv-list">
           {convs.length === 0 && <div className="conv-empty">{q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>}
