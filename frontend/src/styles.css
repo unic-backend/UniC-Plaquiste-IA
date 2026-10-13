@@ -1461,3 +1461,13 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .hub-item span { font-size: 13px; line-height: 1.35; opacity: .72; }
 .hub-item:hover, .hub-item:active { transform: none; box-shadow: none; background: color-mix(in srgb, var(--copper) 7%, transparent); }
 .hub-item:focus-visible { outline: 2px solid var(--copper); outline-offset: -2px; }
+
+/* Atelier : résumé d'un coup d'œil, titres de cartes plus nets */
+.at-glance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 4px 0 16px; }
+.at-tile { display: flex; flex-direction: column; gap: 2px; padding: 12px 12px 10px; border-radius: 16px; border: 1px solid var(--g-edge); background: var(--g-grad), var(--g-base); box-shadow: var(--g-hi); }
+.at-tile b { font-size: 26px; line-height: 1.1; color: var(--green-text, var(--green)); }
+.at-tile span { font-size: 12.5px; color: var(--muted); }
+.at-tile.warn { border-color: color-mix(in srgb, var(--copper) 55%, transparent); }
+.at-tile.warn b { color: var(--copper-text, var(--copper)); }
+.atelier .card-box > h3, .atelier .at-head h3 { font-size: 17px; letter-spacing: -.01em; }
+.atelier .card-box > .hint:first-of-type, .atelier .at-head + .hint { margin-top: 8px; }

@@ -290,6 +290,22 @@ export function Atelier() {
         <h1>Atelier</h1>
         <p className="lede">UniC se surveille, se répare et crée ses agents. Rien ne change en ligne sans ton clic « Fusionner ».</p>
         {msg && <p className="hint" role="status">{msg}</p>}
+        {(() => {
+          const tiles = [
+            { n: d.incidents.length, label: "Problèmes" },
+            { n: d.jobs.filter((j: any) => j.status === "proposed").length, label: "À valider" },
+            { n: d.secrets_unreadable?.length || 0, label: "À reconnecter" },
+          ];
+          return (
+            <div className="at-glance" role="group" aria-label="Résumé">
+              {tiles.map((t) => (
+                <div key={t.label} className={`at-tile ${t.n > 0 ? "warn" : "ok"}`}>
+                  <b>{t.n}</b><span>{t.label}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         <Release connected={!!connected} onMsg={setMsg} />
 
         <section className="card-box">
