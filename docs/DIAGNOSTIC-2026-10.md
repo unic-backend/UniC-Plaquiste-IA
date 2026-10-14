@@ -627,3 +627,21 @@ Chaque ligne = une PR fusionnée, testée ; les chiffres viennent de mesures fai
 Mesuré aussi, sans rien à corriger : latence du serveur de production (`/api/health/ready` 0,25 à 0,8 s), dépendances (0 faille connue côté interface ; 1 côté serveur, `pytest`, outil de test non déployé, et le fichier `requirements*` est une zone protégée), couverture des tests (~85 %), `GET /api/tracking` (30 à 45 ms), préparation d'un message hors appel IA (110 à 130 ms).
 
 Non vérifié (à faire par le patron) : sur un vrai téléphone, appel entrant pendant que UniC parle, Bluetooth, « Nettoyer la boîte » sur Gmail avec un seul mail d'abord, question sur un plan après plusieurs messages.
+
+## Nuit du 14/10 (suite) : interface, courrier, briques d'ARENA
+
+| Domaine | Changement | PR |
+|---|---|---|
+| Accueil, menu, Paramètres, Atelier, Courrier | Refonte visuelle (cartes, états, lisibilité) | #98 à #105 |
+| Courrier | Recherche dans toute la boîte Gmail (`search_inbox`, lecture seule) ; connexion Fiche Google guidée | #104, #105 |
+| Site | Book d'entreprise publiable depuis Réseaux › Site web ; **publication de pages réparée** (le nouveau site React la cassait) | #106 |
+| Fiabilité | Disjoncteur (ARENA) : après 3 échecs réels, Gmail/Google en pause 60 s, visible dans l'Atelier | #107 |
+| Calculs | `business_calc` (ARENA) : échéancier à somme exacte, délai, marge, « et si… », risques, poids de chaque client | #108 |
+| Listes | Fiches compactes sur téléphone, montants lisibles, états vides guidés | #109 |
+| Conversation | Tableaux, liens sûrs, citations, code dans les réponses de l'IA ; bulle « Vous » compacte | #110, #111 |
+| Comptes rendus | `visit_report` (ARENA) : mesures en code, rien d'inventé | #112 |
+| Agenda | État vide guidé | #113 |
+
+Déjà présent, donc non recopié : détection des contradictions de mémoire (`memory.py`). Briques refusées ou en attente d'accord : voir `docs/BRIQUES.md`.
+
+Non vérifié sur de vrais services : syntaxe de recherche Gmail, flux Google, rendu du Book en ligne, rédaction réelle de `visit_report`.
