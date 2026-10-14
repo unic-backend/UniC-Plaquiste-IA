@@ -1524,3 +1524,6 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .msg.user .msg-actions { position: absolute; right: 0; top: 100%; margin: 2px 0 0; z-index: 1; }
 .msg.user .avatar { font-size: 9.5px; letter-spacing: 0; }
 .bubble { min-width: 0; overflow-wrap: anywhere; }
+
+/* curseurs aux couleurs de l'appli (le bleu du système jurait avec le cuivre et le vert) */
+input[type="range"] { accent-color: var(--green); }
