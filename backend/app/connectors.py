@@ -10,6 +10,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app import google_business as gbp, mailbox
+from app.breaker import BREAKER, CircuitOpen
 from app.models import EmailDraft, InboxMessage, SocialPost
 from app.social import PLATFORMS, check_post
 
@@ -28,7 +29,9 @@ def sync_inbox(db: Session, limit: int = 20) -> dict:
     if not mailbox.imap_configured():
         raise ConnectorError("Lecture e-mail NON DISPONIBLE : IMAP non configuré.")
     try:
-        rows = mailbox.fetch_recent(max(1, min(limit, 50)))
+        rows = BREAKER.call("imap", mailbox.fetch_recent, max(1, min(limit, 50)))
+    except CircuitOpen as exc:
+        raise ConnectorError(str(exc), 503)
     except Exception as exc:
         logger.warning("IMAP échec : %s", exc)
         raise ConnectorError("Connexion à la boîte mail impossible. Vérifiez hôte, identifiant, mot de passe.", 502)
@@ -50,7 +53,9 @@ def search_inbox(db: Session, query: str, limit: int = 10) -> list[InboxMessage]
     if not (query or "").strip():
         raise ConnectorError("Recherche vide.", 400)
     try:
-        rows = mailbox.search(query, limit)
+        rows = BREAKER.call("imap", mailbox.search, query, limit)
+    except CircuitOpen as exc:
+        raise ConnectorError(str(exc), 503)
     except Exception as exc:
         logger.warning("IMAP recherche échec : %s", exc)
         raise ConnectorError("Recherche dans la boîte mail impossible (connexion ou syntaxe de recherche).", 502)
@@ -99,7 +104,9 @@ def require_google() -> None:
 def google_call(fn, *args):
     require_google()
     try:
-        return fn(*args)
+        return BREAKER.call("google", fn, *args, failures=(gbp.GoogleError,))
+    except CircuitOpen as exc:
+        raise ConnectorError(str(exc), 503)
     except gbp.GoogleError as exc:
         raise ConnectorError(str(exc), 502)
 
