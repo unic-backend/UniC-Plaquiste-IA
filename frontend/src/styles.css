@@ -1506,3 +1506,12 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
   .table-wrap td[data-label="Client"], .table-wrap td[data-label="Client / fournisseur"] { order: 4; flex: 1 1 100%; color: var(--muted); }
   .table-wrap td[data-label="Client"]::before, .table-wrap td[data-label="Client / fournisseur"]::before { display: none; }
 }
+
+/* Bulles de conversation : pas de marge morte en bas, avatar jamais rogné */
+.md > :last-child { margin-bottom: 0; }
+.msg { min-width: 0; }
+/* actions de ta question : sous la bulle, sans la rallonger */
+.msg.user .bubble { position: relative; }
+.msg.user .msg-actions { position: absolute; right: 0; top: 100%; margin: 2px 0 0; z-index: 1; }
+.msg.user .avatar { font-size: 9.5px; letter-spacing: 0; }
+.bubble { min-width: 0; overflow-wrap: anywhere; }
