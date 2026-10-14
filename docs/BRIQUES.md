@@ -8,7 +8,16 @@ marquées « annoncée » viennent de pages tierces (moteur de recherche), pas d
 | Module ARENA | Dans UniC | PR |
 |---|---|---|
 | `core/execution/disjoncteur.py` | `backend/app/breaker.py` : après 3 échecs réels de suite, Gmail ou Google passent en pause 60 s (plus d'appels de 20 s répétés, plus de mot de passe refusé martelé chez Gmail). Visible dans l'Atelier. | breaker |
+| `core/meetings/intelligence.py` | `backend/app/visit_report.py` + outil IA `visit_report` : compte rendu de visite sans rien inventer (mesures en code, « décidé » ≠ « proposé », responsable/échéance « non précisé » s'ils ne sont pas dits) | visit-report |
 | `core/executive/calcul_affaires.py` + `risque_affaires.py` | `backend/app/business_calc.py` + outil IA `business_calc` : échéancier de paiement (somme **exacte**, ce qu'ARENA n'assurait pas), délai tenable, marge, « et si… », risque de concentration de clients calculé sur les vraies factures | business-calc |
+
+### Déjà présent dans UniC (comparé, rien à recopier)
+
+| Module ARENA | Équivalent UniC |
+|---|---|
+| `core/memory/contradiction.py` | `memory.conflicts` (divergences numériques, même sujet, même portée déclarée) |
+| `core/relecture.py` (contrôle de prix avant réponse) | `pricecheck.review_reply`, appelé par l'orchestrateur sur chaque réponse |
+| `core/executive/question_en_attente.py` | Inutile : UniC envoie tout l'historique de la conversation au modèle, « Medina » reste donc rattaché à la question du devis |
 
 ## 2. Ce qui n'est PAS repris, et pourquoi
 
