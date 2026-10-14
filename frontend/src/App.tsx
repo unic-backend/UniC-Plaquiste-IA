@@ -34,6 +34,7 @@ import { useBackHandler, useScrollMemory } from "./navMemory";
 import { AUTO_KEY, getBriefingTime, listenBriefingTap, scheduleBriefing } from "./briefingPlan";
 import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
+import { md } from "./markdown";
 import { queueMessage, readOutbox, takeQueued, useOnline } from "./offline";
 import { api, net, AuthError, Interrupted, Stopped, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
@@ -46,42 +47,6 @@ function Logo({ size = 28 }: { size?: number }) {
       <rect x="26" y="28" width="12" height="4" fill="#B8612E" />
     </svg>
   );
-}
-
-function md(text: string) {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const inline = (s: string) =>
-    esc(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|[^*])\*(?!\s)([^*]+?)\*(?!\*)/g, "$1<em>$2</em>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-  const out: string[] = [];
-  let list: "ul" | "ol" | null = null;
-  let para: string[] = [];
-  const flushPara = () => { if (para.length) { out.push(`<p>${para.join("<br/>")}</p>`); para = []; } };
-  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  for (const raw of text.split("\n")) {
-    const line = raw.trimEnd();
-    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
-    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    const head = /^#{1,4}\s+(.*)$/.exec(line);
-    if (bullet || num) {
-      flushPara();
-      const kind = bullet ? "ul" : "ol";
-      if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
-      out.push(`<li>${inline((bullet || num)![1])}</li>`);
-    } else if (head) {
-      flushPara(); closeList();
-      out.push(`<h3>${inline(head[1])}</h3>`);
-    } else if (!line.trim()) {
-      flushPara(); closeList();
-    } else {
-      closeList();
-      para.push(inline(line));
-    }
-  }
-  flushPara(); closeList();
-  return out.join("");
 }
 
 /** Chaque mot apparaît à son tour (fondu) : mise en page stable, pas de Markdown cassé en cours de route. */
