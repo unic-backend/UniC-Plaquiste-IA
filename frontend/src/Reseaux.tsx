@@ -695,7 +695,13 @@ export function Journal() {
         <h1>Journal</h1>
         <p className="lede">Tout ce que l'IA et vous avez fait : outils appelés, brouillons, validations. Rien n'est envoyé sans vous.</p>
         {err && <p className="error">{err}</p>}
-        {!err && rows.length === 0 && <div className="empty">Rien d'enregistré pour l'instant.</div>}
+        {!err && rows.length === 0 && (
+          <div className="empty empty-state">
+            <span className="empty-ic" aria-hidden><I.Note size={26} /></span>
+            <b>Rien d'enregistré pour l'instant</b>
+            <p>Chaque outil appelé, brouillon ou validation s'inscrira ici, avec l'heure.</p>
+          </div>
+        )}
         {rows.map((r) => (
           <article key={r.id} className="card-box">
             <div className="toolbar">

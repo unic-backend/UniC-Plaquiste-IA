@@ -1693,8 +1693,10 @@ function Documents() {
           title=""
           columns={["Fichier", "Type", "Pages", "Statut"]}
           rows={files.map((f) => [f.filename, f.mime_type, f.page_count, f.processing_status])}
+          empty={{ title: "Aucun fichier reçu", hint: "Envoie un plan, un devis fournisseur ou une photo avec le « + » de la conversation : il apparaît ici." }}
         />
         <h3>Brouillons e-mail</h3>
+        {emails.length === 0 && <p className="hint">Aucun brouillon. Demande à UniC : « écris un mail à… » : il le prépare ici, sans l'envoyer.</p>}
         <ul>
           {emails.map((e) => (
             <li key={e.id}>
