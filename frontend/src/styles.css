@@ -1527,3 +1527,7 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 
 /* curseurs aux couleurs de l'appli (le bleu du système jurait avec le cuivre et le vert) */
 input[type="range"] { accent-color: var(--green); }
+
+/* Site : ancienne version du Book, repliée */
+.old-book { margin-top: 12px; }
+.old-book > summary { cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--green-text); padding: 8px 2px; }
