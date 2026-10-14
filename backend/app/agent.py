@@ -890,6 +890,8 @@ class AgentSession:
         if action == "comparer":
             return bc.comparer(base, variantes)
         if action == "risque":
+            if facteurs is not None and not isinstance(facteurs, dict):
+                return {"valide": False, "raison": "facteurs doit être un objet {nom: valeur}"}
             allowed = ("dependance_fournisseur", "marge_jours", "duree_totale_jours", "depense_avant_encaissement", "tresorerie_disponible", "concentration_client")
             return bc.risque_global(**{k: v for k, v in (facteurs or {}).items() if k in allowed})
         if action == "concentration_clients":
