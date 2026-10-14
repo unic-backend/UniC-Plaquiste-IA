@@ -52,15 +52,22 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
         )}
       </section>
       <section className="card-box">
-        <label>Book d'entreprise</label>
-        <p className="hint">Une page de présentation complète (carte d'identité de l'entreprise, services, chiffres, grands projets, avis Google) à envoyer à tes clients. Elle n'utilise que tes vraies photos, tes coordonnées et tes vrais avis. Elle s'imprime aussi en PDF.</p>
-        <button className="btn btn-line btn-small" disabled={busy}
-          onClick={() => run(async () => { setBook((await net.bookPreview()).html); })}>Aperçu</button>
-        {st.connected
-          ? <button className="btn btn-copper btn-small" disabled={busy}
-              onClick={() => { if (window.confirm("Publier le Book sur unicplaquiste.com/book/ ?")) run(async () => { const r = await net.bookPublish(); window.open(r.url, "_blank"); }, "Book publié. Netlify met le site à jour dans 1 minute."); }}>Publier le Book</button>
-          : <span className="hint"> Connecte le site ci-dessus pour publier.</span>}
-        <p className="hint">L'aperçu est une version fixe : les animations (carte qui se retourne, galerie qui défile) se voient sur la page publiée.</p>
+        <label>Portfolio d'entreprise</label>
+        <p className="hint">Le portfolio est en ligne : une bannière « Voir notre portfolio » sur l'accueil du site mène à la page animée, avec le PDF A4 à télécharger. Il se modifie dans le dépôt du site (pull request que tu fusionnes), pas depuis ici.</p>
+        <div className="row-actions">
+        <a className="btn btn-copper btn-small" href="https://www.unicplaquiste.com/portfolio/" target="_blank" rel="noopener noreferrer">Ouvrir le portfolio</a>
+        <a className="btn btn-line btn-small" href="https://www.unicplaquiste.com/portfolio/Portfolio-UniC-Plaquiste.pdf" target="_blank" rel="noopener noreferrer">Télécharger le PDF</a>
+        </div>
+        <details className="old-book">
+          <summary>Ancienne version (Book)</summary>
+          <p className="hint">Première version de la page, publiable sur unicplaquiste.com/book/. Elle n'a ni les effets de défilement ni la bannière : à n'utiliser que si tu en as besoin.</p>
+          <button className="btn btn-line btn-small" disabled={busy}
+            onClick={() => run(async () => { setBook((await net.bookPreview()).html); })}>Aperçu</button>
+          {st.connected
+            ? <button className="btn btn-line btn-small" disabled={busy}
+                onClick={() => { if (window.confirm("Publier l'ancien Book sur unicplaquiste.com/book/ ?")) run(async () => { const r = await net.bookPublish(); window.open(r.url, "_blank"); }, "Book publié. Netlify met le site à jour dans 1 minute."); }}>Publier l'ancien Book</button>
+            : <span className="hint"> Connecte le site ci-dessus pour publier.</span>}
+        </details>
       </section>
       <section className="card-box">
         <label>Rédiger une page pour le site</label>
@@ -73,9 +80,9 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
         </button>
       </section>
       {book !== null && createPortal(
-        <div className="preview-back" role="dialog" aria-label="Aperçu du Book">
-          <div className="preview-head"><span /><b>Aperçu du Book</b><button className="tool" onClick={() => setBook(null)} aria-label="Fermer"><I.Stop size={18} /></button></div>
-          <iframe title="Aperçu du Book" srcDoc={book} sandbox="" style={{ flex: 1, border: 0, background: "#fff", width: "100%" }} />
+        <div className="preview-back" role="dialog" aria-label="Aperçu de l'ancien Book">
+          <div className="preview-head"><span /><b>Aperçu de l'ancien Book</b><button className="tool" onClick={() => setBook(null)} aria-label="Fermer"><I.Stop size={18} /></button></div>
+          <iframe title="Aperçu de l'ancien Book" srcDoc={book} sandbox="" style={{ flex: 1, border: 0, background: "#fff", width: "100%" }} />
         </div>, document.body)}
     </>
   );
