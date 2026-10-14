@@ -193,7 +193,7 @@ TOOL_LABELS = {
     "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "search_inbox": "Je cherche dans ta boîte mail…", "read_email": "Je lis le mail…",
     "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
     "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
-    "create_agent": "Je crée l'agent…",
+    "create_agent": "Je crée l'agent…", "business_calc": "Je fais le calcul…",
 }
 
 
