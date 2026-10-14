@@ -1120,12 +1120,15 @@ function DocFilters({ value, onChange, count, total, money = true }: {
   return (
     <div className="doc-filters">
       <input type="search" placeholder="Rechercher : client, numéro, titre…" value={value.q} onChange={set("q")} aria-label="Rechercher" />
-      <div className="doc-filters-row">
-        <label>Du <input type="date" value={value.from} onChange={set("from")} /></label>
-        <label>Au <input type="date" value={value.to} onChange={set("to")} /></label>
-        {money && <label>Min <input type="number" inputMode="numeric" value={value.min} onChange={set("min")} /></label>}
-        {money && <label>Max <input type="number" inputMode="numeric" value={value.max} onChange={set("max")} /></label>}
-      </div>
+      <details className="doc-more" open={active || (typeof window !== "undefined" && window.matchMedia?.("(min-width: 701px)").matches)}>
+        <summary>Filtres : dates{money ? " et montants" : ""}</summary>
+        <div className="doc-filters-row">
+          <label>Du <input type="date" value={value.from} onChange={set("from")} /></label>
+          <label>Au <input type="date" value={value.to} onChange={set("to")} /></label>
+          {money && <label>Min <input type="number" inputMode="numeric" value={value.min} onChange={set("min")} /></label>}
+          {money && <label>Max <input type="number" inputMode="numeric" value={value.max} onChange={set("max")} /></label>}
+        </div>
+      </details>
       <p className="hint">
         {count} sur {total} document(s)
         {active && <> · <button className="link-btn" onClick={() => onChange(NO_FILTER)}>Effacer</button></>}
@@ -1151,6 +1154,7 @@ function TablePage({
   rows,
   onRow,
   extra,
+  empty,
 }: {
   title: string;
   lede?: string;
@@ -1158,6 +1162,7 @@ function TablePage({
   rows: (string | number | null | undefined)[][];
   onRow?: (i: number) => void;
   extra?: React.ReactNode;
+  empty?: { title: string; hint: string };
 }) {
   return (
     <div className="page">
@@ -1167,7 +1172,12 @@ function TablePage({
         {extra}
         <div className="table-wrap">
           {rows.length === 0 ? (
-            <div className="empty">Aucune donnée dans la base UniC. Rien n'est inventé.</div>
+            <div className="empty empty-state">
+              <span className="empty-ic" aria-hidden><I.Note size={26} /></span>
+              <b>{empty?.title ?? "Rien ici pour l'instant"}</b>
+              <p>{empty?.hint ?? "Aucune donnée dans la base UniC. Rien n'est inventé."}</p>
+              <Link to="/" className="btn btn-copper btn-small">Ouvrir la conversation</Link>
+            </div>
           ) : (
             <table>
               <thead>
@@ -1206,6 +1216,7 @@ function Clients() {
       title="Clients"
       lede="Fiches uniquement saisies. Aucun client fictif."
       columns={["Code", "Nom", "Ville", "E-mail", "Tél"]}
+      empty={{ title: "Aucun client enregistré", hint: "Ajoute-le ci-dessus, ou dis-le à UniC : « Nouveau client : Awa Ndiaye, 77 000 00 00, Almadies »." }}
       rows={rows.map((c) => [c.code, c.name, c.city, c.email, c.phone])}
       extra={
         <form
@@ -1492,7 +1503,8 @@ function DevisList() {
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
       extra={<><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total ?? "incomplet", q.prices_complete ? "oui" : "non"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total != null ? fmt(q.total, q.currency || "FCFA") : "incomplet", q.prices_complete ? "oui" : "non"])}
+      empty={{ title: "Aucun devis pour l'instant", hint: "Demande-le à UniC dans le chat : « Fais un devis pour une cloison de 12 m² chez M. Diop »." }}
       onRow={(i) => nav(`/devis/${shown[i].id}`)}
     />
   );
@@ -1664,7 +1676,8 @@ function Factures() {
       title="Factures"
       extra={<><UnpaidPanel /><ExportButtons kind="invoices" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Type", "Client", "Statut", "Total", "Payé", "Reste"]}
-      rows={shown.map((q) => [q.number, q.kind, q.client_name || q.customer_name, statusFr(q.status), q.total, q.paid, q.remaining])}
+      rows={shown.map((q) => [q.number, ({ invoice: "Facture", deposit: "Acompte", partial: "Avancement", final: "Solde", credit: "Avoir" } as Record<string, string>)[q.kind] ?? q.kind, q.client_name || q.customer_name, statusFr(q.status), fmt(q.total, q.currency || "FCFA"), fmt(q.paid, q.currency || "FCFA"), fmt(q.remaining, q.currency || "FCFA")])}
+      empty={{ title: "Aucune facture pour l'instant", hint: "Une facture se crée à partir d'un devis accepté : « Fais la facture du devis UC-3 »." }}
       onRow={(i) => nav(`/factures/${shown[i].id}`)}
     />
   );
@@ -1677,7 +1690,8 @@ function Commandes() {
       title="Bons de commande"
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} />}
       columns={["N°", "Titre", "Client / fournisseur", "Statut", "Total"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, statusFr(q.status), q.total ?? "incomplet"])}
+      rows={shown.map((q) => [q.number, q.title, q.client_name || q.supplier_name, statusFr(q.status), q.total != null ? fmt(q.total, q.currency || "FCFA") : "incomplet"])}
+      empty={{ title: "Aucun bon de commande", hint: "« Fais un bon de commande pour 20 plaques BA13 chez mon fournisseur »." }}
       onRow={(i) => nav(`/commandes/${shown[i].id}`)}
     />
   );
@@ -1691,6 +1705,7 @@ function Livraisons() {
       extra={<DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} money={false} />}
       columns={["N°", "Titre", "Client", "Statut"]}
       rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name, statusFr(q.status)])}
+      empty={{ title: "Aucun bon de livraison", hint: "« Fais le bon de livraison du devis UC-3 »." }}
       onRow={(i) => nav(`/livraisons/${shown[i].id}`)}
     />
   );
