@@ -632,8 +632,9 @@ Non vérifié (à faire par le patron) : sur un vrai téléphone, appel entrant 
 
 | Domaine | Changement | PR |
 |---|---|---|
-| Accueil, menu, Paramètres, Atelier, Courrier | Refonte visuelle (cartes, états, lisibilité) | #98 à #105 |
-| Courrier | Recherche dans toute la boîte Gmail (`search_inbox`, lecture seule) ; connexion Fiche Google guidée | #104, #105 |
+| Accueil, menu, Paramètres, Atelier, Courrier | Refonte visuelle (cartes, états, lisibilité) | #99, #100, #101, #102, #103 |
+| Courrier | Recherche dans toute la boîte Gmail (`search_inbox`, lecture seule) | #103 |
+| Fiche Google | Connexion dans l’appli ; recherche dans tous les comptes Business Profile | #104, #105 |
 | Site | Book d'entreprise publiable depuis Réseaux › Site web ; **publication de pages réparée** (le nouveau site React la cassait) | #106 |
 | Fiabilité | Disjoncteur (ARENA) : après 3 échecs réels, Gmail/Google en pause 60 s, visible dans l'Atelier | #107 |
 | Calculs | `business_calc` (ARENA) : échéancier à somme exacte, délai, marge, « et si… », risques, poids de chaque client | #108 |
