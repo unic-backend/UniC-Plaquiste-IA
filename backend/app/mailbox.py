@@ -97,7 +97,7 @@ def fetch_recent(limit: int = 20) -> list[dict]:
 
 def _quoted(text: str) -> str:
     """Texte de recherche rendu inoffensif pour IMAP : une seule ligne, guillemets et barres échappés, longueur bornée."""
-    flat = " ".join(str(text).split())[:200]
+    flat = " ".join("".join(ch for ch in str(text) if ch.isprintable() or ch.isspace()).split())[:200]   # sans NUL ni caractères de contrôle
     return '"' + flat.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
