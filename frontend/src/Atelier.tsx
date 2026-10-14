@@ -348,6 +348,9 @@ export function Atelier() {
               ))}
             </ul>
           )}
+          {Object.values(d.breakers || {}).filter((b: any) => b.open).map((b: any) => (
+            <p className="error" key={b.label}>⏸ {b.label} : pause de sécurité après {b.fails} échecs de suite. Nouvel essai dans {b.retry_in} s.</p>
+          ))}
           {d.sleeping?.length > 0 && <p className="error">Agent(s) endormi(s) : {d.sleeping.map((s: any) => s.agent).join(", ")} — relancés automatiquement.</p>}
         </section>
 
