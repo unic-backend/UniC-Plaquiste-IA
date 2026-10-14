@@ -318,6 +318,26 @@ TOOLS: list[dict] = [
                          "additionalProperties": False},
     },
     {
+        "name": "business_calc",
+        "description": ("CALCULS D'AFFAIRES EXACTS (en code, jamais de tête) : « echeancier » (répartir un montant en acompte/avancement/solde selon des pourcentages : "
+                        "la somme des étapes égale toujours le total), « delai » (un délai demandé est-il tenable en comptant le risque de retard), « marge » "
+                        "(revenu moins coûts), « comparer » (« et si… » : une base contre des variantes, écart de marge), « risque » (niveau de risque : dépendance "
+                        "fournisseur, délai, trésorerie, concentration client), « concentration_clients » (part de chaque client dans le chiffre d'affaires, sur les VRAIES factures). "
+                        "Les chiffres viennent du message du patron ou de ses documents : n'en invente aucun, et s'il en manque un, demande-le. "
+                        "Ne propose pas de marge de ta propre initiative (il est fournisseur ET poseur)."),
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["echeancier", "delai", "marge", "comparer", "risque", "concentration_clients"]},
+            "total": {"type": "number", "description": "echeancier : montant total à répartir"},
+            "etapes": {"type": "array", "description": "echeancier : étapes, pourcentages = 100 au total",
+                       "items": {"type": "object", "properties": {"libelle": {"type": "string"}, "pourcentage": {"type": "number"}}, "required": ["libelle", "pourcentage"]}},
+            "jours_disponibles": {"type": "number"}, "jours_estimes": {"type": "number"}, "jours_risque": {"type": "number", "description": "retard possible connu (fournisseur…)"},
+            "revenu": {"type": "number"}, "couts": {"type": "object", "description": "poste → montant", "additionalProperties": {"type": "number"}},
+            "base": {"type": "object", "description": "comparer : {revenu, couts}"},
+            "variantes": {"type": "array", "description": "comparer : [{nom, revenu, couts, jours_disponibles?, jours_estimes?}]", "items": {"type": "object"}},
+            "facteurs": {"type": "object", "description": "risque : dependance_fournisseur (0-1), marge_jours, duree_totale_jours, depense_avant_encaissement, tresorerie_disponible, concentration_client (0-1)"}},
+            "required": ["action"], "additionalProperties": False},
+    },
+    {
         "name": "quote_margin",
         "description": ("MARGE d'un devis (pour le patron seulement, jamais pour le client) : prix de vente contre prix d'ACHAT enregistrés, ligne par ligne, "
                         "ventes à perte, marge sous le seuil du patron, lignes sans prix d'achat. À utiliser pour « quelle marge sur ce devis », "
@@ -529,7 +549,7 @@ TOOL_LABELS = {
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
-    "create_agent": "Agent créé", "list_agents": "Agents consultés",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -848,6 +868,33 @@ class AgentSession:
         from app import margin
         m = margin.analyze(q)
         return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"]}
+
+    def _t_business_calc(self, action: str, total=None, etapes=None, jours_disponibles=None, jours_estimes=None, jours_risque=0,
+                         revenu=None, couts=None, base=None, variantes=None, facteurs=None) -> dict:
+        from app import business_calc as bc
+        if action == "echeancier":
+            return bc.echeancier(total, etapes)
+        if action == "delai":
+            return bc.delai(jours_disponibles, jours_estimes, jours_risque)
+        if action == "marge":
+            return bc.marge(revenu, couts)
+        if action == "comparer":
+            return bc.comparer(base, variantes)
+        if action == "risque":
+            allowed = ("dependance_fournisseur", "marge_jours", "duree_totale_jours", "depense_avant_encaissement", "tresorerie_disponible", "concentration_client")
+            return bc.risque_global(**{k: v for k, v in (facteurs or {}).items() if k in allowed})
+        if action == "concentration_clients":
+            from app.services import client_name_of
+            parts: dict[str, float] = {}
+            for inv in self.db.query(Invoice).filter(Invoice.status.notin_(("draft", "cancelled"))).all():
+                if inv.kind == "credit" or (inv.total or 0) <= 0:
+                    continue
+                name = client_name_of(self.db, inv) or "Client sans nom"
+                parts[name] = parts.get(name, 0.0) + float(inv.total)
+            out = bc.concentration_clients(parts)
+            out["note"] = "Calculé sur les factures émises (hors brouillons, annulées et avoirs), pas sur les devis."
+            return out
+        return {"valide": False, "raison": f"action inconnue : {action}"}
 
     def _t_quote_margin(self, quote_number: str = "") -> dict:
         from app import margin

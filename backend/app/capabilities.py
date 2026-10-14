@@ -92,6 +92,8 @@ def registry_snapshot(db=None) -> list[dict]:
         Capability("read_email", "Lire la boîte mail (IMAP) et la fouiller en entier (reçus, envoyés, archivés : search_inbox), résumer des discussions, rédiger des brouillons de réponse",
                    {}, {}, ["user"], conn["email"],
                    "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),
+        Capability("business_calc", "Calculs d'affaires exacts : échéancier (acompte/avancement/solde), délai tenable, marge, « et si… », niveaux de risque, poids de chaque client dans le CA",
+                   {"action": "str"}, {"result": "object"}, ["user"], True),
         Capability("clean_mailbox", "Nettoyer la boîte : le PATRON touche Courrier › « Nettoyer la boîte » (pubs, newsletters, notifications GitHub traitées → corbeille Gmail, récupérable 30 jours, après sa confirmation). Toi, tu ne supprimes rien : tu l'envoies vers ce bouton",
                    {}, {}, ["user"], conn["email"],
                    "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),

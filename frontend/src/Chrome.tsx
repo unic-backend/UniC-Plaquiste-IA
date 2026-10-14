@@ -75,7 +75,7 @@ export function Typing({ deep, web, status, liveHtml }: { deep: boolean; web: bo
 /* ---------- Connecteurs utilisés par l'IA ---------- */
 
 const TOOL_LABELS: Record<string, string> = {
-  read_inbox: "Courrier consulté", search_inbox: "Boîte mail fouillée", read_email: "E-mail lu", save_email_reply_draft: "Réponse e-mail préparée",
+  read_inbox: "Courrier consulté", search_inbox: "Boîte mail fouillée", business_calc: "Calcul d'affaires fait", read_email: "E-mail lu", save_email_reply_draft: "Réponse e-mail préparée",
   list_google_reviews: "Avis Google consultés", google_profile_audit: "Fiche Google auditée",
   save_google_review_reply_draft: "Réponse à un avis préparée", save_social_post_draft: "Publication préparée",
   list_social_posts: "Publications consultées",
