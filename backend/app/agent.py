@@ -338,6 +338,15 @@ TOOLS: list[dict] = [
             "required": ["action"], "additionalProperties": False},
     },
     {
+        "name": "visit_report",
+        "description": ("COMPTE RENDU de visite de chantier ou de réunion à partir d'un texte dicté ou collé par le patron. L'outil mesure (mots, questions, durée) et rend "
+                        "les consignes de rédaction : suis-les à la lettre (rien d'ajouté, décidé ≠ proposé, responsable/échéance « non précisé » s'ils ne sont pas dits). "
+                        "Ne l'appelle pas pour un simple résumé de quelques lignes."),
+        "input_schema": {"type": "object", "properties": {"texte": {"type": "string", "description": "dictée ou notes, tels que donnés"},
+                                                          "duree_secondes": {"type": "number", "description": "durée de l'enregistrement si connue"}},
+                         "required": ["texte"], "additionalProperties": False},
+    },
+    {
         "name": "quote_margin",
         "description": ("MARGE d'un devis (pour le patron seulement, jamais pour le client) : prix de vente contre prix d'ACHAT enregistrés, ligne par ligne, "
                         "ventes à perte, marge sous le seuil du patron, lignes sans prix d'achat. À utiliser pour « quelle marge sur ce devis », "
@@ -549,7 +558,7 @@ TOOL_LABELS = {
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
-    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "visit_report": "Compte rendu préparé",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -895,6 +904,10 @@ class AgentSession:
             out["note"] = "Calculé sur les factures émises (hors brouillons, annulées et avoirs), pas sur les devis."
             return out
         return {"valide": False, "raison": f"action inconnue : {action}"}
+
+    def _t_visit_report(self, texte: str, duree_secondes=None) -> dict:
+        from app import visit_report
+        return visit_report.preparer(texte, duree_secondes)
 
     def _t_quote_margin(self, quote_number: str = "") -> dict:
         from app import margin
