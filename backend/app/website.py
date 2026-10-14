@@ -14,6 +14,7 @@ import json
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from sqlalchemy.orm import Session
@@ -26,7 +27,7 @@ DEFAULT_BRANCH = "main"
 SITE_URL = "https://www.unicplaquiste.com"
 GENERATOR = "unic-ai"
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+){0,7}$")
-RESERVED = {"images", "index", "404", "favicon", "robots", "sitemap", "unic-logo", "apple-touch-icon", "assets", "api", "app", "expert", "admin"}
+RESERVED = {"images", "index", "404", "favicon", "robots", "sitemap", "unic-logo", "apple-touch-icon", "assets", "api", "app", "expert", "admin", "book"}
 _TPL_CACHE: dict = {"t": 0.0, "data": None}
 
 
@@ -179,6 +180,44 @@ def _content_html(blocks) -> str:
 
 # ---------- page : habillage repris du site en ligne ----------
 
+_BUILTIN_TPL = {
+    "links": ('<link rel="preconnect" href="https://fonts.googleapis.com">'
+              '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow:wght@400;500;600;700&display=swap">'
+              '<link rel="icon" href="/favicon.ico"><link rel="apple-touch-icon" href="/apple-touch-icon.png">'),
+    "css": """:root{--ink:#02083a;--ink-soft:#33406b;--espresso:#02083a;--cream:#ffefa3;--gold:#ffc400;--serif:"Anton","Impact",sans-serif;--sans:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;font-family:var(--sans);background:#f6f7fd;color:var(--ink);-webkit-font-smoothing:antialiased}
+a{color:#071a7d}
+.skip-link{position:absolute;left:12px;top:-60px;background:var(--gold);color:var(--ink);padding:10px 16px;border-radius:10px;font-weight:700;z-index:100}.skip-link:focus{top:12px}
+#header{position:fixed;top:0;left:0;right:0;z-index:40;background:var(--espresso);color:#fff}
+#header .hd{max-width:1180px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 24px}
+#header .brand{display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none;font-family:var(--serif);letter-spacing:.04em;font-size:1.15rem}
+#header .brand img{width:36px;height:36px;border-radius:10px}
+#header .nav-links{display:flex;gap:6px}
+#header .nav-links a{color:#fff;text-decoration:none;font-weight:600;padding:8px 12px;border-radius:999px}
+#header .nav-links a:hover{background:rgba(255,255,255,.14)}
+.nav-toggle{display:none;background:transparent;border:1.5px solid rgba(255,255,255,.5);border-radius:10px;width:42px;height:38px;cursor:pointer}
+.nav-toggle span,.nav-toggle span::before,.nav-toggle span::after{display:block;width:18px;height:2px;background:#fff;margin:0 auto;position:relative}
+.nav-toggle span::before,.nav-toggle span::after{content:"";position:absolute;left:0}
+.nav-toggle span::before{top:-6px}.nav-toggle span::after{top:6px}
+.menu-backdrop{display:none}
+@media(max-width:760px){
+  .nav-toggle{display:block}
+  #header .nav-links{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;background:var(--espresso);padding:8px 16px 16px}
+  #header.menu-open .nav-links{display:flex}
+  #header.menu-open .menu-backdrop{display:block;position:fixed;inset:0;z-index:-1}
+}
+footer{background:var(--espresso);color:var(--cream);padding:28px 24px;text-align:center;font-size:.95rem}
+footer a{color:var(--cream)}""",
+    "header": ('<header id="header"><div class="hd"><a class="brand" href="/"><img src="/images/logo-unic-512.webp" width="36" height="36" alt="">UNIC PLAQUISTE</a>'
+               '<button class="nav-toggle" type="button" aria-expanded="false" aria-label="Menu"><span></span></button>'
+               '<nav class="nav-links" aria-label="Menu principal"><a href="/">Accueil</a><a href="/#services">Services</a><a href="/book/">Book</a><a href="/#contact">Contact</a></nav></div>'
+               '<div class="menu-backdrop"></div></header>'),
+    "footer": ('<footer><p>© <span id="year">2026</span> UniC Plaquiste · Gueule Tapée, Dakar · <a href="tel:+221777085092">+221 77 708 50 92</a> · '
+               '<a href="/">Retour au site</a></p></footer>'),
+}
+
+
 def fetch_template() -> dict:
     now = time.time()
     if _TPL_CACHE["data"] and now - _TPL_CACHE["t"] < 3600:
@@ -193,7 +232,10 @@ def fetch_template() -> dict:
     footer = re.search(r"<footer>.*?</footer>", page, flags=re.S)
     fonts = re.findall(r"<link[^>]+(?:fonts\.googleapis|fonts\.gstatic|rel=\"icon\"|rel=\"apple-touch-icon\")[^>]*>", page)
     if not (css and header and footer):
-        raise WebsiteError("Le modèle du site a changé : impossible de reprendre son habillage. Préviens l'assistant.", 502)
+        # Le site actuel est une appli (React) : son en-tête et son pied de page ne sont pas dans le HTML reçu.
+        # Habillage de secours aux couleurs du site (bleu roi et or) : la publication de pages ne tombe pas en panne.
+        _TPL_CACHE.update(t=now, data=_BUILTIN_TPL)
+        return _BUILTIN_TPL
     data = {"css": css, "header": header.group(0), "footer": footer.group(0), "links": "\n".join(fonts)}
     _TPL_CACHE.update(t=now, data=data)
     return data
@@ -298,22 +340,47 @@ def _write(db: Session, path: str, text: str, sha: str | None, message: str, bra
     return r.json().get("commit", {}).get("html_url", "")
 
 
+def _commit_page(db: Session, slug: str, page: str, message: str, priority: str = "0.7") -> str:
+    """Écrit `/<slug>/index.html` (jamais une page que l'assistant n'a pas créée) puis ajoute l'adresse au sitemap."""
+    branch = _get(db, "site_gh_branch") or DEFAULT_BRANCH
+    path = f"{slug}/index.html"
+    existing = _contents(db, path, branch)
+    if existing and f'content="{GENERATOR}"' not in existing[1]:
+        raise WebsiteError("Cette adresse existe déjà sur le site et n'a pas été créée par l'assistant : choisis un autre slug.", 409)
+    commit = _write(db, path, page, existing[0] if existing else None, message, branch)
+    sm = _contents(db, "sitemap.xml", branch)
+    if sm:
+        loc = f"<loc>{SITE_URL}/{slug}/</loc>"
+        if loc not in sm[1] and "</urlset>" in sm[1]:
+            entry = (f"  <url>\n    {loc}\n    <lastmod>{datetime.now(timezone.utc).date().isoformat()}</lastmod>\n"
+                     f"    <changefreq>monthly</changefreq>\n    <priority>{priority}</priority>\n  </url>\n")
+            _write(db, "sitemap.xml", sm[1].replace("</urlset>", entry + "</urlset>"), sm[0], f"Sitemap : {slug}", branch)
+    return commit
+
+
 def publish(db: Session, title: str, body: str) -> dict:
     if not _token(db):
         raise WebsiteError("Le site n'est pas connecté (Paramètres → Site web).", 409)
     spec = parse(body)
     page = render_page(title, spec)
-    branch = _get(db, "site_gh_branch") or DEFAULT_BRANCH
-    path = f"{spec['slug']}/index.html"
-    existing = _contents(db, path, branch)
-    if existing and f'content="{GENERATOR}"' not in existing[1]:
-        raise WebsiteError("Cette adresse existe déjà sur le site et n'a pas été créée par l'assistant : choisis un autre slug.", 409)
-    commit = _write(db, path, page, existing[0] if existing else None, f"Page « {title.strip()[:60]} » (rédigée par l'assistant, approuvée par le patron)", branch)
-    sm = _contents(db, "sitemap.xml", branch)
-    if sm:
-        loc = f"<loc>{SITE_URL}/{spec['slug']}/</loc>"
-        if loc not in sm[1] and "</urlset>" in sm[1]:
-            entry = (f"  <url>\n    {loc}\n    <lastmod>{datetime.now(timezone.utc).date().isoformat()}</lastmod>\n"
-                     "    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>\n")
-            _write(db, "sitemap.xml", sm[1].replace("</urlset>", entry + "</urlset>"), sm[0], f"Sitemap : {spec['slug']}", branch)
+    commit = _commit_page(db, spec["slug"], page, f"Page « {title.strip()[:60]} » (rédigée par l'assistant, approuvée par le patron)")
     return {"url": f"{SITE_URL}/{spec['slug']}/", "commit": commit, "words": spec["words"]}
+
+
+# ---------- Book d'entreprise : une page complète, écrite une fois, publiée sur clic du patron ----------
+
+BOOK_SLUG = "book"
+_BOOK_FILE = Path(__file__).with_name("site_pages") / "book.html"
+
+
+def book_html(preview: bool = False) -> str:
+    """Le Book tel qu'il sera publié. Aperçu : les photos pointent vers le site en ligne (elles y sont déjà)."""
+    text = _BOOK_FILE.read_text(encoding="utf-8")
+    return text.replace('src="/images/', f'src="{SITE_URL}/images/') if preview else text
+
+
+def publish_book(db: Session) -> dict:
+    if not _token(db):
+        raise WebsiteError("Le site n'est pas connecté (Paramètres → Site web).", 409)
+    commit = _commit_page(db, BOOK_SLUG, book_html(), "Book d'entreprise (publié sur clic du patron)", "0.8")
+    return {"url": f"{SITE_URL}/{BOOK_SLUG}/", "commit": commit}
