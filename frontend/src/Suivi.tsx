@@ -26,6 +26,19 @@ function Kpi({ label, value, tone = "" }: { label: string; value: string; tone?:
   return <div className={`sv-kpi ${tone}`}><span>{label}</span><b>{value}</b></div>;
 }
 
+const KIND_FR: Record<string, string> = { avance: "Avance", acompte: "Acompte", solde: "Solde", autre: "Versement" };
+/** « Aujourd'hui », « Hier », sinon « 12 oct » (jamais de date inventée : sans date, rien). */
+function dayLabel(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(`${iso}T12:00:00`);
+  if (isNaN(d.getTime())) return "";
+  const diff = Math.round((new Date().setHours(12, 0, 0, 0) - d.getTime()) / 86400000);
+  if (diff === 0) return "Aujourd'hui";
+  if (diff === 1) return "Hier";
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }).replace(".", "");
+}
+const goTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
 const REMIND_BASE = 6000;   // identifiants des rappels d'encaissement : 6000 à 6199
 
 /** Rappel local sur le téléphone, à 9 h le jour de chaque encaissement prévu (fonctionne hors connexion). */
@@ -133,33 +146,54 @@ export function Suivi() {
   const open = (key: string) => nav(`/suivi/${encodeURIComponent(key)}`);
   return (
     <div className="page">
-      <div className="page-inner sv">
-        <div className="sv-title">
-          <h1>Suivi des encaissements</h1>
-          <button className="sv-plus" aria-label="Ajouter un client" onClick={() => setAdding(!adding)}>{adding ? "×" : "+"}</button>
-        </div>
-        <p className="lede">L'argent de tes devis, client par client. Touche un client pour ouvrir son dossier et parler à UniC.</p>
-        {adding && <NewClient onCreated={(key) => nav(`/suivi/${encodeURIComponent(key)}`)} />}
+      <div className="page-inner sv sv-home">
+        <header className="sv-hero2">
+          <h1>Encaissements</h1>
+          {ov ? (
+            <div className="sv-balance">
+              <small>Reste à encaisser · {ov.nb_a_encaisser} client{ov.nb_a_encaisser > 1 ? "s" : ""}</small>
+              <strong>{money(ov.reste)} <em>{ov.devise}</em></strong>
+              <div className="sv-prog" role="img" aria-label={`${pct(ov.pct_recu)} encaissé`}><i style={{ width: `${Math.max(0, Math.min(100, ov.pct_recu || 0))}%` }} /></div>
+              <span>Déjà reçu {money(ov.recu)} · {pct(ov.pct_recu)} des {money(ov.accepte)} acceptés</span>
+            </div>
+          ) : <div className="sv-balance"><small>{err ? "Chargement impossible" : "Chargement…"}</small></div>}
+        </header>
+        {ov && (
+          <nav className="sv-qa" aria-label="Actions rapides">
+            <button onClick={() => { setAdding(true); setTimeout(() => goTo("sv-new"), 50); }}><span><I.Plus size={22} /></span>Client</button>
+            <button disabled={!ov.sans_reponse.length} onClick={() => goTo("sv-relances")}><span><I.Send size={22} />{ov.sans_reponse.length > 0 && <i className="sv-badge">{ov.sans_reponse.length}</i>}</span>Relancer</button>
+            <button disabled={!ov.rappels.length} onClick={() => goTo("sv-rappels")}><span><I.Bell size={22} />{ov.rappels.length > 0 && <i className="sv-badge">{ov.rappels.length}</i>}</span>Rappels</button>
+            <button onClick={() => nav("/")}><span><I.Chat size={22} /></span>UniC</button>
+          </nav>
+        )}
+        {adding && <div id="sv-new"><NewClient onCreated={(key) => nav(`/suivi/${encodeURIComponent(key)}`)} /></div>}
         {err && <p className="error">{err}</p>}
         {ov && (
           <>
-            <section className="card-box sv-hero">
-              <div className="sv-hero-top"><span>Encaissé sur les devis acceptés</span><b>{pct(ov.pct_recu)}</b></div>
-              <Bar value={ov.pct_recu} />
-              <div className="sv-kpis">
-                <Kpi label="Devis acceptés" value={`${money(ov.accepte)} ${ov.devise}`} />
-                <Kpi label="Déjà reçu" value={`${money(ov.recu)} ${ov.devise}`} tone="ok" />
-                <Kpi label={`Reste à encaisser · ${pct(ov.pct_reste)}`} value={`${money(ov.reste)} ${ov.devise}`} tone="warn" />
-                <Kpi label={`En attente de réponse · ${ov.nb_attente} devis`} value={`${money(ov.en_attente)} ${ov.devise}`} />
-              </div>
-              {ov.conversion && ov.conversion.acceptes + ov.conversion.refuses > 0 && (
-                <p className="sv-small sv-muted sv-conv">
-                  Taux d'acceptation <b>{pct(ov.conversion.taux)}</b> · {ov.conversion.acceptes} accepté{ov.conversion.acceptes > 1 ? "s" : ""} sur {ov.conversion.acceptes + ov.conversion.refuses} devis tranchés
-                </p>
-              )}
+            {ov.clients.some((c: any) => c.reste > 0) && (
+              <section className="sv-sec" aria-label="Clients à encaisser">
+                <div className="sv-sec-head"><h2>À encaisser</h2><button onClick={() => goTo("sv-clients")}>Voir tout</button></div>
+                <div className="sv-cards">
+                  {ov.clients.filter((c: any) => c.reste > 0).slice(0, 8).map((c: any) => (
+                    <button key={c.key} className="sv-cc" onClick={() => open(c.key)}>
+                      <span className="sv-cc-top"><span className="sv-av" aria-hidden>{(c.client || "?").trim().charAt(0).toUpperCase()}</span><span className="sv-cc-pct">{pct(c.pct_recu)} reçu</span></span>
+                      <span className="sv-cc-name">{c.client}</span>
+                      <b>{money(c.reste)}<small> {c.devise}</small></b>
+                      <Bar value={c.pct_recu} />
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+            <section className="sv-sum" aria-label="Résumé">
+              <div><span>Acceptés</span><b>{money(ov.accepte)}</b></div>
+              <div><span>En attente</span><b>{money(ov.en_attente)}</b></div>
+              {ov.conversion && ov.conversion.acceptes + ov.conversion.refuses > 0
+                ? <div><span>Acceptation</span><b>{pct(ov.conversion.taux)}</b></div>
+                : <div><span>Clients</span><b>{ov.nb_clients}</b></div>}
             </section>
             {ov.rappels.length > 0 && (
-              <section className="card-box sv-alert">
+              <section id="sv-rappels" className="card-box sv-alert">
                 <h3>🔔 Encaissements prévus</h3>
                 {ov.rappels.map((r: any) => (
                   <button key={r.numero} className={`sv-line ${r.jours_retard ? "late" : ""}`} onClick={() => open(r.key)}>
@@ -190,7 +224,7 @@ export function Suivi() {
               </section>
             )}
             {ov.sans_reponse.length > 0 && (
-              <section className="card-box sv-alert">
+              <section id="sv-relances" className="card-box sv-alert">
                 <h3>⏳ Sans réponse depuis 7 jours ou plus</h3>
                 {ov.sans_reponse.map((r: any) => (
                   <div key={r.numero} className="sv-line-wrap">
@@ -205,7 +239,22 @@ export function Suivi() {
                 ))}
               </section>
             )}
-            <h2 className="sv-h2">Clients · {ov.nb_clients}</h2>
+            <section className="sv-sec" aria-label="Derniers versements">
+              <div className="sv-sec-head"><h2>Derniers versements</h2></div>
+              {ov.derniers_versements?.length ? (
+                <div className="sv-tx">
+                  {ov.derniers_versements.map((v: any) => (
+                    <button key={v.id} className="sv-tx-row" onClick={() => open(v.key)}>
+                      <span className="sv-tx-ic" aria-hidden><I.Receipt size={20} /></span>
+                      <span className="sv-tx-main"><b>{v.client}</b><small>{[dayLabel(v.date), KIND_FR[v.type] || "Versement", v.moyen].filter(Boolean).join(" · ")}</small></span>
+                      <span className="sv-tx-amt">+{money(v.montant)} <small>{v.devise}</small></span>
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="sv-muted sv-empty">Aucun versement enregistré pour l'instant. Ouvre un client pour noter son premier versement.</p>}
+            </section>
+            <h2 id="sv-clients" className="sv-h2">Tous les clients · {ov.nb_clients}</h2>
+            <p className="sv-muted">Touche un client pour ouvrir son dossier et parler à UniC.</p>
             <input className="sv-search" type="search" placeholder="Chercher un client…" value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="sv-filters" role="group" aria-label="Filtrer">
               {FILTERS.map(([v, l]) => <button key={v} className={filter === v ? "on" : ""} aria-pressed={filter === v} onClick={() => setFilter(v)}>{l}</button>)}

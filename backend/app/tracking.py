@@ -207,6 +207,17 @@ def removed(db: Session) -> list[dict]:
             if (q.total or 0) > 0]
 
 
+def _recent_receipts(db: Session, groups: dict, limit: int = 5) -> list[dict]:
+    """Les derniers versements reçus, tous clients confondus (les plus récents d'abord)."""
+    owner = {r["id"]: (g["client"], key, r["numero"], r["devise"]) for key, g in groups.items() for r in g["quotes"]}
+    if not owner:
+        return []
+    rows = db.query(Receipt).filter(Receipt.quotation_id.in_(list(owner))).order_by(Receipt.received_at.desc()).limit(limit).all()
+    return [{"id": r.id, "client": owner[r.quotation_id][0], "key": owner[r.quotation_id][1], "devis": owner[r.quotation_id][2],
+             "devise": owner[r.quotation_id][3], "montant": round(r.amount), "type": r.kind, "moyen": r.method,
+             "date": r.received_at.date().isoformat() if r.received_at else None} for r in rows]
+
+
 def overview(db: Session) -> dict:
     """Tableau de bord : chiffres globaux + une ligne par client (les plus gros restes à encaisser d'abord)."""
     sync_existing(db)
@@ -222,7 +233,7 @@ def overview(db: Session) -> dict:
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
             "rappels": _reminders(groups), "sans_reponse": _no_reply(groups, company_dict(db).get("name") or ""), "retires": removed(db), "chantiers": _chantiers(groups),
-            "anciennete": _aging(groups), "conversion": _conversion(groups)}
+            "anciennete": _aging(groups), "conversion": _conversion(groups), "derniers_versements": _recent_receipts(db, groups)}
 
 
 def client_file(db: Session, key: str) -> dict:

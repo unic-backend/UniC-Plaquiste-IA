@@ -1528,6 +1528,58 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 /* curseurs aux couleurs de l'appli (le bleu du système jurait avec le cuivre et le vert) */
 input[type="range"] { accent-color: var(--green); }
 
+/* Encaissements : écran d'accueil (hero en dégradé, actions rapides, cartes clients, derniers versements) */
+.sv-home { --sv-r: 30px; }
+.sv-hero2 { margin: -24px -20px 0; padding: calc(22px + env(safe-area-inset-top, 0px) * 0) 20px 62px; border-radius: 0 0 var(--sv-r) var(--sv-r);
+  background: linear-gradient(150deg, var(--green-2) 0%, var(--green) 52%, #14261f 100%); color: var(--on-green); position: relative; overflow: hidden; }
+.sv-hero2::after { content: ""; position: absolute; right: -60px; top: -70px; width: 220px; height: 220px; border-radius: 50%; background: rgba(255,255,255,.07); pointer-events: none; }
+.sv-hero2 h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .01em; opacity: .9; color: inherit; }
+.sv-balance { display: grid; gap: 6px; justify-items: center; text-align: center; margin-top: 22px; position: relative; z-index: 1; }
+.sv-balance small { font-size: 14px; opacity: .82; }
+.sv-balance strong { font-size: 38px; font-weight: 650; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.sv-balance strong em { font-style: normal; font-size: 18px; font-weight: 500; opacity: .75; letter-spacing: 0; }
+.sv-balance span { font-size: 13.5px; font-weight: 400; opacity: .88; max-width: 32ch; line-height: 1.4; }
+.sv-prog { width: min(260px, 70%); height: 6px; border-radius: 999px; background: rgba(255,255,255,.22); overflow: hidden; margin-top: 8px; }
+.sv-prog i { display: block; height: 100%; border-radius: 999px; background: #fff; transition: width .6s var(--ease, ease); }
+.sv-qa { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: -30px 0 26px; position: relative; z-index: 2; }
+.sv-qa button { display: grid; justify-items: center; gap: 8px; border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; padding: 0; -webkit-tap-highlight-color: transparent; }
+.sv-qa button > span { position: relative; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--card); color: var(--green-text); box-shadow: 0 6px 18px rgba(16,30,24,.16); transition: transform .16s var(--ease, ease); }
+.sv-qa button:active > span { transform: scale(.92); }
+.sv-qa button:disabled { opacity: .45; cursor: default; }
+.sv-badge { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--copper); color: #fff; font-style: normal; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.sv-sec { margin: 0 0 26px; }
+.sv-sec-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.sv-sec-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.sv-sec-head button { border: 0; background: transparent; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; padding: 4px 0; }
+.sv-cards { display: flex; gap: 12px; overflow-x: auto; margin: 0 -20px; padding: 2px 20px 8px; scroll-snap-type: x proximity; scroll-padding-inline: 20px; scrollbar-width: none; }
+.sv-cards::-webkit-scrollbar { display: none; }
+.sv-cc { flex: none; width: 154px; scroll-snap-align: start; display: grid; gap: 8px; text-align: left; font: inherit; color: inherit; padding: 14px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sv-cc:active { transform: scale(.98); }
+.sv-cc-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.sv-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green-text); font-weight: 700; font-size: 14px; }
+.sv-cc-pct { font-size: 12px; color: var(--muted); }
+.sv-cc-name { font-size: 13.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv-cc b { font-size: 18px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.sv-cc b small { font-size: 12px; font-weight: 500; color: var(--muted); }
+.sv-cc .sv-bar { height: 6px; }
+.sv-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin: 0 0 26px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); }
+.sv-sum > div { display: grid; gap: 4px; padding: 14px 14px; }
+.sv-sum > div + div { border-left: 1px solid var(--line); }
+.sv-sum span { font-size: 12px; color: var(--muted); }
+.sv-sum b { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.sv-tx { border: 1px solid var(--line); border-radius: 20px; background: var(--card); overflow: hidden; }
+.sv-tx-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; color: inherit; padding: 14px; border: 0; background: transparent; cursor: pointer; }
+.sv-tx-row + .sv-tx-row { border-top: 1px solid var(--line); }
+.sv-tx-ic { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--green) 13%, transparent); color: var(--green-text); }
+.sv-tx-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.sv-tx-main b { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sv-tx-main small { font-size: 12.5px; color: var(--muted); }
+.sv-tx-amt { font-weight: 650; color: #16803c; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sv-tx-amt small { font-size: 11.5px; font-weight: 500; opacity: .8; }
+.sv-empty { padding: 4px 2px; }
+@media (min-width: 700px) { .sv-hero2 { margin: 0; border-radius: var(--sv-r); } .sv-cards { margin: 0; padding-inline: 0; } }
+@media (prefers-reduced-motion: reduce) { .sv-prog i, .sv-qa button > span { transition: none; } }
+.sv-cc b small { display: block; margin-top: 2px; }
 /* Site : ancienne version du Book, repliée */
 .old-book { margin-top: 12px; }
 .old-book > summary { cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--green-text); padding: 8px 2px; }
