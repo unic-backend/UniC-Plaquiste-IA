@@ -92,3 +92,18 @@ def site_publish(pid: str, db: Session = Depends(get_db), user: User = Depends(g
     audit(db, user.id, "website_publish", "social_post", p.id, out["url"])
     db.commit()
     return {"id": p.id, "status": p.status, "url": out["url"], "commit": out["commit"]}
+
+
+@router.get("/book/preview")
+def book_preview(user: User = Depends(get_current_user)):
+    """Aperçu du Book (sans script : lecture sûre dans un cadre isolé)."""
+    return {"html": website.book_html(preview=True), "url": f"{website.SITE_URL}/{website.BOOK_SLUG}/"}
+
+
+@router.post("/book/publish")
+def book_publish(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Publie le Book sur le site : uniquement sur le clic du patron (l'interface demande confirmation)."""
+    out = _w(website.publish_book, db)
+    audit(db, user.id, "website_book_publish", "website", out["url"])
+    db.commit()
+    return {"url": out["url"], "commit": out["commit"]}

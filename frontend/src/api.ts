@@ -235,6 +235,8 @@ export const net = {
   siteDraft: (topic: string, details: string) =>
     request<{ id: string; title: string }>("/api/website/draft", { method: "POST", body: JSON.stringify({ topic, details }) }),
   sitePreview: (id: string) => request<{ html: string; words: number; url: string }>(`/api/website/preview/${id}`),
+  bookPreview: () => request<{ html: string; url: string }>("/api/website/book/preview"),
+  bookPublish: () => request<{ url: string; commit: string }>("/api/website/book/publish", { method: "POST" }),
   sitePublish: (id: string) => request<{ url: string; commit: string }>(`/api/website/publish/${id}`, { method: "POST" }),
   instagramStatus: () => request<InstagramStatus>("/api/instagram"),
   instagramSaveApp: (app_id: string, app_secret: string) =>
