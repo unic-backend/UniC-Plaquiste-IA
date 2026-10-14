@@ -1490,3 +1490,37 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .md pre { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; overflow-x: auto; background: var(--surface-2); font-size: 13px; line-height: 1.45; }
 .md pre code { background: none; padding: 0; }
 .md s { opacity: .7; }
+/* Listes de documents : fiches compactes sur téléphone, états vides qui guident, filtres repliés */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 34px 22px; }
+.empty-ic { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; background: var(--g-grad), var(--g-base); border: 1px solid var(--g-edge); box-shadow: var(--g-hi); color: var(--green-text); }
+.empty-state b { font-size: 18px; color: var(--ink); }
+.empty-state p { margin: 0 0 8px; max-width: 42ch; color: var(--muted); line-height: 1.45; }
+.doc-more > summary { cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--green-text); padding: 8px 2px; list-style: none; }
+.doc-more > summary::-webkit-details-marker { display: none; }
+.doc-more > summary::before { content: "▸ "; }
+.doc-more[open] > summary::before { content: "▾ "; }
+@media (min-width: 701px) { .doc-more > summary { display: none; } }
+@media (max-width: 700px) {
+  .table-wrap { background: transparent; border: 0; box-shadow: none; overflow: visible; }
+  .table-wrap tbody { display: flex; flex-direction: column; gap: 10px; }
+  .table-wrap tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 14px 16px; border: 1px solid var(--g-edge); border-radius: 18px; background: var(--g-grad), var(--g-base); box-shadow: var(--g-hi), var(--g-shadow); }
+  .table-wrap td { display: block; width: auto; flex: 1 1 38%; min-width: 0; order: 9; padding: 0; text-align: left; font-size: 15px; background: transparent !important; }
+  .table-wrap td::before { display: block; flex: none; margin-bottom: 1px; padding: 0; font-size: 10.5px; }
+  .table-wrap td:first-child { order: 1; flex: 0 0 auto; color: var(--muted); font-size: 12.5px; font-weight: 800; }
+  .table-wrap td:first-child::before { display: none; }
+  .table-wrap td[data-label="Statut"] { order: 2; flex: 0 0 auto; margin-left: auto; padding: 3px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: color-mix(in srgb, var(--green) 13%, transparent); color: var(--green-text); }
+  .table-wrap td[data-label="Statut"]::before { display: none; }
+  .table-wrap td[data-label="Titre"], .table-wrap td[data-label="Nom"], .table-wrap td[data-label="Fichier"] { order: 3; flex: 1 1 100%; font-size: 17px; font-weight: 800; color: var(--ink); }
+  .table-wrap td[data-label="Titre"]::before, .table-wrap td[data-label="Nom"]::before, .table-wrap td[data-label="Fichier"]::before { display: none; }
+  .table-wrap td[data-label="Client"], .table-wrap td[data-label="Client / fournisseur"] { order: 4; flex: 1 1 100%; color: var(--muted); }
+  .table-wrap td[data-label="Client"]::before, .table-wrap td[data-label="Client / fournisseur"]::before { display: none; }
+}
+
+/* Bulles de conversation : pas de marge morte en bas, avatar jamais rogné */
+.md > :last-child { margin-bottom: 0; }
+.msg { min-width: 0; }
+/* actions de ta question : sous la bulle, sans la rallonger */
+.msg.user .bubble { position: relative; }
+.msg.user .msg-actions { position: absolute; right: 0; top: 100%; margin: 2px 0 0; z-index: 1; }
+.msg.user .avatar { font-size: 9.5px; letter-spacing: 0; }
+.bubble { min-width: 0; overflow-wrap: anywhere; }

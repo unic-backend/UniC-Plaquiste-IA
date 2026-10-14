@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, isNative } from "./api";
 import { ContactButton } from "./ContactPicker";
+import * as I from "./Icons";
+import { Link } from "react-router-dom";
 
 type Rdv = { id: string; title: string; kind: string; kind_label: string; start_at: string; end_at?: string; location: string;
   client_name: string; phone: string; notes: string; status: string; remind_minutes: number };
@@ -76,7 +78,14 @@ export function Agenda() {
           </section>
         )}
         {msg && <p className="hint">{msg}</p>}
-        {!rows.length && <p className="hint">Rien de prévu dans les 60 prochains jours.</p>}
+        {!rows.length && !open && (
+          <div className="empty empty-state">
+            <span className="empty-ic" aria-hidden><I.Calendar size={26} /></span>
+            <b>Rien de prévu dans les 60 prochains jours</b>
+            <p>Ajoute un rendez-vous ci-dessus, ou dis-le à UniC : « note un métré jeudi à 10 h chez Pape Diop ».</p>
+            <Link to="/" className="btn btn-line btn-small">Ouvrir la conversation</Link>
+          </div>
+        )}
         {Object.entries(groups).map(([day, list]) => (
           <section key={day} className="agenda-day">
             <h3>{day}</h3>
