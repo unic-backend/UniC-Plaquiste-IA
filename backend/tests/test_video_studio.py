@@ -92,7 +92,7 @@ def test_limites_video_elargies_et_refus_sans_troncature():
     over_limit.append({"type": "outro", "seconds": 5})
     with pytest.raises(ValueError, match="10 minutes"):
         vs.build_spec("vertical", over_limit, NAMES)
-    with pytest.raises(ValueError, match="2 minutes 30"):
+    with pytest.raises(ValueError, match="10 minutes"):
         eng.clean(spec_at_limit | {"scenes": over_limit})
 
     too_many = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(201)]
