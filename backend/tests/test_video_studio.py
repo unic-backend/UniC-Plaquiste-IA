@@ -151,5 +151,7 @@ def test_routes_protegees(monkeypatch):
         assert c.post("/api/website/video/plan", json={"brief": ""}).status_code == 401
         assert c.get("/api/website/video/status").status_code == 401
         assert c.post("/api/website/video/fetch").status_code == 401
+        assert c.post("/api/website/video/ai/start", json={"prompt": "Un clip vidéo test", "duration": 5, "format": "vertical"}).status_code == 401
+        assert c.get("/api/website/video/ai/status").status_code == 401
         r = c.post("/api/website/video/plan", json={"brief": ""}, headers={"x-access-code": "s3cret-code"})
         assert r.status_code == 200 and r.json()["spec"]["scenes"]

@@ -218,6 +218,13 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
 export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string };
+export type VideoAIClip = {
+  state: string; detail: string; duration?: number; format?: string;
+  artifact?: { id: string; filename: string; size: number; url: string };
+};
+export type HiggsfieldStatus = {
+  connected: boolean; per_day: number; left_today: number; video_per_day: number; video_left_today: number;
+};
 
 export const net = {
   platforms: () =>
@@ -243,6 +250,10 @@ export const net = {
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<{ state: string; detail: string; url?: string }>("/api/website/video/status"),
   videoFetch: () => request<{ id: string; filename: string; size: number; url: string }>("/api/website/video/fetch", { method: "POST" }),
+  videoAiStart: (prompt: string, duration: number, format: string, generate_audio: boolean) =>
+    request<VideoAIClip>("/api/website/video/ai/start", { method: "POST", body: JSON.stringify({ prompt, duration, format, generate_audio }) }),
+  videoAiStatus: () => request<VideoAIClip>("/api/website/video/ai/status"),
+
   bookPublish: () => request<{ url: string; commit: string }>("/api/website/book/publish", { method: "POST" }),
   sitePublish: (id: string) => request<{ url: string; commit: string }>(`/api/website/publish/${id}`, { method: "POST" }),
   instagramStatus: () => request<InstagramStatus>("/api/instagram"),
@@ -450,7 +461,7 @@ export const api = {
   trackingChat: (key: string) => request<{ messages: { id: string; role: string; content: string }[]; working: boolean }>(`/api/tracking/${encodeURIComponent(key)}/chat`),
   trackingSay: (key: string, message: string) => request<ChatOut>("/api/chat", { method: "POST", body: JSON.stringify({ message, tracking_key: key }) }),
   trackingNewClient: (body: { name: string; phone: string; site: string; note: string }) => request<{ key: string; existait: boolean }>("/api/tracking/clients", { method: "POST", body: JSON.stringify(body) }),
-  higgsfield: () => request<{ connected: boolean; per_day: number; left_today: number }>("/api/higgsfield"),
+  higgsfield: () => request<HiggsfieldStatus>("/api/higgsfield"),
   higgsfieldConnect: (body: { key_id: string; secret: string }) => request<any>("/api/higgsfield", { method: "POST", body: JSON.stringify(body) }),
   higgsfieldDisconnect: () => request<any>("/api/higgsfield", { method: "DELETE" }),
   trackingBalance: (qid: string) => request<any>(`/api/tracking/quotes/${qid}/balance-invoice`, { method: "POST" }),

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, memory as mem, repair, video_studio, website
+from app import assistant, higgsfield, memory as mem, repair, video_studio, website
 from app.database import get_db
 from app.models import SocialPost, User, utcnow
 from app.security import get_current_user, require_roles
@@ -120,6 +120,13 @@ def _v(fn, *a):
         raise HTTPException(exc.status, str(exc))
 
 
+def _hf(fn, *a):
+    try:
+        return fn(*a)
+    except higgsfield.HiggsfieldError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
 class VideoPlanIn(BaseModel):
     brief: str = Field("", max_length=20000)
     format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
@@ -127,6 +134,13 @@ class VideoPlanIn(BaseModel):
 
 class VideoStartIn(BaseModel):
     spec: dict
+
+
+class VideoAIStartIn(BaseModel):
+    prompt: str = Field(..., min_length=8, max_length=1500)
+    duration: int = Field(5, ge=2, le=30)
+    format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
+    generate_audio: bool = True
 
 
 @router.post("/video/plan")
@@ -156,3 +170,18 @@ def video_fetch(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     audit(db, user.id, "video_fetch", "artifact", out["id"])
     db.commit()
     return out
+
+
+@router.post("/video/ai/start")
+def video_ai_start(body: VideoAIStartIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic explicite du patron : consomme des crédits Higgsfield pour générer un clip IA de 2 à 30 secondes."""
+    out = _hf(higgsfield.start_video, db, body.prompt, body.duration, body.format, body.generate_audio, user.id)
+    audit(db, user.id, "video_ai_start", "higgsfield_video", str(out.get("duration") or ""))
+    db.commit()
+    return out
+
+
+@router.get("/video/ai/status")
+def video_ai_status(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Vérifie le clip IA en cours et le range dans Documents quand il est prêt."""
+    return _hf(higgsfield.video_status, db, user.id)
