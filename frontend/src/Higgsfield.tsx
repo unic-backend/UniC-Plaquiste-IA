@@ -51,7 +51,7 @@ export function Higgsfield() {
         <section className="card-box">
           <h3>À savoir</h3>
           <ul className="hint">
-            <li>Chaque image consomme tes crédits Higgsfield. UniC n'en crée qu'une par demande, et seulement quand tu la demandes.</li>
+            <li>Chaque image et chaque clip IA consomment tes crédits Higgsfield. La vidéo ne démarre qu'après ta confirmation.</li>
             <li>Limites de sécurité : {st?.per_day ?? 10} images et {st?.video_per_day ?? 1} clip vidéo IA par jour.</li>
             <li>L'image est une illustration, jamais un plan d'exécution ni un métré. Rien n'est publié ni envoyé sans ton clic.</li>
           </ul>
