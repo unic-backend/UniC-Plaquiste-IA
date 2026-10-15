@@ -205,6 +205,16 @@ def _reserve_video(db: Session) -> None:
     db.commit()
 
 
+def _release_video_reservation(db: Session) -> None:
+    """Libère le quota uniquement quand l'API a clairement refusé la requête (pas en cas de timeout ambigu)."""
+    today = date.today().isoformat()
+    day, _, n = _get(db, VIDEO_COUNT_KEY).partition(":")
+    used = int(n) if day == today and n.isdigit() else 0
+    if day == today and used > 0:
+        _put(db, VIDEO_COUNT_KEY, f"{today}:{used - 1}")
+        db.commit()
+
+
 def _video_job(db: Session) -> dict:
     raw = _get(db, VIDEO_JOB_KEY)
     if not raw:
@@ -270,14 +280,18 @@ def start_video(db: Session, prompt: str, duration: int, fmt: str, generate_audi
         _save_video_job(db, job)
         raise
     if response.status_code in (401, 403):
+        _release_video_reservation(db)
         job.update(state="failed", detail="Clés Higgsfield refusées : reconnecte-les dans Plus › Higgsfield.")
         _save_video_job(db, job)
         raise HiggsfieldError(job["detail"], 400)
     if response.status_code in (402, 429):
+        _release_video_reservation(db)
         job.update(state="failed", detail="Crédits Higgsfield épuisés ou trop de demandes : vérifie ton compte.")
         _save_video_job(db, job)
         raise HiggsfieldError(job["detail"], 402)
     if response.status_code >= 300:
+        if response.status_code < 500:
+            _release_video_reservation(db)
         job.update(state="failed", detail=f"Higgsfield a refusé la demande ({response.status_code}).")
         _save_video_job(db, job)
         raise HiggsfieldError(job["detail"], 502)
