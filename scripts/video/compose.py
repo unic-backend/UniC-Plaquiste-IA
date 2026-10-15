@@ -1,36 +1,42 @@
-"""Montage final : page (caméra sous-pixel) + incrustations -> MP4 1080x1920, 60 i/s, sans mélange d'images (texte net). Sortie plafonnée à ~25 Mo."""
+"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 60 i/s, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
 import json, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
 
-FRAMES, OVD, OUT = sys.argv[1:4]
-M = json.load(open(f"{FRAMES}/meta.json")); O = json.load(open(f"{OVD}/list.json"))
-W, H, S, CAP, NF, P, TOTAL = M["W"], M["H"], M["SCALE"], M["CAP"], M["frames"], O["P"], O["total"]
-OW, OH, MARGIN = 1080, 1920, 1.008
-ACT = set(O["act"]); N = round(TOTAL * 60)
+PLAN, OUT = sys.argv[1:3]
+P = json.load(open(PLAN)); OW, OH = P["view"]["w"] * 3, P["view"]["h"] * 3
+MARGIN, ROYAL = 1.008, (2, 8, 58)
+SEGS = P["segments"]
+for s in SEGS:
+    if s["kind"] == "page":
+        s["m"] = json.load(open(s["fdir"] + "/meta.json")); s["act"] = set(json.load(open(s["out"] + "/list.json")))
+TASKS = [(i, f) for i, s in enumerate(SEGS) for f in range(s["frames"])]
 
-def render(n):
-    t = n / 60 - P
-    if t >= M["endAt"] + 1.2:
-        base = Image.new("RGB", (OW, OH), (2, 8, 58))
-    else:
-        i = min(NF - 1, max(0, round(max(0.0, t) * CAP)))
-        r, z = M["meta"][i]
-        z = max(1.0, z) * MARGIN; cw, ch = W / z, H / z
-        x0, y0 = (W - cw) / 2, min(max((H - ch) / 2 + r, 0), H - ch)
-        base = Image.open(f"{FRAMES}/{i:05d}.jpg").convert("RGB").resize((OW, OH), Image.LANCZOS, box=(x0 * S, y0 * S, (x0 + cw) * S, (y0 + ch) * S))
-    if n in ACT:
-        base = base.convert("RGBA"); base.alpha_composite(Image.open(f"{OVD}/{n:05d}.png").convert("RGBA")); base = base.convert("RGB")
-    return base.tobytes()
+def render(task):
+    i, f = task; s = SEGS[i]
+    if s["kind"] == "html":
+        return Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB").tobytes()
+    m = s["m"]; W, H, S = m["W"], m["H"], m["SCALE"]
+    r, z = m["meta"][min(f, m["frames"] - 1)]
+    z = max(1.0, z) * MARGIN; cw, ch = W / z, H / z
+    x0, y0 = (W - cw) / 2, min(max((H - ch) / 2 + r, 0), H - ch)
+    im = Image.open(f"{s['fdir']}/{f:05d}.jpg").convert("RGB").resize((OW, OH), Image.LANCZOS, box=(x0 * S, y0 * S, (x0 + cw) * S, (y0 + ch) * S))
+    if f in s["act"]:
+        im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['out']}/{f:05d}.png").convert("RGBA")); im = im.convert("RGB")
+    k = min(1.0, f / 21, (s["frames"] - 1 - f) / 21)     # fondu vers la couleur de fond (0,35 s) aux raccords
+    if k < 1.0:
+        im = Image.blend(Image.new("RGB", (OW, OH), ROYAL), im, max(0.0, k))
+    return im.tobytes()
 
-kbps = int(24e6 * 8 / TOTAL / 1000)                       # ~24 Mo au maximum
+total = len(TASKS) / 60
+kbps = min(9000, int(24e6 * 8 / total / 1000))
 ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OW}x{OH}", "-framerate", "60", "-i", "-",
-    "-vf", "eq=contrast=1.02:saturation=1.05,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-maxrate", f"{min(kbps, 9000)}k",
-    "-bufsize", f"{min(kbps, 9000) * 2}k", "-profile:v", "high", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
+    "-vf", "eq=contrast=1.02:saturation=1.05,fade=t=in:st=0:d=0.4,fade=t=out:st=%.2f:d=0.8,format=yuv420p" % max(0, total - 0.8), "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+    "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-profile:v", "high", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
 with Pool() as pool:
-    for k, buf in enumerate(pool.imap(render, range(N), chunksize=6)):
+    for k, buf in enumerate(pool.imap(render, TASKS, chunksize=6)):
         ff.stdin.write(buf)
-        if k % 600 == 0: print(f"{k}/{N}", flush=True)
+        if k % 600 == 0: print(f"{k}/{len(TASKS)}", flush=True)
 ff.stdin.close(); ff.wait()
 if ff.returncode: sys.exit("ffmpeg a échoué")
-print("OK", OUT)
+print("OK", OUT, f"{total:.1f}s")

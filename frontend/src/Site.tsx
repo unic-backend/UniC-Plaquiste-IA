@@ -5,6 +5,12 @@ import { downloadAuth, net, shareDocument, type Post, type VideoPlan } from "./a
 
 type Say = (m: string) => void;
 
+const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Avis client", page: "Défilement du site", outro: "Fin (contact)" };
+const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
+  const d = c.type === "title" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" ? String(c.heading || "") : c.caption ? String(c.caption) : "";
+  return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
+};
+
 /** Connexion du site (GitHub → Netlify) et rédaction de pages par l'IA. */
 export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (connected: boolean) => void; onDraft: () => void }) {
   const [st, setSt] = useState<{ connected: boolean; repo: string; site_url: string } | null>(null);
@@ -15,6 +21,7 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
   const [open, setOpen] = useState(false);
   const [book, setBook] = useState<string | null>(null);
   const [brief, setBrief] = useState("");
+  const [fmt, setFmt] = useState("vertical");
   const [plan, setPlan] = useState<VideoPlan | null>(null);
   const [vid, setVid] = useState<{ state: string; detail: string; url?: string } | null>(null);
   const [got, setGot] = useState<{ url: string; filename: string } | null>(null);
@@ -74,17 +81,22 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
         </details>
       </section>
       <section className="card-box">
-        <label>Vidéo du portfolio</label>
-        <p className="hint">L'IA écrit le scénario, puis GitHub filme la page du portfolio (défilement fluide, titres, carte de fin), sans son. Compte 15 à 20 minutes. Rien n'est publié : la vidéo arrive dans tes documents.</p>
-        <textarea rows={2} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={600} placeholder="Consigne facultative (ex. insiste sur les réalisations)" aria-label="Consigne pour la vidéo" />
+        <label>Studio vidéo</label>
+        <p className="hint">Décris la vidéo voulue (promo d'un service, présentation, avant/après, témoignage, annonce…). L'IA écrit le scénario avec tes photos et tes vrais chiffres ; GitHub la filme, sans son. Compte 15 à 20 minutes. Rien n'est publié : la vidéo arrive dans tes documents.</p>
+        <textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={600} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
+        <select value={fmt} onChange={(e) => setFmt(e.target.value)} aria-label="Format de la vidéo">
+          <option value="vertical">Vertical 9:16 (WhatsApp, TikTok, Reels)</option>
+          <option value="horizontal">Horizontal 16:9 (YouTube, écran)</option>
+          <option value="square">Carré 1:1 (Facebook, Instagram)</option>
+        </select>
         <div className="row-actions">
-          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief)); })}>Proposer un scénario</button>
+          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief, fmt)); })}>Proposer un scénario</button>
           <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
         </div>
         {plan && (
           <>
             <p className="hint">{plan.note} Durée : environ {plan.seconds} s.</p>
-            <ol className="hint">{plan.spec.chapters.map((c) => <li key={c.key}>{c.label} · {c.seconds} s</li>)}</ol>
+            <ol className="hint">{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
             <button className="btn btn-copper btn-small" disabled={busy}
               onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Elle prend 15 à 20 minutes.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
           </>

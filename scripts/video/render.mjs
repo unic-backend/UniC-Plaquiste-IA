@@ -2,15 +2,16 @@
 // Horloge virtuelle + animations CSS pilotées à la main + défilement au pixel physique : le résultat ne dépend pas de la vitesse de la machine.
 import { chromium } from "playwright";
 import fs from "fs";
-const [SPEC, DIR] = process.argv.slice(2);
+const [SPEC, DIR, VIEW] = process.argv.slice(2);
 const S = JSON.parse(fs.readFileSync(SPEC, "utf8"));
-const CAP = 60, SCALE = 3, W = 360, H = 640, DT = 1000 / CAP, dt = 1 / CAP, LIMIT = +(process.env.LIMIT || 1e9);
+const V = JSON.parse(VIEW || '{"w":360,"h":640,"scale":3,"mobile":true}');
+const CAP = 60, SCALE = V.scale, W = V.w, H = V.h, DT = 1000 / CAP, dt = 1 / CAP, LIMIT = +(process.env.LIMIT || 1e9);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v)), lerp = (a, b, x) => a + (b - a) * x;
 const sm = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
 fs.mkdirSync(DIR, { recursive: true });
 
 const b = await chromium.launch({ args: ["--font-render-hinting=none", "--disable-lcd-text"] });
-const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: SCALE, isMobile: true, hasTouch: true });
+const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: SCALE, isMobile: V.mobile, hasTouch: V.mobile });
 const p = await ctx.newPage();
 await p.addInitScript(() => { const q = []; let id = 0;
   window.requestAnimationFrame = cb => { q.push([++id, cb]); return id; };
@@ -53,7 +54,7 @@ const zoomTarget = x => { for (const [a, c] of zoomAt) if (x >= a - .8 && x <= c
 const spring = (s, target, w) => { s.v += (-2 * w * s.v - w * w * (s.p - target)) * dt; s.p += s.v * dt; };
 const SS = { p: 0, v: 0 }, SZ = { p: 1, v: 0 };
 const cdp = await ctx.newCDPSession(p);
-const frames = Math.min(LIMIT, Math.round((endAt + 1.2) * CAP)), meta = []; let vnow = 1000;
+const frames = Math.min(LIMIT, Math.round(endAt * CAP)), meta = []; let vnow = 1000;
 for (let f = 0; f < frames; f++) {
   const x = f / CAP;
   await p.clock.runFor(DT); vnow += DT;
@@ -69,5 +70,5 @@ for (let f = 0; f < frames; f++) {
   meta.push([+(want - sy).toFixed(4), +SZ.p.toFixed(5)]);
   if (f % 300 === 0) console.log(`${(x).toFixed(1)}s ${f}/${frames}`);
 }
-fs.writeFileSync(`${DIR}/meta.json`, JSON.stringify({ W, H, SCALE, CAP, frames, meta, labels, endAt }));
+fs.writeFileSync(`${DIR}/meta.json`, JSON.stringify({ W, H, SCALE, CAP, frames, meta, labels: labels.map(l => ({ a: l[0], b: l[1], n: l[2], label: l[3] })), endAt }));
 await b.close(); console.log("capture terminée", frames, "images");

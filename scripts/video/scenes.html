@@ -1,0 +1,137 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@500;600&display=block">
+<style>
+:root{--royal:#02083a;--soft:#ffefa3;--gold:#ffc400;--u:calc(min(100vw,100vh)/360)}
+html,body{margin:0;width:100vw;height:100vh;overflow:hidden;background:var(--royal)}
+*{box-sizing:border-box}
+#root{position:absolute;inset:0;overflow:hidden;font-family:Barlow,sans-serif;color:#fff}
+#bg{position:absolute;inset:-10%;background:radial-gradient(60% 50% at 30% 20%,#14307f 0,transparent 70%),radial-gradient(50% 50% at 80% 90%,#3a2d00 0,transparent 70%),var(--royal)}
+#sc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:calc(var(--u)*24)}
+.an{font-family:Anton,Impact,sans-serif;letter-spacing:.02em;line-height:1.02}
+.cd{font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase}
+.gold{color:var(--gold)} .soft{color:var(--soft)}
+.row{display:flex;overflow:hidden;white-space:nowrap;justify-content:center}
+.row span{display:inline-block;white-space:pre}
+.ln{height:calc(var(--u)*2);width:calc(var(--u)*220);background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+#sweep{position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.2) 50%,transparent 65%);mix-blend-mode:screen;pointer-events:none}
+/* texte */
+.tx{align-items:flex-start;text-align:left;max-width:calc(var(--u)*560);width:100%}
+.tx h2{font-size:calc(var(--u)*40);color:var(--gold);margin:0 0 calc(var(--u)*18)}
+.bl{display:flex;gap:calc(var(--u)*12);align-items:flex-start;font-size:calc(var(--u)*19);font-weight:600;line-height:1.3;margin:calc(var(--u)*9) 0}
+.bl i{flex:none;width:calc(var(--u)*10);height:calc(var(--u)*10);margin-top:calc(var(--u)*7);border-radius:50%;background:var(--gold)}
+/* photo */
+.ph{position:absolute;inset:0;overflow:hidden}
+.ph img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;will-change:transform}
+.shade{z-index:50;position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(2,8,58,.82))}
+.cap{z-index:51;position:absolute;left:calc(var(--u)*18);right:calc(var(--u)*18);bottom:calc(var(--u)*34);display:flex}
+.cap span{display:inline-block;background:rgba(2,8,58,.92);border:1px solid rgba(255,196,0,.55);border-radius:calc(var(--u)*14);padding:calc(var(--u)*10) calc(var(--u)*16);
+  font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*19);letter-spacing:.1em;text-transform:uppercase}
+/* chiffres */
+.gr{display:grid;grid-template-columns:1fr 1fr;gap:calc(var(--u)*14);width:100%;max-width:calc(var(--u)*520)}
+.cd2{background:var(--soft);color:var(--royal);border-radius:calc(var(--u)*18);padding:calc(var(--u)*18) calc(var(--u)*12);text-align:center}
+.cd2 b{display:block;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:calc(var(--u)*50);line-height:1}
+.cd2 small{display:block;margin-top:calc(var(--u)*6);font-weight:600;font-size:calc(var(--u)*14)}
+/* citation */
+.qm{font-family:Anton,Impact,sans-serif;font-size:calc(var(--u)*120);line-height:.7;color:var(--gold)}
+.qt{font-size:calc(var(--u)*23);font-weight:600;line-height:1.35;max-width:calc(var(--u)*520)}
+.qa{margin-top:calc(var(--u)*18);font-size:calc(var(--u)*15);letter-spacing:.14em;color:var(--soft)}
+/* fin */
+.e1{font-size:calc(var(--u)*58);color:var(--gold)} .e2{font-size:calc(var(--u)*30)}
+.e3{font-size:calc(var(--u)*13);letter-spacing:.16em;color:var(--soft)}
+.e4{font-size:calc(var(--u)*19);letter-spacing:.1em;color:var(--royal);background:var(--gold);padding:calc(var(--u)*12) calc(var(--u)*22);border-radius:999px}
+.e5{font-size:calc(var(--u)*22);font-weight:600;letter-spacing:.04em}
+.e6{font-size:calc(var(--u)*15);font-weight:500;color:var(--soft);opacity:.85}
+/* pastille de chapitre (scène page) */
+#pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
+  border-radius:calc(var(--u)*14);background:rgba(2,8,58,.93);border:1px solid rgba(255,196,0,.55);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
+#pill .n{font-family:Anton,Impact,sans-serif;font-size:calc(var(--u)*22);color:var(--gold);line-height:1}
+#pill .b{width:2px;height:calc(var(--u)*22);background:var(--gold);opacity:.7}
+#pill .t{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*17);letter-spacing:.16em;color:#fff;text-transform:uppercase;white-space:nowrap}
+</style></head><body>
+<div id="root"><div id="bg"></div><div id="sc"></div><div id="sweep"></div></div>
+<div id="pill"><span class="n"></span><span class="b"></span><span class="t"></span></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s), cl = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const eo = x => 1 - Math.pow(1 - cl(x), 4), eio = x => { x = cl(x); return x < .5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2; };
+const ramp = (t, a, b) => cl((t - a) / (b - a)), lerp = (a, b, x) => a + (b - a) * x;
+const el = (tag, cls, txt, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; if (parent) parent.appendChild(e); return e; };   // textContent seulement : aucune balise du scénario n'est interprétée
+const fx = (e, o, y = 0, s = 1, x = 0) => { e.style.opacity = o; e.style.transform = `translate3d(${x}px,${y}px,0) scale(${s})`; };
+const letters = (row, txt) => [...txt].map(c => el("span", "", c, row));
+// réduit la police jusqu'à ce que le texte tienne dans la largeur disponible
+const fit = (node, max) => { let f = parseFloat(getComputedStyle(node).fontSize); for (let i = 0; i < 40 && node.scrollWidth > max && f > 8; i++) { f *= .93; node.style.fontSize = f + "px"; } };
+const W = () => innerWidth;
+let S = null, A = [];   // scène courante et éléments animés
+
+window.setup = sc => {
+  S = sc; A = []; const root = $("#sc"); root.textContent = ""; root.className = "";
+  const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
+  if (T === "title") {
+    const r1 = el("div", "row an gold", "", root), r2 = el("div", "row an", "", root); r1.style.fontSize = 76 * u + "px"; r2.style.fontSize = 44 * u + "px";
+    A.l1 = letters(r1, sc.l1 || ""); const ln = el("div", "ln", "", root); ln.style.margin = `${14 * u}px 0 ${12 * u}px`; A.l2 = letters(r2, sc.l2 || "");
+    const sub = el("div", "cd soft", sc.sub || "", root); sub.style.cssText = `font-size:${15 * u}px;letter-spacing:.42em;margin-top:${14 * u}px;padding-left:.42em`;
+    fit(r1, W() - 48 * u); fit(r2, W() - 48 * u); fit(sub, W() - 48 * u); A.ln = ln; A.sub = sub; if (!sc.l2) { r2.style.display = "none"; ln.style.display = "none"; }
+  } else if (T === "text") {
+    root.className = ""; const box = el("div", "tx", "", root); const h = sc.heading ? el("h2", "an", sc.heading, box) : null; A.h = h;
+    A.b = sc.bullets.map(b => { const d = el("div", "bl", "", box); el("i", "", "", d); el("span", "", b, d); return d; });
+  } else if (T === "photo" || T === "gallery") {
+    root.style.padding = "0"; const srcs = T === "photo" ? [sc.src] : sc.srcs;
+    A.p = srcs.map(s => { const w = el("div", "ph", "", root), im = el("img", "", "", w); im.src = s; im.decoding = "sync"; return { w, im }; });
+    el("div", "shade", "", root);
+    if (sc.caption) { const c = el("div", "cap", "", root); A.cap = el("span", "", sc.caption, c); }
+  } else if (T === "stats") {
+    const g = el("div", "gr", "", root); A.c = sc.items.map(it => { const c = el("div", "cd2", "", g), b = el("b", "", "", c); el("small", "", it.label, c); return { c, b, it }; });
+  } else if (T === "quote") {
+    el("div", "qm", "“", root); const q = el("div", "qt", "", root);
+    A.w = sc.text.split(/\s+/).map(w => el("span", "", w + " ", q)); A.a = sc.author ? el("div", "qa cd", "— " + sc.author, root) : null;
+  } else if (T === "outro") {
+    const L = sc.lines || [], mk = (i, cls, tag = "div") => L[i] ? el(tag, cls, L[i], root) : null;
+    A.e = [mk(0, "e1 an"), mk(1, "e2 an"), L[0] ? el("div", "ln", "", root) : null, mk(2, "e3 cd"), mk(3, "e4 cd"), mk(4, "e5"), mk(5, "e6")].filter(Boolean);
+    A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`; fit(e, W() - 48 * u); });
+  }
+};
+window.ready = () => Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => 0))]);
+
+const kb = (p, t, dur, dir, i = 0) => {   // Ken Burns : zoom lent + dérive
+  const k = ramp(t, 0, dur), z = dir === "out" ? lerp(1.16, 1.02, k) : lerp(1.02, 1.16, k), dx = dir === "left" ? lerp(3, -3, k) : dir === "right" ? lerp(-3, 3, k) : lerp(-1.2, 1.2, k) * (i % 2 ? -1 : 1);
+  p.im.style.transform = `translate3d(${dx}%,${lerp(1, -1, k)}%,0) scale(${z})`; };
+
+// t = temps dans la scène (s) ; dur = durée de la scène (s)
+window.draw = (t, dur) => {
+  const sc = S, T = sc.type, u = Math.min(innerWidth, innerHeight) / 360, root = $("#root");
+  $("#bg").style.transform = `translate3d(${Math.sin(t * .5) * 2}%,${Math.cos(t * .4) * 2}%,0) scale(1.1)`;
+  $("#sweep").style.opacity = 0;
+  if (T === "title") {
+    A.l1.forEach((s, i) => { const k = eo(ramp(t, .15 + i * .07, .75 + i * .07)); fx(s, k, (1 - k) * 80 * u); });
+    A.l2.forEach((s, i) => { const k = eo(ramp(t, .45 + i * .04, 1 + i * .04)); fx(s, k, (1 - k) * 50 * u); });
+    A.ln.style.transform = `scaleX(${eo(ramp(t, .35, 1.05))})`; const ks = eo(ramp(t, .95, 1.5)); fx(A.sub, ks, (1 - ks) * 12 * u);
+    const sw = ramp(t, 1.2, 1.9); $("#sweep").style.transform = `translateX(${-110 + sw * 220}%)`; $("#sweep").style.opacity = sw > 0 && sw < 1 ? 1 : 0;
+  } else if (T === "text") {
+    if (A.h) { const k = eo(ramp(t, .1, .7)); fx(A.h, k, (1 - k) * 30 * u); }
+    A.b.forEach((b, i) => { const k = eo(ramp(t, .55 + i * .45, 1.15 + i * .45)); fx(b, k, 0, 1, (1 - k) * -26 * u); });
+  } else if (T === "photo" || T === "gallery") {
+    const n = A.p.length, seg = dur / n;
+    A.p.forEach((p, i) => { const a = i * seg; p.w.style.opacity = i === 0 ? 1 : eio(ramp(t, a - .5, a)); p.w.style.zIndex = i; kb(p, cl(t - a + (i ? .5 : 0), 0, seg + .5), seg + .5, sc.dir || (i % 2 ? "out" : "in"), i); });
+    if (A.cap) { const k = eo(ramp(t, .5, 1.1)); fx(A.cap, k, (1 - k) * 22 * u); }
+  } else if (T === "stats") {
+    A.c.forEach((o, i) => { const k = eo(ramp(t, .2 + i * .18, .8 + i * .18)); fx(o.c, k, (1 - k) * 40 * u, .94 + .06 * k); o.b.textContent = Math.round(o.it.value * eo(ramp(t, .5 + i * .18, 2 + i * .18))) + (o.it.suffix || ""); });
+  } else if (T === "quote") {
+    A.w.forEach((w, i) => { const k = eo(ramp(t, .3 + i * .09, .7 + i * .09)); fx(w, k, (1 - k) * 12 * u); });
+    if (A.a) { const k = eo(ramp(t, .6 + A.w.length * .09, 1.2 + A.w.length * .09)); fx(A.a, k, (1 - k) * 10 * u); }
+  } else if (T === "outro") {
+    A.e.forEach((e, i) => { const k = eo(ramp(t, .25 + i * .12, .95 + i * .12)); fx(e, k, (1 - k) * 26 * u, .96 + .04 * k); });
+    $("#sc").style.transform = `scale(${1 + ramp(t, .8, dur) * .04})`;
+  }
+  // fondu enchaîné via la couleur de fond (entrée 0,35 s, sortie 0,35 s)
+  root.style.opacity = eio(ramp(t, 0, .35)) * (1 - eio(ramp(t, dur - .35, dur)));
+};
+
+// pastille de chapitre : mode incrustation (fond transparent)
+window.pillMode = () => { $("#root").style.display = "none"; document.documentElement.style.background = document.body.style.background = "transparent"; };
+window.pill = (on, t) => {
+  const p = $("#pill"); if (!on) { p.style.display = "none"; return; }
+  p.style.display = "flex"; const u = Math.min(innerWidth, innerHeight) / 360; $(".n", p).textContent = on.n; $(".t", p).textContent = on.label;
+  const ki = eo(ramp(t, on.a, on.a + .55)), ko = eio(ramp(t, on.b, on.b + .45));
+  p.style.clipPath = `inset(0 ${(1 - ki) * 100}% 0 0 round ${14 * u}px)`; p.style.transform = `translate3d(${(1 - ki) * -18 * u - ko * 24 * u}px,0,0)`; p.style.opacity = 1 - ko;
+  $(".t", p).style.transform = `translate3d(${(1 - eo(ramp(t, on.a + .12, on.a + .7))) * 14 * u}px,0,0)`;
+};
+</script></body></html>

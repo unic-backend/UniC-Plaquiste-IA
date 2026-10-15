@@ -1,12 +1,21 @@
-# Vidéo du portfolio
+# Studio vidéo (universel)
 
-**Parcours** : Paramètres › Site › « Vidéo du portfolio » → *Proposer un scénario* (Claude, via `video_studio.plan`) → *Lancer la fabrication* (clic du patron) → GitHub Actions `video.yml`
-filme la page (Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable).
+**Parcours** : Paramètres › Site › « Studio vidéo » → décrire la vidéo voulue en une phrase + choisir le format (vertical 9:16, horizontal 16:9, carré 1:1) →
+*Proposer un scénario* (Claude, `video_studio.plan`) → relire la liste des scènes → *Lancer la fabrication* (clic du patron) → GitHub Actions `video.yml` filme et monte
+(Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable). Vidéo muette, 15 à 20 minutes de fabrication.
 
-**Pourquoi GitHub Actions** : filmer image par image demande Chrome, ffmpeg et plusieurs processeurs pendant 15 à 20 minutes ; le conteneur Render ne s'y prête pas.
-**Garde-fous** : Claude choisit seulement l'ordre, la durée et des titres dans un CATALOGUE (`video_studio.CATALOG`) ; adresse, sélecteurs, téléphone et site viennent du code.
-Le scénario est reconstruit côté serveur au lancement, puis revalidé par `scripts/video/spec.py` (seuls unicplaquiste.com et les aperçus Netlify sont filmables). Rien n'est publié.
-**Prérequis** : jeton GitHub de l'Atelier avec « Actions : Read and write » ; `video.yml` fusionné sur la branche principale (sans quoi GitHub refuse le lancement).
-**Ajouter une page** : une entrée dans `CATALOG` (adresse + sélecteurs `#id`) et dans l'énumération de l'outil `storyboard`.
-**Moteur** : `render.mjs` (capture déterministe : horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) → `overlay.mjs` (ouverture, chapitres, fin) → `compose.py`
-(caméra sous-pixel, 60 i/s sans mélange d'images, sortie ≤ 25 Mo). Essai local : `VIDEO_ALLOW_LOCAL=1 python scripts/video/make.py spec.json sortie.mp4`.
+**Scènes disponibles** : `title` (titre animé), `text` (titre + puces), `photo` (photo avec zoom lent + légende), `gallery` (2 à 6 photos enchaînées), `stats` (chiffres qui montent),
+`quote` (avis client), `page` (défilement fluide d'une page du site avec caméra et pastilles de chapitre), `outro` (carte de fin : devis, téléphone, site). Une vidéo = 1 à 14 scènes, 120 s au plus.
+
+**Pourquoi GitHub Actions** : filmer image par image demande Chrome, ffmpeg et plusieurs processeurs ; le conteneur Render ne s'y prête pas.
+**Garde-fous** : Claude choisit parmi des CATALOGUES (`video_studio.py` : photos du site, chiffres vrais `FACT_STATS`, avis réels `QUOTES`, pages `PAGES`) et rédige seulement titres, légendes et puces ;
+téléphone et site viennent de `FACTS`. Le scénario est reconstruit côté serveur au lancement (`build_spec`) puis revalidé par `scripts/video/spec.py` (photos du site seulement, adresses unicplaquiste.com / aperçus
+Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Test du contrat serveur ↔ moteur : `backend/tests/test_video_studio.py`.
+**Prérequis** : jeton GitHub de l'Atelier avec « Actions : Read and write » ; `video.yml` sur la branche principale.
+
+**Étendre** : un nouveau chiffre vrai → `FACT_STATS` ; un nouvel avis → `QUOTES` ; une nouvelle page filmable → `PAGES` (adresse + chapitres `#id`) ; un nouveau type de scène → `scripts/video/spec.py`
+(validation) + `scenes.html` (animation) + `video_studio.py` (catalogue). Photos : celles du dossier `images/` du site (liste lue sur le dépôt du site si connecté, sinon liste de secours).
+**Pas encore** : son/musique/voix off, photos prises depuis l'appli (il faudrait les héberger), vidéo d'un site tiers.
+
+**Moteur** : `make.py` → `render.mjs` (scène page : capture déterministe, horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) + `scenes.mjs` (scènes HTML et pastilles, image par image)
+→ `compose.py` (caméra sous-pixel, 60 i/s sans mélange d'images, fondus de raccord, sortie ≤ 25 Mo). Essai local : `VIDEO_ALLOW_LOCAL=1 python scripts/video/make.py scripts/video/sample.json sortie.mp4`.

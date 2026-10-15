@@ -122,6 +122,7 @@ def _v(fn, *a):
 
 class VideoPlanIn(BaseModel):
     brief: str = Field("", max_length=600)
+    format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
 
 
 class VideoStartIn(BaseModel):
@@ -129,9 +130,9 @@ class VideoStartIn(BaseModel):
 
 
 @router.post("/video/plan")
-def video_plan(body: VideoPlanIn, user: User = Depends(ADMIN)):
-    """Scénario proposé par l'IA (rien n'est lancé)."""
-    return video_studio.plan(body.brief)
+def video_plan(body: VideoPlanIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Scénario proposé par l'IA pour une consigne libre (rien n'est lancé)."""
+    return video_studio.plan(db, body.brief, body.format)
 
 
 @router.post("/video/start")
