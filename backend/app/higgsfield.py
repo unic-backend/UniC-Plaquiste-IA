@@ -242,6 +242,9 @@ def _video_public(job: dict) -> dict:
            "duration": job.get("duration"), "format": job.get("format")}
     if job.get("artifact"):
         out["artifact"] = job["artifact"]
+    if job.get("kind") == "long":
+        out.update({"kind": "long", "completed_clips": int(job.get("current_index") or 0),
+                    "total_clips": len(job.get("scenes") or []), "target_seconds": job.get("target_seconds")})
     return out
 
 
@@ -436,7 +439,7 @@ def _long_video_status(db: Session, user_id: str | None, job: dict) -> dict:
             _save_video_job(db, job)
             return _video_public(job)
         listing = folder / "concat.txt"
-        listing.write_text("".join(f"file '{p.as_posix()}'\\n" for p in paths), encoding="utf-8")
+        listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in paths), encoding="utf-8")
         output = folder / "video_longue.mp4"
         try:
             result = subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
