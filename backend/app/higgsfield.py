@@ -1,7 +1,7 @@
 """Higgsfield : génération d'images et de clips vidéo IA (API officielle).
 
 Clés (identifiant + secret) chiffrées par secrets_box, jamais renvoyées ni journalisées. Rien ne part sans clés saisies par le patron.
-Chaque image et chaque clip vidéo consomment des crédits Higgsfield. Limites : MAX_PER_DAY images et MAX_VIDEO_PER_DAY clip vidéo par jour ; aucune génération en arrière-plan.
+Chaque image et chaque clip vidéo consomment des crédits Higgsfield. Limites : MAX_PER_DAY images et MAX_VIDEO_PER_DAY clip vidéo par jour ; aucune génération sans clic explicite.
 Les médias créés sont rangés comme documents de l'appli (téléchargement, partage) ; rien n'est publié ni envoyé.
 """
 from __future__ import annotations
@@ -91,7 +91,7 @@ def connect(db: Session, key_id: str, secret: str) -> dict:
     # Vérification sans dépenser un crédit : une requête de statut inexistante répond 404 si les clés sont bonnes, 401 sinon.
     r = _http("GET", f"{API}/requests/{uuid.uuid4()}/status", (key_id, secret))
     if r.status_code in (401, 403):
-        raise HiggsfieldError("Clés refusées par Higgsfield : vérifie l'identifiant et le secret sur console.higgsfield.ai.")
+        raise HiggsfieldError("Clés refusées par Higgsfield : vérifie l'identifiant et le secret sur open.higgsfield.ai.")
     _put(db, "higgsfield_key_id", secrets_box.encrypt(key_id))
     _put(db, "higgsfield_key_secret", secrets_box.encrypt(secret))
     db.commit()
@@ -150,7 +150,7 @@ def generate_image(db: Session, prompt: str, user_id: str | None) -> dict:
     if r.status_code in (401, 403):
         raise HiggsfieldError("Clés Higgsfield refusées : reconnecte-les dans Plus › Higgsfield.")
     if r.status_code == 402 or r.status_code == 429:
-        raise HiggsfieldError("Crédits Higgsfield épuisés ou trop de demandes : vérifie ton compte sur console.higgsfield.ai.", 402)
+        raise HiggsfieldError("Crédits Higgsfield épuisés ou trop de demandes : vérifie ton compte sur open.higgsfield.ai.", 402)
     if r.status_code >= 300:
         raise HiggsfieldError(f"Higgsfield a refusé la demande ({r.status_code}).", 502)
     sub = r.json() or {}
