@@ -272,7 +272,7 @@ def start_video(db: Session, prompt: str, duration: int, fmt: str, generate_audi
     if response.status_code in (401, 403):
         job.update(state="failed", detail="Clés Higgsfield refusées : reconnecte-les dans Plus › Higgsfield.")
         _save_video_job(db, job)
-        raise HiggsfieldError(job["detail"], 401)
+        raise HiggsfieldError(job["detail"], 400)
     if response.status_code in (402, 429):
         job.update(state="failed", detail="Crédits Higgsfield épuisés ou trop de demandes : vérifie ton compte.")
         _save_video_job(db, job)
