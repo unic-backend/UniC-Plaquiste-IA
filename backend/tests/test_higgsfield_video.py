@@ -80,8 +80,7 @@ def test_video_long_reserve_les_clips_et_demarre_sans_depassement(monkeypatch, t
     state, db = setup_state(monkeypatch)
     sent = []
     monkeypatch.setattr(hf.settings, "unic_data_dir", str(tmp_path))
-    monkeypatch.setattr(hf.settings, "artifacts_path", tmp_path / "storage" / "artifacts")
-    monkeypatch.setattr(hf, "_http", lambda method, url, creds, **kw:
+        monkeypatch.setattr(hf, "_http", lambda method, url, creds, **kw:
                         (sent.append((method, url, kw)) or Response(200, {"request_id": "request_12345678"})))
 
     out = hf.start_long_video(
@@ -128,7 +127,7 @@ def test_erreur_cle_higgsfield_ne_ressemble_pas_a_une_session_app_expiree(monkey
         hf.start_video(db, "Un clip vidéo pour tester", 5, "vertical", True, "owner-1")
     assert exc.value.status == 400
     assert "Clés Higgsfield refusées" in str(exc.value)
-    assert hf.status(db)["video_left_today"] == 1
+    assert hf.status(db)["video_left_today"] == hf.MAX_VIDEO_PER_DAY
 
 
 def test_video_status_verifie_proprietaire_et_recupere_mp4(monkeypatch, tmp_path):
