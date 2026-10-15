@@ -35,7 +35,7 @@ export function Higgsfield() {
             ) : (
               <>
                 <ol className="at-steps">
-                  <li>Sur <b>console.higgsfield.ai</b>, crée une clé d'API (identifiant + secret).</li>
+                  <li>Sur <b>open.higgsfield.ai</b>, crée une clé d'API (identifiant + secret).</li>
                   <li>Colle les deux ici. Ils sont chiffrés sur le serveur et ne s'affichent plus jamais.</li>
                 </ol>
                 <div className="at-form">
