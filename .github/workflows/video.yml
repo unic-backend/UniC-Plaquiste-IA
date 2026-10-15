@@ -1,12 +1,14 @@
 name: Vidéo du portfolio
 
-# Fabrique la vidéo d'une page (Chrome + ffmpeg) à partir d'un scénario JSON écrit par l'IA de l'appli (workflow_dispatch, clic du patron).
-# Un push qui modifie ce fichier ou scripts/video/ lance un essai avec le scénario standard : le moteur est ainsi vérifié par la CI.
+# Fabrique une vidéo (Chrome + ffmpeg) à partir d'un scénario JSON écrit par l'IA de l'appli (workflow_dispatch, clic du patron).
+# Pas de plafond de durée : le scénario est coupé en tronçons de ~90 s (jamais au milieu d'une scène), chaque tronçon se rend sur sa propre machine
+# en parallèle (matrice), puis un dernier travail les assemble sans ré-encodage. Sortie : artefact « unic-video ».
+# Un push qui modifie ce fichier ou scripts/video/ lance un essai avec scripts/video/sample.json : le moteur est ainsi vérifié par la CI.
 on:
   workflow_dispatch:
     inputs:
       spec:
-        description: "Scénario JSON (voir scripts/video/spec.py)"
+        description: "Scénario JSON (voir scripts/video/spec.py), brut ou « gz:<base64 d'un JSON compressé> » pour les gros scénarios"
         required: true
   push:
     paths: ["scripts/video/**", ".github/workflows/video.yml"]
@@ -14,10 +16,55 @@ on:
 permissions:
   contents: read
 
+env:
+  # Essai sur push : tronçons courts (12 s) pour vérifier la matrice et l'assemblage ; vidéo réelle : ~90 s par tronçon
+  CHUNK_SECONDS: ${{ github.event_name == 'push' && '12' || '90' }}
+
 jobs:
-  video:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scénario
+        env:
+          SPEC: ${{ github.event.inputs.spec }}
+        run: |
+          python - <<'PY'
+          import base64, gzip, os, pathlib
+          s = os.environ.get("SPEC", "")
+          if s.startswith("gz:"):
+              s = gzip.decompress(base64.b64decode(s[3:])).decode("utf-8")
+          if not s.strip():
+              s = pathlib.Path("scripts/video/sample.json").read_text(encoding="utf-8")
+          pathlib.Path(os.environ["RUNNER_TEMP"], "spec.json").write_text(s, encoding="utf-8")
+          PY
+          mkdir -p spec-out && cp "$RUNNER_TEMP/spec.json" spec-out/spec.json
+      - id: plan
+        name: Plan des tronçons
+        run: |
+          plan=$(python scripts/video/make.py "$RUNNER_TEMP/spec.json" --plan)
+          echo "$plan"
+          echo "matrix=$(echo "$plan" | jq -c .matrix)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unic-video-spec
+          path: spec-out/spec.json
+          retention-days: 1
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: true
+      matrix:
+        chunk: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,24 +73,47 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: unic-video-spec
+          path: spec-in
       - name: Outils (Playwright + Chrome, Pillow, ffmpeg)
         run: |
           cd scripts/video && npm install --no-save --no-package-lock playwright@1.49.1
           npx playwright install --with-deps chromium
           pip install pillow==10.4.0
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
-      - name: Scénario
-        env:
-          SPEC: ${{ github.event.inputs.spec }}
-        run: |
-          if [ -z "$SPEC" ]; then
-            SPEC='{"url":"https://www.unicplaquiste.com/portfolio/","title":["UNIC","PLAQUISTE"],"subtitle":"Portfolio · Dakar","hero_seconds":4.4,"chapters":[{"selector":"#apropos","label":"À propos","seconds":4.5},{"selector":"#services","label":"Nos services","seconds":5},{"selector":"#chiffres","label":"En chiffres","seconds":4},{"selector":"#pinwrap","label":"Réalisations","seconds":9},{"selector":"#avis","label":"Avis clients","seconds":4},{"selector":"#contact","label":"Contact","seconds":4}],"end":["UNIC","PLAQUISTE","Plafonds · Cloisons · Peinture · Déco","Devis gratuit sous 48 h","+221 77 708 50 92","unicplaquiste.com"]}'
-          fi
-          printf '%s' "$SPEC" > "$RUNNER_TEMP/spec.json"
-      - name: Fabrication
+      - name: Fabrication du tronçon ${{ matrix.chunk }}
         run: |
           mkdir -p out
-          python scripts/video/make.py "$RUNNER_TEMP/spec.json" out/Portfolio-UniC-Plaquiste.mp4
+          python scripts/video/make.py spec-in/spec.json "out/chunk-$(printf '%05d' ${{ matrix.chunk }}).mp4" --chunk ${{ matrix.chunk }}
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unic-video-chunk-${{ matrix.chunk }}
+          path: out/*.mp4
+          retention-days: 1
+          if-no-files-found: error
+
+  assemble:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get install -y --no-install-recommends ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: unic-video-chunk-*
+          merge-multiple: true
+          path: chunks
+      - name: Assemblage
+        run: |
+          mkdir -p out
+          python scripts/video/assemble.py chunks out/Portfolio-UniC-Plaquiste.mp4
           ls -l out
       - uses: actions/upload-artifact@v4
         with:

@@ -1,5 +1,5 @@
 """Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 60 i/s par défaut, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
-import json, subprocess, sys
+import json, os, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
 
@@ -32,9 +32,10 @@ def render(task):
     return im.tobytes()
 
 total = len(TASKS) / FPS
-kbps = min(9000, int(24e6 * 8 / total / 1000))
+kbps = 4500                                   # débit plafonné, identique pour tous les tronçons (la taille croît avec la durée : pas de plafond de durée)
+FADE = ("fade=t=in:st=0:d=0.4," if os.environ.get("FADE_IN", "1") == "1" else "") + (("fade=t=out:st=%.2f:d=0.8," % max(0, total - 0.8)) if os.environ.get("FADE_OUT", "1") == "1" else "")
 ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OW}x{OH}", "-framerate", str(FPS), "-i", "-",
-    "-vf", "eq=contrast=1.02:saturation=1.05,fade=t=in:st=0:d=0.4,fade=t=out:st=%.2f:d=0.8,format=yuv420p" % max(0, total - 0.8), "-c:v", "libx264", "-preset", "medium", "-crf", "16",
+    "-vf", "eq=contrast=1.02:saturation=1.05," + FADE + "format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "16",
     "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-profile:v", "high", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
 with Pool() as pool:
     for k, buf in enumerate(pool.imap(render, TASKS, chunksize=6)):
