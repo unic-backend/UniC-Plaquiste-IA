@@ -219,7 +219,8 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
 export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string };
 export type VideoAIClip = {
-  state: string; detail: string; duration?: number; format?: string;
+  state: string; detail: string; duration?: number; format?: string; kind?: string;
+  completed_clips?: number; total_clips?: number; target_seconds?: number;
   artifact?: { id: string; filename: string; size: number; url: string };
 };
 export type HiggsfieldStatus = {
@@ -253,6 +254,8 @@ export const net = {
   videoAiStart: (prompt: string, duration: number, format: string, generate_audio: boolean) =>
     request<VideoAIClip>("/api/website/video/ai/start", { method: "POST", body: JSON.stringify({ prompt, duration, format, generate_audio }) }),
   videoAiStatus: () => request<VideoAIClip>("/api/website/video/ai/status"),
+  videoAiLongStart: (prompts: string[], duration: number, format: string, generate_audio: boolean) =>
+    request<VideoAIClip>("/api/website/video/ai/long/start", { method: "POST", ...json({ prompts, duration, format, generate_audio }) }),
 
   bookPublish: () => request<{ url: string; commit: string }>("/api/website/book/publish", { method: "POST" }),
   sitePublish: (id: string) => request<{ url: string; commit: string }>(`/api/website/publish/${id}`, { method: "POST" }),
