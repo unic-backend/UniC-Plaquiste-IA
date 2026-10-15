@@ -75,6 +75,26 @@ def test_limites_video_elargies_et_refus_sans_troncature():
     assert len(spec["scenes"]) == 20
     assert vs._duration(spec) <= 150
 
+    at_limit = [{"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 10} for _ in range(14)]
+    at_limit.append({"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 5})
+    at_limit.append({"type": "outro", "seconds": 5})
+    spec_at_limit = vs.build_spec("vertical", at_limit, NAMES)
+    assert vs._duration(spec_at_limit) == 150
+
+    import importlib.util, pathlib
+    sp_path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py"
+    m = importlib.util.spec_from_file_location("video_spec_limit", sp_path)
+    eng = importlib.util.module_from_spec(m)
+    m.loader.exec_module(eng)
+    assert sum(s["seconds"] for s in eng.clean(spec_at_limit)["scenes"]) == 150
+
+    over_limit = [{"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 10} for _ in range(15)]
+    over_limit.append({"type": "outro", "seconds": 5})
+    with pytest.raises(ValueError, match="2 minutes 30"):
+        vs.build_spec("vertical", over_limit, NAMES)
+    with pytest.raises(ValueError, match="2 minutes 30"):
+        eng.clean(spec_at_limit | {"scenes": over_limit})
+
     too_many = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(51)]
     with pytest.raises(ValueError, match="50 scènes"):
         vs.build_spec("vertical", too_many, NAMES)
