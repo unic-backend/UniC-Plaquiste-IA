@@ -1,4 +1,4 @@
-"""Higgsfield : génération d'images (API officielle, docs.higgsfield.ai).
+"""Higgsfield : génération d'images et de clips vidéo IA (API officielle).
 
 Clés (identifiant + secret) chiffrées par secrets_box, jamais renvoyées ni journalisées. Rien ne part sans clés saisies par le patron.
 Chaque image consomme ses crédits Higgsfield : une image par demande, plafond de MAX_PER_DAY par jour, jamais lancée en arrière-plan.
