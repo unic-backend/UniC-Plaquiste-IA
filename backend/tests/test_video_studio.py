@@ -61,6 +61,30 @@ def test_le_moteur_accepte_ce_que_le_serveur_produit():
         raise AssertionError("le moteur aurait dû refuser")
 
 
+def test_limites_video_elargies_et_refus_sans_troncature():
+    from pydantic import ValidationError
+    from app.api_website import VideoPlanIn
+
+    assert len(VideoPlanIn(brief="x" * 20_000).brief) == 20_000
+    with pytest.raises(ValidationError):
+        VideoPlanIn(brief="x" * 20_001)
+
+    scenes = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(19)]
+    scenes.append({"type": "outro", "seconds": 5})
+    spec = vs.build_spec("vertical", scenes, NAMES)
+    assert len(spec["scenes"]) == 20
+    assert vs._duration(spec) <= 600
+
+    too_many = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(51)]
+    with pytest.raises(ValueError, match="50 scènes"):
+        vs.build_spec("vertical", too_many, NAMES)
+
+    # Dix-sept pages avec tous les chapitres dépassent le plafond de 10 minutes.
+    too_long = [{"type": "page", "page": "portfolio"} for _ in range(17)]
+    with pytest.raises(ValueError, match="10 minutes"):
+        vs.build_spec("vertical", too_long, NAMES)
+
+
 def test_start_reconstruit_le_scenario(monkeypatch):
     sent = {}
     monkeypatch.setattr(repair, "_ctx", lambda db: ("tok", "o/r", "main"))
