@@ -16,7 +16,8 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro")
-MAX_SCENES, MAX_TOTAL = 200, 600.0
+# Garde-fous techniques seulement (pas un plafond métier) : la durée n'est limitée que par le temps de calcul GitHub. Au-delà, on coupe en tronçons (chunks()).
+MAX_SCENES, MAX_TOTAL = 5000, 43200.0
 
 
 def _txt(v, n: int) -> str:
@@ -94,6 +95,24 @@ def _scene(s: dict) -> dict:
             "seconds": 0}   # durée réelle fixée par la capture
 
 
+def scene_seconds(s: dict) -> float:
+    """Durée prévue d'une scène (une scène « page » : accueil + chapitres + descente finale)."""
+    return s["seconds"] or (s["hero_seconds"] + sum(c["seconds"] for c in s["chapters"]) + 2.5)
+
+
+def chunks(scenes: list[dict], target: float = 90.0, max_chunks: int = 250) -> list[list[dict]]:
+    """Coupe la vidéo en tronçons d'environ `target` secondes (jamais au milieu d'une scène) : chacun se rend sur sa propre machine, puis on assemble.
+    Au plus `max_chunks` tronçons (limite des matrices GitHub) : plus la vidéo est longue, plus les tronçons grossissent."""
+    total = sum(scene_seconds(s) for s in scenes)
+    target = max(float(target), total / max_chunks)
+    out: list[list[dict]] = [[]]; acc = 0.0
+    for s in scenes:
+        if out[-1] and acc >= target:
+            out.append([]); acc = 0.0
+        out[-1].append(s); acc += scene_seconds(s)
+    return out
+
+
 def clean(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("scénario invalide")
@@ -107,12 +126,12 @@ def clean(raw: dict) -> dict:
     if not isinstance(raw_scenes, list):
         raise ValueError("liste de scènes invalide")
     if len(raw_scenes) > MAX_SCENES:
-        raise ValueError(f"vidéo limitée à {MAX_SCENES} scènes")
+        raise ValueError(f"trop de scènes ({MAX_SCENES} au maximum)")
     scenes = [_scene(s) for s in raw_scenes if isinstance(s, dict)]
     if not scenes:
         raise ValueError("aucune scène")
-    est = sum(s["seconds"] or (s["hero_seconds"] + sum(c["seconds"] for c in s["chapters"]) + 2.5) for s in scenes)
+    est = sum(scene_seconds(s) for s in scenes)
     if est > MAX_TOTAL:
-        raise ValueError("vidéo trop longue (600 s / 10 minutes au maximum)")
+        raise ValueError("vidéo trop longue (12 heures au maximum)")
     fps = raw.get("fps") if raw.get("fps") in (24, 30, 60) else 60
     return {"format": fmt, "fps": fps, "scenes": scenes}

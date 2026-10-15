@@ -74,36 +74,49 @@ def test_limites_video_elargies_et_refus_sans_troncature():
     scenes.append({"type": "outro", "seconds": 5})
     spec = vs.build_spec("vertical", scenes, NAMES)
     assert len(spec["scenes"]) == 20
-    assert vs._duration(spec) <= 600
-
-    at_limit = [{"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 10} for _ in range(59)]
-    at_limit.append({"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 5})
-    at_limit.append({"type": "outro", "seconds": 5})
-    spec_at_limit = vs.build_spec("vertical", at_limit, NAMES)
-    assert vs._duration(spec_at_limit) == 600
 
     import importlib.util, pathlib
     sp_path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py"
     m = importlib.util.spec_from_file_location("video_spec_limit", sp_path)
     eng = importlib.util.module_from_spec(m)
     m.loader.exec_module(eng)
-    assert sum(s["seconds"] for s in eng.clean(spec_at_limit)["scenes"]) == 600
 
-    over_limit = [{"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 10} for _ in range(60)]
-    over_limit.append({"type": "outro", "seconds": 5})
-    with pytest.raises(ValueError, match="10 minutes"):
-        vs.build_spec("vertical", over_limit, NAMES)
-    with pytest.raises(ValueError, match="10 minutes"):
-        eng.clean(spec_at_limit | {"scenes": over_limit})
+    # Aucun plafond de durée métier : 5 h 30 (2 000 scènes de 10 s) sont acceptées par le serveur ET par le moteur
+    long_video = [{"type": "text", "heading": "Services", "bullets": ["UniC"], "seconds": 10} for _ in range(2000)]
+    long_video.append({"type": "outro", "seconds": 5})
+    spec_long = vs.build_spec("vertical", long_video, NAMES)
+    assert vs._duration(spec_long) == 20005
+    cleaned = eng.clean(spec_long)
+    parts = eng.chunks(cleaned["scenes"], 90)
+    assert 2 <= len(parts) <= 250 and [s for p in parts for s in p] == cleaned["scenes"]       # tronçons : tout est couvert, dans l'ordre, sans couper de scène
+    assert all(p for p in parts)
 
-    too_many = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(201)]
-    with pytest.raises(ValueError, match="200 scènes"):
-        vs.build_spec("vertical", too_many, NAMES)
+    # Garde-fous techniques seulement (12 h, 5 000 scènes)
+    with pytest.raises(ValueError, match="12 heures|heures"):
+        vs.build_spec("vertical", [{"type": "text", "heading": "S", "bullets": ["U"], "seconds": 10} for _ in range(4400)], NAMES)
+    with pytest.raises(ValueError, match="5000"):
+        vs.build_spec("vertical", [{"type": "title", "l1": f"S{i}", "seconds": 2.5} for i in range(5001)], NAMES)
+    with pytest.raises(ValueError, match="12 heures"):
+        eng.clean({"format": "vertical", "scenes": [{"type": "text", "heading": "S", "bullets": ["U"], "seconds": 10}] * 4400})
 
-    # Vingt-cinq pages complètes dépassent le plafond de dix minutes.
-    too_long = [{"type": "page", "page": "portfolio"} for _ in range(25)]
-    with pytest.raises(ValueError, match="10 minutes"):
-        vs.build_spec("vertical", too_long, NAMES)
+
+def test_tronconsisation_et_transport():
+    import importlib.util, pathlib
+    m = importlib.util.spec_from_file_location("video_spec_chunks", pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py")
+    eng = importlib.util.module_from_spec(m)
+    m.loader.exec_module(eng)
+    sc = [{"type": "title", "seconds": 4.0, "l1": "A", "l2": "", "sub": ""}] * 10
+    assert [len(p) for p in eng.chunks(sc, 12)] == [3, 3, 3, 1]           # jamais au milieu d'une scène
+    assert len(eng.chunks(sc * 1000, 1, max_chunks=250)) <= 250            # limite des matrices GitHub : les tronçons grossissent
+    page = {"type": "page", "seconds": 0, "hero_seconds": 4.4, "chapters": [{"selector": "#a", "label": "A", "seconds": 4}]}
+    assert eng.scene_seconds(page) == 10.9
+    # petit scénario : JSON brut ; gros scénario : « gz: » + base64, décodable
+    small = vs.build_spec("vertical", [{"type": "title", "l1": "A"}], NAMES)
+    assert vs._transport(small).startswith("{")
+    big = vs.build_spec("vertical", [{"type": "text", "heading": f"Titre {i}", "bullets": [f"Puce numéro {i} " * 3], "seconds": 4} for i in range(900)], NAMES)
+    t = vs._transport(big)
+    import base64, gzip
+    assert t.startswith("gz:") and len(t) <= vs.DISPATCH_INPUT_MAX and json.loads(gzip.decompress(base64.b64decode(t[3:]))) == big
 
 
 def test_start_reconstruit_le_scenario(monkeypatch):

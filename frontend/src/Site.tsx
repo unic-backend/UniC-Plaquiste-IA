@@ -61,7 +61,7 @@ export function VideoStudio({ say }: { say: Say }) {
         <label>Studio vidéo</label>
         <p className="hint">Décris la vidéo voulue (promo d'un service, présentation, avant/après, témoignage, annonce…). Choisis toi-même le moteur selon ton besoin : le montage Chrome + FFmpeg via GitHub Actions ne consomme pas de crédits vidéo payants ; les clips génératifs Higgsfield sont un autre outil, à sélectionner uniquement si tu le souhaites. Si un moteur ne sait pas réaliser une demande, UniC doit te le signaler au lieu de changer de modèle à ta place. Vertical : WhatsApp, TikTok, Reels. Horizontal : YouTube, écran. Carré : Facebook, Instagram. Le temps de fabrication dépend de la durée. Rien n’est publié : la vidéo arrive dans tes documents.</p>
         <textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
-        <p className="hint">{brief.length.toLocaleString("fr-FR")} / 20 000 caractères · jusqu’à 200 scènes · 600 secondes maximum (10 minutes).</p>
+        <p className="hint">{brief.length.toLocaleString("fr-FR")} / 20 000 caractères. Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle.</p>
         <select value={fmt} onChange={(e) => setFmt(e.target.value)} aria-label="Format de la vidéo">
           <option value="vertical">Vertical 9:16</option>
           <option value="horizontal">Horizontal 16:9</option>
@@ -73,7 +73,7 @@ export function VideoStudio({ say }: { say: Say }) {
         </div>
         {plan && (
           <>
-            <p className="hint">{plan.note} Scènes : {plan.spec.scenes.length}/200. Durée : environ {plan.seconds} s (maximum 600 s / 10 min). Moteur choisi : montage Chrome + FFmpeg via GitHub Actions.</p>
+            <p className="hint">{plan.note} Scènes : {plan.spec.scenes.length}. Durée : environ {plan.seconds} s ({Math.floor(plan.seconds / 60)} min {plan.seconds % 60} s). Moteur choisi : montage Chrome + FFmpeg via GitHub Actions.</p>
             <ol className="hint">{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
             <button className="btn btn-copper btn-small" disabled={busy}
               onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>

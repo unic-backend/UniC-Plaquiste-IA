@@ -7,8 +7,18 @@ import spec as sp
 PAGE_VIEW = {"vertical": {"w": 360, "h": 640, "scale": 3, "mobile": True}, "horizontal": {"w": 1280, "h": 720, "scale": 1.5, "mobile": False},
              "square": {"w": 540, "h": 540, "scale": 2, "mobile": True}}
 here = Path(__file__).parent
-raw, out = sys.argv[1], sys.argv[2]
+args = sys.argv[1:]
+raw = args[0]
 cfg = sp.clean(json.load(open(raw)))
+if "--plan" in args:   # plan des tronçons (GitHub Actions) : {"chunks": N, "matrix": [0..N-1], "seconds": total}
+    parts = sp.chunks(cfg["scenes"], float(os.environ.get("CHUNK_SECONDS", "90")))
+    print(json.dumps({"chunks": len(parts), "matrix": list(range(len(parts))), "seconds": round(sum(sp.scene_seconds(s) for s in cfg["scenes"]))}))
+    raise SystemExit(0)
+out = args[1]
+if "--chunk" in args:   # un seul tronçon : fondu d'entrée sur le premier, de sortie sur le dernier
+    k = int(args[args.index("--chunk") + 1]); parts = sp.chunks(cfg["scenes"], float(os.environ.get("CHUNK_SECONDS", "90")))
+    cfg["scenes"] = parts[k]
+    os.environ["FADE_IN"], os.environ["FADE_OUT"] = ("1" if k == 0 else "0"), ("1" if k == len(parts) - 1 else "0")
 FPS = int(os.environ.get("VIDEO_FPS") or cfg["fps"])      # 60 i/s par défaut : c'est ce qui donne la fluidité
 if FPS not in (24, 30, 60):
     raise SystemExit("cadence : 24, 30 ou 60")

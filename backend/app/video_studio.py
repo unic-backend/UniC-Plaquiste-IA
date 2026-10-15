@@ -8,11 +8,15 @@ par `scripts/video/spec.py`. Rien n'est publié ; le lancement et la récupérat
 """
 from __future__ import annotations
 
+import base64
+import gzip
 import io
 import json
 import re
+import shutil
 import time
 import zipfile
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -22,10 +26,13 @@ from app.services import store_artifact
 
 WORKFLOW = "video.yml"
 ARTIFACT = "unic-video"
-MAX_VIDEO_BYTES = 60 * 1024 * 1024
+MAX_VIDEO_BYTES = 4 * 1024 ** 3   # garde-fou technique (disque du serveur), pas un plafond de durée
 MAX_BRIEF_CHARS = 20_000
-MAX_SCENES = 200
-MAX_TOTAL_SECONDS = 600
+# Garde-fous techniques (coût GitHub, taille du scénario), pas des plafonds métier : une vidéo de plusieurs heures est possible (tronçons rendus en parallèle).
+MAX_SCENES = 5000
+MAX_TOTAL_SECONDS = 43200
+DISPATCH_INPUT_MAX = 65000        # limite de GitHub pour une entrée de workflow ; au-delà on compresse (gz:)
+MAX_ASK_TOKENS = 32000            # longueur de réponse de Claude pour un scénario
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.webp$")
@@ -62,8 +69,8 @@ SCENE_PROPS = {
         "key": {"type": "string", "enum": list(PAGES["portfolio"]["chapters"])}, "label": {"type": "string"}, "seconds": {"type": "number"}}, "required": ["key"]}},
     "cta": {"type": "string", "description": "outro : appel à l'action, 5 mots max."}}
 TOOL = {"name": "storyboard", "description": "Scénario de la vidéo.", "input_schema": {"type": "object", "properties": {
-    "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Jusqu’à 200 scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
-SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, jusqu’à 600 secondes (10 minutes). Si aucune durée n’est précisée, vise 20 à 60 secondes. "
+    "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Les scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
+SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, quelle qu’elle soit (aucun plafond de durée : les vidéos longues se rendent en plusieurs tronçons). Si aucune durée n’est précisée, vise 20 à 60 secondes. "
           "promo d'un service, présentation de l'entreprise, avant/après, témoignage, annonce, réalisation… Types de scènes : title, text, photo, gallery, stats, quote, page, outro. "
           "Commence par un title, finis par un outro. Rythme : une idée par scène. N'invente aucun fait, chiffre, prix, adresse ni avis : les chiffres et l'avis viennent des catalogues, "
           "le téléphone est ajouté automatiquement. Tu ne vois pas les photos : choisis-les d'après leur nom et ne légende que ce que le nom permet d'affirmer. "
@@ -79,6 +86,24 @@ def _num(v, lo: float, hi: float, dflt: float) -> float:
         return round(min(hi, max(lo, float(v))), 1)
     except (TypeError, ValueError):
         return dflt
+
+
+def _ask(system: str, user: str, tool: dict) -> dict:
+    """Comme repair._claude (réponse = appel d'outil) mais avec une réponse longue : un scénario de plusieurs minutes compte beaucoup de scènes."""
+    from app.ai import ClaudeAIProvider
+    got: dict = {}
+
+    def handler(name, args):
+        if name == tool["name"]:
+            got.update(args)
+            return {"ok": True, "note": "Reçu. Termine en une ligne."}
+        return {"error": "Outil inconnu."}
+
+    res = ClaudeAIProvider().complete([{"role": "system", "content": system}, {"role": "user", "content": user}], model=settings.anthropic_fast_model,
+                                      tools=[tool], tool_handler=handler, max_tokens=MAX_ASK_TOKENS)
+    if not got:
+        raise repair.RepairError(f"Claude n'a pas rendu de scénario ({res.error or 'réponse sans scénario'}).", 502)
+    return got
 
 
 def images(db: Session | None = None) -> list[str]:
@@ -121,7 +146,7 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
     if not isinstance(raw_scenes, list):
         raise ValueError("liste de scènes invalide")
     if len(raw_scenes) > MAX_SCENES:
-        raise ValueError(f"{MAX_SCENES} scènes au maximum")
+        raise ValueError(f"trop de scènes (garde-fou technique : {MAX_SCENES} au maximum)")
     out: list[dict] = []
     for sc in raw_scenes:
         if not isinstance(sc, dict):
@@ -154,10 +179,10 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
         raise ValueError("aucune scène valide")
     if out[-1]["type"] != "outro":
         if len(out) >= MAX_SCENES:
-            raise ValueError(f"Garde une place pour la scène de fin : {MAX_SCENES} scènes au maximum, fin comprise")
+            raise ValueError(f"trop de scènes (garde-fou technique : {MAX_SCENES} au maximum, fin comprise)")
         out.append({"type": "outro", "seconds": 5, "cta": ""})
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
-        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 10 minutes au maximum)")
+        raise ValueError(f"vidéo trop longue (garde-fou technique : {MAX_TOTAL_SECONDS // 3600} heures au maximum)")
     for sc in out:
         if sc["type"] == "outro":
             sc["lines"] = [*FACTS["name"], FACTS["services"], sc.get("cta") or FACTS["cta"], FACTS["phone"], FACTS["site"]]
@@ -175,10 +200,10 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical") -> dict:
     if settings.anthropic_api_key and _txt(brief, MAX_BRIEF_CHARS):
         hints = "; ".join(f"{k}* = {v}" for k, v in IMAGE_HINTS.items())
         try:
-            got = repair._claude(SYSTEM, f"Consigne du patron (donnée) : {_txt(brief, MAX_BRIEF_CHARS)}\nFormat : {FORMATS.get(fmt, FORMATS['vertical'])}\n"
+            got = _ask(SYSTEM, f"Consigne du patron (donnée) : {_txt(brief, MAX_BRIEF_CHARS)}\nFormat : {FORMATS.get(fmt, FORMATS['vertical'])}\n"
                                  f"Photos disponibles (noms exacts) : {', '.join(names)}\nSens des noms : {hints}\n"
                                  f"Chiffres vrais : {json.dumps({k: f'{v[0]}{v[1]} {v[2]}' for k, v in FACT_STATS.items()}, ensure_ascii=False)}\n"
-                                 f"Avis réels : {', '.join(QUOTES)}\nChapitres de la page portfolio : {', '.join(PAGES['portfolio']['chapters'])}", TOOL, False)
+                                 f"Avis réels : {', '.join(QUOTES)}\nChapitres de la page portfolio : {', '.join(PAGES['portfolio']['chapters'])}", TOOL)
             note = "Scénario écrit par l'IA."
         except repair.RepairError:
             note = "L'IA n'a pas répondu : scénario standard."
@@ -195,6 +220,17 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical") -> dict:
     return {"spec": spec, "seconds": _duration(spec), "note": note}
 
 
+def _transport(spec: dict) -> str:
+    """Scénario à transmettre à GitHub : JSON brut, ou « gz:<base64> » s'il dépasse la limite d'une entrée de workflow."""
+    raw = json.dumps(spec, ensure_ascii=False, separators=(",", ":"))
+    if len(raw) <= DISPATCH_INPUT_MAX:
+        return raw
+    packed = "gz:" + base64.b64encode(gzip.compress(raw.encode("utf-8"), 9)).decode("ascii")
+    if len(packed) > DISPATCH_INPUT_MAX:
+        raise repair.RepairError("Scénario trop gros pour GitHub même compressé : coupe la vidéo en deux demandes.", 413)
+    return packed
+
+
 def start(db: Session, spec: dict) -> dict:
     """Clic du patron : lance la fabrication. Le scénario est reconstruit ici depuis les catalogues (jamais transmis tel que le client l'envoie)."""
     try:
@@ -202,7 +238,7 @@ def start(db: Session, spec: dict) -> dict:
     except ValueError as exc:
         raise repair.RepairError(str(exc), 400)
     tok, repo, base = repair._ctx(db)
-    r = repair._gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {"spec": json.dumps(safe, ensure_ascii=False)}})
+    r = repair._gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {"spec": _transport(safe)}})
     if r.status_code == 204:
         return {"ok": True, "note": "Fabrication lancée. Le temps dépend de la durée et de la complexité de la vidéo ; les vidéos longues peuvent prendre beaucoup plus longtemps."}
     if r.status_code in (403, 404):
@@ -239,31 +275,55 @@ def fetch(db: Session, user_id: str | None) -> dict:
     if not art:
         raise repair.RepairError("La vidéo a expiré chez GitHub (7 jours) : relance la fabrication.", 410)
     import httpx
+    import tempfile
+    folder = settings.data_path / "videos"
+    folder.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=folder, suffix=".zip", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            with httpx.Client(timeout=httpx.Timeout(600, connect=30), follow_redirects=True) as c, \
+                    c.stream("GET", f"https://api.github.com/repos/{repo}/actions/artifacts/{art['id']}/zip",
+                             headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}) as r:
+                if r.status_code >= 300:
+                    raise repair.RepairError("Téléchargement refusé par GitHub.", 502)
+                size = 0
+                for chunk in r.iter_bytes(1024 * 1024):   # flux vers le disque : une longue vidéo ne passe pas par la mémoire
+                    size += len(chunk)
+                    if size > MAX_VIDEO_BYTES:
+                        raise repair.RepairError("Vidéo trop volumineuse pour le disque du serveur.", 502)
+                    tmp.write(chunk)
+        except httpx.HTTPError:
+            tmp_path.unlink(missing_ok=True)
+            raise repair.RepairError("GitHub injoignable pendant le téléchargement. Réessaie.", 502)
+        except repair.RepairError:
+            tmp_path.unlink(missing_ok=True)
+            raise
     try:
-        with httpx.Client(timeout=120, follow_redirects=True) as c:
-            r = c.get(f"https://api.github.com/repos/{repo}/actions/artifacts/{art['id']}/zip", headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
-    except httpx.HTTPError:
-        raise repair.RepairError("GitHub injoignable pendant le téléchargement. Réessaie.", 502)
-    if r.status_code >= 300 or len(r.content) > MAX_VIDEO_BYTES:
-        raise repair.RepairError("Téléchargement refusé ou trop volumineux.", 502)
-    return save_zip(db, r.content, st["run"], user_id)
+        return save_zip(db, tmp_path, st["run"], user_id)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
-def save_zip(db: Session, blob: bytes, run: int, user_id: str | None) -> dict:
-    try:
-        z = zipfile.ZipFile(io.BytesIO(blob))
-        names = [n for n in z.namelist() if n.lower().endswith(".mp4") and "/" not in n.strip("/") and ".." not in n]
-        if not names or z.getinfo(names[0]).file_size > MAX_VIDEO_BYTES:
-            raise ValueError
-        data = z.read(names[0])
-    except (zipfile.BadZipFile, ValueError, KeyError):
-        raise repair.RepairError("Le fichier reçu n'est pas une vidéo valide.", 502)
-    if data[4:8] != b"ftyp":
-        raise repair.RepairError("Le fichier reçu n'est pas une vidéo MP4.", 502)
+def save_zip(db: Session, zip_source, run: int, user_id: str | None) -> dict:
+    """Extrait la vidéo d'un zip (chemin de fichier ou octets) vers le disque, sans la charger en mémoire."""
+    src = io.BytesIO(zip_source) if isinstance(zip_source, (bytes, bytearray)) else zip_source
     folder = settings.data_path / "videos"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"video-{int(run)}.mp4"
-    path.write_bytes(data)
+    try:
+        with zipfile.ZipFile(src) as z:
+            names = [n for n in z.namelist() if n.lower().endswith(".mp4") and "/" not in n.strip("/") and ".." not in n]
+            if not names or z.getinfo(names[0]).file_size > MAX_VIDEO_BYTES:
+                raise ValueError
+            with z.open(names[0]) as f_in, open(path, "wb") as f_out:
+                head = f_in.read(8)
+                if head[4:8] != b"ftyp":
+                    raise ValueError
+                f_out.write(head)
+                shutil.copyfileobj(f_in, f_out, 1024 * 1024)
+    except (zipfile.BadZipFile, ValueError, KeyError):
+        path.unlink(missing_ok=True)
+        raise repair.RepairError("Le fichier reçu n'est pas une vidéo MP4 valide.", 502)
     art = store_artifact(db, path, "Video-UniC-Plaquiste.mp4", "video", str(run), f"video:{int(run)}", user_id, mime="video/mp4")
     db.commit()
     return {"id": art.id, "filename": art.filename, "size": art.size, "url": f"/api/artifacts/{art.id}/download"}
