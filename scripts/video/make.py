@@ -41,14 +41,14 @@ try:
         if any([p.wait() for p in procs]):
             raise SystemExit("le rendu des scènes a échoué")
     # les scènes HTML ne dépendent pas des pages : on les rend pendant que les pages se filment (cœurs libres)
-    (work / "plan.json").write_text(json.dumps({"view": {"w": w, "h": h}, "fps": FPS, "segments": segs}, ensure_ascii=False))
+    (work / "plan.json").write_text(json.dumps({"view": {"w": w, "h": h}, "fps": FPS, "theme": cfg["theme"], "segments": segs}, ensure_ascii=False))
     run_scenes("html", max(1, WORKERS - 1) if pages else WORKERS)
     for i, proc in pages:
         if proc.wait():
             raise SystemExit(f"la capture de la scène {i + 1} a échoué")
         m = json.load(open(work / f"s{i}" / "f" / "meta.json"))
         segs[i].update(frames=m["frames"], labels=m["labels"])
-    (work / "plan.json").write_text(json.dumps({"view": {"w": w, "h": h}, "fps": FPS, "segments": segs}, ensure_ascii=False))   # durées et chapitres des pages connus
+    (work / "plan.json").write_text(json.dumps({"view": {"w": w, "h": h}, "fps": FPS, "theme": cfg["theme"], "segments": segs}, ensure_ascii=False))   # durées et chapitres des pages connus
     if pages:
         run_scenes("pill", WORKERS)
     for s in segs:   # fusion des listes de pastilles écrites par chaque Chrome
