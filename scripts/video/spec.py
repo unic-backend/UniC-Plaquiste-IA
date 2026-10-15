@@ -16,7 +16,7 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro")
-MAX_SCENES, MAX_TOTAL = 14, 120.0
+MAX_SCENES, MAX_TOTAL = 50, 600.0
 
 
 def _txt(v, n: int) -> str:
@@ -103,10 +103,15 @@ def clean(raw: dict) -> dict:
                                                  {"type": "page", "url": raw.get("url"), "hero_seconds": raw.get("hero_seconds"), "chapters": raw.get("chapters")},
                                                  {"type": "outro", "lines": raw.get("end")}]}
     fmt = raw.get("format") if raw.get("format") in FORMATS else "vertical"
-    scenes = [_scene(s) for s in (raw.get("scenes") or [])[:MAX_SCENES] if isinstance(s, dict)]
+    raw_scenes = raw.get("scenes") or []
+    if not isinstance(raw_scenes, list):
+        raise ValueError("liste de scènes invalide")
+    if len(raw_scenes) > MAX_SCENES:
+        raise ValueError(f"vidéo limitée à {MAX_SCENES} scènes pour le moment")
+    scenes = [_scene(s) for s in raw_scenes if isinstance(s, dict)]
     if not scenes:
         raise ValueError("aucune scène")
     est = sum(s["seconds"] or (s["hero_seconds"] + sum(c["seconds"] for c in s["chapters"]) + 2.5) for s in scenes)
     if est > MAX_TOTAL:
-        raise ValueError("vidéo trop longue (120 s au maximum)")
+        raise ValueError("vidéo trop longue (600 s / 10 minutes au maximum pour le moment)")
     return {"format": fmt, "scenes": scenes}
