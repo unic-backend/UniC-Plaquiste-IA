@@ -268,7 +268,7 @@ def start_video(db: Session, prompt: str, duration: int, fmt: str, generate_audi
     if not (creds[0] and creds[1]):
         raise HiggsfieldError("Higgsfield n'est pas connecté : Plus › Higgsfield › colle tes clés.", 400)
     previous = _video_job(db)
-    if previous.get("state") in ("submitting", "queued", "processing"):
+    if previous.get("state") in ("submitting", "queued", "processing", "assembling"):
         raise HiggsfieldError("Un clip IA est déjà en cours. Attends sa fin avant d'en lancer un autre.", 409)
 
     _reserve_video(db)
@@ -463,6 +463,8 @@ def _long_video_status(db: Session, user_id: str | None, job: dict) -> dict:
         for p in paths:
             p.unlink(missing_ok=True)
         listing.unlink(missing_ok=True)
+        output.unlink(missing_ok=True)
+        folder.rmdir()
         return _video_public(job)
     if not request_id:
         if job.get("state") == "submitting" and time.time() - float(job.get("current_started_at") or 0) < 120:
