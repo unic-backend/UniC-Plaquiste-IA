@@ -1583,3 +1583,27 @@ input[type="range"] { accent-color: var(--green); }
 /* Site : ancienne version du Book, repliée */
 .old-book { margin-top: 12px; }
 .old-book > summary { cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--green-text); padding: 8px 2px; }
+
+/* Studio vidéo : un seul bloc, trois modes (montage gratuit, clip IA, vidéo IA longue) */
+.vs .hint { margin: 0 0 12px; line-height: 1.45; }
+.vs .seg { margin: 4px 0 10px; }
+.vs .seg button { padding: 10px 4px; font-size: 13px; line-height: 1.15; flex-direction: column; text-align: center; }
+.vs-tag { display: block; font-size: 10px; font-weight: 500; letter-spacing: .04em; opacity: .65; }
+.vs-fmt { display: flex; flex-wrap: wrap; gap: 6px; }
+.vs-fmt .chip { font-size: 13px; padding: 7px 12px; cursor: pointer; }
+.vs-fmt .chip.on { background: var(--green); color: var(--on-green); border-color: var(--green); }
+.vs-note { font-size: 12px; line-height: 1.45; color: var(--muted); margin: 8px 0 12px; }
+.vs-note.ok { color: var(--green-text, var(--green)); font-weight: 600; }
+.vs textarea { margin-top: 12px; }
+.vs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.vs label.vs-field, .vs label.vs-check { flex-direction: row; justify-content: flex-start; text-align: left; }
+.card-box .vs-field { display: flex; align-items: center; gap: 10px; text-transform: none; letter-spacing: 0; font-size: 13px; opacity: 1; margin: 12px 0 0; }
+.vs-row .vs-field { margin: 0; }
+.card-box .vs-check { display: inline-flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 13px; opacity: 1; margin: 0; cursor: pointer; }
+.vs-check input { width: 18px; height: 18px; flex: none; margin: 0; accent-color: var(--green); }
+.vs-plan { margin: 10px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-3); }
+.vs-sum { margin: 0 0 4px; font-size: 14px; }
+.vs-plan ol { margin: 8px 0 12px; padding-left: 20px; font-size: 13px; line-height: 1.5; max-height: 220px; overflow-y: auto; }
+.vs-status { margin: 12px 0; padding: 10px 12px; border-left: 3px solid var(--copper); background: var(--surface-3); border-radius: 6px; font-size: 13px; line-height: 1.45; }
+.vs .btn:not(.btn-small) { width: 100%; margin-top: 4px; }
+
