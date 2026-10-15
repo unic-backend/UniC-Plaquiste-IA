@@ -127,14 +127,14 @@ export function VideoStudio({ say }: { say: Say }) {
       {aiClip && aiClip.state !== "idle" && <p className="hint" role="status">{aiClip.detail}</p>}
       {aiClip?.state === "ready" && aiClip.artifact && (
         <div className="row-actions">
-          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>Télécharger le clip IA</button>
+          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>{aiClip.kind === "long" ? "Télécharger la vidéo IA longue" : "Télécharger le clip IA"}</button>
           <button className="btn btn-line btn-small" onClick={() => shareDocument(aiClip.artifact!.url, aiClip.artifact!.filename).catch((e) => say(e.message))}>Partager</button>
         </div>
       )}
 
       <hr />
       <label>Vidéo IA longue — jusqu’à 10 minutes</label>
-      <p className="hint">Écris une consigne par scène, dans l’ordre. UniC génère un clip Higgsfield de 30 secondes par consigne puis assemble les clips en MP4. Chaque clip consomme des crédits payants. Plafond global : 20 clips par jour. Le son IA est réglé ci-dessus.</p>
+      <p className="hint">Écris une consigne par scène, dans l’ordre. UniC génère un clip Higgsfield de 30 secondes par consigne puis assemble les clips en MP4. Chaque clip consomme des crédits payants. Plafond global : 20 clips par jour, pour tous les clips et vidéos longues. Le son IA est réglé ci-dessus.</p>
       <label className="hint">Durée finale
         <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
           <option value={30}>30 secondes · 1 clip</option>
