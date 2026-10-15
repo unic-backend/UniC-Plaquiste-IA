@@ -217,7 +217,7 @@ export type JournalRow = { id: string; at: string | null; action: string; label:
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
-export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string };
+export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string; route?: { mode: "free" | "paid_optional"; recommended: "free" | "free_first"; reason: string; paid_confirmation_required: boolean } };
 export type VideoAIClip = {
   state: string; detail: string; duration?: number; format?: string; kind?: string;
   completed_clips?: number; total_clips?: number; target_seconds?: number;
