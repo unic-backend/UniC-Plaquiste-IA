@@ -18,4 +18,4 @@ Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Tes
 **Pas encore** : son/musique/voix off, photos prises depuis l'appli (il faudrait les héberger), vidéo d'un site tiers.
 
 **Moteur** (`overlay.html` / `overlay.mjs` : ancien moteur du portfolio, conservés et inutilisés) : `make.py` → `render.mjs` (scène page : capture déterministe, horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) + `scenes.mjs` (scènes HTML et pastilles, image par image)
-→ `compose.py` (caméra sous-pixel, 60 i/s sans mélange d'images, fondus de raccord, sortie ≤ 25 Mo). Essai local : `VIDEO_ALLOW_LOCAL=1 python scripts/video/make.py scripts/video/sample.json sortie.mp4`.
+→ `compose.py` (caméra sous-pixel, 30 i/s par défaut sans mélange d'images, fondus de raccord, sortie ≤ 25 Mo). Cadence configurable : `VIDEO_FPS=24`, `30` (défaut) ou `60`. Essai local : `VIDEO_ALLOW_LOCAL=1 python scripts/video/make.py scripts/video/sample.json sortie.mp4`.
