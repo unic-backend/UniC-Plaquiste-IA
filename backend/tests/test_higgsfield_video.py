@@ -80,7 +80,7 @@ def test_video_long_reserve_les_clips_et_demarre_sans_depassement(monkeypatch, t
     state, db = setup_state(monkeypatch)
     sent = []
     monkeypatch.setattr(hf.settings, "unic_data_dir", str(tmp_path))
-        monkeypatch.setattr(hf, "_http", lambda method, url, creds, **kw:
+    monkeypatch.setattr(hf, "_http", lambda method, url, creds, **kw:
                         (sent.append((method, url, kw)) or Response(200, {"request_id": "request_12345678"})))
 
     out = hf.start_long_video(
