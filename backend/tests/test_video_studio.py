@@ -10,25 +10,6 @@ from app import repair, video_studio as vs
 NAMES = ["ref-dakar-arena.webp", "realis-01-plafond.webp", "realis-02-cloisons.webp"]
 
 
-def test_route_video_gratuite_par_defaut_sans_credits():
-    route = vs.recommend_video_route("Vidéo promotionnelle de faux plafond BA13 avec photos, textes et transitions.")
-    assert route["mode"] == "free"
-    assert route["recommended"] == "free"
-    assert route["paid_confirmation_required"] is False
-
-
-@pytest.mark.parametrize("brief", [
-    "Vidéo photoréaliste avec des humains réalistes qui marchent dans un salon.",
-    "Générer une personne hyperréaliste qui parle face caméra avec les lèvres synchronisées.",
-    "Plan cinématographique réaliste avec un véritable acteur.",
-])
-def test_route_video_signale_mode_payant_sans_le_lancer(brief):
-    route = vs.recommend_video_route(brief)
-    assert route["mode"] == "paid_optional"
-    assert route["recommended"] == "free_first"
-    assert route["paid_confirmation_required"] is True
-
-
 def test_scenario_standard_sans_cle(monkeypatch):
     monkeypatch.setattr(vs.settings, "anthropic_api_key", "")
     p = vs.plan(None, "", "horizontal")

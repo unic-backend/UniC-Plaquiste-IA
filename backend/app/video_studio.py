@@ -168,33 +168,6 @@ def _duration(spec: dict) -> int:
     return round(sum(c["seconds"] if c["type"] != "page" else c["hero_seconds"] + sum(x["seconds"] for x in c["chapters"]) + 2.5 for c in spec["scenes"]))
 
 
-def recommend_video_route(brief: str) -> dict:
-    """Recommend free composition by default; paid generative video only for requests that need it."""
-    text = " ".join(str(brief or "").casefold().split())
-    paid_signals = (
-        r"photoreal(?:istic|iste)?", r"photor[eé]aliste", r"hyperr[eé]aliste",
-        r"humains? r[eé]alistes?", r"personnes? r[eé]alistes?", r"visages? r[eé]alistes?",
-        r"acteur(?:s|ices)? r[eé]el(?:s|les)?", r"parler face cam[eé]ra",
-        r"lip.?sync", r"l[eè]vres? synchronis[eé]es?", r"mouvements? humains? complexes?",
-        r"cin[eé]matographique r[eé]aliste", r"g[eé]n[eé]rer un humain", r"g[eé]n[eé]rer une personne",
-        r"g[eé]n[eé]rer des humains", r"v[eé]ritable acteur",
-    )
-    needs_paid = any(re.search(pattern, text) for pattern in paid_signals)
-    if needs_paid:
-        return {
-            "mode": "paid_optional",
-            "recommended": "free_first",
-            "reason": "La demande semble nécessiter des humains ou mouvements photoréalistes. Le montage gratuit reste possible, mais un modèle vidéo payant peut mieux répondre.",
-            "paid_confirmation_required": True,
-        }
-    return {
-        "mode": "free",
-        "recommended": "free",
-        "reason": "Le montage gratuit Chrome + FFmpeg suffit probablement. Aucun crédit vidéo payant n'est nécessaire pour ce parcours.",
-        "paid_confirmation_required": False,
-    }
-
-
 def plan(db: Session | None, brief: str = "", fmt: str = "vertical") -> dict:
     """Propose un scénario pour une consigne libre. Sans clé Claude ou en cas d'échec : scénario standard de présentation (toujours valide)."""
     names = images(db)
@@ -219,7 +192,7 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical") -> dict:
         spec = build_spec(fmt, [{"type": "title", "l1": "UNIC", "l2": "PLAQUISTE", "sub": "Plaquiste · Dakar", "seconds": 3.5},
                                 {"type": "stats", "facts": list(FACT_STATS), "seconds": 5},
                                 {"type": "page", "page": "portfolio"}, {"type": "outro", "seconds": 5}], names)
-    return {"spec": spec, "seconds": _duration(spec), "note": note, "route": recommend_video_route(brief)}
+    return {"spec": spec, "seconds": _duration(spec), "note": note}
 
 
 def start(db: Session, spec: dict) -> dict:
