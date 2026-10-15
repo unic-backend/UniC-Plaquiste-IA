@@ -114,7 +114,7 @@ export function VideoStudio({ say }: { say: Say }) {
       </div>
       <button className="btn btn-copper btn-small" disabled={busy || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
         onClick={() => {
-          if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Limite : ${hf?.video_per_day ?? 1} clip par jour.`)) return;
+          if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Plafond : ${hf?.video_per_day ?? 20} clips par jour.`)) return;
           run(async () => {
             try {
               const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
