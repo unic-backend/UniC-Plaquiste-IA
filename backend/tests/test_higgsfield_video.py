@@ -94,12 +94,13 @@ def test_video_start_valide_duree_format_et_connexion(monkeypatch):
 
 
 def test_erreur_cle_higgsfield_ne_ressemble_pas_a_une_session_app_expiree(monkeypatch):
-    _, db = setup_state(monkeypatch)
+    state, db = setup_state(monkeypatch)
     monkeypatch.setattr(hf, "_http", lambda *a, **kw: Response(401, {"error": "unauthorized"}))
     with pytest.raises(hf.HiggsfieldError) as exc:
         hf.start_video(db, "Un clip vidéo pour tester", 5, "vertical", True, "owner-1")
     assert exc.value.status == 400
     assert "Clés Higgsfield refusées" in str(exc.value)
+    assert hf.status(db)["video_left_today"] == 1
 
 
 def test_video_status_verifie_proprietaire_et_recupere_mp4(monkeypatch, tmp_path):
