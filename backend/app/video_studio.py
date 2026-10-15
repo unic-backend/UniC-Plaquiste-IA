@@ -25,7 +25,7 @@ ARTIFACT = "unic-video"
 MAX_VIDEO_BYTES = 60 * 1024 * 1024
 MAX_BRIEF_CHARS = 20_000
 MAX_SCENES = 50
-MAX_TOTAL_SECONDS = 600
+MAX_TOTAL_SECONDS = 120
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.webp$")
@@ -63,7 +63,7 @@ SCENE_PROPS = {
     "cta": {"type": "string", "description": "outro : appel à l'action, 5 mots max."}}
 TOOL = {"name": "storyboard", "description": "Scénario de la vidéo.", "input_schema": {"type": "object", "properties": {
     "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Jusqu’à 50 scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
-SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, jusqu’à 10 minutes. Si aucune durée n’est précisée, vise 20 à 60 secondes. "
+SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, jusqu’à 120 secondes (2 minutes) pour le moment. Si aucune durée n’est précisée, vise 20 à 60 secondes. "
           "promo d'un service, présentation de l'entreprise, avant/après, témoignage, annonce, réalisation… Types de scènes : title, text, photo, gallery, stats, quote, page, outro. "
           "Commence par un title, finis par un outro. Rythme : une idée par scène. N'invente aucun fait, chiffre, prix, adresse ni avis : les chiffres et l'avis viennent des catalogues, "
           "le téléphone est ajouté automatiquement. Tu ne vois pas les photos : choisis-les d'après leur nom et ne légende que ce que le nom permet d'affirmer. "
@@ -157,7 +157,7 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
             raise ValueError(f"Garde une place pour la scène de fin : {MAX_SCENES} scènes au maximum, fin comprise")
         out.append({"type": "outro", "seconds": 5, "cta": ""})
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
-        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 10 minutes au maximum pour le moment)")
+        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 120 secondes / 2 minutes au maximum pour le moment)")
     for sc in out:
         if sc["type"] == "outro":
             sc["lines"] = [*FACTS["name"], FACTS["services"], sc.get("cta") or FACTS["cta"], FACTS["phone"], FACTS["site"]]
