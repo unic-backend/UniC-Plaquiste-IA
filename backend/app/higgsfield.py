@@ -1,8 +1,8 @@
 """Higgsfield : génération d'images et de clips vidéo IA (API officielle).
 
 Clés (identifiant + secret) chiffrées par secrets_box, jamais renvoyées ni journalisées. Rien ne part sans clés saisies par le patron.
-Chaque image consomme ses crédits Higgsfield : une image par demande, plafond de MAX_PER_DAY par jour, jamais lancée en arrière-plan.
-L'image créée est rangée comme document de l'appli (téléchargement, partage) ; rien n'est publié ni envoyé.
+Chaque image et chaque clip vidéo consomment des crédits Higgsfield. Limites : MAX_PER_DAY images et MAX_VIDEO_PER_DAY clip vidéo par jour ; aucune génération en arrière-plan.
+Les médias créés sont rangés comme documents de l'appli (téléchargement, partage) ; rien n'est publié ni envoyé.
 """
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _http(method: str, url: str, creds: tuple[str, str], **kw) -> httpx.Response
 def connect(db: Session, key_id: str, secret: str) -> dict:
     key_id, secret = (key_id or "").strip(), (secret or "").strip()
     if len(key_id) < 6 or len(secret) < 6:
-        raise HiggsfieldError("Colle l'identifiant de clé ET le secret (console.higgsfield.ai).")
+        raise HiggsfieldError("Colle l'identifiant de clé ET le secret (open.higgsfield.ai).")
     # Vérification sans dépenser un crédit : une requête de statut inexistante répond 404 si les clés sont bonnes, 401 sinon.
     r = _http("GET", f"{API}/requests/{uuid.uuid4()}/status", (key_id, secret))
     if r.status_code in (401, 403):
