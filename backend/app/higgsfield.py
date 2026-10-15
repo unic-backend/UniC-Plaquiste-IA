@@ -281,7 +281,12 @@ def start_video(db: Session, prompt: str, duration: int, fmt: str, generate_audi
         job.update(state="failed", detail=f"Higgsfield a refusé la demande ({response.status_code}).")
         _save_video_job(db, job)
         raise HiggsfieldError(job["detail"], 502)
-    submitted = response.json() or {}
+    try:
+        submitted = response.json() or {}
+    except (TypeError, ValueError):
+        submitted = {}
+    if not isinstance(submitted, dict):
+        submitted = {}
     request_id = str(submitted.get("request_id") or "")
     if not _ID_RE.match(request_id):
         job.update(state="failed", detail="Higgsfield n'a pas renvoyé d'identifiant de génération valide.")
@@ -293,16 +298,17 @@ def start_video(db: Session, prompt: str, duration: int, fmt: str, generate_audi
 
 
 def _download_video(url: str) -> bytes:
-    if not _safe_https(url):
+    parsed = urlparse(url or "")
+    if not _safe_https(url) or parsed.username or parsed.password:
         raise HiggsfieldError("Higgsfield n'a pas renvoyé d'adresse vidéo exploitable.", 502)
     try:
         with httpx.Client(timeout=90) as client:
             response = client.get(url)
     except httpx.HTTPError:
         raise HiggsfieldError("Le clip est prêt, mais son téléchargement a échoué. Réessaie de vérifier le statut.", 502)
-    content = response.content
     if response.status_code != 200:
         raise HiggsfieldError(f"Le téléchargement du clip a échoué ({response.status_code}).", 502)
+    content = response.content
     if len(content) > MAX_VIDEO_BYTES:
         raise HiggsfieldError("Le clip dépasse la limite de stockage de 60 Mo.", 413)
     if b"ftyp" not in content[:32]:
@@ -346,7 +352,12 @@ def video_status(db: Session, user_id: str | None) -> dict:
         job.update(state="failed", detail=f"Higgsfield ne retrouve pas cette génération ({response.status_code}).")
         _save_video_job(db, job)
         return _video_public(job)
-    data = response.json() or {}
+    try:
+        data = response.json() or {}
+    except (TypeError, ValueError):
+        return {**_video_public(job), "detail": "Réponse Higgsfield illisible ; nouvelle vérification automatique."}
+    if not isinstance(data, dict):
+        return {**_video_public(job), "detail": "Réponse Higgsfield illisible ; nouvelle vérification automatique."}
     provider_state = str(data.get("status") or "").lower()
     if provider_state in ("queued", "pending", "submitted"):
         job.update(state="queued", detail="Clip IA en file d'attente chez Higgsfield…")
