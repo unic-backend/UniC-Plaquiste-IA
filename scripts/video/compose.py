@@ -1,17 +1,17 @@
-"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 30 i/s par défaut, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
+"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 60 i/s par défaut, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
 import json, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
 
 PLAN, OUT = sys.argv[1:3]
 P = json.load(open(PLAN)); OW, OH = P["view"]["w"] * 3, P["view"]["h"] * 3
-FPS = int(P.get("fps", 30))
+FPS = int(P.get("fps", 60))
 if FPS not in (24, 30, 60): sys.exit("fps invalide")
 MARGIN, ROYAL = 1.008, (2, 8, 58)
 SEGS = P["segments"]
 for s in SEGS:
     if s["kind"] == "page":
-        s["m"] = json.load(open(s["fdir"] + "/meta.json")); s["act"] = set(json.load(open(s["out"] + "/list.json")))
+        s["m"] = json.load(open(s["fdir"] + "/meta.json")); s["act"] = set(json.load(open(s["out"] + "/list.json")))   # list.json : fusion des listes des Chrome (make.py)
 TASKS = [(i, f) for i, s in enumerate(SEGS) for f in range(s["frames"])]
 
 def render(task):

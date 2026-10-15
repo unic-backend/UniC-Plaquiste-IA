@@ -114,4 +114,5 @@ def clean(raw: dict) -> dict:
     est = sum(s["seconds"] or (s["hero_seconds"] + sum(c["seconds"] for c in s["chapters"]) + 2.5) for s in scenes)
     if est > MAX_TOTAL:
         raise ValueError("vidéo trop longue (600 s / 10 minutes au maximum)")
-    return {"format": fmt, "scenes": scenes}
+    fps = raw.get("fps") if raw.get("fps") in (24, 30, 60) else 60
+    return {"format": fmt, "fps": fps, "scenes": scenes}
