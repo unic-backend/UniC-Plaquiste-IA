@@ -54,7 +54,7 @@ def test_video_start_uses_official_model_and_limits_cost(monkeypatch):
     }
     assert sent["kwargs"]["headers"]["Idempotency-Key"]
     assert json.loads(state[hf.VIDEO_JOB_KEY])["user_id"] == "owner-1"
-    assert hf.status(db)["video_left_today"] == 0
+    assert hf.status(db)["video_left_today"] == hf.MAX_VIDEO_PER_DAY - 1
 
 
 def test_video_start_refuse_doublon_et_quota(monkeypatch):
