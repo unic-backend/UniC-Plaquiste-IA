@@ -157,7 +157,7 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
             raise ValueError(f"Garde une place pour la scène de fin : {MAX_SCENES} scènes au maximum, fin comprise")
         out.append({"type": "outro", "seconds": 5, "cta": ""})
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
-        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 120 secondes / 2 minutes au maximum pour le moment)")
+        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 2 minutes au maximum pour le moment)")
     for sc in out:
         if sc["type"] == "outro":
             sc["lines"] = [*FACTS["name"], FACTS["services"], sc.get("cta") or FACTS["cta"], FACTS["phone"], FACTS["site"]]
