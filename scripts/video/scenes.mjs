@@ -21,6 +21,7 @@ const setMode = async m => {   // "html" ou "pill" : on ne bascule que si néces
 };
 const ONLY = process.env.ONLY || "";   // "html" : scènes seules (avant la fin des captures de pages) ; "pill" : pastilles seules
 for (const seg of PLAN.segments) {
+  if (seg.kind === "clip") continue;   // film d'IA : déjà mis en images par make.py
   if (ONLY && (ONLY === "html") !== (seg.kind === "html")) continue;
   fs.mkdirSync(seg.out, { recursive: true });
   const act = []; let ready = false;

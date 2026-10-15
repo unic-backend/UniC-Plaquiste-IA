@@ -217,7 +217,8 @@ export type JournalRow = { id: string; at: string | null; action: string; label:
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
-export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string };
+export type VideoPlan = { spec: { format: string; theme?: string; scenes: VideoScene[] }; seconds: number; note: string; ai?: { clips: number; images: number } };
+export type VideoState = { state: string; detail: string; url?: string; can_retry?: boolean; ai?: { done: number; total: number } };
 export type VideoAIClip = {
   state: string; detail: string; duration?: number; format?: string; kind?: string;
   completed_clips?: number; total_clips?: number; target_seconds?: number;
@@ -249,7 +250,8 @@ export const net = {
   bookPreview: () => request<{ html: string; url: string }>("/api/website/book/preview"),
   videoPlan: (brief: string, format: string) => request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format }) }),
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
-  videoStatus: () => request<{ state: string; detail: string; url?: string }>("/api/website/video/status"),
+  videoStatus: () => request<VideoState>("/api/website/video/status"),
+  videoRetry: () => request<{ ok: boolean; note: string }>("/api/website/video/retry", { method: "POST" }),
   videoFetch: () => request<{ id: string; filename: string; size: number; url: string }>("/api/website/video/fetch", { method: "POST" }),
   videoAiStart: (prompt: string, duration: number, format: string, generate_audio: boolean) =>
     request<VideoAIClip>("/api/website/video/ai/start", { method: "POST", body: JSON.stringify({ prompt, duration, format, generate_audio }) }),

@@ -158,8 +158,17 @@ def video_plan(body: VideoPlanIn, db: Session = Depends(get_db), user: User = De
 @router.post("/video/start")
 def video_start(body: VideoStartIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Clic du patron : lance la fabrication (GitHub Actions)."""
-    out = _v(video_studio.start, db, body.spec)
+    out = _v(video_studio.start, db, body.spec, user.id)
     audit(db, user.id, "video_start", "website", "portfolio")
+    db.commit()
+    return out
+
+
+@router.post("/video/retry")
+def video_retry(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron : relance le montage avec les médias IA déjà générés (sans nouveau crédit)."""
+    out = _v(video_studio.retry_render, db)
+    audit(db, user.id, "video_retry", "website", "portfolio")
     db.commit()
     return out
 

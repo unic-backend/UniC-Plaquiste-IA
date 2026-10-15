@@ -16,7 +16,7 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
-TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro")
+TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip")
 # Garde-fous techniques seulement (pas un plafond métier) : la durée n'est limitée que par le temps de calcul GitHub. Au-delà, on coupe en tronçons (chunks()).
 MAX_SCENES, MAX_TOTAL = 5000, 43200.0
 
@@ -39,6 +39,25 @@ def _img(v) -> str:
     return (os.environ.get("VIDEO_IMG_BASE") or IMG_BASE) + n
 
 
+def _media_url(raw) -> str:
+    """Adresse d'un média généré (clip ou image d'IA) : https obligatoire, jamais une adresse IP ni localhost, pas d'identifiants dans l'adresse.
+    (Le serveur ne la prend que dans la réponse du fournisseur ; le moteur la revalide.)"""
+    import ipaddress
+    u = urlparse(str(raw or ""))
+    local = os.environ.get("VIDEO_ALLOW_LOCAL") == "1" and u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1")
+    if local:
+        return str(raw)
+    host = (u.hostname or "").lower()
+    ip = True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        ip = False
+    if u.scheme != "https" or not host or ip or host == "localhost" or host.endswith(".local") or u.username or u.password or len(str(raw)) > 2000:
+        raise ValueError("adresse de média refusée")
+    return str(raw)
+
+
 def _url(raw) -> str:
     u = urlparse(str(raw or ""))
     local = os.environ.get("VIDEO_ALLOW_LOCAL") == "1" and u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1")
@@ -58,8 +77,10 @@ def _scene(s: dict) -> dict:
         if not b:
             raise ValueError("scène texte sans contenu")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 10, 5), "heading": _txt(s.get("heading"), 40), "bullets": b}
+    if t == "clip":
+        return {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url"))}
     if t == "photo":
-        return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "src": _img(s.get("image")), "caption": _txt(s.get("caption"), 60),
+        return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "src": _media_url(s.get("url")) if s.get("url") else _img(s.get("image")), "caption": _txt(s.get("caption"), 60),
                 "dir": s.get("direction") if s.get("direction") in ("in", "out", "left", "right") else "in"}
     if t == "gallery":
         imgs = [_img(x) for x in (s.get("images") or [])][:6]

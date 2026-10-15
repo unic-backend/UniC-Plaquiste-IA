@@ -18,6 +18,12 @@ def render(task):
     i, f = task; s = SEGS[i]
     if s["kind"] == "html":
         return Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB").tobytes()
+    if s["kind"] == "clip":   # film d'IA déjà mis au format (make.py) : seulement le fondu aux raccords
+        im = Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB")
+        fade_frames = max(1, round(0.35 * FPS)); k = min(1.0, f / fade_frames, (s["frames"] - 1 - f) / fade_frames)
+        if k < 1.0:
+            im = Image.blend(Image.new("RGB", (OW, OH), ROYAL), im, max(0.0, k))
+        return im.tobytes()
     m = s["m"]; W, H, S = m["W"], m["H"], m["SCALE"]
     r, z = m["meta"][min(f, m["frames"] - 1)]
     z = max(1.0, z) * MARGIN; cw, ch = W / z, H / z

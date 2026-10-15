@@ -154,6 +154,8 @@ def test_start_reconstruit_le_scenario(monkeypatch):
     sent = {}
     monkeypatch.setattr(repair, "_ctx", lambda db: ("tok", "o/r", "main"))
     monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
+    from app import video_hybrid
+    monkeypatch.setattr(video_hybrid, "clear", lambda db: None)
 
     class R:
         status_code = 204

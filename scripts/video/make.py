@@ -1,5 +1,6 @@
 """Fabrique une vidéo à partir d'un scénario : python scripts/video/make.py spec.json sortie.mp4  (Playwright + ffmpeg + Pillow requis)."""
-import json, os, shutil, subprocess, sys, tempfile
+import json, os, shutil, subprocess, sys, tempfile, urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import spec as sp
@@ -7,6 +8,25 @@ import spec as sp
 PAGE_VIEW = {"vertical": {"w": 360, "h": 640, "scale": 3, "mobile": True}, "horizontal": {"w": 1280, "h": 720, "scale": 1.5, "mobile": False},
              "square": {"w": 540, "h": 540, "scale": 2, "mobile": True}}
 here = Path(__file__).parent
+MAX_CLIP_BYTES = 600 * 1024 * 1024
+
+
+def fetch_media(url: str, dest: Path) -> None:
+    """Télécharge un média généré (clip d'IA). L'adresse est déjà validée (spec.py) ; on revérifie après redirection, avec une taille maximale."""
+    req = urllib.request.Request(url, headers={"User-Agent": "unic-video/1"})
+    with urllib.request.urlopen(req, timeout=180) as r, open(dest, "wb") as f:   # noqa: S310
+        final = urlparse(r.geturl())
+        if not (final.scheme == "https" or (os.environ.get("VIDEO_ALLOW_LOCAL") == "1" and final.hostname in ("localhost", "127.0.0.1"))):
+            raise SystemExit("téléchargement refusé : redirection hors https")
+        size = 0
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_CLIP_BYTES:
+                raise SystemExit("clip trop volumineux")
+            f.write(chunk)
 args = sys.argv[1:]
 raw = args[0]
 cfg = sp.clean(json.load(open(raw)))
@@ -26,7 +46,7 @@ WORKERS = max(1, min(4, os.cpu_count() or 1))
 w, h = sp.FORMATS[cfg["format"]]
 work = Path(tempfile.mkdtemp(prefix="unic-video-"))
 try:
-    segs, pages = [], []
+    segs, pages, clips = [], [], []
     env = {**os.environ, "VIDEO_FPS": str(FPS)}
     for i, sc in enumerate(cfg["scenes"]):
         d = work / f"s{i}"
@@ -34,6 +54,15 @@ try:
             (work / f"page{i}.json").write_text(json.dumps(sc, ensure_ascii=False))
             pages.append((i, subprocess.Popen(["node", str(here / "render.mjs"), str(work / f"page{i}.json"), str(d / "f"), json.dumps(PAGE_VIEW[cfg["format"]])], env=env)))
             segs.append({"kind": "page", "fdir": str(d / "f"), "out": str(d / "o"), "frames": 0, "labels": []})
+        elif sc["type"] == "clip":   # film d'IA : mis au format de la vidéo, image par image, pendant que la page se filme
+            src = work / f"clip{i}.mp4"
+            fetch_media(sc["url"], src)
+            n = round(sc["seconds"] * FPS); d.mkdir(parents=True, exist_ok=True)
+            ow, oh = w * 3, h * 3
+            clips.append((i, subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", "-vf",
+                                               f"scale={ow}:{oh}:force_original_aspect_ratio=increase,crop={ow}:{oh},fps={FPS},tpad=stop_mode=clone:stop_duration={sc['seconds']}",
+                                               "-frames:v", str(n), "-q:v", "2", "-start_number", "0", str(d / "%05d.jpg")])))
+            segs.append({"kind": "clip", "out": str(d), "frames": n})
         else:
             segs.append({"kind": "html", "out": str(d), "frames": round(sc["seconds"] * FPS), "scene": sc})
     def run_scenes(only: str, n: int):
@@ -43,6 +72,11 @@ try:
     # les scènes HTML ne dépendent pas des pages : on les rend pendant que les pages se filment (cœurs libres)
     (work / "plan.json").write_text(json.dumps({"view": {"w": w, "h": h}, "fps": FPS, "theme": cfg["theme"], "segments": segs}, ensure_ascii=False))
     run_scenes("html", max(1, WORKERS - 1) if pages else WORKERS)
+    for i, proc in clips:
+        if proc.wait():
+            raise SystemExit(f"le clip de la scène {i + 1} n'a pas pu être mis au format (fichier vidéo invalide ?)")
+        if len(list((work / f"s{i}").glob("*.jpg"))) < segs[i]["frames"]:
+            raise SystemExit(f"le clip de la scène {i + 1} est vide")
     for i, proc in pages:
         if proc.wait():
             raise SystemExit(f"la capture de la scène {i + 1} a échoué")
