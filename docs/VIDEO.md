@@ -2,15 +2,15 @@
 
 **Parcours** : Paramètres › Site › « Studio vidéo » → décrire la vidéo voulue en une phrase + choisir le format (vertical 9:16, horizontal 16:9, carré 1:1) →
 *Proposer un scénario* (Claude, `video_studio.plan`) → relire la liste des scènes → *Lancer la fabrication* (clic du patron) → GitHub Actions `video.yml` filme et monte
-(Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable). Vidéo muette, 15 à 20 minutes de fabrication.
+(Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable). Vidéo muette ; le temps de fabrication varie selon la durée et la complexité.
 
 **Scènes disponibles** : `title` (titre animé), `text` (titre + puces), `photo` (photo avec zoom lent + légende), `gallery` (2 à 6 photos enchaînées), `stats` (chiffres qui montent),
-`quote` (avis client), `page` (défilement fluide d'une page du site avec caméra et pastilles de chapitre), `outro` (carte de fin : devis, téléphone, site). Une vidéo = 1 à 14 scènes, 120 s au plus.
+`quote` (avis client), `page` (défilement fluide d'une page du site avec caméra et pastilles de chapitre), `outro` (carte de fin : devis, téléphone, site). Une vidéo = jusqu’à 50 scènes, 600 s (10 minutes) au plus pour le moment. La consigne peut contenir jusqu’à 20 000 caractères. Au-delà de ces limites, le moteur refuse explicitement la demande au lieu de supprimer silencieusement des scènes.
 
 **Pourquoi GitHub Actions** : filmer image par image demande Chrome, ffmpeg et plusieurs processeurs ; le conteneur Render ne s'y prête pas.
 **Garde-fous** : Claude choisit parmi des CATALOGUES (`video_studio.py` : photos du site, chiffres vrais `FACT_STATS`, avis réels `QUOTES`, pages `PAGES`) et rédige seulement titres, légendes et puces ;
 téléphone et site viennent de `FACTS`. Le scénario est reconstruit côté serveur au lancement (`build_spec`) puis revalidé par `scripts/video/spec.py` (photos du site seulement, adresses unicplaquiste.com / aperçus
-Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Test du contrat serveur ↔ moteur : `backend/tests/test_video_studio.py`.
+Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Test du contrat serveur ↔ moteur et des nouvelles limites : `backend/tests/test_video_studio.py`.
 **Prérequis** : jeton GitHub de l'Atelier avec « Actions : Read and write » ; `video.yml` sur la branche principale.
 
 **Étendre** : un nouveau chiffre vrai → `FACT_STATS` ; un nouvel avis → `QUOTES` ; une nouvelle page filmable → `PAGES` (adresse + chapitres `#id`) ; un nouveau type de scène → `scripts/video/spec.py`
