@@ -5,7 +5,7 @@
 (Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable). Vidéo muette ; le temps de fabrication varie selon la durée et la complexité.
 
 **Scènes disponibles** : `title` (titre animé), `text` (titre + puces), `photo` (photo avec zoom lent + légende), `gallery` (2 à 6 photos enchaînées), `stats` (chiffres qui montent),
-`quote` (avis client), `page` (défilement fluide d'une page du site avec caméra et pastilles de chapitre), `outro` (carte de fin : devis, téléphone, site). Une vidéo = jusqu’à 50 scènes, 600 s (10 minutes) au plus pour le moment. La consigne peut contenir jusqu’à 20 000 caractères. Au-delà de ces limites, le moteur refuse explicitement la demande au lieu de supprimer silencieusement des scènes.
+`quote` (avis client), `page` (défilement fluide d'une page du site avec caméra et pastilles de chapitre), `outro` (carte de fin : devis, téléphone, site). Une vidéo = jusqu’à 50 scènes, 120 s (2 minutes) au plus pour le moment. La consigne peut contenir jusqu’à 20 000 caractères. Le plafond de durée reste à 120 s tant que le moteur image-par-image et son temps d’exécution ne sont pas optimisés. Au-delà de ces limites, le moteur refuse explicitement la demande au lieu de supprimer silencieusement des scènes.
 
 **Pourquoi GitHub Actions** : filmer image par image demande Chrome, ffmpeg et plusieurs processeurs ; le conteneur Render ne s'y prête pas.
 **Garde-fous** : Claude choisit parmi des CATALOGUES (`video_studio.py` : photos du site, chiffres vrais `FACT_STATS`, avis réels `QUOTES`, pages `PAGES`) et rédige seulement titres, légendes et puces ;
