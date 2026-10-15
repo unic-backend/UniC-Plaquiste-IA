@@ -73,14 +73,14 @@ def test_limites_video_elargies_et_refus_sans_troncature():
     scenes.append({"type": "outro", "seconds": 5})
     spec = vs.build_spec("vertical", scenes, NAMES)
     assert len(spec["scenes"]) == 20
-    assert vs._duration(spec) <= 120
+    assert vs._duration(spec) <= 150
 
     too_many = [{"type": "title", "l1": f"Scène {i}", "seconds": 2.5} for i in range(51)]
     with pytest.raises(ValueError, match="50 scènes"):
         vs.build_spec("vertical", too_many, NAMES)
 
-    # Quatre pages avec tous les chapitres dépassent le plafond actuel de 120 secondes.
-    too_long = [{"type": "page", "page": "portfolio"} for _ in range(4)]
+    # Cinq pages avec tous les chapitres dépassent le plafond actuel de 150 secondes.
+    too_long = [{"type": "page", "page": "portfolio"} for _ in range(5)]
     with pytest.raises(ValueError, match="2 minutes"):
         vs.build_spec("vertical", too_long, NAMES)
 
