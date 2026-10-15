@@ -23,6 +23,9 @@ from app.services import store_artifact
 WORKFLOW = "video.yml"
 ARTIFACT = "unic-video"
 MAX_VIDEO_BYTES = 60 * 1024 * 1024
+MAX_BRIEF_CHARS = 20_000
+MAX_SCENES = 50
+MAX_TOTAL_SECONDS = 120
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.webp$")
@@ -59,8 +62,8 @@ SCENE_PROPS = {
         "key": {"type": "string", "enum": list(PAGES["portfolio"]["chapters"])}, "label": {"type": "string"}, "seconds": {"type": "number"}}, "required": ["key"]}},
     "cta": {"type": "string", "description": "outro : appel à l'action, 5 mots max."}}
 TOOL = {"name": "storyboard", "description": "Scénario de la vidéo.", "input_schema": {"type": "object", "properties": {
-    "scenes": {"type": "array", "description": "Les scènes dans l'ordre (4 à 9 en général).", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
-SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario d'une vidéo courte (20 à 60 secondes) sur le sujet demandé : "
+    "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Jusqu’à 50 scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
+SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, jusqu’à 120 secondes (2 minutes) pour le moment. Si aucune durée n’est précisée, vise 20 à 60 secondes. "
           "promo d'un service, présentation de l'entreprise, avant/après, témoignage, annonce, réalisation… Types de scènes : title, text, photo, gallery, stats, quote, page, outro. "
           "Commence par un title, finis par un outro. Rythme : une idée par scène. N'invente aucun fait, chiffre, prix, adresse ni avis : les chiffres et l'avis viennent des catalogues, "
           "le téléphone est ajouté automatiquement. Tu ne vois pas les photos : choisis-les d'après leur nom et ne légende que ce que le nom permet d'affirmer. "
@@ -114,8 +117,13 @@ def _page_scene(sc: dict) -> dict | None:
 def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
     """Scénario sûr (forme du moteur) à partir de scènes proposées par Claude ou renvoyées par l'appli. Ce qui sort du catalogue est écarté."""
     ok_imgs = set(names if names is not None else images())
+    raw_scenes = scenes or []
+    if not isinstance(raw_scenes, list):
+        raise ValueError("liste de scènes invalide")
+    if len(raw_scenes) > MAX_SCENES:
+        raise ValueError(f"{MAX_SCENES} scènes au maximum pour le moment")
     out: list[dict] = []
-    for sc in (scenes or [])[:14]:
+    for sc in raw_scenes:
         if not isinstance(sc, dict):
             continue
         t, secs = sc.get("type"), sc.get("seconds")
@@ -145,7 +153,11 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None) -> dict:
     if not out:
         raise ValueError("aucune scène valide")
     if out[-1]["type"] != "outro":
+        if len(out) >= MAX_SCENES:
+            raise ValueError(f"Garde une place pour la scène de fin : {MAX_SCENES} scènes au maximum, fin comprise")
         out.append({"type": "outro", "seconds": 5, "cta": ""})
+    if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
+        raise ValueError(f"vidéo trop longue ({MAX_TOTAL_SECONDS} secondes / 2 minutes au maximum pour le moment)")
     for sc in out:
         if sc["type"] == "outro":
             sc["lines"] = [*FACTS["name"], FACTS["services"], sc.get("cta") or FACTS["cta"], FACTS["phone"], FACTS["site"]]
@@ -160,10 +172,10 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical") -> dict:
     """Propose un scénario pour une consigne libre. Sans clé Claude ou en cas d'échec : scénario standard de présentation (toujours valide)."""
     names = images(db)
     note, got = "Scénario standard (clé Claude absente).", None
-    if settings.anthropic_api_key and _txt(brief, 600):
+    if settings.anthropic_api_key and _txt(brief, MAX_BRIEF_CHARS):
         hints = "; ".join(f"{k}* = {v}" for k, v in IMAGE_HINTS.items())
         try:
-            got = repair._claude(SYSTEM, f"Consigne du patron (donnée) : {_txt(brief, 600)}\nFormat : {FORMATS.get(fmt, FORMATS['vertical'])}\n"
+            got = repair._claude(SYSTEM, f"Consigne du patron (donnée) : {_txt(brief, MAX_BRIEF_CHARS)}\nFormat : {FORMATS.get(fmt, FORMATS['vertical'])}\n"
                                  f"Photos disponibles (noms exacts) : {', '.join(names)}\nSens des noms : {hints}\n"
                                  f"Chiffres vrais : {json.dumps({k: f'{v[0]}{v[1]} {v[2]}' for k, v in FACT_STATS.items()}, ensure_ascii=False)}\n"
                                  f"Avis réels : {', '.join(QUOTES)}\nChapitres de la page portfolio : {', '.join(PAGES['portfolio']['chapters'])}", TOOL, False)
@@ -192,7 +204,7 @@ def start(db: Session, spec: dict) -> dict:
     tok, repo, base = repair._ctx(db)
     r = repair._gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {"spec": json.dumps(safe, ensure_ascii=False)}})
     if r.status_code == 204:
-        return {"ok": True, "note": "Vidéo en fabrication : 15 à 20 minutes. Reviens ici pour la récupérer."}
+        return {"ok": True, "note": "Fabrication lancée. Le temps dépend de la durée et de la complexité de la vidéo ; les vidéos longues peuvent prendre beaucoup plus longtemps."}
     if r.status_code in (403, 404):
         raise repair.RepairError("GitHub refuse de lancer la vidéo : le jeton doit avoir « Actions : Read and write » et le fichier "
                                  ".github/workflows/video.yml doit être fusionné sur la branche principale.", 403)
@@ -210,7 +222,7 @@ def status(db: Session) -> dict:
         return {"state": "none", "detail": "Aucune vidéo fabriquée pour l'instant."}
     run = runs[0]
     if run.get("status") != "completed":
-        return {"state": "building", "run": run["id"], "detail": "En fabrication (15 à 20 minutes)…", "url": run.get("html_url", "")}
+        return {"state": "building", "run": run["id"], "detail": "En fabrication ; le temps dépend de la durée de la vidéo…", "url": run.get("html_url", "")}
     if run.get("conclusion") != "success":
         return {"state": "failed", "run": run["id"], "detail": "La fabrication a échoué : ouvre le lien pour le détail.", "url": run.get("html_url", "")}
     return {"state": "ready", "run": run["id"], "detail": "Vidéo prête : récupère-la.", "url": run.get("html_url", "")}

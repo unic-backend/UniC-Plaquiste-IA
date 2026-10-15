@@ -121,7 +121,7 @@ def _v(fn, *a):
 
 
 class VideoPlanIn(BaseModel):
-    brief: str = Field("", max_length=600)
+    brief: str = Field("", max_length=20000)
     format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
 
 
