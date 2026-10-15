@@ -59,7 +59,7 @@ export function VideoStudio({ say }: { say: Say }) {
     <>
     <section className="card-box">
         <label>Studio vidéo</label>
-        <p className="hint">Décris la vidéo voulue (promo d'un service, présentation, avant/après, témoignage, annonce…). L’IA écrit le scénario avec tes photos et tes vrais chiffres ; GitHub la filme, sans son. Jusqu’à 200 scènes et 600 secondes (10 minutes). Vertical : WhatsApp, TikTok, Reels. Horizontal : YouTube, écran. Carré : Facebook, Instagram. Le temps de fabrication dépend de la durée. Rien n’est publié : la vidéo arrive dans tes documents.</p>
+        <p className="hint">Décris la vidéo voulue (promo d'un service, présentation, avant/après, témoignage, annonce…). **Mode gratuit prioritaire** : le scénario et le montage Chrome + FFmpeg tournent via GitHub Actions, sans crédits vidéo payants. L’IA écrit le scénario avec tes photos et tes vrais chiffres ; jusqu’à 10 minutes. Vertical : WhatsApp, TikTok, Reels. Horizontal : YouTube, écran. Carré : Facebook, Instagram. Le temps de fabrication dépend de la durée. Rien n’est publié : la vidéo arrive dans tes documents.</p>
         <textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
         <p className="hint">{brief.length.toLocaleString("fr-FR")} / 20 000 caractères · jusqu’à 200 scènes · 600 secondes maximum (10 minutes).</p>
         <select value={fmt} onChange={(e) => setFmt(e.target.value)} aria-label="Format de la vidéo">
@@ -73,7 +73,7 @@ export function VideoStudio({ say }: { say: Say }) {
         </div>
         {plan && (
           <>
-            <p className="hint">{plan.note} Scènes : {plan.spec.scenes.length}/50. Durée : environ {plan.seconds} s (maximum 600 s / 10 min).</p>
+            <p className="hint">{plan.note} Scènes : {plan.spec.scenes.length}/200. Durée : environ {plan.seconds} s (maximum 600 s / 10 min). {plan.route?.reason || ""}</p>
             <ol className="hint">{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
             <button className="btn btn-copper btn-small" disabled={busy}
               onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
@@ -91,8 +91,8 @@ export function VideoStudio({ say }: { say: Say }) {
         )}
     </section>
     <section className="card-box">
-      <label>Génération vidéo par IA</label>
-      <p className="hint">Higgsfield · Wan 3.0 Prime · 720p · clips de 2 à 30 secondes. Ce mode crée un vrai clip vidéo à partir d'une consigne, avec son IA en option. Pour les montages scénarisés jusqu'à 10 minutes, utilise le scénario ci-dessus. Chaque génération consomme des crédits payants Higgsfield ; rien n'est lancé sans confirmation.</p>
+      <label>Vidéo générative avancée (option payante)</label>
+      <p className="hint">Utilise ce mode seulement si tu as besoin de vrais humains photoréalistes, de mouvements complexes ou d’une scène que le montage gratuit ne peut pas produire. Higgsfield · Wan 3.0 Prime · 720p · clips de 2 à 30 secondes. Chaque génération consomme des crédits payants ; le mode gratuit reste prioritaire et rien n'est lancé sans confirmation.</p>
       {hf?.connected ? (
         <p className="hint">Clips IA restants aujourd'hui : {hf.video_left_today}/{hf.video_per_day}. Format : {fmt === "vertical" ? "vertical 9:16" : fmt === "horizontal" ? "horizontal 16:9" : "carré 1:1"}.</p>
       ) : (
@@ -133,8 +133,8 @@ export function VideoStudio({ say }: { say: Say }) {
       )}
 
       <hr />
-      <label>Vidéo IA longue — jusqu’à 10 minutes</label>
-      <p className="hint">Écris une consigne par scène, dans l’ordre. UniC génère un clip Higgsfield de 30 secondes par consigne puis assemble les clips en MP4. Chaque clip consomme des crédits payants. Plafond global : 20 clips par jour, pour tous les clips et vidéos longues. Le son IA est réglé ci-dessus.</p>
+      <label>Vidéo générative longue (option payante)</label>
+      <p className="hint">À utiliser uniquement si tu veux plusieurs scènes réellement générées par un modèle vidéo. Pour les publicités, présentations, photos animées, textes, transitions et montages classiques, utilise le Studio vidéo gratuit au-dessus. Ici, chaque scène génère un clip Higgsfield payant de 30 secondes maximum ; jusqu’à 10 minutes et 20 clips. Le son IA est réglé ci-dessus.</p>
       <label className="hint">Durée finale
         <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
           <option value={30}>30 secondes · 1 clip</option>
