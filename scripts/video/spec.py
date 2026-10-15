@@ -15,6 +15,7 @@ HOST_OK = re.compile(r"^([a-z0-9-]+\.)*(unicplaquiste\.com|netlify\.app)$")
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
+THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro")
 # Garde-fous techniques seulement (pas un plafond métier) : la durée n'est limitée que par le temps de calcul GitHub. Au-delà, on coupe en tronçons (chunks()).
 MAX_SCENES, MAX_TOTAL = 5000, 43200.0
@@ -72,7 +73,7 @@ def _scene(s: dict) -> dict:
                 v = int(it.get("value"))
             except (TypeError, ValueError, AttributeError):
                 continue
-            items.append({"value": min(max(v, 0), 100000), "suffix": CTRL.sub("", str(it.get("suffix") or ""))[:4], "label": _txt(it.get("label"), 28)})
+            items.append({"value": min(max(v, 0), 10 ** 9), "suffix": CTRL.sub("", str(it.get("suffix") or ""))[:6], "label": _txt(it.get("label"), 28)})
         if len(items) < 2:
             raise ValueError("chiffres : au moins 2")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 9, 5), "items": items}
@@ -134,4 +135,5 @@ def clean(raw: dict) -> dict:
     if est > MAX_TOTAL:
         raise ValueError("vidéo trop longue (12 heures au maximum)")
     fps = raw.get("fps") if raw.get("fps") in (24, 30, 60) else 60
-    return {"format": fmt, "fps": fps, "scenes": scenes}
+    theme = raw.get("theme") if raw.get("theme") in THEMES else "unic"
+    return {"format": fmt, "fps": fps, "theme": theme, "scenes": scenes}

@@ -152,7 +152,7 @@ class VideoAILongStartIn(BaseModel):
 @router.post("/video/plan")
 def video_plan(body: VideoPlanIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Scénario proposé par l'IA pour une consigne libre (rien n'est lancé)."""
-    return video_studio.plan(db, body.brief, body.format)
+    return _v(video_studio.plan, db, body.brief, body.format)
 
 
 @router.post("/video/start")

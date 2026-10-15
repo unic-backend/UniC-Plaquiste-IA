@@ -11,6 +11,7 @@ const b = await chromium.launch({ args: ["--font-render-hinting=none", "--disabl
 const p = await (await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3 })).newPage();
 if (process.env.VIDEO_PRELOAD) await (await import(process.env.VIDEO_PRELOAD)).default(p);
 await p.goto("file://" + new URL("./scenes.html", import.meta.url).pathname);
+await p.evaluate(t => { document.documentElement.dataset.theme = t; }, PLAN.theme || "unic");
 let n = 0, blk = 0, mode = "";
 const setMode = async m => {   // "html" ou "pill" : on ne bascule que si nécessaire
   if (mode === m) return;

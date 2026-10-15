@@ -1,5 +1,7 @@
 # Studio vidéo (universel)
 
+**N'importe quel sujet** : le scénario est écrit pour la consigne du patron, quel qu'elle soit (histoire, tutoriel, animaux, voyage, annonce, promo…). Le montage gratuit ne crée ni images ni films : il assemble titres, textes, chiffres, citations, photos et défilement de page, avec une **ambiance de couleurs** choisie par l'IA selon le sujet (`theme` : unic, night, light, earth, ocean, sunset). Les catalogues de l'entreprise (photos du site, chiffres vrais, avis, page portfolio, téléphone) ne servent que si le sujet concerne l'entreprise ; la carte de fin d'entreprise est une option (`brand`). Sans clé Claude, une demande libre est refusée clairement (jamais remplacée par une vidéo sans rapport). Les images et films générés (un lion qui court) viennent du mode « Clip IA ».
+
 **Parcours** : Paramètres › Site › « Studio vidéo » → décrire la vidéo voulue en une phrase + choisir le format (vertical 9:16, horizontal 16:9, carré 1:1) →
 *Proposer un scénario* (Claude, `video_studio.plan`) → relire la liste des scènes → *Lancer la fabrication* (clic du patron) → GitHub Actions `video.yml` filme et monte
 (Chrome + ffmpeg, `scripts/video/`) → *Récupérer la vidéo* (rangée comme document, téléchargeable et partageable). Vidéo muette ; le temps de fabrication varie selon la durée et la complexité.

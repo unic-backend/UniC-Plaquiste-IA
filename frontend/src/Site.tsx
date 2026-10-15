@@ -63,7 +63,7 @@ export function VideoStudio({ say }: { say: Say }) {
   return (
     <section className="card-box vs">
       <label>Studio vidéo</label>
-      <p className="hint">Décris la vidéo voulue : promo d'un service, présentation, avant/après, témoignage, annonce… Rien n'est publié : la vidéo arrive dans tes documents.</p>
+      <p className="hint">Décris n'importe quelle vidéo : histoire, tutoriel, annonce, promo, récit, animaux, voyage… Rien n'est publié : la vidéo arrive dans tes documents.</p>
 
       <div className="seg" role="tablist" aria-label="Type de vidéo">
         {([["montage", "Montage", "gratuit"], ["clip", "Clip IA", "payant"], ["long", "Vidéo IA longue", "payant"]] as const).map(([k, name, tag]) => (
@@ -82,8 +82,8 @@ export function VideoStudio({ say }: { say: Say }) {
 
       {mode === "montage" && (
         <>
-          <textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
-          <p className="vs-note">Montage Chrome + FFmpeg sur GitHub, sans crédits payants. Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle. {brief.length.toLocaleString("fr-FR")} / 20 000 caractères.</p>
+          <textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Une vidéo de 40 secondes qui raconte l’histoire de Dakar, avec des chiffres clés et une citation" aria-label="Description de la vidéo" />
+          <p className="vs-note">Montage gratuit : titres, textes, chiffres, citations, photos du site et ambiances de couleurs (l'IA choisit celle du sujet). Il ne crée pas d'images ni de films : pour un lion qui court, utilise « Clip IA ». Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle. {brief.length.toLocaleString("fr-FR")} / 20 000 caractères.</p>
           <div className="row-actions">
             <button className="btn btn-copper btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief, fmt)); })}>Proposer un scénario</button>
             <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>

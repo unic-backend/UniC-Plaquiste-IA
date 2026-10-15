@@ -15,6 +15,34 @@ def test_scenario_standard_sans_cle(monkeypatch):
     p = vs.plan(None, "", "horizontal")
     types = [s["type"] for s in p["spec"]["scenes"]]
     assert types[0] == "title" and types[-1] == "outro" and "page" in types and p["spec"]["format"] == "horizontal" and 20 <= p["seconds"] <= 60
+    assert vs.FACTS["phone"] in p["spec"]["scenes"][-1]["lines"]            # sans consigne : présentation de l'entreprise
+
+
+def test_un_sujet_quelconque_ne_donne_jamais_une_video_d_entreprise(monkeypatch):
+    """« Un lion qui court après ses petits » : pas de clé Claude -> on le dit (on ne livre pas une vidéo de plaquiste) ; avec Claude -> scénario libre, sans téléphone."""
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "")
+    with pytest.raises(repair.RepairError) as e:
+        vs.plan(None, "Un lion qui court après ses petits dans la savane", "vertical")
+    assert e.value.status == 400
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: {"theme": "earth", "scenes": [
+        {"type": "title", "l1": "LA SAVANE", "l2": "LE LION", "sub": "Un instant de vie"},
+        {"type": "stats", "items": [{"value": 80, "suffix": " km/h", "label": "Vitesse de pointe"}, {"value": 3, "suffix": "", "label": "Petits par portée"}]},
+        {"type": "quote", "text": "Le plus fort n'est pas celui qui court le plus vite.", "author": "Proverbe"},
+        {"type": "outro", "lines": ["Fin", "Merci d'avoir regardé"]}]})
+    p = vs.plan(None, "Un lion qui court après ses petits dans la savane", "vertical")
+    assert p["spec"]["theme"] == "earth" and [c["type"] for c in p["spec"]["scenes"]] == ["title", "stats", "quote", "outro"]
+    assert "+221" not in json.dumps(p["spec"]) and "UNIC" not in json.dumps(p["spec"])      # rien de l'entreprise
+    assert p["spec"]["scenes"][1]["items"][0] == {"value": 80, "suffix": " km/h", "label": "Vitesse de pointe"}
+    assert p["spec"]["scenes"][2]["author"] == "Proverbe" and p["spec"]["scenes"][3]["lines"] == ["Fin", "Merci d'avoir regardé"]
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: {"scenes": [{"type": "inconnu"}]})
+    with pytest.raises(repair.RepairError) as e:
+        vs.plan(None, "Un lion", "vertical")
+    assert e.value.status == 502                                              # scénario inutilisable : on le dit
+    import importlib.util, pathlib
+    m = importlib.util.spec_from_file_location("video_spec_th", pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py")
+    eng = importlib.util.module_from_spec(m); m.loader.exec_module(eng)
+    assert eng.clean(p["spec"])["theme"] == "earth" and eng.clean({**p["spec"], "theme": "inconnu"})["theme"] == "unic"
 
 
 def test_toutes_les_scenes_et_les_garde_fous():
@@ -31,15 +59,18 @@ def test_toutes_les_scenes_et_les_garde_fous():
         {"type": "page", "page": "portfolio", "chapters": [{"key": "avis", "label": "Avis", "seconds": 99}, {"key": "x"}]},
         {"type": "inconnu"}], NAMES)
     t = [s["type"] for s in spec["scenes"]]
-    assert t == ["title", "photo", "gallery", "stats", "quote", "text", "page", "outro"]      # outro ajouté
+    assert t == ["title", "photo", "gallery", "stats", "quote", "text", "page"]                  # plus d'outro imposé
     assert spec["scenes"][0]["seconds"] == 6 and "<" not in spec["scenes"][0]["l1"] and "\x00" not in spec["scenes"][0]["l1"]
     assert spec["scenes"][2]["images"] == ["realis-01-plafond.webp", "realis-02-cloisons.webp"]
     assert [i["value"] for i in spec["scenes"][3]["items"]] == [180, 98]
     assert spec["scenes"][4]["author"].startswith("Khadige") and spec["scenes"][5]["bullets"] == ["Plafonds", "Cloisons"]
     page = spec["scenes"][6]
     assert page["url"] == "https://www.unicplaquiste.com/portfolio/" and page["chapters"] == [{"key": "avis", "selector": "#avis", "label": "Avis", "seconds": 9.0}]
-    assert vs.FACTS["phone"] in spec["scenes"][7]["lines"] and spec["format"] == "square"
+    assert spec["format"] == "square" and spec["theme"] == "unic"
+    brand = vs.build_spec("vertical", [{"type": "outro", "brand": True, "cta": "Appelle-nous", "lines": ["faux"]}], NAMES)["scenes"][0]
+    assert vs.FACTS["phone"] in brand["lines"] and "Appelle-nous" in brand["lines"] and "faux" not in brand["lines"]       # carte entreprise : faits du code
     assert vs.build_spec("n'importe quoi", [{"type": "outro"}], NAMES)["format"] == "vertical"
+    assert vs.build_spec("vertical", [{"type": "outro"}], NAMES)["scenes"][0]["lines"] == ["Merci"]
 
 
 def test_le_moteur_accepte_ce_que_le_serveur_produit():
@@ -129,7 +160,7 @@ def test_start_reconstruit_le_scenario(monkeypatch):
     monkeypatch.setattr(repair, "_gh", lambda m, path, tok, **kw: (sent.update(path=path, json=kw["json"]) or R()))
     out = vs.start(None, {"format": "horizontal", "scenes": [{"type": "photo", "image": "ref-dakar-arena.webp", "caption": "x"},
                                                               {"type": "page", "url": "https://evil.example/", "chapters": [{"key": "services", "selector": "body", "seconds": 5}]},
-                                                              {"type": "outro", "cta": "Appelle-moi", "lines": ["faux"]}]})
+                                                              {"type": "outro", "brand": True, "cta": "Appelle-moi", "lines": ["faux"]}]})
     assert out["ok"] and sent["path"].endswith("/video.yml/dispatches")
     got = json.loads(sent["json"]["inputs"]["spec"])
     assert got["format"] == "horizontal" and got["scenes"][1]["url"] == "https://www.unicplaquiste.com/portfolio/" and got["scenes"][1]["chapters"][0]["selector"] == "#services"
