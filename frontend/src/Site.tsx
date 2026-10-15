@@ -21,6 +21,8 @@ export function VideoStudio({ say }: { say: Say }) {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiDuration, setAiDuration] = useState(5);
   const [aiAudio, setAiAudio] = useState(true);
+  const [longPromptsText, setLongPromptsText] = useState("");
+  const [longDuration, setLongDuration] = useState(60);
   const [aiClip, setAiClip] = useState<VideoAIClip | null>(null);
   const [hf, setHf] = useState<HiggsfieldStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,7 +38,7 @@ export function VideoStudio({ say }: { say: Say }) {
   }, []);
   const aiState = aiClip?.state;
   useEffect(() => {
-    if (!aiState || !["submitting", "queued", "processing"].includes(aiState)) return;
+    if (!aiState || !["submitting", "queued", "processing", "assembling"].includes(aiState)) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -44,7 +46,7 @@ export function VideoStudio({ say }: { say: Say }) {
         const next = await net.videoAiStatus();
         if (cancelled) return;
         setAiClip(next);
-        if (["submitting", "queued", "processing"].includes(next.state)) timer = setTimeout(poll, 5000);
+        if (["submitting", "queued", "processing", "assembling"].includes(next.state)) timer = setTimeout(poll, 5000);
         else api.higgsfield().then((s) => { if (!cancelled) setHf(s); }).catch(() => {});
       } catch {
         if (!cancelled) timer = setTimeout(poll, 10000);
@@ -112,7 +114,7 @@ export function VideoStudio({ say }: { say: Say }) {
       </div>
       <button className="btn btn-copper btn-small" disabled={busy || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
         onClick={() => {
-          if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Limite : ${hf?.video_per_day ?? 1} clip par jour.`)) return;
+          if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Plafond : ${hf?.video_per_day ?? 20} clips par jour.`)) return;
           run(async () => {
             try {
               const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
@@ -121,14 +123,44 @@ export function VideoStudio({ say }: { say: Say }) {
               api.higgsfield().then(setHf).catch(() => {});
             }
           }, "Génération du clip IA lancée.");
-        }}>{aiClip && ["submitting", "queued", "processing"].includes(aiClip.state) ? "Génération en cours…" : "Générer un clip IA"}</button>
+        }}>{aiClip && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state) ? "Génération en cours…" : "Générer un clip IA"}</button>
       {aiClip && aiClip.state !== "idle" && <p className="hint" role="status">{aiClip.detail}</p>}
       {aiClip?.state === "ready" && aiClip.artifact && (
         <div className="row-actions">
-          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>Télécharger le clip IA</button>
+          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>{aiClip.kind === "long" ? "Télécharger la vidéo IA longue" : "Télécharger le clip IA"}</button>
           <button className="btn btn-line btn-small" onClick={() => shareDocument(aiClip.artifact!.url, aiClip.artifact!.filename).catch((e) => say(e.message))}>Partager</button>
         </div>
       )}
+
+      <hr />
+      <label>Vidéo IA longue — jusqu’à 10 minutes</label>
+      <p className="hint">Écris une consigne par scène, dans l’ordre. UniC génère un clip Higgsfield de 30 secondes par consigne puis assemble les clips en MP4. Chaque clip consomme des crédits payants. Plafond global : 20 clips par jour, pour tous les clips et vidéos longues. Le son IA est réglé ci-dessus.</p>
+      <label className="hint">Durée finale
+        <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
+          <option value={30}>30 secondes · 1 clip</option>
+          <option value={60}>1 minute · 2 clips</option>
+          <option value={120}>2 minutes · 4 clips</option>
+          <option value={300}>5 minutes · 10 clips</option>
+          <option value={600}>10 minutes · 20 clips</option>
+        </select>
+      </label>
+      <textarea rows={8} value={longPromptsText} onChange={(e) => setLongPromptsText(e.target.value)} maxLength={30000}
+        placeholder={"Une consigne par ligne, une scène de 30 secondes chacune. Exemple :\nPlan cinématographique d’un salon contemporain avec faux plafond BA13...\nGros plan sur l’éclairage indirect et les finitions..."}
+        aria-label="Consignes des scènes de la vidéo IA longue" />
+      <p className="hint">{longPromptsText.split("\n").filter((s) => s.trim()).length} / {longDuration / 30} consignes requises · {longDuration / 30} clips payants prévus.</p>
+      <button className="btn btn-copper btn-small" disabled={busy || !hf?.connected || hf.video_left_today < longDuration/30 ||
+        longPromptsText.split("\n").filter((s) => s.trim()).length !== longDuration/30 ||
+        longPromptsText.split("\n").some((s) => s.trim().length > 0 && s.trim().length < 8) ||
+        (aiClip !== null && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state))}
+        onClick={() => {
+          const prompts = longPromptsText.split("\n").map((s) => s.trim()).filter(Boolean);
+          if (!window.confirm(`Créer une vidéo IA de ${longDuration/60} minute(s) avec ${prompts.length} clips Higgsfield ? Chaque clip consomme des crédits payants, soit jusqu’à ${prompts.length} générations. Le traitement peut prendre longtemps. Continuer ?`)) return;
+          run(async () => { const result = await net.videoAiLongStart(prompts, longDuration, fmt, aiAudio); setAiClip(result); api.higgsfield().then(setHf).catch(() => {}); },
+            "Génération de la vidéo IA longue lancée.");
+        }}>Générer la vidéo IA longue</button>
+      {aiClip?.kind === "long" && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state) &&
+        <p className="hint" role="status">Progression : {aiClip.completed_clips || 0}/{aiClip.total_clips || 0} clips terminés. {aiClip.detail}</p>}
+
     </section>
     </>
   );

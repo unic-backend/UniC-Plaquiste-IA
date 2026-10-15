@@ -54,7 +54,7 @@ def test_video_start_uses_official_model_and_limits_cost(monkeypatch):
     }
     assert sent["kwargs"]["headers"]["Idempotency-Key"]
     assert json.loads(state[hf.VIDEO_JOB_KEY])["user_id"] == "owner-1"
-    assert hf.status(db)["video_left_today"] == 0
+    assert hf.status(db)["video_left_today"] == hf.MAX_VIDEO_PER_DAY - 1
 
 
 def test_video_start_refuse_doublon_et_quota(monkeypatch):
@@ -69,11 +69,38 @@ def test_video_start_refuse_doublon_et_quota(monkeypatch):
     assert len(calls) == 1
 
     state[hf.VIDEO_JOB_KEY] = ""
-    state[hf.VIDEO_COUNT_KEY] = f"{date.today().isoformat()}:1"
+    state[hf.VIDEO_COUNT_KEY] = f"{date.today().isoformat()}:{hf.MAX_VIDEO_PER_DAY}"
     with pytest.raises(hf.HiggsfieldError, match="par jour") as exc:
         hf.start_video(db, "Un autre clip vidéo", 5, "square", False, "owner-1")
     assert exc.value.status == 429
     assert len(calls) == 1
+
+
+def test_video_long_reserve_les_clips_et_demarre_sans_depassement(monkeypatch, tmp_path):
+    state, db = setup_state(monkeypatch)
+    sent = []
+    monkeypatch.setattr(hf.settings, "unic_data_dir", str(tmp_path))
+    monkeypatch.setattr(hf, "_http", lambda method, url, creds, **kw:
+                        (sent.append((method, url, kw)) or Response(200, {"request_id": "request_12345678"})))
+
+    out = hf.start_long_video(
+        db,
+        ["Un salon contemporain avec faux plafond BA13", "Gros plan sur les finitions lumineuses"],
+        60, "horizontal", True, "owner-1",
+    )
+    assert out["kind"] == "long"
+    assert out["state"] == "queued"
+    assert out["total_clips"] == 2
+    assert out["target_seconds"] == 60
+    assert len(sent) == 1  # un seul clip est soumis à la fois
+    assert sent[0][2]["json"]["duration"] == 30
+    assert state[hf.VIDEO_COUNT_KEY] == f"{date.today().isoformat()}:2"
+
+
+def test_video_long_refuse_un_nombre_de_consignes_incoherent(monkeypatch):
+    _, db = setup_state(monkeypatch)
+    with pytest.raises(hf.HiggsfieldError, match="exactement 2 consignes"):
+        hf.start_long_video(db, ["Une consigne valide"], 60, "vertical", False, "owner-1")
 
 
 def test_video_start_valide_duree_format_et_connexion(monkeypatch):
@@ -100,7 +127,7 @@ def test_erreur_cle_higgsfield_ne_ressemble_pas_a_une_session_app_expiree(monkey
         hf.start_video(db, "Un clip vidéo pour tester", 5, "vertical", True, "owner-1")
     assert exc.value.status == 400
     assert "Clés Higgsfield refusées" in str(exc.value)
-    assert hf.status(db)["video_left_today"] == 1
+    assert hf.status(db)["video_left_today"] == hf.MAX_VIDEO_PER_DAY
 
 
 def test_video_status_verifie_proprietaire_et_recupere_mp4(monkeypatch, tmp_path):

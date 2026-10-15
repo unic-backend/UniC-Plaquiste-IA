@@ -142,6 +142,12 @@ class VideoAIStartIn(BaseModel):
     format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
     generate_audio: bool = True
 
+class VideoAILongStartIn(BaseModel):
+    prompts: list[str] = Field(..., min_length=1, max_length=20)
+    duration: int = Field(..., ge=2, le=600)
+    format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
+    generate_audio: bool = True
+
 
 @router.post("/video/plan")
 def video_plan(body: VideoPlanIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
@@ -181,7 +187,16 @@ def video_ai_start(body: VideoAIStartIn, db: Session = Depends(get_db), user: Us
     return out
 
 
+@router.post("/video/ai/long/start")
+def video_ai_long_start(body: VideoAILongStartIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Lance explicitement une série de clips IA puis les assemble en MP4."""
+    out = _hf(higgsfield.start_long_video, db, body.prompts, body.duration, body.format, body.generate_audio, user.id)
+    audit(db, user.id, "video_ai_long_start", "higgsfield_long_video", str(body.duration))
+    db.commit()
+    return out
+
+
 @router.get("/video/ai/status")
 def video_ai_status(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
-    """Vérifie le clip IA en cours et le range dans Documents quand il est prêt."""
+    """Vérifie le clip IA ou le montage IA long et le range dans Documents quand il est prêt."""
     return _hf(higgsfield.video_status, db, user.id)
