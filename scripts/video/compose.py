@@ -1,10 +1,12 @@
-"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 60 i/s, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
+"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 30 i/s par défaut, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
 import json, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
 
 PLAN, OUT = sys.argv[1:3]
 P = json.load(open(PLAN)); OW, OH = P["view"]["w"] * 3, P["view"]["h"] * 3
+FPS = int(P.get("fps", 30))
+if FPS not in (24, 30, 60): sys.exit("fps invalide")
 MARGIN, ROYAL = 1.008, (2, 8, 58)
 SEGS = P["segments"]
 for s in SEGS:
@@ -23,14 +25,15 @@ def render(task):
     im = Image.open(f"{s['fdir']}/{f:05d}.jpg").convert("RGB").resize((OW, OH), Image.LANCZOS, box=(x0 * S, y0 * S, (x0 + cw) * S, (y0 + ch) * S))
     if f in s["act"]:
         im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['out']}/{f:05d}.png").convert("RGBA")); im = im.convert("RGB")
-    k = min(1.0, f / 21, (s["frames"] - 1 - f) / 21)     # fondu vers la couleur de fond (0,35 s) aux raccords
+    fade_frames = max(1, round(0.35 * FPS))
+    k = min(1.0, f / fade_frames, (s["frames"] - 1 - f) / fade_frames)     # fondu vers la couleur de fond (0,35 s) aux raccords
     if k < 1.0:
         im = Image.blend(Image.new("RGB", (OW, OH), ROYAL), im, max(0.0, k))
     return im.tobytes()
 
-total = len(TASKS) / 60
+total = len(TASKS) / FPS
 kbps = min(9000, int(24e6 * 8 / total / 1000))
-ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OW}x{OH}", "-framerate", "60", "-i", "-",
+ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{OW}x{OH}", "-framerate", str(FPS), "-i", "-",
     "-vf", "eq=contrast=1.02:saturation=1.05,fade=t=in:st=0:d=0.4,fade=t=out:st=%.2f:d=0.8,format=yuv420p" % max(0, total - 0.8), "-c:v", "libx264", "-preset", "medium", "-crf", "16",
     "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-profile:v", "high", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
 with Pool() as pool:
