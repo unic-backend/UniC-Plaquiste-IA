@@ -16,7 +16,7 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro")
-MAX_SCENES, MAX_TOTAL = 50, 120.0
+MAX_SCENES, MAX_TOTAL = 50, 150.0
 
 
 def _txt(v, n: int) -> str:
@@ -113,5 +113,5 @@ def clean(raw: dict) -> dict:
         raise ValueError("aucune scène")
     est = sum(s["seconds"] or (s["hero_seconds"] + sum(c["seconds"] for c in s["chapters"]) + 2.5) for s in scenes)
     if est > MAX_TOTAL:
-        raise ValueError("vidéo trop longue (120 s / 2 minutes au maximum pour le moment)")
+        raise ValueError("vidéo trop longue (150 s / 2 minutes 30 au maximum pour le moment)")
     return {"format": fmt, "scenes": scenes}
