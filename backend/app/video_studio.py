@@ -62,7 +62,7 @@ SCENE_PROPS = {
         "key": {"type": "string", "enum": list(PAGES["portfolio"]["chapters"])}, "label": {"type": "string"}, "seconds": {"type": "number"}}, "required": ["key"]}},
     "cta": {"type": "string", "description": "outro : appel à l'action, 5 mots max."}}
 TOOL = {"name": "storyboard", "description": "Scénario de la vidéo.", "input_schema": {"type": "object", "properties": {
-    "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Jusqu’à 50 scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
+    "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Jusqu’à 200 scènes dans l’ordre ; termine par outro.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}}}, "required": ["scenes"]}}
 SYSTEM = ("Tu es réalisateur et monteur vidéo pour UniC Plaquiste (plaquiste à Dakar). Tu composes le scénario de la durée demandée par le patron, jusqu’à 600 secondes (10 minutes). Si aucune durée n’est précisée, vise 20 à 60 secondes. "
           "promo d'un service, présentation de l'entreprise, avant/après, témoignage, annonce, réalisation… Types de scènes : title, text, photo, gallery, stats, quote, page, outro. "
           "Commence par un title, finis par un outro. Rythme : une idée par scène. N'invente aucun fait, chiffre, prix, adresse ni avis : les chiffres et l'avis viennent des catalogues, "
