@@ -1,0 +1,6 @@
+{"format":"vertical","scenes":[
+{"type":"title","l1":"UNIC","l2":"PLAQUISTE","sub":"Plaquiste · Dakar","seconds":3.5},
+{"type":"photo","image":"ref-dakar-arena.webp","caption":"Dakar Arena","direction":"in","seconds":3.5},
+{"type":"stats","items":[{"value":180,"suffix":"+","label":"Chantiers livrés"},{"value":98,"suffix":"%","label":"Clients satisfaits"}],"seconds":4},
+{"type":"page","url":"https://www.unicplaquiste.com/portfolio/","hero_seconds":3,"chapters":[{"selector":"#apropos","label":"À propos","seconds":4},{"selector":"#services","label":"Nos services","seconds":4}]},
+{"type":"outro","lines":["UNIC","PLAQUISTE","Plafonds · Cloisons · Peinture · Déco","Devis gratuit sous 48 h","+221 77 708 50 92","unicplaquiste.com"],"seconds":4.5}]}

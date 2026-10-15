@@ -216,7 +216,8 @@ export type JournalRow = { id: string; at: string | null; action: string; label:
 
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
-export type VideoPlan = { spec: { url: string; subtitle: string; chapters: { key: string; label: string; seconds: number }[]; end: string[] }; seconds: number; note: string };
+export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
+export type VideoPlan = { spec: { format: string; scenes: VideoScene[] }; seconds: number; note: string };
 
 export const net = {
   platforms: () =>
@@ -238,7 +239,7 @@ export const net = {
     request<{ id: string; title: string }>("/api/website/draft", { method: "POST", body: JSON.stringify({ topic, details }) }),
   sitePreview: (id: string) => request<{ html: string; words: number; url: string }>(`/api/website/preview/${id}`),
   bookPreview: () => request<{ html: string; url: string }>("/api/website/book/preview"),
-  videoPlan: (brief: string) => request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief }) }),
+  videoPlan: (brief: string, format: string) => request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format }) }),
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<{ state: string; detail: string; url?: string }>("/api/website/video/status"),
   videoFetch: () => request<{ id: string; filename: string; size: number; url: string }>("/api/website/video/fetch", { method: "POST" }),
