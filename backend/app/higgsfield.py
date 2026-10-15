@@ -1,7 +1,7 @@
 """Higgsfield : génération d'images et de clips vidéo IA (API officielle).
 
 Clés (identifiant + secret) chiffrées par secrets_box, jamais renvoyées ni journalisées. Rien ne part sans clés saisies par le patron.
-Chaque image et chaque clip vidéo consomment des crédits Higgsfield. Limites : MAX_PER_DAY images et MAX_VIDEO_PER_DAY clip vidéo par jour ; aucune génération sans clic explicite.
+Chaque image et chaque clip vidéo consomment des crédits Higgsfield. Limites : MAX_PER_DAY images et MAX_VIDEO_PER_DAY clips vidéo par jour ; aucune génération sans clic explicite.
 Les médias créés sont rangés comme documents de l'appli (téléchargement, partage) ; rien n'est publié ni envoyé.
 """
 from __future__ import annotations
