@@ -114,9 +114,12 @@ export function VideoStudio({ say }: { say: Say }) {
         onClick={() => {
           if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Limite : ${hf?.video_per_day ?? 1} clip par jour.`)) return;
           run(async () => {
-            const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
-            setAiClip(result);
-            api.higgsfield().then(setHf).catch(() => {});
+            try {
+              const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
+              setAiClip(result);
+            } finally {
+              api.higgsfield().then(setHf).catch(() => {});
+            }
           }, "Génération du clip IA lancée.");
         }}>{aiClip && ["submitting", "queued", "processing"].includes(aiClip.state) ? "Génération en cours…" : "Générer un clip IA"}</button>
       {aiClip && aiClip.state !== "idle" && <p className="hint" role="status">{aiClip.detail}</p>}
