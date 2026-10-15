@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan } from "./api";
+import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan, type VideoState } from "./api";
 
 type Say = (m: string) => void;
 
-const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Avis client", page: "Défilement du site", outro: "Fin (contact)" };
+const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Avis client", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)" };
 const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
-  const d = c.type === "title" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" ? String(c.heading || "") : c.caption ? String(c.caption) : "";
+  const d = c.type === "title" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" ? String(c.heading || "") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
   return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
 };
 
@@ -16,7 +16,7 @@ export function VideoStudio({ say }: { say: Say }) {
   const [brief, setBrief] = useState("");
   const [fmt, setFmt] = useState("vertical");
   const [plan, setPlan] = useState<VideoPlan | null>(null);
-  const [vid, setVid] = useState<{ state: string; detail: string; url?: string } | null>(null);
+  const [vid, setVid] = useState<VideoState | null>(null);
   const [got, setGot] = useState<{ url: string; filename: string } | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiDuration, setAiDuration] = useState(5);
@@ -37,6 +37,13 @@ export function VideoStudio({ say }: { say: Say }) {
     net.videoAiStatus().then((s) => { if (alive && s.state !== "idle") setAiClip(s); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  const vidState = vid?.state;
+  useEffect(() => {   // le montage (et la génération IA qui le précède) se suit tout seul : plus besoin d'appuyer sur « Où en est la vidéo ? »
+    if (vidState !== "building") return;
+    let cancelled = false;
+    const timer = setInterval(() => { net.videoStatus().then((s) => { if (!cancelled) setVid(s); }).catch(() => {}); }, 10000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [vidState]);
   const aiState = aiClip?.state;
   useEffect(() => {
     if (!aiState || !["submitting", "queued", "processing", "assembling"].includes(aiState)) return;
@@ -92,12 +99,24 @@ export function VideoStudio({ say }: { say: Say }) {
             <div className="vs-plan">
               <p className="vs-sum"><b>{plan.spec.scenes.length} scènes</b> · environ {plan.seconds >= 60 ? `${Math.floor(plan.seconds / 60)} min ${plan.seconds % 60} s` : `${plan.seconds} s`}</p>
               <p className="vs-note">{plan.note}</p>
+              {plan.ai && plan.ai.clips + plan.ai.images > 0 && (
+                <p className="vs-status">⚠️ {plan.ai.clips} clip(s) et {plan.ai.images} image(s) générés par l'IA : <b>crédits Higgsfield payants</b>, un média à la fois. Les films IA sont muets dans le montage. Tu peux fermer l'application pendant la génération.</p>
+              )}
               <ol>{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
               <button className="btn btn-copper" disabled={busy}
-                onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
+                onClick={() => {
+                  const paid = plan.ai ? plan.ai.clips + plan.ai.images : 0;
+                  const msg = paid > 0
+                    ? `Lancer la fabrication ? Elle génère ${plan.ai!.clips} clip(s) et ${plan.ai!.images} image(s) avec Higgsfield : ${paid} génération(s) payante(s) (crédits). Le montage part ensuite tout seul.`
+                    : "Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.";
+                  if (window.confirm(msg)) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée.");
+                }}>{plan.ai && plan.ai.clips + plan.ai.images > 0 ? "Lancer (génération IA payante)" : "Lancer la fabrication"}</button>
             </div>
           )}
           {vid && <p className="vs-status" role="status">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
+          {vid?.state === "failed" && vid.can_retry && (
+            <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoRetry(); setVid({ state: r.ok ? "building" : "failed", detail: r.note }); }, "Montage relancé (aucun nouveau crédit).")}>Relancer le montage (sans nouveau crédit)</button>
+          )}
           {vid?.state === "ready" && !got && (
             <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
           )}
