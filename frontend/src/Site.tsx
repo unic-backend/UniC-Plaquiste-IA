@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { net, type Post } from "./api";
+import { downloadAuth, net, shareDocument, type Post, type VideoPlan } from "./api";
 
 type Say = (m: string) => void;
 
@@ -14,6 +14,10 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [book, setBook] = useState<string | null>(null);
+  const [brief, setBrief] = useState("");
+  const [plan, setPlan] = useState<VideoPlan | null>(null);
+  const [vid, setVid] = useState<{ state: string; detail: string; url?: string } | null>(null);
+  const [got, setGot] = useState<{ url: string; filename: string } | null>(null);
   const refresh = () => net.siteStatus().then((s) => { setSt(s); onChange?.(s.connected); }).catch((e) => say(e.message));
   useEffect(() => { refresh(); }, []);
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -68,6 +72,33 @@ export function SiteConnect({ say, onChange, onDraft }: { say: Say; onChange?: (
                 onClick={() => { if (window.confirm("Publier l'ancien Book sur unicplaquiste.com/book/ ?")) run(async () => { const r = await net.bookPublish(); window.open(r.url, "_blank"); }, "Book publié. Netlify met le site à jour dans 1 minute."); }}>Publier l'ancien Book</button>
             : <span className="hint"> Connecte le site ci-dessus pour publier.</span>}
         </details>
+      </section>
+      <section className="card-box">
+        <label>Vidéo du portfolio</label>
+        <p className="hint">L'IA écrit le scénario, puis GitHub filme la page du portfolio (défilement fluide, titres, carte de fin), sans son. Compte 15 à 20 minutes. Rien n'est publié : la vidéo arrive dans tes documents.</p>
+        <textarea rows={2} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={600} placeholder="Consigne facultative (ex. insiste sur les réalisations)" aria-label="Consigne pour la vidéo" />
+        <div className="row-actions">
+          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief)); })}>Proposer un scénario</button>
+          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
+        </div>
+        {plan && (
+          <>
+            <p className="hint">{plan.note} Durée : environ {plan.seconds} s.</p>
+            <ol className="hint">{plan.spec.chapters.map((c) => <li key={c.key}>{c.label} · {c.seconds} s</li>)}</ol>
+            <button className="btn btn-copper btn-small" disabled={busy}
+              onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Elle prend 15 à 20 minutes.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
+          </>
+        )}
+        {vid && <p className="hint">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
+        {vid?.state === "ready" && !got && (
+          <button className="btn btn-copper btn-small" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
+        )}
+        {got && (
+          <div className="row-actions">
+            <button className="btn btn-copper btn-small" onClick={() => downloadAuth(got.url, got.filename).catch(() => {})}>Télécharger</button>
+            <button className="btn btn-line btn-small" onClick={() => shareDocument(got.url, got.filename).catch((e) => say(e.message))}>Partager</button>
+          </div>
+        )}
       </section>
       <section className="card-box">
         <label>Rédiger une page pour le site</label>

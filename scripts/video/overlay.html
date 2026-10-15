@@ -1,0 +1,74 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@500;600&display=block">
+<style>
+:root{--royal:#02083a;--soft:#ffefa3;--gold:#ffc400}
+html,body{margin:0;width:360px;height:640px;overflow:hidden;background:transparent}
+*{box-sizing:border-box}
+.layer{position:absolute;inset:0;display:none}
+.word{display:flex;overflow:hidden;font-family:Anton,Impact,sans-serif;line-height:1.02;letter-spacing:.02em}
+.word span{display:inline-block}
+#op{background:var(--royal);flex-direction:column;align-items:center;justify-content:center}
+#op .g{display:flex;flex-direction:column;align-items:center}
+#w1{font-size:76px;color:var(--gold)} #w2{font-size:44px;color:#fff;margin-top:2px}
+#ln{height:2px;width:220px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:14px 0 12px}
+#sub{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:15px;letter-spacing:.42em;color:var(--soft);padding-left:.42em;margin-top:14px}
+#sweep{position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.22) 50%,transparent 65%);mix-blend-mode:screen}
+#lab .pill{position:absolute;left:16px;bottom:96px;display:flex;align-items:center;gap:10px;padding:9px 16px 9px 12px;border-radius:14px;background:rgba(2,8,58,.93);border:1px solid rgba(255,196,0,.55);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
+#lab .n{font-family:Anton,Impact,sans-serif;font-size:22px;color:var(--gold);line-height:1}
+#lab .bar{width:2px;height:22px;background:var(--gold);opacity:.7}
+#lab .t{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:17px;letter-spacing:.16em;color:#fff;text-transform:uppercase;white-space:nowrap}
+#end{background:var(--royal);flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 20px}
+#end>*{will-change:transform,opacity}
+.e0{font-family:Anton,Impact,sans-serif;font-size:58px;color:var(--gold);line-height:1}
+.e1{font-family:Anton,Impact,sans-serif;font-size:30px;color:#fff;line-height:1.1;margin-top:2px}
+.eb{height:2px;width:200px;margin-top:16px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+.e2{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:13px;letter-spacing:.16em;color:var(--soft);margin:12px 0 22px;text-transform:uppercase}
+.e3{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:19px;letter-spacing:.1em;color:var(--royal);background:var(--gold);padding:12px 22px;border-radius:999px;text-transform:uppercase}
+.e4{font-family:Barlow,sans-serif;font-weight:600;font-size:22px;color:#fff;margin-top:22px;letter-spacing:.04em}
+.e5{font-family:Barlow,sans-serif;font-weight:500;font-size:15px;color:var(--soft);margin-top:6px;opacity:.85}
+#black{background:#000}
+</style></head><body>
+<div class="layer" id="op"><div class="g"><div class="word" id="w1"></div><div id="ln"></div><div class="word" id="w2"></div><div id="sub"></div></div><div id="sweep"></div></div>
+<div class="layer" id="lab"><div class="pill"><span class="n"></span><span class="bar"></span><span class="t"></span></div></div>
+<div class="layer" id="end"></div><div class="layer" id="black"></div>
+<script>
+const $ = s => document.querySelector(s), cl = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const eo = x => 1 - Math.pow(1 - cl(x), 4), eio = x => { x = cl(x); return x < .5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2; };
+const ramp = (t, a, b) => cl((t - a) / (b - a));
+const fx = (el, o, y, s = 1) => { el.style.opacity = o; el.style.transform = `translate3d(0,${y}px,0) scale(${s})`; };
+let L1 = [], L2 = [], E = [], C;
+const letters = (el, txt) => { el.textContent = ""; return [...txt].map(c => { const s = document.createElement("span"); s.textContent = c; el.appendChild(s); return s; }); };
+// Tout le texte passe par textContent : aucune balise venant du scénario n'est interprétée.
+window.setup = c => {
+  C = c; L1 = letters($("#w1"), c.title[0] || ""); L2 = letters($("#w2"), c.title[1] || ""); $("#sub").textContent = c.subtitle || "";
+  const end = $("#end"); end.textContent = ""; E = [];
+  const cls = ["e0", "e1", "eb", "e2", "e3", "e4", "e5"], at = [0, 1, -1, 2, 3, 4, 5];
+  cls.forEach((k, i) => { if (at[i] >= 0 && !c.end[at[i]]) return; const d = document.createElement("div"); d.className = k; if (at[i] >= 0) d.textContent = c.end[at[i]]; end.appendChild(d); E.push(d); });
+};
+window.draw = T => {
+  const P = C.P, t = T - P, op = $("#op"), lab = $("#lab"), end = $("#end"), blk = $("#black");
+  if (T < P) {
+    op.style.display = "flex";
+    L1.forEach((s, i) => { const k = eo(ramp(T, .15 + i * .07, .75 + i * .07)); fx(s, k, (1 - k) * 80); });
+    L2.forEach((s, i) => { const k = eo(ramp(T, .45 + i * .04, 1.0 + i * .04)); fx(s, k, (1 - k) * 50); });
+    $("#ln").style.transform = `scaleX(${eo(ramp(T, .35, 1.05))})`;
+    const ks = eo(ramp(T, .95, 1.5)); fx($("#sub"), ks, (1 - ks) * 12);
+    const sw = ramp(T, 1.25, 1.95); $("#sweep").style.transform = `translateX(${-110 + sw * 220}%)`; $("#sweep").style.opacity = sw > 0 && sw < 1 ? 1 : 0;
+    const out = eio(ramp(T, P - .75, P)); $("#op .g").style.transform = `scale(${1 + out * 1.6})`; $("#op .g").style.opacity = 1 - out; op.style.background = `rgba(2,8,58,${1 - out})`;
+  } else op.style.display = "none";
+  let on = null; for (const l of C.labels) if (t >= l[0] - .05 && t <= l[1] + .5) on = l;
+  if (on) {
+    lab.style.display = "block"; const pill = $("#lab .pill"); $("#lab .n").textContent = on[2]; $("#lab .t").textContent = on[3];
+    const ki = eo(ramp(t, on[0], on[0] + .55)), ko = eio(ramp(t, on[1], on[1] + .45));
+    pill.style.clipPath = `inset(0 ${(1 - ki) * 100}% 0 0 round 14px)`; pill.style.transform = `translate3d(${(1 - ki) * -18 - ko * 24}px,0,0)`; pill.style.opacity = 1 - ko;
+    $("#lab .t").style.transform = `translate3d(${(1 - eo(ramp(t, on[0] + .12, on[0] + .7))) * 14}px,0,0)`;
+    $("#lab .n").style.transform = `translate3d(0,${(1 - eo(ramp(t, on[0] + .05, on[0] + .6))) * 10}px,0)`;
+  } else lab.style.display = "none";
+  if (t >= C.endAt) {
+    end.style.display = "flex"; end.style.background = `rgba(2,8,58,${eio(ramp(t, C.endAt, C.endAt + .8))})`;
+    E.forEach((s, i) => { const k = eo(ramp(t, C.endAt + .45 + i * .12, C.endAt + 1.15 + i * .12)); fx(s, k, (1 - k) * 26, .96 + .04 * k); });
+    end.style.transform = `scale(${1 + ramp(t, C.endAt + .8, C.total - P) * .04})`;
+  } else end.style.display = "none";
+  const kf = ramp(T, C.total - .5, C.total); blk.style.display = kf > 0 ? "block" : "none"; blk.style.opacity = eio(kf);
+};
+</script></body></html>
