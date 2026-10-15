@@ -34,8 +34,9 @@ export function VideoStudio({ say }: { say: Say }) {
     net.videoAiStatus().then((s) => { if (alive && s.state !== "idle") setAiClip(s); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  const aiState = aiClip?.state;
   useEffect(() => {
-    if (!aiClip || !["submitting", "queued", "processing"].includes(aiClip.state)) return;
+    if (!aiState || !["submitting", "queued", "processing"].includes(aiState)) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -51,7 +52,7 @@ export function VideoStudio({ say }: { say: Say }) {
     };
     timer = setTimeout(poll, 5000);
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [aiClip?.state]);
+  }, [aiState]);
   return (
     <>
     <section className="card-box">
@@ -109,7 +110,7 @@ export function VideoStudio({ say }: { say: Say }) {
         </label>
         <label className="hint"><input type="checkbox" checked={aiAudio} onChange={(e) => setAiAudio(e.target.checked)} /> Générer le son IA</label>
       </div>
-      <button className="btn btn-copper btn-small" disabled={busy || !hf?.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
+      <button className="btn btn-copper btn-small" disabled={busy || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
         onClick={() => {
           if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Limite : ${hf?.video_per_day ?? 1} clip par jour.`)) return;
           run(async () => {
