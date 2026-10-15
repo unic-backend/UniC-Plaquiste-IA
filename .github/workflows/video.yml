@@ -1,0 +1,53 @@
+name: Vidéo du portfolio
+
+# Fabrique la vidéo d'une page (Chrome + ffmpeg) à partir d'un scénario JSON écrit par l'IA de l'appli (workflow_dispatch, clic du patron).
+# Un push qui modifie ce fichier ou scripts/video/ lance un essai avec le scénario standard : le moteur est ainsi vérifié par la CI.
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "Scénario JSON (voir scripts/video/spec.py)"
+        required: true
+  push:
+    paths: ["scripts/video/**", ".github/workflows/video.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Outils (Playwright + Chrome, Pillow, ffmpeg)
+        run: |
+          cd scripts/video && npm install --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+          pip install pillow==10.4.0
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
+      - name: Scénario
+        env:
+          SPEC: ${{ github.event.inputs.spec }}
+        run: |
+          if [ -z "$SPEC" ]; then
+            SPEC='{"url":"https://www.unicplaquiste.com/portfolio/","title":["UNIC","PLAQUISTE"],"subtitle":"Portfolio · Dakar","hero_seconds":4.4,"chapters":[{"selector":"#apropos","label":"À propos","seconds":4.5},{"selector":"#services","label":"Nos services","seconds":5},{"selector":"#chiffres","label":"En chiffres","seconds":4},{"selector":"#pinwrap","label":"Réalisations","seconds":9},{"selector":"#avis","label":"Avis clients","seconds":4},{"selector":"#contact","label":"Contact","seconds":4}],"end":["UNIC","PLAQUISTE","Plafonds · Cloisons · Peinture · Déco","Devis gratuit sous 48 h","+221 77 708 50 92","unicplaquiste.com"]}'
+          fi
+          printf '%s' "$SPEC" > "$RUNNER_TEMP/spec.json"
+      - name: Fabrication
+        run: |
+          mkdir -p out
+          python scripts/video/make.py "$RUNNER_TEMP/spec.json" out/Portfolio-UniC-Plaquiste.mp4
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unic-video
+          path: out/Portfolio-UniC-Plaquiste.mp4
+          retention-days: 7
+          if-no-files-found: error

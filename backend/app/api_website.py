@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, memory as mem, website
+from app import assistant, memory as mem, repair, video_studio, website
 from app.database import get_db
 from app.models import SocialPost, User, utcnow
-from app.security import get_current_user
+from app.security import get_current_user, require_roles
 from app.services import audit
 
 router = APIRouter(prefix="/website", tags=["website"])
@@ -107,3 +107,51 @@ def book_publish(db: Session = Depends(get_db), user: User = Depends(get_current
     audit(db, user.id, "website_book_publish", "website", out["url"])
     db.commit()
     return {"url": out["url"], "commit": out["commit"]}
+
+
+# ---------- Vidéo du portfolio (fabriquée par GitHub Actions) ----------
+ADMIN = require_roles("admin", "manager")
+
+
+def _v(fn, *a):
+    try:
+        return fn(*a)
+    except repair.RepairError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+class VideoPlanIn(BaseModel):
+    brief: str = Field("", max_length=600)
+
+
+class VideoStartIn(BaseModel):
+    spec: dict
+
+
+@router.post("/video/plan")
+def video_plan(body: VideoPlanIn, user: User = Depends(ADMIN)):
+    """Scénario proposé par l'IA (rien n'est lancé)."""
+    return video_studio.plan(body.brief)
+
+
+@router.post("/video/start")
+def video_start(body: VideoStartIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron : lance la fabrication (GitHub Actions)."""
+    out = _v(video_studio.start, db, body.spec)
+    audit(db, user.id, "video_start", "website", "portfolio")
+    db.commit()
+    return out
+
+
+@router.get("/video/status")
+def video_status(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    return _v(video_studio.status, db)
+
+
+@router.post("/video/fetch")
+def video_fetch(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron : récupère la vidéo prête et la range dans les documents."""
+    out = _v(video_studio.fetch, db, user.id)
+    audit(db, user.id, "video_fetch", "artifact", out["id"])
+    db.commit()
+    return out
