@@ -17,5 +17,5 @@ Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Tes
 (validation) + `scenes.html` (animation) + `video_studio.py` (catalogue). Photos : celles du dossier `images/` du site (liste lue sur le dépôt du site si connecté, sinon liste de secours).
 **Pas encore** : son/musique/voix off, photos prises depuis l'appli (il faudrait les héberger), vidéo d'un site tiers.
 
-**Moteur** : `make.py` → `render.mjs` (scène page : capture déterministe, horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) + `scenes.mjs` (scènes HTML et pastilles, image par image)
+**Moteur** (`overlay.html` / `overlay.mjs` : ancien moteur du portfolio, conservés et inutilisés) : `make.py` → `render.mjs` (scène page : capture déterministe, horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) + `scenes.mjs` (scènes HTML et pastilles, image par image)
 → `compose.py` (caméra sous-pixel, 60 i/s sans mélange d'images, fondus de raccord, sortie ≤ 25 Mo). Essai local : `VIDEO_ALLOW_LOCAL=1 python scripts/video/make.py scripts/video/sample.json sortie.mp4`.
