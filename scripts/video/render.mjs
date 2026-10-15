@@ -5,7 +5,7 @@ import fs from "fs";
 const [SPEC, DIR, VIEW] = process.argv.slice(2);
 const S = JSON.parse(fs.readFileSync(SPEC, "utf8"));
 const V = JSON.parse(VIEW || '{"w":360,"h":640,"scale":3,"mobile":true}');
-const CAP = +(process.env.VIDEO_FPS || 30), SCALE = V.scale, W = V.w, H = V.h, DT = 1000 / CAP, dt = 1 / CAP, LIMIT = +(process.env.LIMIT || 1e9);
+const CAP = +(process.env.VIDEO_FPS || 60), SCALE = V.scale, W = V.w, H = V.h, DT = 1000 / CAP, dt = 1 / CAP, LIMIT = +(process.env.LIMIT || 1e9);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v)), lerp = (a, b, x) => a + (b - a) * x;
 const sm = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
 fs.mkdirSync(DIR, { recursive: true });

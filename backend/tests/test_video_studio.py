@@ -52,6 +52,7 @@ def test_le_moteur_accepte_ce_que_le_serveur_produit():
                                          {"type": "page"}, {"type": "outro"}], NAMES)
     out = eng.clean(spec)
     assert [s["type"] for s in out["scenes"]] == [s["type"] for s in spec["scenes"]] and out["format"] == "horizontal"
+    assert out["fps"] == 60 and eng.clean({**spec, "fps": 30})["fps"] == 30 and eng.clean({**spec, "fps": 7})["fps"] == 60   # fluidité par défaut : 60 i/s
     for bad in ({"scenes": [{"type": "photo", "image": "../../etc/passwd"}]}, {"scenes": [{"type": "page", "url": "https://evil.example/", "chapters": [{"selector": "#a"}]}]},
                 {"scenes": [{"type": "page", "url": "https://www.unicplaquiste.com/", "chapters": [{"selector": "body > script"}]}]}):
         try:
