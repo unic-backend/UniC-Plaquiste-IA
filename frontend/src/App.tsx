@@ -10,6 +10,7 @@ import { AttachRow, type Attach } from "./Attach";
 const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
 const Suivi = lazyPage(() => import("./Suivi"), "Suivi");
 const SuiviClient = lazyPage(() => import("./Suivi"), "SuiviClient");
+const VideoPage = lazyPage(() => import("./Video"), "VideoPage");
 const Prospects = lazyPage(() => import("./Prospects"), "Prospects");
 import { prepareFile } from "./compress";
 import { listenOnce } from "./listen";
@@ -568,6 +569,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         </Link>
         <Link to="/suivi" className={`side-brief side-code ${loc.pathname.startsWith("/suivi") ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Receipt size={18} /> <span>Encaissements</span>
+        </Link>
+        <Link to="/video" className={`side-brief side-code ${loc.pathname === "/video" ? "active" : ""}`} onClick={() => setOpen(false)}>
+          <I.Film size={18} /> <span>Studio vidéo</span>
         </Link>
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
@@ -2160,6 +2164,7 @@ export default function App() {
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/suivi" element={<Suivi />} />
+        <Route path="/video" element={<VideoPage />} />
         <Route path="/suivi/:key" element={<SuiviClient />} />
         <Route path="/prospects" element={<Prospects />} />
         <Route path="/factures/:id" element={<DocDetail kind="invoice" />} />
