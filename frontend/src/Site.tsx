@@ -25,6 +25,7 @@ export function VideoStudio({ say }: { say: Say }) {
   const [longDuration, setLongDuration] = useState(60);
   const [aiClip, setAiClip] = useState<VideoAIClip | null>(null);
   const [hf, setHf] = useState<HiggsfieldStatus | null>(null);
+  const [mode, setMode] = useState<"montage" | "clip" | "long">("montage");
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
@@ -55,114 +56,129 @@ export function VideoStudio({ say }: { say: Say }) {
     timer = setTimeout(poll, 5000);
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [aiState]);
+  const running = !!aiClip && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state);
+  const longLines = longPromptsText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const clipsNeeded = longDuration / 30;
+  const fmtName = fmt === "vertical" ? "vertical 9:16" : fmt === "horizontal" ? "horizontal 16:9" : "carré 1:1";
   return (
-    <>
-    <section className="card-box">
-        <label>Studio vidéo</label>
-        <p className="hint">Décris la vidéo voulue (promo d'un service, présentation, avant/après, témoignage, annonce…). Choisis toi-même le moteur selon ton besoin : le montage Chrome + FFmpeg via GitHub Actions ne consomme pas de crédits vidéo payants ; les clips génératifs Higgsfield sont un autre outil, à sélectionner uniquement si tu le souhaites. Si un moteur ne sait pas réaliser une demande, UniC doit te le signaler au lieu de changer de modèle à ta place. Vertical : WhatsApp, TikTok, Reels. Horizontal : YouTube, écran. Carré : Facebook, Instagram. Le temps de fabrication dépend de la durée. Rien n’est publié : la vidéo arrive dans tes documents.</p>
-        <textarea rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
-        <p className="hint">{brief.length.toLocaleString("fr-FR")} / 20 000 caractères. Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle.</p>
-        <select value={fmt} onChange={(e) => setFmt(e.target.value)} aria-label="Format de la vidéo">
-          <option value="vertical">Vertical 9:16</option>
-          <option value="horizontal">Horizontal 16:9</option>
-          <option value="square">Carré 1:1</option>
-        </select>
-        <div className="row-actions">
-          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief, fmt)); })}>Proposer un scénario</button>
-          <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
-        </div>
-        {plan && (
-          <>
-            <p className="hint">{plan.note} Scènes : {plan.spec.scenes.length}. Durée : environ {plan.seconds} s ({Math.floor(plan.seconds / 60)} min {plan.seconds % 60} s). Moteur choisi : montage Chrome + FFmpeg via GitHub Actions.</p>
-            <ol className="hint">{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
-            <button className="btn btn-copper btn-small" disabled={busy}
-              onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
-          </>
-        )}
-        {vid && <p className="hint">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
-        {vid?.state === "ready" && !got && (
-          <button className="btn btn-copper btn-small" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
-        )}
-        {got && (
-          <div className="row-actions">
-            <button className="btn btn-copper btn-small" onClick={() => downloadAuth(got.url, got.filename).catch(() => {})}>Télécharger</button>
-            <button className="btn btn-line btn-small" onClick={() => shareDocument(got.url, got.filename).catch((e) => say(e.message))}>Partager</button>
-          </div>
-        )}
-    </section>
-    <section className="card-box">
-      <label>Vidéo générative avancée (option payante)</label>
-      <p className="hint">Tu choisis si tu veux utiliser ce moteur. Higgsfield · Wan 3.0 Prime · 720p · clips de 2 à 30 secondes. Chaque génération consomme des crédits payants ; aucune dépense n'est lancée sans ta confirmation. Si le moteur sélectionné ne peut pas faire le travail, UniC doit l'indiquer et te laisser choisir un autre moteur.</p>
-      {hf?.connected ? (
-        <p className="hint">Clips IA restants aujourd'hui : {hf.video_left_today}/{hf.video_per_day}. Format : {fmt === "vertical" ? "vertical 9:16" : fmt === "horizontal" ? "horizontal 16:9" : "carré 1:1"}.</p>
-      ) : (
-        <p className="hint">Higgsfield n'est pas connecté. Configure les clés dans Plus › Higgsfield pour activer la génération.</p>
-      )}
-      <textarea rows={3} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={1500}
-        placeholder="Ex. Travelling cinématographique dans un salon moderne avec faux plafond BA13 et éclairage indirect chaleureux."
-        aria-label="Consigne du clip vidéo IA" />
-      <div className="row-actions">
-        <label className="hint">Durée
-          <select value={aiDuration} onChange={(e) => setAiDuration(Number(e.target.value))} aria-label="Durée du clip IA">
-            <option value={5}>5 secondes</option>
-            <option value={10}>10 secondes</option>
-            <option value={15}>15 secondes</option>
-            <option value={30}>30 secondes</option>
-          </select>
-        </label>
-        <label className="hint"><input type="checkbox" checked={aiAudio} onChange={(e) => setAiAudio(e.target.checked)} /> Générer le son IA</label>
+    <section className="card-box vs">
+      <label>Studio vidéo</label>
+      <p className="hint">Décris la vidéo voulue : promo d'un service, présentation, avant/après, témoignage, annonce… Rien n'est publié : la vidéo arrive dans tes documents.</p>
+
+      <div className="seg" role="tablist" aria-label="Type de vidéo">
+        {([["montage", "Montage", "gratuit"], ["clip", "Clip IA", "payant"], ["long", "Vidéo IA longue", "payant"]] as const).map(([k, name, tag]) => (
+          <button key={k} role="tab" aria-selected={mode === k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>
+            <span>{name}<small className="vs-tag"> {tag}</small></span>
+          </button>
+        ))}
       </div>
-      <button className="btn btn-copper btn-small" disabled={busy || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
-        onClick={() => {
-          if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Plafond : ${hf?.video_per_day ?? 20} clips par jour.`)) return;
-          run(async () => {
-            try {
-              const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
-              setAiClip(result);
-            } finally {
-              api.higgsfield().then(setHf).catch(() => {});
-            }
-          }, "Génération du clip IA lancée.");
-        }}>{aiClip && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state) ? "Génération en cours…" : "Générer un clip IA"}</button>
-      {aiClip && aiClip.state !== "idle" && <p className="hint" role="status">{aiClip.detail}</p>}
-      {aiClip?.state === "ready" && aiClip.artifact && (
+
+      <div className="vs-fmt" role="radiogroup" aria-label="Format de la vidéo">
+        {([["vertical", "Vertical 9:16"], ["horizontal", "Horizontal 16:9"], ["square", "Carré 1:1"]] as const).map(([k, name]) => (
+          <button key={k} role="radio" aria-checked={fmt === k} className={`chip${fmt === k ? " on" : ""}`} onClick={() => setFmt(k)}>{name}</button>
+        ))}
+      </div>
+      <p className="vs-note">Vertical : WhatsApp, TikTok, Reels · Horizontal : YouTube, écran · Carré : Facebook, Instagram.</p>
+
+      {mode === "montage" && (
+        <>
+          <textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Vidéo de 30 secondes sur les faux plafonds BA13, avec nos réalisations" aria-label="Description de la vidéo" />
+          <p className="vs-note">Montage Chrome + FFmpeg sur GitHub, sans crédits payants. Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle. {brief.length.toLocaleString("fr-FR")} / 20 000 caractères.</p>
+          <div className="row-actions">
+            <button className="btn btn-copper btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief, fmt)); })}>Proposer un scénario</button>
+            <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
+          </div>
+          {plan && (
+            <div className="vs-plan">
+              <p className="vs-sum"><b>{plan.spec.scenes.length} scènes</b> · environ {plan.seconds >= 60 ? `${Math.floor(plan.seconds / 60)} min ${plan.seconds % 60} s` : `${plan.seconds} s`}</p>
+              <p className="vs-note">{plan.note}</p>
+              <ol>{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
+              <button className="btn btn-copper" disabled={busy}
+                onClick={() => { if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.")) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée."); }}>Lancer la fabrication</button>
+            </div>
+          )}
+          {vid && <p className="vs-status" role="status">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
+          {vid?.state === "ready" && !got && (
+            <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
+          )}
+          {got && (
+            <div className="row-actions">
+              <button className="btn btn-copper btn-small" onClick={() => downloadAuth(got.url, got.filename).catch(() => {})}>Télécharger</button>
+              <button className="btn btn-line btn-small" onClick={() => shareDocument(got.url, got.filename).catch((e) => say(e.message))}>Partager</button>
+            </div>
+          )}
+        </>
+      )}
+
+      {mode !== "montage" && (
+        <p className="vs-note">{hf?.connected
+          ? `Higgsfield · Wan 3.0 Prime · 720p. Clips IA restants aujourd'hui : ${hf.video_left_today}/${hf.video_per_day}. Chaque clip consomme des crédits payants ; rien n'est lancé sans ta confirmation.`
+          : "Higgsfield n'est pas connecté : colle tes clés dans Plus › Higgsfield pour activer ces deux modes."}</p>
+      )}
+
+      {mode === "clip" && (
+        <>
+          <textarea rows={4} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={1500}
+            placeholder="Ex. Travelling cinématographique dans un salon moderne avec faux plafond BA13 et éclairage indirect chaleureux."
+            aria-label="Consigne du clip vidéo IA" />
+          <div className="vs-row">
+            <label className="vs-field">Durée
+              <select value={aiDuration} onChange={(e) => setAiDuration(Number(e.target.value))} aria-label="Durée du clip IA">
+                <option value={5}>5 secondes</option><option value={10}>10 secondes</option><option value={15}>15 secondes</option><option value={30}>30 secondes</option>
+              </select>
+            </label>
+            <label className="vs-check"><input type="checkbox" checked={aiAudio} onChange={(e) => setAiAudio(e.target.checked)} /> <span>Son généré par l'IA</span></label>
+          </div>
+          <button className="btn btn-copper" disabled={busy || running || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
+            onClick={() => {
+              if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Plafond : ${hf?.video_per_day ?? 20} clips par jour.`)) return;
+              run(async () => {
+                try {
+                  const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
+                  setAiClip(result);
+                } finally {
+                  api.higgsfield().then(setHf).catch(() => {});
+                }
+              }, "Génération du clip IA lancée.");
+            }}>{running ? "Génération en cours…" : "Générer un clip IA"}</button>
+        </>
+      )}
+
+      {mode === "long" && (
+        <>
+          <label className="vs-field">Durée finale
+            <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
+              <option value={30}>30 secondes · 1 clip</option><option value={60}>1 minute · 2 clips</option><option value={120}>2 minutes · 4 clips</option>
+              <option value={300}>5 minutes · 10 clips</option><option value={600}>10 minutes · 20 clips</option>
+            </select>
+          </label>
+          <textarea rows={7} value={longPromptsText} onChange={(e) => setLongPromptsText(e.target.value)} maxLength={30000}
+            placeholder={"Une consigne par ligne, une scène de 30 secondes chacune. Exemple :\nPlan cinématographique d’un salon contemporain avec faux plafond BA13...\nGros plan sur l’éclairage indirect et les finitions..."}
+            aria-label="Consignes des scènes de la vidéo IA longue" />
+          <p className={`vs-note${longLines.length === clipsNeeded ? " ok" : ""}`}>{longLines.length} / {clipsNeeded} consignes · {clipsNeeded} clips payants. Le son suit le réglage du mode « Clip IA ».</p>
+          <button className="btn btn-copper" disabled={busy || !hf?.connected || hf.video_left_today < clipsNeeded || longLines.length !== clipsNeeded ||
+            longPromptsText.split("\n").some((l) => l.trim().length > 0 && l.trim().length < 8) || running}
+            onClick={() => {
+              if (!window.confirm(`Créer une vidéo IA de ${longDuration / 60} minute(s) avec ${longLines.length} clips Higgsfield ? Chaque clip consomme des crédits payants, soit jusqu’à ${longLines.length} générations. Le traitement peut prendre longtemps. Continuer ?`)) return;
+              run(async () => { const result = await net.videoAiLongStart(longLines, longDuration, fmt, aiAudio); setAiClip(result); api.higgsfield().then(setHf).catch(() => {}); },
+                "Génération de la vidéo IA longue lancée.");
+            }}>Générer la vidéo IA longue</button>
+        </>
+      )}
+
+      {mode !== "montage" && aiClip && aiClip.state !== "idle" && (
+        <p className="vs-status" role="status">
+          {aiClip.kind === "long" && running ? `Progression : ${aiClip.completed_clips || 0}/${aiClip.total_clips || 0} clips terminés. ` : ""}{aiClip.detail}
+        </p>
+      )}
+      {mode !== "montage" && aiClip?.state === "ready" && aiClip.artifact && (
         <div className="row-actions">
           <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>{aiClip.kind === "long" ? "Télécharger la vidéo IA longue" : "Télécharger le clip IA"}</button>
           <button className="btn btn-line btn-small" onClick={() => shareDocument(aiClip.artifact!.url, aiClip.artifact!.filename).catch((e) => say(e.message))}>Partager</button>
         </div>
       )}
-
-      <hr />
-      <label>Vidéo générative longue (option payante)</label>
-      <p className="hint">Tu choisis ce parcours lorsque tu veux plusieurs scènes générées par le modèle vidéo. Chaque scène génère un clip Higgsfield payant de 30 secondes maximum ; jusqu’à 10 minutes et 20 clips. Le son IA est réglé ci-dessus. Ce parcours ne se lance jamais automatiquement à la place du montage GitHub gratuit.</p>
-      <label className="hint">Durée finale
-        <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
-          <option value={30}>30 secondes · 1 clip</option>
-          <option value={60}>1 minute · 2 clips</option>
-          <option value={120}>2 minutes · 4 clips</option>
-          <option value={300}>5 minutes · 10 clips</option>
-          <option value={600}>10 minutes · 20 clips</option>
-        </select>
-      </label>
-      <textarea rows={8} value={longPromptsText} onChange={(e) => setLongPromptsText(e.target.value)} maxLength={30000}
-        placeholder={"Une consigne par ligne, une scène de 30 secondes chacune. Exemple :\nPlan cinématographique d’un salon contemporain avec faux plafond BA13...\nGros plan sur l’éclairage indirect et les finitions..."}
-        aria-label="Consignes des scènes de la vidéo IA longue" />
-      <p className="hint">{longPromptsText.split("\n").filter((s) => s.trim()).length} / {longDuration / 30} consignes requises · {longDuration / 30} clips payants prévus.</p>
-      <button className="btn btn-copper btn-small" disabled={busy || !hf?.connected || hf.video_left_today < longDuration/30 ||
-        longPromptsText.split("\n").filter((s) => s.trim()).length !== longDuration/30 ||
-        longPromptsText.split("\n").some((s) => s.trim().length > 0 && s.trim().length < 8) ||
-        (aiClip !== null && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state))}
-        onClick={() => {
-          const prompts = longPromptsText.split("\n").map((s) => s.trim()).filter(Boolean);
-          if (!window.confirm(`Créer une vidéo IA de ${longDuration/60} minute(s) avec ${prompts.length} clips Higgsfield ? Chaque clip consomme des crédits payants, soit jusqu’à ${prompts.length} générations. Le traitement peut prendre longtemps. Continuer ?`)) return;
-          run(async () => { const result = await net.videoAiLongStart(prompts, longDuration, fmt, aiAudio); setAiClip(result); api.higgsfield().then(setHf).catch(() => {}); },
-            "Génération de la vidéo IA longue lancée.");
-        }}>Générer la vidéo IA longue</button>
-      {aiClip?.kind === "long" && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state) &&
-        <p className="hint" role="status">Progression : {aiClip.completed_clips || 0}/{aiClip.total_clips || 0} clips terminés. {aiClip.detail}</p>}
-
+      <p className="vs-note">Si un moteur ne sait pas réaliser une demande, UniC te le signale au lieu d'en changer à ta place.</p>
     </section>
-    </>
   );
 }
 
