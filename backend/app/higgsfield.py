@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
+import shutil
 import subprocess
+import threading
 import time
 import uuid
 from datetime import date
@@ -424,6 +427,100 @@ def start_long_video(db: Session, prompts: list[str], target_seconds: int, fmt: 
     return _video_public(job)
 
 
+# ---------- Assemblage des clips (en arrière-plan : jamais dans la requête HTTP) ----------
+ASSEMBLY_LOCK = "assembling.lock"
+ASSEMBLY_STALE_S = 3 * 3600        # un assemblage qui n'a pas bougé depuis 3 h est considéré comme perdu (serveur redémarré)
+ASSEMBLY_TIMEOUT_S = 2 * 3600      # ffmpeg
+
+
+def _stream_signature(path: Path) -> str:
+    """Forme des flux d'un clip (codec, taille, cadence, pixels, audio) : deux clips ne se collent sans ré-encodage que si elle est identique."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,r_frame_rate,pix_fmt,sample_rate,channels",   # noqa: S603, S607
+                        "-of", "json", str(path)], capture_output=True, text=True, timeout=60, check=False)
+    try:
+        streams = json.loads(r.stdout or "{}").get("streams", [])
+    except ValueError:
+        return ""
+    return json.dumps(sorted(streams, key=lambda x: x.get("codec_type", "")), sort_keys=True)
+
+
+def _concat(paths: list[Path], listing: Path, output: Path) -> None:
+    """Colle les clips : sans ré-encodage (instantané) quand tous ont exactement le même format, sinon avec ré-encodage."""
+    listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in paths), encoding="utf-8")
+    base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing)]
+    sigs = {_stream_signature(p) for p in paths}
+    modes = [["-c", "copy"]] if len(sigs) == 1 and "" not in sigs else []
+    modes.append(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k"])
+    for extra in modes:
+        result = subprocess.run([*base, *extra, "-movflags", "+faststart", str(output)], capture_output=True, text=True, timeout=ASSEMBLY_TIMEOUT_S, check=False)   # noqa: S603
+        if result.returncode == 0 and output.is_file() and output.stat().st_size >= 1024:
+            return
+        output.unlink(missing_ok=True)
+    raise HiggsfieldError("FFmpeg n'a pas réussi à assembler les clips.", 500)
+
+
+def _assembly_worker(folder: Path) -> None:
+    """Tourne dans un fil du serveur, avec sa propre session de base : assemble, range dans Documents, met le job à jour."""
+    from app.database import SessionLocal
+    lock = folder / ASSEMBLY_LOCK
+    db = SessionLocal()
+    try:
+        job = _video_job(db)
+        if job.get("work_dir") != str(folder) or job.get("state") != "assembling":
+            return
+        paths = [Path(p) for p in job.get("clip_paths", [])]
+        listing, output = folder / "concat.txt", folder / "video_longue.mp4"
+        try:
+            _concat(paths, listing, output)
+            key = new_id()[:8]
+            dest = settings.artifacts_path / "generated" / f"video_longue_{key}.mp4"      # le document doit vivre HORS du dossier de travail (qu'on nettoie)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(output), str(dest))
+            art = store_artifact(db, dest, f"Video IA longue {key}.mp4", "generated_video", key, f"higgsfield-long-video-{key}", job.get("user_id"), mime="video/mp4")
+            db.commit()
+            job = _video_job(db)
+            job.update(state="ready", detail=f"Vidéo IA assemblée : {job['target_seconds']} secondes, {len(paths)} clips. Enregistrée dans tes documents.",
+                       artifact={"id": art.id, "filename": art.filename, "size": art.size, "url": f"/api/artifacts/{art.id}/download"})
+            _save_video_job(db, job)
+            for p in paths:
+                p.unlink(missing_ok=True)
+            listing.unlink(missing_ok=True)
+        except (HiggsfieldError, OSError, subprocess.TimeoutExpired) as exc:
+            db.rollback()
+            job = _video_job(db)
+            job.update(state="failed", detail=f"Assemblage vidéo impossible : {exc if isinstance(exc, HiggsfieldError) else type(exc).__name__}. Les clips sont conservés.")
+            _save_video_job(db, job)
+    finally:
+        db.close()
+        lock.unlink(missing_ok=True)
+        try:
+            folder.rmdir()      # seulement s'il est vide : en cas d'échec, les clips restent
+        except OSError:
+            pass
+
+
+def _assembly_status(db: Session, job: dict) -> dict:
+    """Démarre l'assemblage en arrière-plan s'il ne tourne pas déjà (un seul à la fois, même avec plusieurs processus), et renvoie l'état tout de suite."""
+    folder = Path(str(job.get("work_dir") or ""))
+    paths = [Path(p) for p in job.get("clip_paths", [])]
+    if len(paths) != len(job.get("scenes") or []) or not folder.is_dir() or not all(p.is_file() for p in paths):
+        job.update(state="failed", detail="Les fichiers temporaires de la vidéo longue sont incomplets.")
+        _save_video_job(db, job)
+        return _video_public(job)
+    lock = folder / ASSEMBLY_LOCK
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        if time.time() - lock.stat().st_mtime < ASSEMBLY_STALE_S:
+            return _video_public(job)         # déjà en cours (ce processus ou un autre)
+        lock.unlink(missing_ok=True)          # verrou périmé : on relance
+        return _assembly_status(db, job)
+    threading.Thread(target=_assembly_worker, args=(folder,), name="video-ia-assemblage", daemon=True).start()
+    return _video_public(job)
+
+
+
 def _long_video_status(db: Session, user_id: str | None, job: dict) -> dict:
     if job.get("user_id") != user_id:
         raise HiggsfieldError("Cette vidéo IA appartient à une autre session.", 403)
@@ -432,40 +529,7 @@ def _long_video_status(db: Session, user_id: str | None, job: dict) -> dict:
     index = int(job.get("current_index") or 0)
     request_id = str(job.get("request_id") or "")
     if job.get("state") == "assembling":
-        paths = [Path(p) for p in job.get("clip_paths", [])]
-        folder = Path(str(job.get("work_dir") or ""))
-        if len(paths) != len(job.get("scenes") or []) or not folder.is_dir():
-            job.update(state="failed", detail="Les fichiers temporaires de la vidéo longue sont incomplets.")
-            _save_video_job(db, job)
-            return _video_public(job)
-        listing = folder / "concat.txt"
-        listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in paths), encoding="utf-8")
-        output = folder / "video_longue.mp4"
-        try:
-            result = subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                                     "-i", str(listing), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)],
-                                    capture_output=True, text=True, timeout=900, check=False)
-            if result.returncode != 0 or not output.is_file() or output.stat().st_size < 1024:
-                raise HiggsfieldError("FFmpeg n'a pas réussi à assembler les clips.", 500)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            job.update(state="failed", detail=f"Assemblage vidéo impossible : {type(exc).__name__}.")
-            _save_video_job(db, job)
-            return _video_public(job)
-        key = new_id()[:8]
-        art = store_artifact(db, output, f"Video IA longue {key}.mp4", "generated_video", key,
-                             f"higgsfield-long-video-{key}", user_id, mime="video/mp4")
-        db.commit()
-        job.update(state="ready", detail=f"Vidéo IA assemblée : {job['target_seconds']} secondes, {len(paths)} clips. Enregistrée dans tes documents.",
-                   artifact={"id": art.id, "filename": art.filename, "size": art.size,
-                             "url": f"/api/artifacts/{art.id}/download"})
-        _save_video_job(db, job)
-        for p in paths:
-            p.unlink(missing_ok=True)
-        listing.unlink(missing_ok=True)
-        output.unlink(missing_ok=True)
-        folder.rmdir()
-        return _video_public(job)
+        return _assembly_status(db, job)
     if not request_id:
         if job.get("state") == "submitting" and time.time() - float(job.get("current_started_at") or 0) < 120:
             return _video_public(job)
