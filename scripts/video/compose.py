@@ -1,4 +1,4 @@
-"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 60 i/s, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
+"""Montage final : met bout à bout les scènes (page filmée avec caméra sous-pixel + pastilles, ou scènes HTML) -> MP4 30 i/s par défaut, sans mélange d'images (texte net). Sortie ≈ 24 Mo au plus."""
 import json, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
