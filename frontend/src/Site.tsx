@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan } from "./api";
+import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan } from "./api";
 
 type Say = (m: string) => void;
 
@@ -30,7 +30,7 @@ export function VideoStudio({ say }: { say: Say }) {
   };
   useEffect(() => {
     let alive = true;
-    net.higgsfield().then((s) => { if (alive) setHf(s); }).catch(() => {});
+    api.higgsfield().then((s) => { if (alive) setHf(s); }).catch(() => {});
     net.videoAiStatus().then((s) => { if (alive && s.state !== "idle") setAiClip(s); }).catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -45,7 +45,7 @@ export function VideoStudio({ say }: { say: Say }) {
         if (cancelled) return;
         setAiClip(next);
         if (["submitting", "queued", "processing"].includes(next.state)) timer = setTimeout(poll, 5000);
-        else net.higgsfield().then((s) => { if (!cancelled) setHf(s); }).catch(() => {});
+        else api.higgsfield().then((s) => { if (!cancelled) setHf(s); }).catch(() => {});
       } catch {
         if (!cancelled) timer = setTimeout(poll, 10000);
       }
@@ -116,7 +116,7 @@ export function VideoStudio({ say }: { say: Say }) {
           run(async () => {
             const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
             setAiClip(result);
-            net.higgsfield().then(setHf).catch(() => {});
+            api.higgsfield().then(setHf).catch(() => {});
           }, "Génération du clip IA lancée.");
         }}>{aiClip && ["submitting", "queued", "processing"].includes(aiClip.state) ? "Génération en cours…" : "Générer un clip IA"}</button>
       {aiClip && aiClip.state !== "idle" && <p className="hint" role="status">{aiClip.detail}</p>}
