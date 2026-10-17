@@ -164,3 +164,26 @@ def test_engine_agrees_with_the_independent_exact_verifier_on_thousands_of_rando
             assert calc.verify(r)["problems"] == [], text
             checked += 1
     assert checked > 700 and refused >= 1                                                     # beaucoup de cas vérifiés ; l'invalide est bien refusé
+
+
+def test_peinture_murs_d_une_piece_utilise_le_perimetre():
+    r = calc.calculate_from_text("peinture murs salon 5x4 hauteur 2.5")
+    assert r.inputs["area_m2"] == 45.0
+    assert "murs de la pièce" in r.assumptions[0]
+
+
+def test_peinture_deux_dimensions_sans_hauteur_est_signalee():
+    r = calc.calculate_from_text("peinture 5x4")
+    assert r.inputs["area_m2"] == 20.0
+    assert "hauteur" in r.assumptions[0]
+
+
+def test_dimension_negative_refusee():
+    import pytest
+    with pytest.raises(ValueError):
+        calc.calculate_from_text("cloison -5 x 3")
+
+
+def test_troisieme_valeur_signalee():
+    r = calc.calculate_from_text("cloison 3m x 2,5m x 4")
+    assert any("Trois valeurs" in m for m in r.missing)
