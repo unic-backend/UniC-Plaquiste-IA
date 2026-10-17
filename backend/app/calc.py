@@ -736,6 +736,20 @@ def detect_calc_kind(text: str) -> str | None:
 
 
 def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult | None:
+    """Calcul à partir d'une phrase. Refuse les dimensions négatives ; signale les valeurs en trop au lieu de les ignorer."""
+    t = text.lower().replace("×", "x")
+    if re.search(r"(?<![\w.,])-\d", t):
+        raise ValueError("Dimension négative détectée : donnez des longueurs positives.")
+    result = _calculate_from_text(text, defaults)
+    extra = re.search(rf"({_NUM})\s*m?\s*x\s*({_NUM})\s*m?\s*x\s*({_NUM})", t)
+    if result is not None and extra:
+        result.missing.append(
+            f"Trois valeurs reçues ({extra.group(1)} × {extra.group(2)} × {extra.group(3)}) : seules les deux premières sont utilisées. "
+            "Précisez ce que représente la troisième (hauteur, nombre, épaisseur).")
+    return result
+
+
+def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult | None:
     cfg = {**DEFAULTS, **(defaults or {})}
     kind = detect_calc_kind(text)
     if kind is None:
@@ -820,9 +834,11 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
                                  board_height=cfg["board_height_m"])
 
     if kind == "paint":
+        from_pair = False
         if area_m is None:
             if pair:
                 area_m = pair[0] * pair[1]
+                from_pair = True
             elif len(nums) >= 1:
                 area_m = nums[0]
             else:
@@ -836,7 +852,21 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
         cm = re.search(r"(\d+)\s*couches?", t)
         if cm:
             coats = int(cm.group(1))
-        return calculate_paint(area_m, coats=coats)
+        note = None
+        if from_pair:
+            a, b = pair
+            if height and re.search(r"\bmurs?\b|pi[eè]ce|salon|chambre|cuisine|bureau|couloir", t):
+                h = parse_number(height.group(1))
+                area_m = round_qty(2 * (a + b) * h, 2)
+                note = (f"Surface = murs de la pièce : 2 × ({a:g} + {b:g}) × {h:g} = {area_m:g} m². "
+                        "Portes et fenêtres non déduites (surface un peu surestimée).")
+            else:
+                note = (f"Surface = {a:g} × {b:g} = {area_m:g} m² (une seule face). "
+                        "Pour peindre les murs d'une pièce, donnez aussi la hauteur.")
+        result = calculate_paint(area_m, coats=coats)
+        if note:
+            result.assumptions.insert(0, note)
+        return result
 
     if kind == "plaster":
         if area_m is None:
