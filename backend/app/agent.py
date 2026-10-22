@@ -691,7 +691,7 @@ OWNER_ASK = {
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
     "create_contact": re.compile(r"contact|fiche|ajoute|enregistr|cr[ée]e", re.I),
-    "save_email_draft": re.compile(r"e-?mail|mail|courri|lettre|[ée]cri|r[ée]dige|r[ée]ponds|envoie", re.I),
+    "save_email_draft": re.compile(r"e-?mail|mail|courri|lettre|[ée]cri|r[ée]dig|r[ée]pon|envoi|message|dis[- ]lui|pr[ée]vien|inform", re.I),
 }
 _WORD = re.compile(r"[a-zà-ÿ0-9]{3,}", re.I)
 
@@ -736,7 +736,9 @@ class AgentSession:
         """Action sensible demandée après la lecture d'un contenu de tiers, sans ordre du patron : refusée (côté serveur)."""
         if not self.tainted:
             return None
-        said = str(self.state.get("owner_message") or "")
+        # l'ordre du patron peut s'étaler sur plusieurs messages (« écris un mail à X » → question → « dis-lui que… ») :
+        # ses propres messages récents comptent, jamais le contenu des documents ni les réponses de l'IA
+        said = " ".join([str(self.state.get("owner_message") or ""), *(str(t) for t in self.state.get("owner_recent") or [])])
         if name == "remember":
             text = str(args.get("text") or "")
             if trust.inspect(text) or not owner_backs(text, said):
