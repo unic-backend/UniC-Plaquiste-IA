@@ -396,6 +396,7 @@ class DraftEdit(BaseModel):
     to_addr: str | None = Field(None, max_length=255)
     subject: str | None = Field(None, max_length=512)
     body: str | None = None
+    attachments: list[str] | None = Field(None, max_length=20)   # pièces jointes gardées (le patron peut en retirer)
 
 
 def _get_draft(db: Session, did: str) -> EmailDraft:
@@ -414,6 +415,12 @@ def mail_draft_edit(did: str, body: DraftEdit, db: Session = Depends(get_db), us
         v = getattr(body, field)
         if v is not None:
             setattr(d, field, v)
+    if body.attachments is not None:
+        import json
+        try:
+            d.attachments_json = json.dumps(connectors.checked_attachments(db, body.attachments))
+        except connectors.ConnectorError as exc:
+            raise HTTPException(exc.status, str(exc))
     db.commit()
     return {"id": d.id, "to_addr": d.to_addr, "subject": d.subject, "body": d.body, "status": d.status}
 
@@ -438,8 +445,18 @@ def mail_draft_send(did: str, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(409, "Approuvez le brouillon avant l'envoi.")
     if not mailbox.smtp_configured():
         raise HTTPException(503, "Envoi NON DISPONIBLE : SMTP non configuré. Copiez le texte.")
+    from pathlib import Path
+    files = []
+    for art in connectors.attachments_of(db, d):
+        p = Path(art.path)
+        if not p.is_file():
+            raise HTTPException(409, f"Pièce jointe « {art.filename} » introuvable sur le serveur. Rien n'a été envoyé.")
+        files.append((art.filename, art.mime_type, p.read_bytes()))
     try:
-        mailbox.send(d.to_addr, d.subject, d.body)
+        if files:
+            mailbox.send(d.to_addr, d.subject, d.body, files)
+        else:
+            mailbox.send(d.to_addr, d.subject, d.body)
     except Exception as exc:
         logger.warning("SMTP échec : %s", exc)
         raise HTTPException(502, "Envoi échoué. Rien n'a été envoyé. Vérifiez la configuration SMTP.")

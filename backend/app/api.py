@@ -2041,11 +2041,14 @@ def audit_list(db: Session = Depends(get_db), user: User = Depends(require_roles
 
 @router.get("/emails")
 def email_drafts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.connectors import attachments_of
     rows = db.query(EmailDraft).order_by(EmailDraft.created_at.desc()).limit(50).all()
     return [
         {
             "id": e.id, "to": e.to_addr, "subject": e.subject, "body": e.body,
             "status": e.status, "created_at": e.created_at.isoformat() if e.created_at else None,
+            "reply": e.related_type == "inbox",
+            "attachments": [{"id": a.id, "filename": a.filename, "mime": a.mime_type, "size": a.size} for a in attachments_of(db, e)],
         }
         for e in rows
     ]

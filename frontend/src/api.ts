@@ -195,7 +195,7 @@ export type Mail = {
 };
 export type GReview = { id: string; author: string; stars: number; comment: string; created: string; replied: boolean };
 export type GProfile = { title: string; website: string; phone: string; description: string; gaps: string[]; complete: boolean };
-export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string };
+export type MailDraft = { id: string; to_addr: string; subject: string; body: string; status: string; attachments?: string[] };
 
 export type Memo = {
   id: string; text: string; kind: string; source: string; pinned: boolean; created_at: string | null;
