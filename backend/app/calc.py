@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.2"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.3"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -158,11 +158,32 @@ def boards_needed(net_area: float, waste: float, board_m2: float) -> int:
     return ceil_int(net_area * (1.0 + waste) / board_m2)
 
 
-def studs_needed(length_m: float, spacing_m: float) -> int:
+def studs_needed(length_m: float, spacing_m: float, board_width_m: float | None = None) -> int:
+    """Méthode UniC : chaque plaque (1,20 m) prend 3 montants (deux bords + milieu) ; deux plaques voisines partagent
+    le montant de jonction → ⌈L / largeur plaque⌉ × (largeur / entraxe) + 1 (5 m → 5 plaques → 11 montants).
+    Si l'entraxe ne divise pas la largeur de plaque : ⌈L / entraxe⌉ + 1 (un montant à chaque extrémité)."""
     if spacing_m <= 0:
         raise ValueError("Entraxe invalide")
-    # montants d'extrémité inclus : floor(L/e) + 1
-    return int(math.floor(length_m / spacing_m + 1e-9)) + 1   # 1e-9 : évite 6,999… pour 7
+    if board_width_m and board_width_m > 0:
+        gaps = board_width_m / spacing_m
+        if gaps >= 1 and abs(gaps - round(gaps)) < 1e-9:
+            return math.ceil(length_m / board_width_m - 1e-9) * int(round(gaps)) + 1   # 1e-9 : 4,8 / 1,2 = 4,000…1
+    return math.ceil(length_m / spacing_m - 1e-9) + 1
+
+
+def stud_bars(n_studs: int, height_m: float, bar_m: float = BAR_LENGTH_M) -> int:
+    """Barres de montant (2,90 m) : une par montant jusqu'à 2,90 m de haut ; au-delà, des rallonges taillées dans
+    d'autres barres (chutes réutilisées). Recouvrement d'éclissage non compté."""
+    if n_studs <= 0:
+        return 0
+    full = math.floor(height_m / bar_m + 1e-9)
+    rest = round(height_m - full * bar_m, 6)
+    if full == 0:
+        return n_studs
+    if rest <= 1e-6:
+        return n_studs * full
+    per_bar = max(1, math.floor(bar_m / rest + 1e-9))
+    return n_studs * full + math.ceil(n_studs / per_bar)
 
 
 def tracks_length(length_m: float, runs: int = 2) -> float:
@@ -211,7 +232,8 @@ def calculate_partition(
     b_area = board_area(board_width, board_height)
     areas = partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
-    n_studs = studs_needed(length_m, stud_spacing)
+    n_studs = studs_needed(length_m, stud_spacing, board_width)
+    n_stud_bars = stud_bars(n_studs, height_m)
     tracks = tracks_length(length_m, 2)
     # montants : un par montant, hauteur = hauteur cloison
     stud_ml = round_qty(n_studs * height_m, 3)
@@ -303,8 +325,8 @@ def calculate_partition(
         ),
         CalcStep(
             "Nombre de montants",
-            "⌊ longueur / entraxe ⌋ + 1",
-            {"longueur": length_m, "entraxe": stud_spacing},
+            "3 montants par plaque, jonctions partagées : ⌈ longueur / largeur plaque ⌉ × 2 + 1",
+            {"longueur": length_m, "largeur plaque": board_width, "entraxe": stud_spacing},
             n_studs,
             "u",
             STATUS_ESTIMATED,
@@ -330,8 +352,11 @@ def calculate_partition(
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
-        QuantityLine("MONTANT-M48", "Montant M48", n_studs, "u",
-                     "⌊L/entraxe⌋+1", STATUS_ESTIMATED, notes=f"Soit {stud_ml} ml à la hauteur {height_m:g} m"),
+        QuantityLine("MONTANT-M48", "Montant M48 (barre de 2,90 m)", n_stud_bars, "u",
+                     "⌈L/largeur plaque⌉×2+1" + (" + rallonges" if n_stud_bars != n_studs else ""), STATUS_ESTIMATED,
+                     notes=f"{n_studs} montants, soit {stud_ml} ml à la hauteur {height_m:g} m"
+                     + (f" ; hauteur > {BAR_LENGTH_M:g} m : {n_stud_bars} barres (recouvrement d'éclissage non compté)"
+                        if n_stud_bars != n_studs else "")),
         QuantityLine("UC-RAILS-48-MM", "Rails 48 mm (barre de 2,90 m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
                      "⌈ L × 2 / 2,90 ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
@@ -349,7 +374,8 @@ def calculate_partition(
     result.assumptions = [
         f"Plaque standard BA13 {board_width:g} × {board_height:g} m = {b_area:.2f} m² (catalogue par défaut, non une donnée UniC confirmée).",
         f"Coefficient de déchet = {waste*100:.0f} % (paramètre par défaut, à confirmer selon la complexité du chantier).",
-        f"Entraxe des montants = {stud_spacing:g} m (paramètre par défaut).",
+        f"Entraxe des montants = {stud_spacing:g} m : méthode UniC, chaque plaque prend 3 montants (bords + milieu), "
+        "le montant de jonction est partagé entre deux plaques.",
         f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (règle professionnelle par défaut).",
         "Les montants d'ouverture (renforts autour des portes/fenêtres) ne sont pas ajoutés automatiquement.",
         "Aucun prix n'est appliqué : les tarifs UniC ne sont pas inventés.",
@@ -473,6 +499,7 @@ def calculate_ceiling(
         return rows_, rows_ * (ceil_int(run / h_sp) + 1), round_qty(run * rows_, 2)
 
     rows, hangers, furring_ml = min(layout(length_m, width_m), layout(width_m, length_m), key=lambda t: (t[1], t[2]))
+    perimeter = round_qty(2 * (length_m + width_m), 2)
 
     result = CalcResult(
         kind="ceiling",
@@ -514,18 +541,22 @@ def calculate_ceiling(
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", "Barre de fourrure (2,90 m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
                      f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / 2,90 ⌉", STATUS_ESTIMATED),
+        # cornière de rive sur tout le périmètre : elle porte les bords des plaques contre les murs
+        QuantityLine("UC-CORNIERES", "Cornière de rive (barre de 2,90 m)", ceil_int(perimeter / BAR_LENGTH_M), "barre",
+                     f"⌈ périmètre {perimeter:g} ml / 2,90 ⌉", STATUS_ESTIMATED if dims_known else STATUS_ASSUMED),
     ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
         "Méthode UniC : fourrures tous les 0,50 m, une tige tous les 0,90 m (tige + pivot + cheville à laiton), "
         "plaques de 2 m posées en travers des fourrures.",
-        "Les profils périphériques et les entretoises ne sont pas détaillés pièce par pièce.",
+        "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)) ; entretoises non comptées.",
         "Aucun prix n'est appliqué.",
     ]
     result.missing = [
         "Type exact de faux plafond (BA13, dalles 600×600, démontable, acoustique) si différent du défaut.",
-        "Hauteur de plénum / type de suspente.",
+        "Hauteur de plénum (longueur des tiges).",
+        "Vis, bande et enduit des joints du plafond : non chiffrés.",
         "Prix UniC non renseignés.",
     ]
     if not dims_known:
@@ -834,12 +865,8 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 missing=["Longueur et largeur (ou surface) du plafond."],
                 next_step="Indiquez par exemple : faux plafond 8 x 5 m.",
             )
-        result = calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
-                                   board_height=cfg["board_height_m"])
-        if square_from_area:
-            result.assumptions.insert(0, f"Seule la surface ({square_from_area:g} m²) est connue : pièce supposée carrée "
-                                         f"({a:g} × {b:g} m). Plaques exactes ; fourrures et tiges approximatives selon la vraie forme.")
-        return result
+        return calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
+                                 board_height=cfg["board_height_m"], dims_known=square_from_area is None)
 
     if kind == "paint":
         from_pair = False
@@ -958,7 +985,13 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
             if qty.get(sku) != boards:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
-            studs = int(L // _F(inp["stud_spacing"])) + 1
+            bw, e = _F(inp["board_width"]), _F(inp["stud_spacing"])
+            gaps = bw / e
+            n = (_min_count(L, bw) * int(gaps) + 1) if gaps >= 1 and gaps.denominator == 1 else _min_count(L, e) + 1
+            bar = _F(BAR_LENGTH_M)
+            full = int(H // bar)
+            rest = H - full * bar
+            studs = n if full == 0 else n * full if rest == 0 else n * full + _min_count(Fraction(n), Fraction(int(bar // rest)))
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * L, _F(BAR_LENGTH_M))
@@ -976,6 +1009,9 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             area = _F(inp["length_m"]) * _F(inp["width_m"])
             if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):
                 problems.append(f"Surface : moteur {step.get('Surface')} ≠ contrôle {float(area):g} m².")
+            rive = _min_count(2 * (_F(inp["length_m"]) + _F(inp["width_m"])), _F(BAR_LENGTH_M))
+            if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
+                problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         problems.append(f"Contrôle impossible : {type(exc).__name__}.")
     return {"ok": not problems, "problems": problems,

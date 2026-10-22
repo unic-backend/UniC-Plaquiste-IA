@@ -495,8 +495,14 @@ OWNER_RULES_V9 = (
     "Un travail = un seul devis. Jamais deux devis à la fois ; une correction modifie le devis existant.",
 )
 
+OWNER_RULES_V10 = (
+    "Cloison : chaque plaque (1,20 m de large) prend 3 montants, les deux bords et le milieu ; deux plaques voisines partagent "
+    "le montant de jonction. Nombre de montants = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11 montants). L'autre face réutilise les "
+    "mêmes montants. Toujours laisser l'outil de calcul compter, jamais de tête.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
-              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9}
+              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10}
 
 
 def seed_owner_rules(db: Session) -> int:

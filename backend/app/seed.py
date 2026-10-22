@@ -110,7 +110,7 @@ Surface nette = surface brute − (ouvertures × faces concernées).
 Nombre de plaques = ⌈ surface nette × (1 + déchet) / (largeur plaque × hauteur plaque) ⌉.
 
 Valeurs par défaut (HYPOTHÈSES, configurables dans Paramètres) :
-- Plaque BA13 2,50 × 1,20 m = 3,00 m²
+- Plaque BA13 2,00 × 1,20 m = 2,40 m² (plaque UniC par défaut ; 2,50 m seulement si demandé)
 - Déchet 8 %
 Ces valeurs ne sont pas des tarifs UniC.""",
     ),
@@ -118,7 +118,8 @@ Ces valeurs ne sont pas des tarifs UniC.""",
         "methode-ossature",
         "Méthode de calcul ossature métallique",
         "method",
-        """Montants : n = ⌊ longueur / entraxe ⌋ + 1. Entraxe par défaut 0,60 m (hypothèse).
+        """Montants (méthode UniC) : chaque plaque de 1,20 m prend 3 montants (bords + milieu), le montant de jonction est
+partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11). Au-delà de 2,90 m de haut : rallonges.
 Rails : longueur × 2 (haut + bas).
 Renforts d'ouverture non ajoutés automatiquement — à saisir si connus.
 Vis : 15 / m² (hypothèse professionnelle).
@@ -287,6 +288,30 @@ def apply_owner_hangers_v4(db: Session) -> int:
     sus = db.query(Material).filter(Material.sku == "SUSPENTE").first()
     if sus is not None:
         sus.is_active = False   # remplacée par tige + pivot + cheville à laiton
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+_OLD_OSSATURE_PREFIX = "Montants : n = ⌊ longueur / entraxe ⌋ + 1."
+_OLD_PLAQUE_LINE = "- Plaque BA13 2,50 × 1,20 m = 3,00 m²"
+
+
+def apply_owner_studs_v6(db: Session) -> int:
+    """Fiches méthode alignées sur le moteur : 3 montants par plaque (jonctions partagées), plaque 2 m par défaut.
+    Seules les fiches encore au texte d'origine sont mises à jour (une fiche retouchée par le patron n'est pas écrasée)."""
+    from app.models import AppSetting, KnowledgeArticle
+
+    flag = "seed_owner_studs_v6"
+    if db.get(AppSetting, flag):
+        return 0
+    bodies = {slug: body for slug, _t, _c, body in ARTICLES}
+    n = 0
+    for slug, marker in (("methode-ossature", _OLD_OSSATURE_PREFIX), ("methode-plaques", _OLD_PLAQUE_LINE)):
+        art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == slug).first()
+        if art is not None and marker in (art.body or ""):
+            art.body = bodies[slug]
+            n += 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n
