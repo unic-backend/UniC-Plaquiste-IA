@@ -146,7 +146,19 @@ def report(db: Session, days: int = DAYS) -> dict[str, Any]:
     else:
         rows.append(_row("corrections", "Corrections validées", "non mesuré", NONE, "Aucune correction décidée sur la période."))
 
-    # 10. Alertes inutiles : impossible à mesurer sans retour du patron
+    # 10. Actions affirmées sans être faites (« j'ai créé le devis » sans l'outil) : rattrapées par le serveur (claims.py)
+    caught = _audit_count(db, "ai_phantom_claim", since)
+    warned = _audit_count(db, "ai_phantom_warned", since)
+    if spent_n or caught:
+        rows.append(_row("actions_fantomes", "Actions affirmées sans être faites", f"{caught} rattrapée(s) · {warned} signalée(s)",
+                         OK if warned == 0 else WARN,
+                         (f"Sur {spent_n} réponse(s) IA ce mois-ci. " if spent_n else "")
+                         + "Rattrapée : l'IA a dû faire l'action ou dire la vérité avant de répondre. Signalée : elle a persisté, "
+                           "tu as vu l'avertissement ⚠️ dans la réponse."))
+    else:
+        rows.append(_row("actions_fantomes", "Actions affirmées sans être faites", "non mesuré", NONE, "Aucune réponse IA ce mois-ci."))
+
+    # 11. Alertes inutiles : impossible à mesurer sans retour du patron
     rows.append(_row("faux_positifs", "Alertes inutiles", "non mesuré", NONE,
                      "Il faut un bouton « fausse alerte » pour compter. Pas encore en place : rien n'est estimé."))
 

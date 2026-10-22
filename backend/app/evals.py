@@ -47,6 +47,17 @@ CASES: list[dict[str, Any]] = [
     {"id": "devis-apres-calcul", "message": "Fais le devis d'une cloison de 6 m sur 2,50 m deux faces pour Awa Ba.",
      "tool": "calculate_materials", "expect": {"kind": "partition", "length_m": 6, "height_m": 2.5, "sides": 2},
      "not_before": "create_quote"},
+    # au-delà du chantier : UniC est universel (courrier, fichiers, agenda) et n'invente ni adresse ni action
+    {"id": "mail-banque", "message": "Écris un e-mail à ma banque (conseiller@banque.sn) pour demander un rendez-vous mardi matin.",
+     "tool": "save_email_draft", "expect": {"to": "conseiller@banque.sn"}},
+    {"id": "mail-sans-adresse", "message": "Écris un mail à mon fournisseur de ciment pour lui demander ses nouveaux prix.",
+     "tool": "save_email_draft", "expect": {}, "absent": ["to"]},
+    {"id": "excel-depenses", "message": "Fais-moi un fichier Excel de mes dépenses : ciment 50 000, fer 20 000, transport 15 000.",
+     "tool": "make_spreadsheet", "expect": {}},
+    {"id": "pdf-attestation", "message": "Rédige en PDF une attestation de fin de travaux pour Mme Diop, chantier de Ouakam.",
+     "tool": "make_pdf", "expect": {}},
+    {"id": "rendez-vous", "message": "Note un rendez-vous avec Awa jeudi à 10 h pour un métré.",
+     "tool": "add_appointment", "expect": {}},
 ]
 
 
@@ -95,11 +106,11 @@ def score_case(case: dict, calls: list[tuple[str, dict]]) -> dict:
 
 def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
     """Lance le banc d'essai sur Claude (outils NON exécutés) et garde le rapport. `complete` remplaçable en test."""
-    from app import agent
+    from app import agent, claims
     from app.ai import PROVIDERS
     from app.config import settings
     from app.models import AppSetting
-    from app.orchestrator import SYSTEM_RULES
+    from app.orchestrator import SYSTEM_RULES, wants_deep
     last = report_last(db)
     if complete is None:
         if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last["at"])).total_seconds() < MIN_INTERVAL_S:
@@ -115,11 +126,19 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
         def handler(name: str, args: dict, _calls=calls) -> dict:
             _calls.append((name, dict(args or {})))
             return {"evaluation": True, "note": "Banc d'essai : outil non exécuté. Réponds en une phrase."}
+        # mêmes consignes, même modèle et même effort que la vraie conversation : sinon on mesure une autre IA
+        deep = wants_deep(db, case["message"], asked=False, voice=False, attached=False, focus=False)
+        system = SYSTEM_RULES + agent.AGENT_PROMPT + agent.availability_note(db)
         try:
-            complete([{"role": "system", "content": SYSTEM_RULES}, {"role": "user", "content": case["message"]}],
-                     tools=agent.TOOLS, tool_handler=handler, max_tokens=1500, effort="medium",
-                     model=settings.anthropic_fast_model)   # mêmes réglages que la conversation courante
-            results.append(score_case(case, calls))
+            res = complete([{"role": "system", "content": system}, {"role": "user", "content": case["message"]}],
+                           tools=agent.TOOLS, tool_handler=handler, max_tokens=4000, effort="high" if deep else "medium",
+                           model=settings.anthropic_model if deep else settings.anthropic_fast_model)
+            scored = score_case(case, calls)
+            phantom = claims.unbacked(getattr(res, "text", "") or "", [n for n, _ in calls])
+            if phantom:   # « j'ai créé… » sans l'outil : une action inventée compte comme une invention
+                scored["problems"].append("Action inventée : la réponse affirme avoir fait " + ", ".join(phantom) + " sans l'outil.")
+                scored["ok"] = False
+            results.append(scored)
         except Exception as exc:   # un cas en panne ne fausse pas les autres
             logger.warning("cas %s en échec : %s", case["id"], exc)
             results.append({"id": case["id"], "ok": False, "problems": [f"Erreur : {type(exc).__name__}"]})

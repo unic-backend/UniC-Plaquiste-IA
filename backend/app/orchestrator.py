@@ -1083,6 +1083,7 @@ def handle_turn(
                         ai = again
                     still = claims.unbacked(ai.text, session.succeeded)
                     if still:
+                        audit(db, user.id, "ai_phantom_warned", "conversation", conv.id, ", ".join(still)[:250])
                         ai.text += claims.warning(still)
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
