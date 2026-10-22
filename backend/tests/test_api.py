@@ -4285,3 +4285,31 @@ def test_montant_fcfa_sans_centimes():
 def test_chat_public_refuse_corps_geant(client):
     r = client.post("/api/public/chat", content=b"x" * 30_000, headers={"content-type": "application/json"})
     assert r.status_code == 413
+
+
+def test_fiches_methode_alignees_sur_trois_montants_par_plaque(client):
+    from app.database import SessionLocal
+    from app.models import AppSetting, KnowledgeArticle, Memory
+    from app.seed import apply_owner_studs_v6
+    db = SessionLocal()
+    oss = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    pl = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-plaques").first()
+    oss.body = "Montants : n = ⌊ longueur / entraxe ⌋ + 1. Ancienne fiche."
+    pl.body = "Fiche retouchée par le patron."            # jamais écrasée
+    flag = db.get(AppSetting, "seed_owner_studs_v6")
+    if flag:
+        db.delete(flag)
+    db.commit()
+    assert apply_owner_studs_v6(db) == 1
+    db.refresh(oss)
+    db.refresh(pl)
+    assert "3 montants" in oss.body and pl.body == "Fiche retouchée par le patron."
+    assert apply_owner_studs_v6(db) == 0                   # une seule fois
+    from app import memory
+    rule_flag = db.get(AppSetting, "seed_owner_rules_v10")
+    if rule_flag:                                          # d'autres tests vident la mémoire : on repose la règle
+        db.delete(rule_flag)
+        db.commit()
+    memory.seed_owner_rules(db)
+    assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("Cloison : chaque plaque%")).count() == 1
+    db.close()
