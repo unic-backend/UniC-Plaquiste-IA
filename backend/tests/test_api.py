@@ -4313,3 +4313,21 @@ def test_fiches_methode_alignees_sur_trois_montants_par_plaque(client):
     memory.seed_owner_rules(db)
     assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("Cloison : chaque plaque%")).count() == 1
     db.close()
+
+
+def test_fiche_ossature_trois_montants_par_porte(client):
+    from app.database import SessionLocal
+    from app.models import AppSetting, KnowledgeArticle
+    from app.seed import apply_owner_doors_v7
+    db = SessionLocal()
+    oss = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    oss.body = "Ligne du patron.\nRenforts d'ouverture non ajoutés automatiquement — à saisir si connus."
+    flag = db.get(AppSetting, "seed_owner_doors_v7")
+    if flag:
+        db.delete(flag)
+    db.commit()
+    assert apply_owner_doors_v7(db) == 1
+    db.refresh(oss)
+    assert oss.body.startswith("Ligne du patron.") and "3 montants de renfort par porte" in oss.body
+    assert apply_owner_doors_v7(db) == 0
+    db.close()

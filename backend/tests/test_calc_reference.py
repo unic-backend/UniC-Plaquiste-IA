@@ -50,13 +50,13 @@ def test_case_320m_two_faces_openings_unknown():
 
 def test_case_small_wall_with_confirmed_door():
     # 4 × 2,50 × 1 = 10 m² ; porte 0,90 × 2,04 = 1,836 m² ; nette = 8,164 m²
-    # plaques 1,20 × 2,50 = 3 m² : ⌈8,164 × 1,10 / 3⌉ = ⌈2,993⌉ = 3 ; montants ⌈4/1,2⌉×2+1 = 9 ; rails ⌈8/2,9⌉ = 3
+    # plaques 1,20 × 2,50 = 3 m² : ⌈8,164 × 1,10 / 3⌉ = ⌈2,993⌉ = 3 ; montants ⌈4/1,2⌉×2+1 = 9, + 3 de renfort pour la porte = 12 ; rails ⌈8/2,9⌉ = 3
     r = calc.calculate_partition(4, 2.5, 1, [calc.Opening("door", 0.9, 2.04)], waste=0.10, board_width=1.2,
                                  board_height=2.5, stud_spacing=0.6)
     assert _step(r, "Surface des ouvertures")["result"] == 1.836
     assert _step(r, "Surface nette")["result"] == 8.164 and _step(r, "Surface nette")["status"] == calc.STATUS_CALCULATED
     assert _status(r, "Ouvertures") == calc.STATUS_CONFIRMED
-    assert _qty(r, "BA13-2500x1200") == 3 and _qty(r, "MONTANT-M48") == 9 and _qty(r, "UC-RAILS-48-MM") == 3
+    assert _qty(r, "BA13-2500x1200") == 3 and _qty(r, "MONTANT-M48") == 12 and _qty(r, "UC-RAILS-48-MM") == 3
     assert r.to_dict()["verification"]["ok"]
 
 

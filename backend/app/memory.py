@@ -501,8 +501,14 @@ OWNER_RULES_V10 = (
     "mêmes montants. Toujours laisser l'outil de calcul compter, jamais de tête.",
 )
 
+OWNER_RULES_V11 = (
+    "Cloison : chaque porte prend 3 montants de renfort en plus des montants de la cloison. L'outil de calcul les ajoute "
+    "dès qu'une porte est citée.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
-              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10}
+              "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
+              "v11": OWNER_RULES_V11}
 
 
 def seed_owner_rules(db: Session) -> int:
