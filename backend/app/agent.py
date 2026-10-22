@@ -98,6 +98,17 @@ TOOLS: list[dict] = [
             "subject": {"type": "string"}}, "required": ["email_id", "body"], "additionalProperties": False},
     },
     {
+        "name": "save_email_draft",
+        "description": ("Enregistre un BROUILLON de NOUVEL e-mail (pas une réponse) : à la banque, un fournisseur, l'administration, un proche, "
+                        "un client… N'envoie rien : le patron le relit, l'approuve puis l'envoie lui-même. Pour répondre à un e-mail reçu, "
+                        "utilise save_email_reply_draft. Adresse inconnue : laisse « to » vide, ne l'invente jamais. "
+                        "document_number (facultatif) : devis ou facture dont parle le courrier."),
+        "input_schema": {"type": "object", "properties": {
+            "to": {"type": "string", "description": "Adresse e-mail du destinataire, ou vide si inconnue"},
+            "subject": {"type": "string"}, "body": {"type": "string", "description": "Texte complet, signé au nom du patron"},
+            "document_number": {"type": "string"}}, "required": ["subject", "body"], "additionalProperties": False},
+    },
+    {
         "name": "list_google_reviews",
         "description": "Liste les derniers avis de la fiche Google Maps (auteur, note, commentaire, déjà répondu ou non).",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -548,7 +559,7 @@ TOOLS: list[dict] = [
 
 TOOL_LABELS = {
     "read_inbox": "Courrier consulté", "search_inbox": "Boîte mail fouillée", "read_email": "E-mail lu",
-    "save_email_reply_draft": "Brouillon de réponse préparé", "list_google_reviews": "Avis Google consultés",
+    "save_email_reply_draft": "Brouillon de réponse préparé", "save_email_draft": "Brouillon d'e-mail préparé", "list_google_reviews": "Avis Google consultés",
     "google_profile_audit": "Fiche Google auditée", "save_google_review_reply_draft": "Réponse à un avis préparée",
     "save_social_post_draft": "Brouillon de publication préparé", "list_social_posts": "Publications consultées",
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
@@ -654,6 +665,7 @@ OWNER_ASK = {
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
     "create_contact": re.compile(r"contact|fiche|ajoute|enregistr|cr[ée]e", re.I),
+    "save_email_draft": re.compile(r"e-?mail|mail|courri|lettre|[ée]cri|r[ée]dige|r[ée]ponds|envoie", re.I),
 }
 _WORD = re.compile(r"[a-zà-ÿ0-9]{3,}", re.I)
 
@@ -1107,6 +1119,18 @@ class AgentSession:
         d = connectors.save_email_reply_draft(self.db, self._mail(email_id), body, subject, self.user_id)
         self.cards.append({"kind": "email", "id": d.id})
         return {"draft_id": d.id, "a": d.to_addr, "statut": "brouillon : en attente d'approbation par le patron"}
+
+    def _t_save_email_draft(self, subject: str, body: str, to: str = "", document_number: str = "") -> dict:
+        rel_type = rel_id = ""
+        if document_number.strip():
+            doc = (self.db.query(Quotation).filter(Quotation.number == document_number.strip()).first()
+                   or self.db.query(Invoice).filter(Invoice.number == document_number.strip()).first())
+            if doc is None:
+                raise ConnectorError(f"Document « {document_number} » introuvable.", 404)
+            rel_type, rel_id = doc.__class__.__name__.lower(), doc.id
+        d = connectors.save_email_draft(self.db, to, subject, body, self.user_id, rel_type, rel_id)
+        self.cards.append({"kind": "email", "id": d.id})
+        return {"draft_id": d.id, "a": d.to_addr or "(adresse à compléter)", "statut": "brouillon : le patron le relit, l'approuve et l'envoie"}
 
     # --- fiche Google
     def _t_list_google_reviews(self) -> dict:

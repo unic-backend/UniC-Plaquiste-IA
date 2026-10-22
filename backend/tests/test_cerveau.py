@@ -166,3 +166,41 @@ def test_la_voix_dit_les_montants_et_les_mesures_comme_un_humain():
     assert clean_for_speech("Il faut 24,5 m² de BA13 et 35 ml de bande.") == "Il faut 24,5 mètres carrés de B A 13 et 35 mètres linéaires de bande."
     assert clean_for_speech("RDV à 14h30, délai 48 h, 20 L et 17,5 kg.") == "RDV à 14 heures 30, délai 48 heures, 20 litres et 17,5 kilos."
     assert clean_for_speech("Mme Diop, malade, le 12/10.") == "Mme Diop, malade, le 12/10."
+
+
+# ---------- universel : UniC ne se limite pas au placo ----------
+
+@pytest.mark.parametrize("message", [
+    "Envoie un mail à ma banque pour demander un rendez-vous",
+    "Publie une annonce sur Facebook pour recruter un chauffeur",
+    "Prépare un rapport de chantier sur la réunion de ce matin",
+    "Statut du projet de livre que j'écris",
+])
+def test_les_demandes_universelles_vont_a_l_ia_pas_a_une_reponse_toute_faite(client, seen, message):
+    before = len(seen)
+    r = client.post("/api/chat", json={"message": message}).json()["message"]
+    assert len(seen) == before + 1 and r["content"] == "ok"        # avant : texte figé, ou un PDF « rapport » vide
+
+
+def test_l_enjeu_couvre_tous_les_domaines(client, seen):
+    for msg, deep in (("Aide-moi à rédiger un contrat de travail pour un ouvrier", True),
+                      ("Calcule mon impot sur 12 000 000 F de bénéfice", True),
+                      ("J'ai des symptômes de paludisme, que faire ?", True),
+                      ("Écris un poème sur Dakar", False)):
+        client.post("/api/chat", json={"message": msg})
+        assert seen[-1][1]["deep"] is deep, msg
+
+
+def test_brouillon_de_nouvel_email(client):
+    from app import agent
+    from app.database import SessionLocal
+    from app.models import EmailDraft
+    with SessionLocal() as db:
+        s = agent.AgentSession(db, None, {"owner_message": "écris un mail à ma banque"})
+        out = s("save_email_draft", {"to": "conseiller@banque.sn", "subject": "Rendez-vous", "body": "Bonjour, je souhaite un rendez-vous."})
+        d = db.get(EmailDraft, out["draft_id"])
+        assert d.status == "draft" and d.to_addr == "conseiller@banque.sn" and s.cards[-1] == {"kind": "email", "id": d.id}
+        out = s("save_email_draft", {"subject": "Bonjour", "body": "Texte"})                     # adresse inconnue : jamais inventée
+        assert db.get(EmailDraft, out["draft_id"]).to_addr == "" and "compléter" in out["a"]
+        assert "invalide" in s("save_email_draft", {"to": "pas-une-adresse", "subject": "x", "body": "y"})["error"]
+        assert "introuvable" in s("save_email_draft", {"subject": "x", "body": "y", "document_number": "UC-0000"})["error"]
