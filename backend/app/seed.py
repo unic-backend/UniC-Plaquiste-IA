@@ -121,7 +121,7 @@ Ces valeurs ne sont pas des tarifs UniC.""",
         """Montants (méthode UniC) : chaque plaque de 1,20 m prend 3 montants (bords + milieu), le montant de jonction est
 partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11). Au-delà de 2,90 m de haut : rallonges.
 Rails : longueur × 2 (haut + bas).
-Renforts d'ouverture non ajoutés automatiquement — à saisir si connus.
+Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus.
 Vis : 15 / m² (hypothèse professionnelle).
 Bande à joint : 1,40 m / m² (hypothèse).
 Enduit à joint : 0,35 kg/m²/passe × 2 passes (hypothèse).""",
@@ -312,6 +312,27 @@ def apply_owner_studs_v6(db: Session) -> int:
         if art is not None and marker in (art.body or ""):
             art.body = bodies[slug]
             n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+_OLD_OPENINGS_LINE = "Renforts d'ouverture non ajoutés automatiquement — à saisir si connus."
+_NEW_OPENINGS_LINE = "Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus."
+
+
+def apply_owner_doors_v7(db: Session) -> int:
+    """Fiche ossature : 3 montants de renfort par porte (règle du patron). Seule la phrase d'origine est remplacée. Une seule fois."""
+    from app.models import AppSetting, KnowledgeArticle
+
+    flag = "seed_owner_doors_v7"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    if art is not None and _OLD_OPENINGS_LINE in (art.body or ""):
+        art.body = art.body.replace(_OLD_OPENINGS_LINE, _NEW_OPENINGS_LINE)
+        n = 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

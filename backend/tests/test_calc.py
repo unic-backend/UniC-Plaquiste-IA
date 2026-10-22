@@ -228,3 +228,19 @@ def test_plafond_compte_la_corniere_de_rive():
     r = calc.calculate_ceiling(4, 5)
     q = {x.sku: x.quantity for x in r.quantities}
     assert q["UC-CORNIERES"] == 7 and calc.verify(r)["ok"]
+
+
+def test_trois_montants_de_renfort_par_porte():
+    # 6 m : 11 montants ; 2 portes → + 2 × 3 = 17 (règle UniC)
+    r = calc.calculate_partition(6, 2.7, 2, [calc.Opening("door", 0.9, 2.04, 2)])
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 17 and calc.verify(r)["ok"]
+    r = calc.calculate_partition(6, 2.7, 2, [calc.Opening("window", 1.2, 1.2, 1)])
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 11      # fenêtre : pas de renfort automatique
+
+
+def test_portes_en_toutes_lettres_et_taille_supposee():
+    r = calc.calculate_from_text("cloison 6 x 2.7 avec une porte")
+    assert [(o["kind"], o["quantity"], o["assumed_size"]) for o in r.inputs["openings"]] == [("door", 1, True)]
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 14
+    r = calc.calculate_from_text("cloison 6 x 2.7 avec deux portes et une fenêtre")
+    assert [(o["kind"], o["quantity"]) for o in r.inputs["openings"]] == [("door", 2), ("window", 1)]

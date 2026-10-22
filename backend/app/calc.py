@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.3"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.4"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -42,6 +42,7 @@ DEFAULTS = {
 
 
 BAR_LENGTH_M = 2.90   # longueur des barres UniC (fourrure, montant, rail, cornière)
+DOOR_STUDS = 3        # règle UniC : chaque porte prend 3 montants de renfort
 
 
 def board_sku(board_width_m: float, board_height_m: float, suffix: str = "") -> tuple[str, str]:
@@ -233,7 +234,9 @@ def calculate_partition(
     areas = partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
     n_studs = studs_needed(length_m, stud_spacing, board_width)
-    n_stud_bars = stud_bars(n_studs, height_m)
+    n_doors = sum(o.quantity for o in openings if o.kind == "door")
+    door_studs = DOOR_STUDS * n_doors   # règle UniC : 3 montants de renfort par porte
+    n_stud_bars = stud_bars(n_studs, height_m) + door_studs
     tracks = tracks_length(length_m, 2)
     # montants : un par montant, hauteur = hauteur cloison
     stud_ml = round_qty(n_studs * height_m, 3)
@@ -353,10 +356,12 @@ def calculate_partition(
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         QuantityLine("MONTANT-M48", "Montant M48 (barre de 2,90 m)", n_stud_bars, "u",
-                     "⌈L/largeur plaque⌉×2+1" + (" + rallonges" if n_stud_bars != n_studs else ""), STATUS_ESTIMATED,
+                     "⌈L/largeur plaque⌉×2+1" + (" + rallonges" if n_stud_bars - door_studs != n_studs else "")
+                     + (f" + 3 × {n_doors} porte(s)" if n_doors else ""), STATUS_ESTIMATED,
                      notes=f"{n_studs} montants, soit {stud_ml} ml à la hauteur {height_m:g} m"
-                     + (f" ; hauteur > {BAR_LENGTH_M:g} m : {n_stud_bars} barres (recouvrement d'éclissage non compté)"
-                        if n_stud_bars != n_studs else "")),
+                     + (f" ; hauteur > {BAR_LENGTH_M:g} m : rallonges (recouvrement d'éclissage non compté)"
+                        if n_stud_bars - door_studs != n_studs else "")
+                     + (f" ; + {door_studs} montants de renfort ({n_doors} porte(s) × 3)" if n_doors else "")),
         QuantityLine("UC-RAILS-48-MM", "Rails 48 mm (barre de 2,90 m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
                      "⌈ L × 2 / 2,90 ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
@@ -377,7 +382,7 @@ def calculate_partition(
         f"Entraxe des montants = {stud_spacing:g} m : méthode UniC, chaque plaque prend 3 montants (bords + milieu), "
         "le montant de jonction est partagé entre deux plaques.",
         f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (règle professionnelle par défaut).",
-        "Les montants d'ouverture (renforts autour des portes/fenêtres) ne sont pas ajoutés automatiquement.",
+        "Portes : 3 montants de renfort par porte (règle UniC). Fenêtres : renforts non ajoutés automatiquement.",
         "Aucun prix n'est appliqué : les tarifs UniC ne sont pas inventés.",
     ]
     result.missing = [
@@ -725,11 +730,19 @@ def _sides(text: str) -> int:
     return 2
 
 
+_COUNT_WORDS = {"une": 1, "un": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5, "six": 6}
+_COUNT = r"(\d+|une|un|deux|trois|quatre|cinq|six)"
+
+
+def _count(raw: str) -> int:
+    return int(raw) if raw.isdigit() else _COUNT_WORDS[raw]
+
+
 def _openings(text: str) -> list[Opening]:
     t = text.lower()
     openings: list[Opening] = []
-    door_q = re.search(r"(\d+)\s*(?:portes?|doors?)", t)
-    win_q = re.search(r"(\d+)\s*(?:fen[eê]tres?|windows?)", t)
+    door_q = re.search(rf"\b{_COUNT}\s*(?:portes?|doors?)\b", t)
+    win_q = re.search(rf"\b{_COUNT}\s*(?:fen[eê]tres?|windows?)\b", t)
     # door size e.g. porte 0.90 x 2.04
     for kind, default_w, default_h, patt in (
         ("door", 0.90, 2.04, r"porte[s]?\s+(\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)"),
@@ -738,9 +751,9 @@ def _openings(text: str) -> list[Opening]:
         for m in re.finditer(patt, t):
             openings.append(Opening(kind, parse_number(m.group(1)), parse_number(m.group(2)), 1))
     if door_q and not any(o.kind == "door" for o in openings):
-        openings.append(Opening("door", 0.90, 2.04, int(door_q.group(1))))
+        openings.append(Opening("door", 0.90, 2.04, _count(door_q.group(1)), assumed_size=True))
     if win_q and not any(o.kind == "window" for o in openings):
-        openings.append(Opening("window", 1.20, 1.20, int(win_q.group(1))))
+        openings.append(Opening("window", 1.20, 1.20, _count(win_q.group(1)), assumed_size=True))
     return openings
 
 
@@ -992,6 +1005,7 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             full = int(H // bar)
             rest = H - full * bar
             studs = n if full == 0 else n * full if rest == 0 else n * full + _min_count(Fraction(n), Fraction(int(bar // rest)))
+            studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * L, _F(BAR_LENGTH_M))
