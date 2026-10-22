@@ -758,6 +758,8 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
     if re.search(r"plaques?\s*(?:de\s*)?(?:2[.,]50?|2500)\b", t):
         cfg["board_height_m"] = 2.5   # seulement si le patron le précise : la plaque par défaut fait 2 m
     t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
+    t = re.sub(rf"({_NUM})\s*(mm|cm)\b",
+               lambda m: f"{parse_number(m.group(1)) / (1000 if m.group(2) == 'mm' else 100):g} m", t)   # 3500 mm → 3.5 m
 
     pair = _extract_dimension_pair(t)
     nums = _find_numbers(t)
@@ -813,6 +815,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         )
 
     if kind == "ceiling":
+        square_from_area = None
         if pair:
             a, b = pair
         elif length and width:
@@ -820,6 +823,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         elif area_m is not None:
             side = math.sqrt(area_m)
             a, b = round(side, 3), round(area_m / side, 3)
+            square_from_area = area_m
         elif len(nums) >= 2:
             a, b = nums[0], nums[1]
         else:
@@ -830,8 +834,12 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 missing=["Longueur et largeur (ou surface) du plafond."],
                 next_step="Indiquez par exemple : faux plafond 8 x 5 m.",
             )
-        return calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
-                                 board_height=cfg["board_height_m"])
+        result = calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
+                                   board_height=cfg["board_height_m"])
+        if square_from_area:
+            result.assumptions.insert(0, f"Seule la surface ({square_from_area:g} m²) est connue : pièce supposée carrée "
+                                         f"({a:g} × {b:g} m). Plaques exactes ; fourrures et tiges approximatives selon la vraie forme.")
+        return result
 
     if kind == "paint":
         from_pair = False
@@ -849,9 +857,10 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                     next_step="Indiquez par exemple : peinture 1600 m² deux couches.",
                 )
         coats = 2
-        cm = re.search(r"(\d+)\s*couches?", t)
+        words = {"une": 1, "un": 1, "simple": 1, "deux": 2, "double": 2, "trois": 3, "quatre": 4}
+        cm = re.search(r"(\d+|une|un|simple|deux|double|trois|quatre)\s*couches?", t)
         if cm:
-            coats = int(cm.group(1))
+            coats = int(cm.group(1)) if cm.group(1).isdigit() else words[cm.group(1)]
         note = None
         if from_pair:
             a, b = pair
