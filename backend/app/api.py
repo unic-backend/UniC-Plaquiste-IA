@@ -1461,6 +1461,7 @@ class SettingsIn(BaseModel):
     board_width_m: float | None = Field(default=None, gt=0, le=3)
     board_height_m: float | None = Field(default=None, gt=0, le=6)
     stud_spacing_m: float | None = Field(default=None, gt=0, le=2)
+    ai_deep_stakes: bool | None = None
     notes: str | None = None
 
 
