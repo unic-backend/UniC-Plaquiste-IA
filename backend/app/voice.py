@@ -72,6 +72,33 @@ def _explain(r: httpx.Response) -> VoiceError:
     return VoiceError(f"ElevenLabs a refusé la demande. {msg}".strip(), 502)
 
 
+_SPACED_THOUSANDS = re.compile(r"(?<![\d,.])\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?![\d])")
+_SPEECH_UNITS = (
+    (re.compile(r"(?<=\d)\s*(?:m²|m2)(?![\w])"), " mètres carrés"),
+    (re.compile(r"(?<=\d)\s*ml(?![\w])"), " mètres linéaires"),
+    (re.compile(r"(?<=\d)\s*mm(?![\w])"), " millimètres"),
+    (re.compile(r"(?<=\d)\s*cm(?![\w])"), " centimètres"),
+    (re.compile(r"(?<=\d)\s*m(?![\w²])"), " mètres"),
+    (re.compile(r"(?<=\d)\s*kg(?![\w])"), " kilos"),
+    (re.compile(r"(?<=\d)\s*[lL](?![\w'’])"), " litres"),
+    (re.compile(r"(?<=\d)\s*h\s*(?=\d)"), " heures "),
+    (re.compile(r"(?<=\d)\s*h(?![\w])"), " heures"),
+)
+
+
+def speech_numbers(t: str) -> str:
+    """Montants et mesures dits comme un humain : « 1 250 000 FCFA » → « 1250000 francs CFA » (la voix lit « un million… »
+    au lieu de « un, deux cent cinquante, zéro zéro zéro »), « 12 x 2,5 m » → « 12 par 2,5 mètres », « BA13 » → « B A 13 »."""
+    t = _SPACED_THOUSANDS.sub(lambda m: re.sub(r"[ \u00a0\u202f]", "", m.group(0)), t)
+    t = re.sub(r"(?<=\d)\s*[x×*]\s*(?=\d)", " par ", t)
+    t = re.sub(r"\b(?:F\s?CFA|FCFA|XOF)\b", "francs CFA", t)
+    t = re.sub(r"\bBA\s?(\d{2})\b", r"B A \1", t)
+    t = re.sub(r"\bN[°o]\s?(?=\d)", "numéro ", t)
+    for pattern, words in _SPEECH_UNITS:
+        t = pattern.sub(words, t)
+    return re.sub(r"\s*[→—–]\s*", ", ", t)
+
+
 def clean_for_speech(text: str) -> str:
     """Texte lisible à voix haute : sans Markdown, tableaux, liens, ni liste de sources."""
     t = text.split("\n\n**Sources**")[0]
@@ -83,7 +110,7 @@ def clean_for_speech(text: str) -> str:
     t = re.sub(r"^\s{0,3}#{1,6}\s*", "", t, flags=re.M)
     t = re.sub(r"^\s*[-*•]\s+", "", t, flags=re.M)
     t = re.sub(r"[*_`>~]+", "", t)
-    t = t.replace("m²", " mètres carrés").replace("m2", " mètres carrés").replace("FCFA", " francs CFA")
+    t = speech_numbers(t)
     t = re.sub(r"\s*\n+\s*", ". ", t)
     t = re.sub(r"\s{2,}", " ", t)
     t = re.sub(r"\.{2,}", ".", t)

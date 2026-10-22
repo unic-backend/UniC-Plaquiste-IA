@@ -90,6 +90,15 @@ def wants_deep(db: Session, text: str, *, asked: bool, voice: bool, attached: bo
     return attached or focus or bool(STAKES_RE.search(text))
 
 
+def with_followup(text: str, history: list) -> str:
+    """« oui », « vas-y », « d'accord, fais-le » : une réponse courte hérite du sujet de l'échange précédent.
+    Sans cela, la confirmation qui CRÉE le devis (« oui ») partait sur le modèle le plus léger, comme une banalité.
+    history : messages précédents, du plus récent au plus ancien (sans la demande en cours)."""
+    if len(text.split()) > 6:
+        return text
+    return " ".join([text, *((m.content or "")[:600] for m in history[:2])])
+
+
 HISTORY_SIZE = 8   # derniers messages envoyés tels quels au modèle ; au-delà, mem.thread_recall rappelle le fil utile
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
@@ -970,6 +979,8 @@ def handle_turn(
                     history[0].content == text or (history[0].content == "[fichier]" and text == "Analyse le fichier.")) else None
                 # la demande en cours est déjà enregistrée (api.chat) : sans ce tri elle partait DEUX fois au modèle
                 history = [m for m in history if m is not current][:HISTORY_SIZE]
+                topic = with_followup(text, history)   # sujet réel du tour : « oui » après une proposition de devis = un devis
+                deep = wants_deep(db, topic, asked=asked_deep, voice=voice, attached=bool(attached), focus=bool(state.get("focus")))
                 if locked:   # téléphone verrouillé : aucune donnée de l'entreprise (base, mémoire, anciennes conversations) ni outil
                     kb_text, doc_text, doc_flags, memory_block, past_block, thread_block = "", "", [], "", "", ""
                 else:
@@ -1030,7 +1041,7 @@ def handle_turn(
                     msgs[1]["content"] += agent.availability_note(db)   # varie (connecteurs branchés) : hors cache
                 voice_kw: dict = {}
                 if voice and not deep:   # vitesse : réponses courtes, modèle rapide pour la conversation, effort réduit pour le reste
-                    if settings.anthropic_voice_model and not VOICE_HEAVY_RE.search(text):
+                    if settings.anthropic_voice_model and not VOICE_HEAVY_RE.search(topic):
                         voice_kw = {"model": settings.anthropic_voice_model, "effort": "", "max_tokens": 700}
                     else:
                         voice_kw = {"effort": "low", "max_tokens": 1200}

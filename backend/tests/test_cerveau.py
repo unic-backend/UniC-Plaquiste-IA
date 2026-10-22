@@ -138,3 +138,31 @@ def test_la_reflexion_est_annoncee_pendant_le_flux():
     client = _NS(beta=_NS(messages=_NS(stream=lambda **kw: Stream())))
     ai.ClaudeAIProvider._send_stream(client, {"model": "m", "messages": []}, events.append)
     assert {"t": "status", "text": "Je réfléchis…"} in events and {"t": "delta", "text": "Réponse"} in events
+
+
+def test_un_oui_apres_une_proposition_de_devis_herite_de_l_enjeu(client, seen):
+    cid = client.post("/api/chat", json={"message": "Prépare le devis de la cloison de 12 m pour M. Diop"}).json()["conversation_id"]
+    client.post("/api/chat", json={"message": "oui vas-y", "conversation_id": cid})
+    assert seen[-1][1]["deep"] is True                              # avant : « oui » = banalité, modèle le plus léger
+    cid2 = client.post("/api/chat", json={"message": "Raconte une histoire de chat"}).json()["conversation_id"]
+    client.post("/api/chat", json={"message": "oui encore", "conversation_id": cid2})
+    assert seen[-1][1]["deep"] is False                             # une suite de blague reste légère
+
+
+def test_vocal_la_confirmation_d_un_devis_ne_part_pas_sur_le_modele_leger(client, seen, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "anthropic_voice_model", "claude-haiku-4-5-20251001")
+    cid = client.post("/api/chat", json={"message": "Fais le devis du plafond de M. Sow", "voice": True}).json()["conversation_id"]
+    assert seen[-1][1].get("model") != settings.anthropic_voice_model
+    client.post("/api/chat", json={"message": "oui", "conversation_id": cid, "voice": True})
+    assert seen[-1][1].get("model") != settings.anthropic_voice_model   # le « oui » qui crée le devis : pas le modèle léger
+    client.post("/api/chat", json={"message": "Quelle heure est-il à Paris ?", "voice": True})
+    assert seen[-1][1].get("model") == settings.anthropic_voice_model    # simple conversation : le plus rapide
+
+
+def test_la_voix_dit_les_montants_et_les_mesures_comme_un_humain():
+    from app.voice import clean_for_speech
+    assert clean_for_speech("Le devis fait **1 250 000 FCFA** pour 12 x 2,5 m.") == "Le devis fait 1250000 francs CFA pour 12 par 2,5 mètres."
+    assert clean_for_speech("Il faut 24,5 m² de BA13 et 35 ml de bande.") == "Il faut 24,5 mètres carrés de B A 13 et 35 mètres linéaires de bande."
+    assert clean_for_speech("RDV à 14h30, délai 48 h, 20 L et 17,5 kg.") == "RDV à 14 heures 30, délai 48 heures, 20 litres et 17,5 kilos."
+    assert clean_for_speech("Mme Diop, malade, le 12/10.") == "Mme Diop, malade, le 12/10."

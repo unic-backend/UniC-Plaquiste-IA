@@ -1,5 +1,5 @@
 // Vérifie la parole au fil de l'eau (phrases dites dès qu'elles sont complètes) et le tri des demandes de téléphone. Lancer : npm run test:phone
-import { SpeechPipeline, takeSentences } from "../src/sentences";
+import { SpeechPipeline, speakable, takeSentences } from "../src/sentences";
 import { looksLikePhoneTask } from "../src/notifs";
 
 let ok = 0, ko = 0;
@@ -35,6 +35,27 @@ async function pipe() {
   eq("annulation : plus rien", log2.filter((x) => x !== "stop").length <= 1 && log2.includes("stop"), true);
 }
 await pipe();
+
+// annulation pendant une phrase qui ne finit jamais (audio ElevenLabs mis en pause) : finish() rend quand même la main
+async function stuck() {
+  const r = new SpeechPipeline(() => new Promise<void>(() => { /* ne se termine jamais */ }), () => {});
+  r.push("Une phrase assez longue qui ne finira jamais de se dire. ");
+  const done = r.finish().then(() => "fini");
+  r.cancel();
+  eq("couper la parole ne bloque pas", await Promise.race([done, new Promise((res) => setTimeout(() => res("bloqué"), 200))]), "fini");
+}
+await stuck();
+
+// montants et mesures dits comme un humain
+for (const [t, w] of [
+  ["Le devis fait **1 250 000 FCFA** pour 12 x 2,5 m.", "Le devis fait 1250000 francs CFA pour 12 par 2,5 mètres."],
+  ["Il faut 24,5 m² de BA13 et 35 ml de bande.", "Il faut 24,5 mètres carrés de B A 13 et 35 mètres linéaires de bande."],
+  ["RDV à 14h30, délai 48 h.", "RDV à 14 heures 30, délai 48 heures."],
+  ["Peinture : 20 L, enduit 17,5 kg.", "Peinture : 20 litres, enduit 17,5 kilos."],
+  ["Le montant M48 coûte 1\u202f600 F CFA.", "Le montant M48 coûte 1600 francs CFA."],
+  ["Il est 2 m de haut", "Il est 2 mètres de haut"],
+  ["malade, Mme Diop, 12/10", "malade, Mme Diop, 12/10"],
+] as const) eq("parole : " + t, speakable(t), w);
 
 // tri des demandes : seules celles qui parlent d'appel ou de message vont au serveur
 for (const [s, w] of [["appelle Awa", true], ["apèle Moussa", true], ["envoie un message à Awa", true], ["écris à papa", true], ["dis à Ibou que je viens", true], ["prévenir Ibrahima", true], ["envoi un sms", true],

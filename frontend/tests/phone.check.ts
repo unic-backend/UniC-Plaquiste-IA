@@ -1,6 +1,6 @@
 // Vérifie la recherche de contacts (noms mal prononcés), le oui/non et les déroulés appel/SMS. Lancer : npm run test:phone
 import { matchContacts, pickAmong, yesNo, phon } from "../src/phoneMatch";
-import { runPhoneIntent, HANGUP_RE } from "../src/unicPhone";
+import { runPhoneIntent, HANGUP_RE, END_RE } from "../src/unicPhone";
 const contacts = [
   { name: "Awa Fall", number: "+221771111111" }, { name: "Awa Diop", number: "+221772222222" }, { name: "Moussa Ndiaye", number: "+221773333333" },
   { name: "Ousmane Diallo", number: "+221774444444" }, { name: "Madame Ribeiro", number: "+221775555555" }, { name: "Papa", number: "+221776666666" },
@@ -68,5 +68,7 @@ r = await run({ action: "sms", name: "Moussa", number: "", message: "je viens", 
 eq("SMS préparé refusé = rien", r.actions, []);
 for (const t of ["coupe l'appel", "Hey UniC coupe l'appel", "raccroche", "raccrocher s'il te plaît", "termine la communication", "coupe la communication", "arrête l'appel", "coupe cet appel"]) eq("raccrocher : " + t, HANGUP_RE.test(t), true);
 for (const t of ["appelle Moussa", "coupe le son", "passe un appel à Awa", "arrête de parler", "merci", "coupe la musique"]) eq("pas raccrocher : " + t, HANGUP_RE.test(t), false);
+for (const t of ["merci", "Merci beaucoup", "stop", "arrête", "c'est bon", "c est bon merci", "au revoir UniC", "ok merci", "ça suffit.", "merci UniC"]) eq("fin : " + t, END_RE.test(t), true);
+for (const t of ["merci, et maintenant fais le devis", "stop le devis de Diop", "arrête de calculer et envoie", "c'est bon pour le devis, envoie-le", "merci de m'appeler Awa", "fini le plafond ?"]) eq("pas fin : " + t, END_RE.test(t), false);
 console.log(`OK ${ok}  ÉCHECS ${ko}`);
 if (ko) process.exit(1);
