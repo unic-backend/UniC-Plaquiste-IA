@@ -1296,7 +1296,11 @@ def pay_invoice(iid: str, body: PaymentIn, db: Session = Depends(get_db), user: 
     i = db.get(Invoice, iid)
     if not i:
         raise HTTPException(404, "Facture introuvable")
-    apply_payment(db, i, body.amount, body.method, body.reference, user.id)
+    try:
+        apply_payment(db, i, body.amount, body.method, body.reference, user.id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
     generate_invoice_pdf(db, i, user.id)
     db.commit()
     return _invoice(i)

@@ -4259,3 +4259,29 @@ def test_self_check_flags_a_backup_that_became_unrestorable_after_creation(clien
         assert db.query(Incident).filter(Incident.source == "check:Sauvegarde restaurable", Incident.status == "open").count() == 0
     finally:
         db.close()
+
+
+def test_paiement_superieur_au_reste_refuse(client):
+    from app.database import SessionLocal
+    from app.models import Quotation
+    from app.services import apply_payment, invoice_from_quote
+    qid = _track_quote("UC-TRK-0007-OP", "Client Trop Percu", 100_000)
+    db = SessionLocal()
+    inv = invoice_from_quote(db, db.get(Quotation, qid), "invoice", None)
+    apply_payment(db, inv, 60_000, "wave", "a", None)
+    with pytest.raises(ValueError):
+        apply_payment(db, inv, 50_000, "wave", "b", None)   # reste 40 000 : 50 000 refusé
+    apply_payment(db, inv, 40_000, "wave", "c", None)
+    assert inv.remaining == 0 and inv.status == "paid"
+    db.close()
+
+
+def test_montant_fcfa_sans_centimes():
+    from app.pdfs import money
+    assert money(1_250_000.0, "FCFA") == "1 250 000 FCFA"
+    assert money(99.9, "EUR") == "99,90 EUR"
+
+
+def test_chat_public_refuse_corps_geant(client):
+    r = client.post("/api/public/chat", content=b"x" * 30_000, headers={"content-type": "application/json"})
+    assert r.status_code == 413

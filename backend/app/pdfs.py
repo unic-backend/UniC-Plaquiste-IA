@@ -45,7 +45,8 @@ def money(value: float | None, currency: str) -> str:
     if value is None:
         return "prix non renseigné"
     cur = f" {currency}" if currency else ""
-    return f"{fr_num(value)}{cur}"
+    whole = (currency or "").upper().replace(" ", "") in ("FCFA", "XOF", "CFA") and float(value).is_integer()
+    return f"{fr_num(value, 0 if whole else 2)}{cur}"   # FCFA : pas de centimes quand le montant est rond
 
 
 def _styles():

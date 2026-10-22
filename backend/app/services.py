@@ -902,11 +902,15 @@ def generate_site_report_pdf(db: Session, *, title: str, body_lines: list[str],
 def apply_payment(db: Session, invoice: Invoice, amount: float, method: str, reference: str, user_id: str | None) -> Payment:
     if amount <= 0:
         raise ValueError("Montant invalide")
+    if invoice.total is not None:
+        due = money_round(invoice.total - (invoice.paid or 0))
+        if amount > due + 0.005:
+            raise ValueError(f"Le versement ({amount:g}) dépasse le reste à payer ({due:g}). Vérifiez le montant.")
     pay = Payment(invoice_id=invoice.id, amount=amount, method=method, reference=reference, created_by=user_id)
     db.add(pay)
-    invoice.paid = round((invoice.paid or 0) + amount, 2)
+    invoice.paid = money_round((invoice.paid or 0) + amount)
     if invoice.total is not None:
-        invoice.remaining = round(invoice.total - invoice.paid, 2)
+        invoice.remaining = money_round(invoice.total - invoice.paid)
         if invoice.remaining <= 0:
             invoice.status = "paid"
             invoice.remaining = 0
