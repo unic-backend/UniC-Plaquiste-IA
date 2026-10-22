@@ -284,3 +284,34 @@ def test_brouillon_avec_pieces_jointes_puis_envoi_apres_validation(client, monke
     assert client.post(f"/api/mail/drafts/{did}/send").status_code == 200
     to, subject, files = sent[-1]
     assert to == "conseiller@banque.sn" and files[0][0] == "Rapport.pdf" and files[0][2][:5] == b"%PDF-"
+
+
+# ---------- une demande en plusieurs messages n'est pas bloquée par la sécurité des documents ----------
+
+def test_mail_demande_en_deux_messages_avec_document_dans_le_contexte(client):
+    from app import agent
+    from app.database import SessionLocal
+    suite = "Demain inchalla nous allons commencer notre projet avec Fast a CED"   # le contenu seul, sans « mail »
+    args = {"to": "odiop2020@gmail.com", "subject": "Démarrage du projet", "body": "Bonjour, demain nous commençons."}
+    with SessionLocal() as db:
+        seul = agent.AgentSession(db, None, {"third_party_docs": True, "owner_message": suite})
+        assert "Refusé" in seul("save_email_draft", dict(args))["error"]          # sans le contexte : bloqué (cas signalé par le patron)
+        assert agent.AgentSession(db, None, {"third_party_docs": True, "owner_message": "Dis lui que demain nous commençons"})(
+            "save_email_draft", dict(args)).get("draft_id")                        # « dis-lui » est une demande de message
+        fil = agent.AgentSession(db, None, {"third_party_docs": True, "owner_message": suite,
+                                            "owner_recent": ["Écrit un mail a odiop2020@gmail.com"]})
+        assert fil("save_email_draft", dict(args)).get("draft_id")              # sa demande du message précédent compte
+        piege = agent.AgentSession(db, None, {"third_party_docs": True, "owner_message": "Résume ce document",
+                                              "owner_recent": ["Quel temps fait-il ?"]})
+        assert "Refusé" in piege("save_email_draft", dict(args))["error"]        # un document ne peut pas commander un courrier
+
+
+def test_les_demandes_precedentes_du_patron_suivent_la_conversation(client, seen):
+    from app.database import SessionLocal
+    from app.models import Conversation
+    cid = client.post("/api/chat", json={"message": "Écrit un mail a odiop2020@gmail.com"}).json()["conversation_id"]
+    client.post("/api/chat", json={"message": "Dis lui demain nous commençons le projet", "conversation_id": cid})
+    with SessionLocal() as db:
+        state = __import__("json").loads(db.get(Conversation, cid).state_json)
+    assert state["owner_message"] == "Dis lui demain nous commençons le projet"
+    assert state["owner_recent"] == ["Écrit un mail a odiop2020@gmail.com"]
