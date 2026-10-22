@@ -187,8 +187,9 @@ function Evals({ onMsg }: { onMsg: (m: string) => void }) {
     <section className="card-box">
       <div className="at-head"><h3>Banc d'essai IA</h3>
         <button className="btn btn-line btn-small" disabled={!!e?.running} onClick={start}>{e?.running ? "En cours…" : "Lancer"}</button></div>
-      <p className="hint">{e?.cases ?? 10} demandes de référence (cloisons, plafonds, unités, faces, ouvertures). Le code vérifie que l'IA extrait les bonnes
-        dimensions sans rien inventer. À relancer après chaque changement de l'IA. ≈ 10 appels à Claude.</p>
+      <p className="hint">{e?.cases ?? 16} demandes de référence : métrés (cloisons, plafonds, unités, faces, ouvertures), e-mails, PDF et Excel, agenda.
+        Le code vérifie que l'IA choisit le bon outil, reprend les bons chiffres et n'invente rien : ni dimension, ni adresse, ni action « faite ».
+        Mêmes consignes et même modèle que la vraie conversation. À relancer après chaque changement de l'IA. ≈ {e?.cases ?? 16} appels à Claude.</p>
       {last && (
         <>
           <p className={last.passed === last.total ? "hint ic" : "error"}><b>{last.passed}/{last.total} réussis · {String(last.score).replace(".", ",")} %</b>
