@@ -204,3 +204,83 @@ def test_brouillon_de_nouvel_email(client):
         assert db.get(EmailDraft, out["draft_id"]).to_addr == "" and "compléter" in out["a"]
         assert "invalide" in s("save_email_draft", {"to": "pas-une-adresse", "subject": "x", "body": "y"})["error"]
         assert "introuvable" in s("save_email_draft", {"subject": "x", "body": "y", "document_number": "UC-0000"})["error"]
+
+
+# ---------- hallucinations d'action ----------
+
+def _scripted_chat(monkeypatch, replies):
+    from app import orchestrator
+    calls = []
+
+    def fake(msgs, **kw):
+        calls.append(msgs)
+        text = replies[min(len(calls), len(replies)) - 1]
+
+        class R:
+            provider, model, available, error, raw = "claude", "m", True, "", None
+        R.text = text
+        return R()
+    monkeypatch.setattr(orchestrator, "chat_complete", fake)
+    monkeypatch.setattr(orchestrator, "provider_chain", lambda deep=False: [type("P", (), {"id": "claude"})()])
+    return calls
+
+
+def test_une_action_affirmee_sans_outil_est_corrigee(client, monkeypatch):
+    calls = _scripted_chat(monkeypatch, ["J'ai créé le devis UC-2026-9999 pour M. Diop.",
+                                         "Je n'ai pas encore créé le devis : donne-moi le lieu du chantier."])
+    r = client.post("/api/chat", json={"message": "Fais le devis de M. Diop"}).json()["message"]
+    assert len(calls) == 2 and "Contrôle automatique" in calls[1][-1]["content"]
+    assert r["content"].startswith("Je n'ai pas encore créé le devis") and "⚠️" not in r["content"]
+
+
+def test_si_l_ia_persiste_le_patron_est_averti(client, monkeypatch):
+    _scripted_chat(monkeypatch, ["C'est noté : rendez-vous jeudi 10 h avec Awa."])
+    r = client.post("/api/chat", json={"message": "Rendez-vous jeudi 10 h avec Awa"}).json()["message"]
+    assert "⚠️ Vérification" in r["content"] and "le rendez-vous" in r["content"]
+
+
+def test_une_reponse_sans_affirmation_n_est_pas_retouchee(client, monkeypatch):
+    calls = _scripted_chat(monkeypatch, ["Il te faut 12 plaques. Veux-tu que je crée le devis ?"])
+    client.post("/api/chat", json={"message": "Combien de plaques pour 5 x 2,5 m deux faces ?"})
+    assert len(calls) == 1
+
+
+# ---------- fichiers et pièces jointes ----------
+
+def test_l_ia_cree_un_pdf_et_un_excel(client):
+    from pathlib import Path
+    from openpyxl import load_workbook
+    from app import agent
+    from app.database import SessionLocal
+    from app.models import Artifact
+    with SessionLocal() as db:
+        s = agent.AgentSession(db, None, {})
+        out = s("make_pdf", {"title": "Attestation de travaux", "content": "# Objet\nTravaux réalisés.\n- Plafond\n- **Cloisons**"})
+        art = db.get(Artifact, out["artifact_id"])
+        assert Path(art.path).read_bytes()[:5] == b"%PDF-" and art.filename == "Attestation_de_travaux.pdf" and s.files[-1]["id"] == art.id
+        out = s("make_spreadsheet", {"title": "Budget", "sheets": [{"name": "Mois", "rows": [["Poste", "Montant"], ["Ciment", 50000], ["Total", "=SUM(B2:B2)"]]}]})
+        ws = load_workbook(db.get(Artifact, out["artifact_id"]).path)["Mois"]
+        assert ws["B2"].value == 50000 and ws["B3"].value == "=SUM(B2:B2)" and ws["A1"].font.bold
+        assert "error" in s("make_spreadsheet", {"title": "Vide", "sheets": []})
+
+
+def test_brouillon_avec_pieces_jointes_puis_envoi_apres_validation(client, monkeypatch):
+    from app import agent, mailbox
+    from app.database import SessionLocal
+    sent = []
+    monkeypatch.setattr(mailbox, "smtp_configured", lambda: True)
+    monkeypatch.setattr(mailbox, "send", lambda to, subject, body, files=None: sent.append((to, subject, files)))
+    with SessionLocal() as db:
+        s = agent.AgentSession(db, None, {"owner_message": "envoie le rapport à la banque"})
+        pdf = s("make_pdf", {"title": "Rapport", "content": "Texte du rapport."})["artifact_id"]
+        out = s("save_email_draft", {"to": "conseiller@banque.sn", "subject": "Rapport", "body": "Bonjour, ci-joint.", "attachments": [pdf]})
+        assert out["pieces_jointes"] == ["Rapport.pdf"]
+        assert "introuvable" in s("save_email_draft", {"subject": "x", "body": "y", "attachments": ["pas-un-fichier"]})["error"]
+    did = out["draft_id"]
+    draft = next(d for d in client.get("/api/emails").json() if d["id"] == did)
+    assert [a["filename"] for a in draft["attachments"]] == ["Rapport.pdf"]
+    assert client.post(f"/api/mail/drafts/{did}/send").status_code == 409          # rien ne part sans l'approbation du patron
+    assert client.post(f"/api/mail/drafts/{did}/approve").status_code == 200
+    assert client.post(f"/api/mail/drafts/{did}/send").status_code == 200
+    to, subject, files = sent[-1]
+    assert to == "conseiller@banque.sn" and files[0][0] == "Rapport.pdf" and files[0][2][:5] == b"%PDF-"

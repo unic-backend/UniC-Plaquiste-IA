@@ -559,6 +559,7 @@ class EmailDraft(Base):
     status: Mapped[str] = mapped_column(String(32), default="draft")
     related_type: Mapped[str] = mapped_column(String(64), default="")
     related_id: Mapped[str] = mapped_column(String(36), default="")
+    attachments_json: Mapped[str] = mapped_column(Text, default="[]")   # identifiants d'artefacts (PDF, Excel) joints à l'envoi
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

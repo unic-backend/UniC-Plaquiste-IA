@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import google_business as gbp, mailbox
 from app.breaker import BREAKER, CircuitOpen
-from app.models import EmailDraft, InboxMessage, SocialPost
+from app.models import Artifact, EmailDraft, InboxMessage, SocialPost
 from app.social import PLATFORMS, check_post
 
 logger = logging.getLogger("unic.connectors")
@@ -71,13 +71,42 @@ def search_inbox(db: Session, query: str, limit: int = 10) -> list[InboxMessage]
     return out
 
 
-def save_email_reply_draft(db: Session, mail: InboxMessage, body: str, subject: str = "", user_id: str | None = None) -> EmailDraft:
+MAX_ATTACH_BYTES = 20 * 1024 * 1024   # au-delà, la plupart des messageries refusent le courrier
+
+
+def checked_attachments(db: Session, artifact_ids: list | None) -> list[str]:
+    """Pièces jointes d'un brouillon : seulement des fichiers qui existent vraiment (aucun identifiant inventé), 20 Mo au total."""
+    ids = list(dict.fromkeys(str(i).strip() for i in (artifact_ids or []) if str(i).strip()))
+    total = 0
+    for i in ids:
+        art = db.get(Artifact, i)
+        if art is None:
+            raise ConnectorError(f"Pièce jointe « {i} » introuvable : crée d'abord le fichier (make_pdf, make_spreadsheet, document).", 404)
+        total += art.size or 0
+    if total > MAX_ATTACH_BYTES:
+        raise ConnectorError("Pièces jointes trop lourdes (20 Mo au total au plus).", 400)
+    return ids
+
+
+def attachments_of(db: Session, d: EmailDraft) -> list[Artifact]:
+    import json
+    try:
+        ids = json.loads(d.attachments_json or "[]")
+    except ValueError:
+        ids = []
+    return [a for a in (db.get(Artifact, i) for i in ids) if a is not None]
+
+
+def save_email_reply_draft(db: Session, mail: InboxMessage, body: str, subject: str = "", user_id: str | None = None,
+                           attachments: list | None = None) -> EmailDraft:
     body = (body or "").strip()
     if not body:
         raise ConnectorError("Réponse vide.", 400)
     subj = (subject or "").strip() or (mail.subject if mail.subject.lower().startswith("re:") else f"Re: {mail.subject}")
+    import json
     d = EmailDraft(to_addr=mail.from_addr, subject=subj, body=body, status="draft",
-                   related_type="inbox", related_id=mail.id, created_by=user_id)
+                   related_type="inbox", related_id=mail.id, created_by=user_id,
+                   attachments_json=json.dumps(checked_attachments(db, attachments)))
     db.add(d)
     db.flush()
     mail.reply_draft_id = d.id
@@ -86,7 +115,7 @@ def save_email_reply_draft(db: Session, mail: InboxMessage, body: str, subject: 
 
 
 def save_email_draft(db: Session, to_addr: str, subject: str, body: str, user_id: str | None = None,
-                     related_type: str = "", related_id: str = "") -> EmailDraft:
+                     related_type: str = "", related_id: str = "", attachments: list | None = None) -> EmailDraft:
     """Nouveau courrier (pas une réponse) : à la banque, à un fournisseur, à un proche… BROUILLON seulement :
     le patron le relit, l'approuve puis l'envoie lui-même (page Réseaux & mail)."""
     body, to_addr = (body or "").strip(), (to_addr or "").strip()
@@ -94,8 +123,10 @@ def save_email_draft(db: Session, to_addr: str, subject: str, body: str, user_id
         raise ConnectorError("Courrier vide.", 400)
     if to_addr and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_addr):
         raise ConnectorError(f"Adresse e-mail invalide : « {to_addr} ». Laisse vide si tu ne la connais pas.", 400)
+    import json
     d = EmailDraft(to_addr=to_addr, subject=(subject or "").strip()[:500] or "(sans objet)", body=body, status="draft",
-                   related_type=related_type, related_id=related_id, created_by=user_id)
+                   related_type=related_type, related_id=related_id, created_by=user_id,
+                   attachments_json=json.dumps(checked_attachments(db, attachments)))
     db.add(d)
     db.commit()
     return d

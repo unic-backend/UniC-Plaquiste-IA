@@ -184,13 +184,17 @@ def trash(message_ids: list[str]) -> dict:
     return {"moved": moved, "missing": missing}
 
 
-def send(to_addr: str, subject: str, body: str) -> None:
+def send(to_addr: str, subject: str, body: str, attachments: list[tuple[str, str, bytes]] | None = None) -> None:
+    """attachments : [(nom du fichier, type MIME, contenu)] — PDF, Excel… joints tels quels."""
     host, port, user, pwd, sender = _smtp()
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to_addr
     msg["Subject"] = subject
     msg.set_content(body)
+    for filename, mime, data in attachments or []:
+        main, _, sub = (mime or "application/octet-stream").partition("/")
+        msg.add_attachment(data, maintype=main, subtype=sub or "octet-stream", filename=filename)
     with smtplib.SMTP(host, port, timeout=30) as smtp:
         smtp.starttls()
         smtp.login(user, pwd)

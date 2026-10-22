@@ -1,7 +1,7 @@
 import * as I from "./Icons";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, net, type Post } from "./api";
+import { api, downloadAuth, net, type Post } from "./api";
 
 /* ---------- Barre de page avec bouton retour (toutes les pages hors conversation) ---------- */
 
@@ -99,6 +99,8 @@ function EmailDraftCard({ id }: { id: string }) {
   const [d, setD] = useState<any>(null);
   const [canSend, setCanSend] = useState(false);
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [edit, setEdit] = useState<{ to_addr: string; subject: string; body: string } | null>(null);
   const load = () => api.emails().then((rows) => setD(rows.find((r: any) => r.id === id) ?? null));
   useEffect(() => {
     load();
@@ -106,29 +108,68 @@ function EmailDraftCard({ id }: { id: string }) {
   }, [id]);
   if (!d) return null;
   const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
     try {
       await fn();
       setMsg(ok);
-      load();
+      await load();
     } catch (e: any) {
       setMsg(e.message);
+      await load();
+    } finally {
+      setBusy(false);
     }
   };
+  const save = () => act(async () => { if (edit) await net.editDraft(id, edit); setEdit(null); }, "Modifié.");
+  const removeFile = (fid: string) => act(() => net.editDraft(id, { attachments: d.attachments.filter((a: any) => a.id !== fid).map((a: any) => a.id) }), "Pièce jointe retirée.");
+  const noAddress = !/@/.test(d.to || "");
   return (
     <div className="draft-card">
-      <div className="draft-card-head"><b>✉️ Brouillon de réponse</b><span className="badge">{d.status}</span></div>
-      <div className="hint">À : {d.to} · {d.subject}</div>
-      <p className="post-body">{d.body}</p>
+      <div className="draft-card-head"><b>✉️ {d.reply ? "Brouillon de réponse" : "Brouillon d'e-mail"}</b><span className="badge">{d.status}</span></div>
+      {edit ? (
+        <div className="form-grid">
+          <label>À<input type="email" value={edit.to_addr} placeholder="adresse@exemple.com" onChange={(e) => setEdit({ ...edit, to_addr: e.target.value })} /></label>
+          <label>Objet<input value={edit.subject} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} /></label>
+          <label>Texte<textarea rows={8} value={edit.body} onChange={(e) => setEdit({ ...edit, body: e.target.value })} /></label>
+        </div>
+      ) : (
+        <>
+          <div className="hint">À : {d.to || <b>adresse à compléter</b>} · {d.subject}</div>
+          <p className="post-body">{d.body}</p>
+        </>
+      )}
+      {d.attachments?.length > 0 && (
+        <div className="hint">
+          📎 {d.attachments.map((a: any) => (
+            <span key={a.id} style={{ marginRight: 10 }}>
+              <button className="btn btn-ghost btn-small" onClick={() => downloadAuth(`/api/artifacts/${a.id}/download`, a.filename)}>{a.filename}</button>
+              {d.status === "draft" && <button className="btn btn-ghost btn-small" aria-label={`Retirer ${a.filename}`} disabled={busy} onClick={() => removeFile(a.id)}>✕</button>}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="toolbar">
-        {d.status === "draft" && <button className="btn btn-copper btn-small" onClick={() => act(() => net.approveDraft(id), "Approuvé.")}>Approuver</button>}
+        {d.status === "draft" && !edit && <button className="btn btn-line btn-small" onClick={() => setEdit({ to_addr: d.to || "", subject: d.subject, body: d.body })}>Modifier</button>}
+        {edit && <button className="btn btn-copper btn-small" disabled={busy} onClick={save}>Enregistrer</button>}
+        {edit && <button className="btn btn-ghost btn-small" onClick={() => setEdit(null)}>Annuler</button>}
+        {d.status === "draft" && !edit && canSend && (
+          <button className="btn btn-copper btn-small" disabled={busy || noAddress}
+            onClick={() => act(async () => { await net.approveDraft(id); await net.sendDraft(id); }, "E-mail envoyé.")}>
+            {noAddress ? "Ajoute l'adresse pour envoyer" : "Valider et envoyer"}
+          </button>
+        )}
+        {d.status === "draft" && !edit && !canSend && (
+          <button className="btn btn-copper btn-small" disabled={busy || noAddress} onClick={() => act(() => net.approveDraft(id), "Approuvé.")}>Approuver</button>
+        )}
         {d.status === "approved" && (
-          <button className="btn btn-copper btn-small" disabled={!canSend} onClick={() => act(() => net.sendDraft(id), "E-mail envoyé.")}>
+          <button className="btn btn-copper btn-small" disabled={!canSend || busy} onClick={() => act(() => net.sendDraft(id), "E-mail envoyé.")}>
             {canSend ? "Envoyer" : "Envoi NON DISPONIBLE (SMTP)"}
           </button>
         )}
         {d.status === "sent" && <span className="badge">Envoyé</span>}
+        {!edit && <button className="btn btn-ghost btn-small" onClick={() => navigator.clipboard?.writeText(d.body)}>Copier</button>}
       </div>
-      {msg && <div className="hint">{msg}</div>}
+      {msg && <div className="hint" role="status">{msg}</div>}
     </div>
   );
 }

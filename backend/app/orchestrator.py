@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, learned, memory as mem, metier, pricecheck
-from app import lessons
+from app import claims, lessons
 from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
@@ -39,6 +39,7 @@ from app.models import (
 )
 from app.services import (
     approve_entity,
+    audit,
     company_dict,
     create_delivery_note,
     create_purchase_order,
@@ -1066,6 +1067,21 @@ def handle_turn(
                                            tool_handler=session, effort="low", max_tokens=1200)
                 if ai.provider in ("claude", "vibecode") and ai.raw:
                     usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider)   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
+                phantom = claims.unbacked(ai.text, session.succeeded) if (session is not None and ai.available and ai.text) else []
+                if phantom:
+                    # « j'ai créé le devis » sans create_quote réussi : un tour de correction (faire vraiment, ou dire la vérité)
+                    audit(db, user.id, "ai_phantom_claim", "conversation", conv.id, ", ".join(phantom)[:250])
+                    fix = msgs + [{"role": "assistant", "content": ai.text}, {"role": "user", "content": claims.correction_prompt(phantom)}]
+                    with live_stream():
+                        again = chat_complete(fix, deep=deep, web=False, tools=agent.TOOLS, tool_handler=session,
+                                              **{k: v for k, v in voice_kw.items() if k != "model"})
+                    if again.available and again.text and again.error != "refusal":
+                        if again.provider in ("claude", "vibecode") and again.raw:
+                            usage.record(db, again.raw.get("usage"), again.model, provider=again.provider)
+                        ai = again
+                    still = claims.unbacked(ai.text, session.succeeded)
+                    if still:
+                        ai.text += claims.warning(still)
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
                     if session.cards or session.documents or session.images or session.files:
