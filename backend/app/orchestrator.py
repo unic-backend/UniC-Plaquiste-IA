@@ -53,7 +53,8 @@ VOICE_RULES = (
     "\n\nMODE VOIX : le patron te PARLE et t'écoute, il ne lit pas. Ton nom est UniC. Réponds comme à l'oral : 1 à 3 phrases courtes et "
     "naturelles, en français simple, sans Markdown, sans tableau, sans liste, sans emoji, sans lien. "
     "Le patron parle un français approximatif et sa prononciation est déformée par son accent : la reconnaissance vocale écorche les mots. "
-    "Comprends l'INTENTION la plus probable grâce au contexte du métier (plaquisterie) et aux clients connus, sans lui faire répéter pour une "
+    "Comprends l'INTENTION la plus probable grâce au contexte (il te parle de TOUT : son entreprise, ses clients, sa famille, l'actualité, "
+    "la santé, l'argent, les idées… pas seulement du placo), sans lui faire répéter pour une "
     "faute de mot ou une syllabe changée ; ne corrige jamais sa langue. Le téléphone sait APPELER, envoyer des SMS et lire les notifications : "
     "si le patron veut appeler ou écrire à quelqu'un et que tu n'as pas le nom, demande seulement « Qui veux-tu appeler ? » ; ne dis JAMAIS que tu ne peux "
     "pas téléphoner et ne propose ni rendez-vous ni script à la place. S'il reste un vrai doute (nom d'un client, montant, quantité), pose UNE "
@@ -71,13 +72,18 @@ LOCKED_RULES = (
 # Tâches de bureau (documents, calculs, chantiers) : le modèle courant, plus sûr ; tout le reste de la conversation vocale : le plus rapide.
 VOICE_HEAVY_RE = re.compile(
     r"devis|facture|bon de|calcul|m[ée]tr[ée]|plan\b|plaque|cloison|plafond|prix|surface|fourrure|montant|rail|peinture|enduit|chantier|rapport|bilan|impay|accept|avance|acompte|encaiss|reliquat|solde|re[çc]u|"
-    r"cr[ée]e|corrige|modifie|retire|ajoute|mail|courrier|avis|google|publi|r[ée]seaux", re.I)
+    r"cr[ée]e|corrige|modifie|retire|ajoute|mail|courrier|avis|google|publi|r[ée]seaux|"
+    r"contrat|lettre|r[ée]dige|juridi|imp[ôo]t|banque|m[ée]dic|sant[ée]|analyse", re.I)
 
 # Sujets à enjeu (argent, quantités, documents engageants, plans) : le modèle le plus fort, effort élevé, si le réglage le permet.
 STAKES_RE = re.compile(
     r"devis|factur|bons? de (?:commande|livraison)|m[ée]tr[ée]|calcul|cloison|plafond|plaques?\b|montants?\b|rails?\b|fourrure|"
     r"surface|\bm2\b|m²|prix|tarif|marge|acompte|avance|solde|encaiss|paiement|versement|reliquat|impay|\bplans?\b|chantier|budget|"
-    r"combien|rentab|bilan|tr[ée]sorerie", re.I)
+    r"combien|rentab|bilan|tr[ée]sorerie|"
+    # au-delà du chantier : ce qui engage le patron dans tous les domaines
+    r"contrat|juridi|\bloi\b|l[ée]gal|tribunal|litige|avocat|imp[ôo]ts?|fiscal|banque|pr[êe]t\b|cr[ée]dit|investi|assurance|"
+    r"salaire|embauch|recrut|licenci|stratégi|business plan|plan d'affaires|sant[ée]|m[ée]dic|sympt[ôo]m|traitement|analyse|compar|d[ée]cision",
+    re.I)
 
 
 def wants_deep(db: Session, text: str, *, asked: bool, voice: bool, attached: bool, focus: bool) -> bool:
@@ -381,7 +387,8 @@ def _intent(text: str, state: dict) -> str:
 
 
 def _help_text() -> str:
-    return """Je suis **UniC AI**, l'employé digital d'UniC Plaquiste. La conversation suffit.
+    return """Je suis **UniC AI**, l'assistant universel du patron d'UniC Plaquiste : entreprise, chantiers, mais aussi
+courrier, rédaction, calculs, idées, langues, questions de tous les jours. La conversation suffit.
 
 Exemples :
 - « Calcule une cloison de 12 m × 2,50 m, deux faces, 2 portes »
@@ -394,6 +401,7 @@ Exemples :
 - « Trouve toutes les portes »
 - « Prépare le rapport de chantier »
 - « Écris l'e-mail au client » (brouillon, sans envoi automatique)
+- « Rédige une lettre à ma banque », « Traduis ce texte en anglais », « Calcule 15 % de 2 500 000 »
 
 Je calcule avec formules visibles. Je n'invente jamais un prix UniC.
 Les connecteurs e-mail / site / réseaux / Google Business sont **NON DISPONIBLES** tant qu'ils ne sont pas configurés."""
@@ -529,7 +537,11 @@ def handle_turn(
     if chain0 and chain0[0].id in ("claude", "vibecode") and intent in (
             "greeting", "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
             "list_customers", "list_suppliers", "list_projects", "list_quotes", "list_invoices",
-            "create_customer", "create_supplier", "create_project", "analyze_doc", "analyze_photo", "search_doc"):
+            "create_customer", "create_supplier", "create_project", "analyze_doc", "analyze_photo", "search_doc",
+            # UniC est universel : « envoie un mail à ma banque », « publie une annonce pour recruter », « rapport de la réunion »
+            # recevaient une réponse toute faite (ou un PDF vide) au lieu du travail demandé
+            "send_email", "draft_email", "connector_na", "site_report") \
+            or chain0 and chain0[0].id in ("claude", "vibecode") and intent == "site_status" and _match_project(db, text) is None:
         intent = "chat"   # avec un moteur IA cloud, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":

@@ -6,6 +6,7 @@ l'envoi et la publication restent des gestes explicites du patron (boutons Appro
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -80,6 +81,22 @@ def save_email_reply_draft(db: Session, mail: InboxMessage, body: str, subject: 
     db.add(d)
     db.flush()
     mail.reply_draft_id = d.id
+    db.commit()
+    return d
+
+
+def save_email_draft(db: Session, to_addr: str, subject: str, body: str, user_id: str | None = None,
+                     related_type: str = "", related_id: str = "") -> EmailDraft:
+    """Nouveau courrier (pas une réponse) : à la banque, à un fournisseur, à un proche… BROUILLON seulement :
+    le patron le relit, l'approuve puis l'envoie lui-même (page Réseaux & mail)."""
+    body, to_addr = (body or "").strip(), (to_addr or "").strip()
+    if not body:
+        raise ConnectorError("Courrier vide.", 400)
+    if to_addr and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", to_addr):
+        raise ConnectorError(f"Adresse e-mail invalide : « {to_addr} ». Laisse vide si tu ne la connais pas.", 400)
+    d = EmailDraft(to_addr=to_addr, subject=(subject or "").strip()[:500] or "(sans objet)", body=body, status="draft",
+                   related_type=related_type, related_id=related_id, created_by=user_id)
+    db.add(d)
     db.commit()
     return d
 
