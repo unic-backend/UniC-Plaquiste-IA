@@ -326,6 +326,8 @@ async def site_chat(request: Request):
     """Chat public du site : réponses bornées, aucune donnée de l'entreprise exposée."""
     from app import sitechat
     from app.database import SessionLocal
+    if int(request.headers.get("content-length") or 0) > 20_000:   # chat public : jamais besoin de plus de quelques lignes
+        return JSONResponse({"detail": "Message trop long"}, status_code=413)
     try:
         body = await request.json()
     except Exception:
