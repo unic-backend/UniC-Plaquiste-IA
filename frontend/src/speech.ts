@@ -1,6 +1,6 @@
 import { apiUrl, getCode, isNative } from "./api";
 import { useEffect, useState } from "react";
-import { SpeechPipeline } from "./sentences";
+import { SpeechPipeline, speakable } from "./sentences";
 import { voiceOut } from "./phone";
 
 /** Lecture à voix haute des réponses. Moteurs : voix du téléphone (gratuit) ou voix ElevenLabs (serveur, voix clonée possible). */
@@ -17,14 +17,7 @@ export function setPref(p: Partial<VoicePref>): VoicePref {
   return n;
 }
 
-/** Texte lisible : sans Markdown, tableaux, liens ni sources (le serveur nettoie aussi, par sécurité). */
-export function speakable(text: string): string {
-  return text.split("\n\n**Sources**")[0]
-    .replace(/```[\s\S]*?```/g, " ").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/https?:\/\/\S+/g, " ")
-    .replace(/^\s*\|.*\|\s*$/gm, " ").replace(/^\s{0,3}#{1,6}\s*/gm, "").replace(/^\s*[-*•]\s+/gm, "")
-    .replace(/[*_`>~]+/g, "").replace(/m²|m2/g, " mètres carrés").replace(/FCFA/g, " francs CFA")
-    .replace(/\s*\n+\s*/g, ". ").replace(/\s{2,}/g, " ").replace(/\.{2,}/g, ".").trim();
-}
+export { speakable } from "./sentences";   // texte à dire : module pur (testé sans navigateur)
 
 /** Dernier problème de lecture à voix haute (voix absente, moteur en erreur) : l'écran vocal l'affiche, au lieu d'un silence inexpliqué. */
 let speechIssue = "";

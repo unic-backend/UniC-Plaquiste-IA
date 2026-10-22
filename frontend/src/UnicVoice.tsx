@@ -7,17 +7,17 @@ import { listenOnce } from "./listen";
 import { audioOutputs, audioRoute, getPhoneWhenLocked, getReadWhenLocked, getVoiceOutput, notifApi, phone, setVoiceOutput, wakeApi, type VoiceOutput } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
 import { createSpeaker, ding, getSpeechIssue, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
-import { HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
+import { END_RE, HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
+import type { SpeechPipeline } from "./sentences";
 
 /** UniC vocal : on lui parle, il répond à voix haute. Rien n'est écrit à l'écran. Dire « stop » ou « merci » termine. */
 type Phase = "idle" | "listening" | "thinking" | "speaking";
-const LABEL: Record<Phase, string> = { idle: "Touche pour parler", listening: "Je t'écoute", thinking: "Je réfléchis…", speaking: "Je parle" };
+const LABEL: Record<Phase, string> = { idle: "Touche pour parler", listening: "Je t'écoute", thinking: "Je réfléchis…", speaking: "Je parle · touche pour me couper" };
 const HEARING = "Je t'entends…";
 const WAITING = "Un instant…";   // le micro n'est pas encore ouvert : on n'affiche « Je t'écoute » qu'au signal sonore
 /** « mode interprète », « active la traduction en anglais » → ouvre l'interprète (la langue citée est préchoisie). */
 const INTERP_RE = /interpr[èe]te|traducteur|mode traduction|(?:active|lance|ouvre|d[ée]marre)\s+(?:la\s+)?traduction/i;
 const INTERP_LANGS: [RegExp, string][] = [[/anglais|english/i, "en"], [/arabe/i, "ar"], [/espagnol/i, "es"], [/portugais/i, "pt"], [/allemand/i, "de"], [/italien/i, "it"], [/turc/i, "tr"], [/chinois/i, "zh"], [/russe/i, "ru"], [/n[ée]erlandais|hollandais/i, "nl"], [/japonais/i, "ja"], [/hindi/i, "hi"]];
-const END_RE = /^(stop|arr[êe]te|merci|c'est bon|c est bon|au revoir|ça suffit|ca suffit|fini|termin[ée])\b/i;
 
 const say = (t: string) => sayRate(t, getVocalRate());   // UniC vocal parle à la vitesse choisie (1,25 par défaut)
 
@@ -37,6 +37,7 @@ export function UnicVoice() {
   const manual = useRef(false);   // arrêt par un toucher : on ne ferme pas
   const interp = useRef("");   // l'interprète a été demandé à voix haute : on y va quand la conversation se termine
   const wake = useRef(!!(window as unknown as { __unicWake?: boolean }).__unicWake);   // ouvert par « Hey UniC »
+  const speaking = useRef<SpeechPipeline | null>(null);   // réponse en cours de lecture : la toucher la coupe et UniC réécoute
 
   const refreshBt = () => { if (isNative) audioOutputs().then((o) => setBt(o.bluetooth || "")); };
   async function switchOut() {
@@ -105,6 +106,7 @@ export function UnicVoice() {
           continue;
         }
         let speaker = createSpeaker();
+        speaking.current = speaker;
         let started = false;
         const ac = new AbortController();
         const stuck = window.setTimeout(() => ac.abort(), 70000);   // le serveur ne répond pas : on le dit au lieu de rester sur « Je réfléchis… » pour toujours
@@ -113,13 +115,13 @@ export function UnicVoice() {
           out = await api.chatStream({ message: heard, conversation_id: cid.current, voice: true, locked }, (ev) => {
             if (!active.current) { speaker.cancel(); return; }
             if (ev.t === "delta") { if (!started) { started = true; setPhase("speaking"); } speaker.push(ev.text || ""); }   // il parle dès la première phrase
-            else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); started = false; }
+            else if (ev.t === "reset") { speaker.cancel(); speaker = createSpeaker(); speaking.current = speaker; started = false; }
           }, ac.signal);
         } finally { window.clearTimeout(stuck); }
         cid.current = out.conversation_id;
         if (!out.streamed) speaker.push(out.message?.content || "");
         setPhase("speaking");
-        await speaker.finish();
+        try { await speaker.finish(); } finally { speaking.current = null; }
         continue;
       } catch (e: any) { reply = e instanceof Stopped ? "Le serveur met trop de temps à répondre. Réessaie dans un instant." : (e?.message || "Je n'arrive pas à joindre le serveur."); setErr(reply); }
       if (!active.current) return;
@@ -133,7 +135,10 @@ export function UnicVoice() {
   };
 
   const begin = () => { setErr(""); failed.current = false; manual.current = false; active.current = true; loop().catch((e) => setErr(e?.message || "Erreur")); };
-  const toggle = () => { if (active.current) { manual.current = true; end(); } else begin(); };
+  const toggle = () => {
+    if (active.current && phase === "speaking" && speaking.current) { speaking.current.cancel(); speaking.current = null; return; }   // couper la parole : UniC se tait et réécoute
+    if (active.current) { manual.current = true; end(); } else begin();
+  };
   const close = () => { end(); if (wake.current) wakeApi.finish().catch(() => {}); else nav(-1); };
 
   useEffect(() => {
