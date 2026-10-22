@@ -187,3 +187,20 @@ def test_dimension_negative_refusee():
 def test_troisieme_valeur_signalee():
     r = calc.calculate_from_text("cloison 3m x 2,5m x 4")
     assert any("Trois valeurs" in m for m in r.missing)
+
+
+def test_couches_en_toutes_lettres():
+    assert calc.calculate_from_text("peinture 40 m2 une couche").inputs["coats"] == 1
+    assert calc.calculate_from_text("peinture 40 m2 trois couches").inputs["coats"] == 3
+    assert calc.calculate_from_text("peinture 40 m2 double couche").inputs["coats"] == 2
+    assert calc.calculate_from_text("peinture 40 m2 3 couches").inputs["coats"] == 3
+
+
+def test_millimetres_convertis_dans_la_phrase():
+    r = calc.calculate_from_text("cloison 3500 mm par 2500 mm double face")
+    assert r.inputs["length_m"] == 3.5 and r.inputs["height_m"] == 2.5
+
+
+def test_plafond_depuis_une_surface_signale_la_forme_supposee():
+    r = calc.calculate_from_text("faux plafond 25 m²")
+    assert "supposée carrée" in r.assumptions[0]
