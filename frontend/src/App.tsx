@@ -1896,6 +1896,11 @@ function CompanyPage() {
             Conditions de paiement
             <textarea value={s.payment_terms || ""} onChange={(e) => setS({ ...s, payment_terms: e.target.value })} />
           </label>
+          <label className="check-row">
+            <input type="checkbox" checked={s.ai_deep_stakes !== false}
+              onChange={(e) => setS({ ...s, ai_deep_stakes: e.target.checked })} />
+            Réflexion approfondie pour les devis, factures, métrés, plans et paiements (plus juste, un peu plus lent et plus cher)
+          </label>
         </div>
         <button
           className="btn btn-copper"

@@ -185,6 +185,21 @@ def live():
         STREAM_CB.reset(tok)
 
 
+def close_tool_budget(send, client, params: dict, resp, rounds: int):
+    """Budget de tours d'outils épuisé alors que l'IA en demande encore : ces derniers appels ne sont PAS exécutés
+    (aucune action au-delà du budget) et l'IA doit conclure en texte — fait, reste à faire — au lieu d'une réponse vide."""
+    if getattr(resp, "stop_reason", "") != "tool_use":
+        return resp
+    note = json.dumps({"error": f"Limite de {rounds} tours d'outils atteinte : appel NON exécuté. Fais le bilan au patron : "
+                       "ce qui est fait, ce qui reste à faire, et propose de continuer."}, ensure_ascii=False)
+    results = [{"type": "tool_result", "tool_use_id": b.id, "content": note, "is_error": True}
+               for b in resp.content if getattr(b, "type", "") == "tool_use"]
+    params["messages"] = params["messages"] + [{"role": "assistant", "content": resp.content},
+                                               {"role": "user", "content": results}]
+    params["tool_choice"] = {"type": "none"}   # « none » est accepté par tous les modèles (contrairement à « any »)
+    return send(client, params)
+
+
 TOOL_LABELS = {
     "get_prices": "Je regarde les prix…", "calculate_materials": "Je calcule les quantités…",
     "create_quote": "Je prépare le devis…", "create_invoice": "Je prépare la facture…",
@@ -263,6 +278,8 @@ class ClaudeAIProvider(AIProvider):
                     kind = getattr(ev, "type", "")
                     if kind == "content_block_start" and getattr(ev.content_block, "type", "") == "server_tool_use":
                         cb({"t": "status", "text": "Je cherche sur Internet…"})
+                    elif kind == "content_block_start" and getattr(ev.content_block, "type", "") == "thinking":
+                        cb({"t": "status", "text": "Je réfléchis…"})
                     elif kind == "content_block_delta" and getattr(ev.delta, "type", "") == "text_delta":
                         cb({"t": "delta", "text": ev.delta.text})
                 return stream.get_final_message()
@@ -319,7 +336,7 @@ class ClaudeAIProvider(AIProvider):
             else:
                 break
             resp = self._send(client, params)
-        return resp
+        return close_tool_budget(self._send, client, params, resp, self.MAX_ROUNDS) if handler is not None else resp
 
     def complete(self, messages: list[dict], **kwargs) -> AIResult:
         model = kwargs.get("model") or settings.anthropic_model
@@ -424,6 +441,8 @@ class VibecodeAIProvider(AIProvider):
                     kind = getattr(ev, "type", "")
                     if kind == "content_block_delta" and getattr(ev.delta, "type", "") == "text_delta":
                         cb({"t": "delta", "text": ev.delta.text})
+                    elif kind == "content_block_start" and getattr(ev.content_block, "type", "") == "thinking":
+                        cb({"t": "status", "text": "Je réfléchis…"})
                 return stream.get_final_message()
 
         cb({"t": "reset"})
@@ -474,7 +493,7 @@ class VibecodeAIProvider(AIProvider):
             else:
                 break
             resp = self._send(client, params)
-        return resp
+        return close_tool_budget(self._send, client, params, resp, self.MAX_ROUNDS) if handler is not None else resp
 
     def complete(self, messages: list[dict], **kwargs) -> AIResult:
         # L'identifiant Vibecode est toujours celui réellement envoyé (Sonnet/Opus/Haiku configurables dans .env).

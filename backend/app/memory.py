@@ -408,6 +408,48 @@ def recall_past(db: Session, query: str, exclude_conversation_id: str | None = N
             + "\n".join(lines))
 
 
+def thread_recall(db: Session, conversation_id: str, query: str, exclude_ids: set[str], budget: int = 2500,
+                  max_lines: int = 7) -> str:
+    """Le fil de CETTE conversation au-delà des derniers échanges envoyés au modèle (exclude_ids).
+
+    Sans lui, une longue conversation (un devis construit en 30 messages) oubliait son début : seuls les derniers messages
+    partaient au modèle, et recall_past exclut volontairement la conversation en cours. On garde, sans appel à l'IA :
+    1. la demande de départ du patron (le cadre du travail) ;
+    2. les passages anciens qui parlent de la question actuelle (BM25) ;
+    3. les trois derniers messages chiffrés du patron (dimensions, prix, quantités : les faits qu'il a posés).
+    """
+    rows = (db.query(Message).filter(Message.conversation_id == conversation_id, Message.role.in_(("user", "assistant")))
+            .order_by(Message.created_at.asc()).all())
+    older = [m for m in rows if m.id not in exclude_ids]
+    if not older:
+        return ""
+    pos = {m.id: i + 1 for i, m in enumerate(rows)}
+    picked: list[str] = []
+    first = next((m for m in older if m.role == "user"), None)
+    if first is not None:
+        picked.append(first.id)
+    ranked = retrieval.bm25(query, [retrieval.Record(m.id, (m.content or "")[:1500]) for m in older])
+    if ranked:
+        top = ranked[0][1]
+        picked += [i for i, sc in ranked if sc >= 0.35 * top and i not in picked][:max_lines]
+    figures = [m.id for m in older if m.role == "user" and re.search(r"\d", m.content or "")][-3:]
+    picked += [i for i in figures if i not in picked]
+    by_id = {m.id: m for m in older}
+    lines, used = [], 0
+    for mid in sorted(set(picked), key=lambda i: pos[i]):
+        m = by_id[mid]
+        who = "Patron" if m.role == "user" else "UniC"
+        line = f"- [message {pos[mid]}] {who} : {' '.join((m.content or '').split())[:320]}"
+        if used + len(line) > budget:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
+        return ""
+    return (f"PLUS TÔT DANS CETTE CONVERSATION ({len(older)} message(s) plus anciens que les derniers échanges ; "
+            "le patron a pu corriger depuis : les messages récents priment) :\n" + "\n".join(lines))
+
+
 # ---------- état mesuré ----------
 
 def _device(path) -> int:
