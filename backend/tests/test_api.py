@@ -3012,9 +3012,11 @@ def test_repair_job_opens_a_pull_request_and_merges_only_when_tests_are_green(cl
         if path.endswith("/pulls") and method == "POST":
             return R(201, {"number": 7, "html_url": "https://github.com/x/y/pull/7"})
         if path.endswith("/pulls/7") and method == "GET":
-            return R(200, {"merged": False, "state": "open", "head": {"sha": "c1"}})
+            return R(200, {"merged": False, "state": "open", "head": {"sha": "c1"}, "draft": True, "node_id": "PR_node7"})
         if "/check-runs" in path:
             return R(200, {"check_runs": state["runs"]})
+        if path == "/graphql":
+            return R(200, {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}})
         return R(200, {})
 
     state = {"runs": [{"name": "backend", "status": "in_progress"}]}
@@ -3043,6 +3045,11 @@ def test_repair_job_opens_a_pull_request_and_merges_only_when_tests_are_green(cl
     assert out["ok"] and any(m == "PUT" and p.endswith("/pulls/7/merge") for m, p, _ in calls)
     put = next(j for m, p, j in calls if m == "PUT" and p.endswith("/pulls/7/merge"))
     assert put["sha"] == "c1"   # le commit exact qui a passé les contrôles
+    opened = next(j for m, p, j in calls if m == "POST" and p.endswith("/pulls"))
+    assert opened["draft"] is True                                    # brouillon : la fusion automatique du dépôt ne la prend jamais
+    order = [p for m, p, _ in calls if p == "/graphql" or (m == "PUT" and p.endswith("/merge"))]
+    assert order == ["/graphql", "/repos/" + order[1].split("/repos/")[1]]   # sortie du brouillon au clic du patron, puis fusion
+    assert next(j for m, p, j in calls if p == "/graphql")["variables"]["id"] == "PR_node7"
     db.expire_all()
     assert job.status == "merged" and db.get(Incident, inc.id).status == "fixed"
     db.close()

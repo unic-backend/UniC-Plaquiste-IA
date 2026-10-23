@@ -341,7 +341,9 @@ def run_job(db: Session, job: RepairJob) -> RepairJob:
         _ok(_gh("POST", f"/repos/{repo}/git/refs", tok, json={"ref": f"refs/heads/{branch}", "sha": commit}), "branche")
         body = (f"{patch.get('summary', '')}\n\n**Origine** : {'incident ' + job.incident_id if job.incident_id else job.request[:400]}\n\n"
                 "Proposé par UniC AI. Les tests tournent sur cette branche ; la fusion se fait seulement au clic du patron.")
-        pr = _ok(_gh("POST", f"/repos/{repo}/pulls", tok, json={"title": title, "head": branch, "base": base, "body": body}), "pull request")
+        # BROUILLON : la fusion automatique du dépôt (automerge.yml) ignore les brouillons ; seul le clic « Fusionner » du patron la publie
+        pr = _ok(_gh("POST", f"/repos/{repo}/pulls", tok, json={"title": title, "head": branch, "base": base, "body": body, "draft": True}),
+                 "pull request")
         job.status, job.summary, job.branch = "proposed", patch.get("summary", "")[:3000], branch
         job.pr_number, job.pr_url = pr.get("number", 0), pr.get("html_url", "")
         job.files = json.dumps(sorted(changed), ensure_ascii=False)
@@ -511,6 +513,18 @@ def to_dict(job: RepairJob) -> dict:
             "incident_id": job.incident_id, "created_at": job.created_at.isoformat() if job.created_at else None}
 
 
+def _ready(tok: str, repo: str, number: int) -> None:
+    """Sort la proposition du mode brouillon (API GraphQL : l'API REST ne le permet pas). Sans effet si elle n'en est pas un."""
+    pr = _ok(_gh("GET", f"/repos/{repo}/pulls/{number}", tok), "pull request")
+    if not pr.get("draft"):
+        return
+    r = _gh("POST", "/graphql", tok, json={"query": "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) "
+                                                     "{ pullRequest { isDraft } } }", "variables": {"id": pr.get("node_id", "")}})
+    data = _ok(r, "sortie du brouillon")
+    if data.get("errors"):
+        raise RepairError("GitHub refuse de sortir la proposition du brouillon : " + str(data["errors"][0].get("message", ""))[:160], 502)
+
+
 def merge(db: Session, job: RepairJob) -> dict:
     """Clic du patron : fusionne SEULEMENT si les tests sont verts, puis lance le redéploiement si un crochet est fourni."""
     if job.status != "proposed":
@@ -519,6 +533,7 @@ def merge(db: Session, job: RepairJob) -> dict:
     if st["state"] != "success":
         raise RepairError("Fusion refusée : les tests ne sont pas verts (" + st.get("detail", st["state"]) + ").", 409)
     tok, repo, _ = _ctx(db)
+    _ready(tok, repo, job.pr_number)   # brouillon → prête, juste avant la fusion (GitHub refuse de fusionner un brouillon)
     # « sha » = le commit exact qui a passé les contrôles : si la proposition a bougé depuis, GitHub refuse (409) au lieu de fusionner du code non testé
     r = _gh("PUT", f"/repos/{repo}/pulls/{job.pr_number}/merge", tok, json={"merge_method": "squash", "sha": st["sha"]})
     if r.status_code == 409:
