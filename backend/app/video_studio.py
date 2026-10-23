@@ -12,6 +12,7 @@ import base64
 import gzip
 import io
 import json
+import math
 import re
 import shutil
 import time
@@ -33,6 +34,10 @@ MAX_SCENES = 5000
 MAX_TOTAL_SECONDS = 43200
 DISPATCH_INPUT_MAX = 65000        # limite de GitHub pour une entrée de workflow ; au-delà on compresse (gz:)
 MAX_ASK_TOKENS = 32000            # longueur de réponse de Claude pour un scénario
+READ_CPS = 22                     # caractères lus par seconde à l'écran (lecture rapide d'un texte court)
+FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.html)
+# durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
+SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8)}
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
@@ -106,6 +111,55 @@ def _txt(v, n: int) -> str:
     return CTRL.sub("", str(v or "")).strip()[:n]
 
 
+def _cut(v, n: int) -> str:
+    """Texte VU à l'écran : coupé à la fin d'un mot avec « … » s'il dépasse (jamais « Plafonds lumin »), retours à la ligne gardés comme espaces."""
+    s = " ".join(re.sub(r"[<>]", "", re.sub(r"[\x00-\x1f\x7f]", " ", str(v or ""))).split())
+    if len(s) <= n:
+        return s
+    head = s[:n - 1]
+    if s[n - 1] != " " and " " in head[n // 2:]:     # coupé au milieu d'un mot : on revient au mot entier précédent
+        head = head[:head.rindex(" ")]
+    return head.rstrip(" ,;:.-–—") + "…"
+
+
+def _stat(v) -> int | float | None:
+    """Chiffre affiché : décimales gardées (2,5 % ne devient pas 2 %), négatif permis, borné ; None si ce n'est pas un nombre."""
+    try:
+        f = round(float(v), 2)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(f):
+        return None
+    f = min(max(f, -10 ** 9), 10 ** 9)
+    return int(f) if f == int(f) else f
+
+
+def _readable(sc: dict) -> float:
+    """Durée minimale d'une scène pour que tout APPARAISSE et se LISE avant le fondu de sortie (rythmes des animations de scenes.html).
+    Une citation de 200 caractères en 3 s disparaissait avant la fin de sa propre animation."""
+    t = sc["type"]
+    if t == "gallery":
+        return round(max(1.6 * len(sc["images"]), (.5 + len(sc.get("caption") or "") / READ_CPS + FADE_OUT) if sc.get("caption") else 0), 1)
+    if t == "title":
+        shown = max(.75 + .07 * max(len(sc["l1"]) - 1, 0), 1 + .04 * max(len(sc["l2"]) - 1, 0) if sc["l2"] else 0, 1.5 if sc["sub"] else 0)
+        n = len(sc["l1"]) + len(sc["l2"]) + len(sc["sub"])
+    elif t == "text":
+        shown, n = 1.15 + .45 * (len(sc["bullets"]) - 1), len(sc["heading"]) + sum(len(b) for b in sc["bullets"])
+    elif t == "stats":
+        shown, n = 2 + .18 * (len(sc["items"]) - 1), sum(len(i["label"]) + 4 for i in sc["items"])
+    elif t == "quote":
+        words = len(sc["text"].split())
+        shown, n = (1.2 + .09 * words) if sc["author"] else (.7 + .09 * words), len(sc["text"]) + len(sc["author"])
+    elif t == "outro":
+        lines = [x for x in sc["lines"] if x]
+        shown, n = .95 + .12 * len(lines), sum(len(x) for x in lines)
+    elif t in ("photo", "ai_image") and sc.get("caption"):
+        shown, n = 1.1, len(sc["caption"])
+    else:
+        return 0.0
+    return round(max(shown + .8, .5 + n / READ_CPS) + FADE_OUT, 1)
+
+
 def _num(v, lo: float, hi: float, dflt: float) -> float:
     try:
         return round(min(hi, max(lo, float(v))), 1)
@@ -160,7 +214,7 @@ def _page_scene(sc: dict) -> dict | None:
         k = str((c or {}).get("key") or "")
         if k in cat["chapters"] and not any(x["key"] == k for x in ch):
             sel, label, secs = cat["chapters"][k]
-            ch.append({"key": k, "selector": sel, "label": _txt(c.get("label"), 24) or label, "seconds": _num(c.get("seconds"), 3, 9, secs)})
+            ch.append({"key": k, "selector": sel, "label": _cut(c.get("label"), 24) or label, "seconds": _num(c.get("seconds"), 3, 9, secs)})
     return {"type": "page", "page": sc.get("page") or "portfolio", "url": cat["url"], "hero_seconds": 4.4, "chapters": ch} if ch else None
 
 
@@ -186,50 +240,52 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                 if t == "ai_clip":
                     out.append({"type": t, "seconds": int(_num(secs, 2, 30, 5)), "prompt": prompt})
                 else:
-                    out.append({"type": t, "seconds": _num(secs, 2.5, 8, 4), "prompt": prompt, "caption": _txt(sc.get("caption"), 60),
+                    out.append({"type": t, "seconds": _num(secs, 2.5, 8, 4), "prompt": prompt, "caption": _cut(sc.get("caption"), 60),
                                 "direction": sc.get("direction") if sc.get("direction") in ("in", "out", "left", "right") else "in"})
             continue
-        if t == "title" and (_txt(sc.get("l1"), 24) or _txt(sc.get("l2"), 24)):
-            out.append({"type": t, "seconds": _num(secs, 2.5, 6, 4), "l1": _txt(sc.get("l1"), 24), "l2": _txt(sc.get("l2"), 24), "sub": _txt(sc.get("sub"), 40)})
-        elif t == "text" and [b for b in (sc.get("bullets") or []) if _txt(b, 70)]:
-            out.append({"type": t, "seconds": _num(secs, 3, 10, 5), "heading": _txt(sc.get("heading"), 40), "bullets": [_txt(b, 70) for b in sc["bullets"] if _txt(b, 70)][:4]})
+        if t == "title" and (_cut(sc.get("l1"), 24) or _cut(sc.get("l2"), 24)):
+            out.append({"type": t, "seconds": _num(secs, 2.5, 6, 4), "l1": _cut(sc.get("l1"), 24), "l2": _cut(sc.get("l2"), 24), "sub": _cut(sc.get("sub"), 40)})
+        elif t == "text" and [b for b in (sc.get("bullets") or []) if _cut(b, 70)]:
+            out.append({"type": t, "seconds": _num(secs, 3, 10, 5), "heading": _cut(sc.get("heading"), 40), "bullets": [_cut(b, 70) for b in sc["bullets"] if _cut(b, 70)][:4]})
         elif t == "photo" and sc.get("image") in ok_imgs:
-            out.append({"type": t, "seconds": _num(secs, 2.5, 8, 4), "image": sc["image"], "caption": _txt(sc.get("caption"), 60), "direction": sc.get("direction") if sc.get("direction") in ("in", "out", "left", "right") else "in"})
+            out.append({"type": t, "seconds": _num(secs, 2.5, 8, 4), "image": sc["image"], "caption": _cut(sc.get("caption"), 60), "direction": sc.get("direction") if sc.get("direction") in ("in", "out", "left", "right") else "in"})
         elif t == "gallery":
             im = [i for i in (sc.get("images") or []) if i in ok_imgs][:6]
             if len(im) >= 2:
-                out.append({"type": t, "seconds": _num(secs, 4, 14, 2.4 * len(im)), "images": im, "caption": _txt(sc.get("caption"), 60)})
+                out.append({"type": t, "seconds": _num(secs, 4, 14, 2.4 * len(im)), "images": im, "caption": _cut(sc.get("caption"), 60)})
         elif t == "stats":
             items = []
             for it in (sc.get("items") or [])[:4]:
-                try:
-                    items.append({"value": int(float((it or {}).get("value"))), "suffix": CTRL.sub("", str((it or {}).get("suffix") or ""))[:6], "label": _txt((it or {}).get("label"), 28)})
-                except (TypeError, ValueError, AttributeError, OverflowError):
-                    continue
+                v = _stat(it.get("value")) if isinstance(it, dict) else None
+                if v is not None:
+                    items.append({"value": v, "suffix": CTRL.sub("", str(it.get("suffix") or ""))[:6], "label": _cut(it.get("label"), 28)})
             ks = [k for k in (sc.get("facts") or []) if k in FACT_STATS]
             items += [{"value": FACT_STATS[k][0], "suffix": FACT_STATS[k][1], "label": FACT_STATS[k][2]} for k in ks]
             if len(items) >= 2:
                 out.append({"type": t, "seconds": _num(secs, 3, 9, 5), "items": items[:4]})
-        elif t == "quote" and (sc.get("quote") in QUOTES or _txt(sc.get("text"), 220)):
+        elif t == "quote" and (sc.get("quote") in QUOTES or _cut(sc.get("text"), 220)):
             if sc.get("quote") in QUOTES:
                 q = QUOTES[sc["quote"]]
                 out.append({"type": t, "seconds": _num(secs, 3, 10, 6), "quote": sc["quote"], "text": q[0], "author": q[1]})
             else:
-                out.append({"type": t, "seconds": _num(secs, 3, 10, 6), "text": _txt(sc.get("text"), 220), "author": _txt(sc.get("author"), 40)})
+                out.append({"type": t, "seconds": _num(secs, 3, 10, 6), "text": _cut(sc.get("text"), 220), "author": _cut(sc.get("author"), 40)})
         elif t == "page":
             p = _page_scene(sc)
             if p:
                 out.append(p)
         elif t == "outro":
             if sc.get("brand") is True:      # carte de l'entreprise : faits du code, jamais écrits par l'IA
-                lines = [*FACTS["name"], FACTS["services"], _txt(sc.get("cta"), 40) or FACTS["cta"], FACTS["phone"], FACTS["site"]]
+                lines = [*FACTS["name"], FACTS["services"], _cut(sc.get("cta"), 40) or FACTS["cta"], FACTS["phone"], FACTS["site"]]
             else:
-                lines = [_txt(x, 60) for x in (sc.get("lines") or [])][:6]
+                lines = [_cut(x, 60) for x in (sc.get("lines") or [])][:6]
                 if not any(lines):
-                    lines = [_txt(sc.get("cta"), 40) or "Merci"]
+                    lines = [_cut(sc.get("cta"), 40) or "Merci"]
             out.append({"type": t, "seconds": _num(secs, 3, 8, 5), "lines": lines, "brand": sc.get("brand") is True})
     if not out:
         raise ValueError("aucune scène valide")
+    for sc in out:     # le temps de tout lire avant le fondu, dans la limite du type de scène
+        if sc["type"] in SECONDS:
+            sc["seconds"] = round(min(SECONDS[sc["type"]][1], max(sc["seconds"], _readable(sc))), 1)
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
         raise ValueError(f"vidéo trop longue (garde-fou technique : {MAX_TOTAL_SECONDS // 3600} heures au maximum)")
     return {"format": fmt if fmt in FORMATS else "vertical", "theme": theme if theme in THEMES else "unic", "scenes": out}

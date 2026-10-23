@@ -10,8 +10,26 @@ if (![24, 30, 60].includes(FPS)) throw new Error('VIDEO_FPS doit être 24, 30 ou
 const b = await chromium.launch({ args: ["--font-render-hinting=none", "--disable-lcd-text"] });
 const p = await (await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3 })).newPage();
 if (process.env.VIDEO_PRELOAD) await (await import(process.env.VIDEO_PRELOAD)).default(p);
-await p.goto("file://" + new URL("./scenes.html", import.meta.url).pathname);
+const TRIES = 4, pause = ms => new Promise(r => setTimeout(r, ms));
+// Polices vérifiées avant la première image : sans elles, ce tronçon sortirait dans une autre police que les autres (vidéo disparate).
+for (let i = 1; ; i++) {
+  if (i === 1) await p.goto("file://" + new URL("./scenes.html", import.meta.url).pathname); else await p.reload();
+  const miss = await p.evaluate(() => window.fontsOk());
+  if (!miss.length) break;
+  if (i >= TRIES) throw new Error(`polices introuvables après ${i} essais (réseau) : ${miss.join(", ")}`);
+  await pause(2000 * i);
+}
 await p.evaluate(t => { document.documentElement.dataset.theme = t; }, PLAN.theme || "unic");
+// Images d'une scène : réessayées, puis erreur claire (une photo manquante donnait une scène vide, sans le dire).
+const settle = async () => {
+  for (let i = 1; ; i++) {
+    const bad = await p.evaluate(() => window.ready());
+    if (!bad.length) return;
+    if (i >= TRIES) throw new Error(`image injoignable après ${i} essais : ${String(bad[0]).slice(0, 120)}`);
+    await pause(2000 * i);
+    await p.evaluate(() => window.reloadImages());
+  }
+};
 let n = 0, blk = 0, mode = "";
 const setMode = async m => {   // "html" ou "pill" : on ne bascule que si nécessaire
   if (mode === m) return;
@@ -30,7 +48,7 @@ for (const seg of PLAN.segments) {
     const end = Math.min(seg.frames, start + BLOCK);
     if (seg.kind === "html") {
       await setMode("html");
-      if (!ready) { await p.evaluate(sc => window.setup(sc), seg.scene); await p.evaluate(() => window.ready()); ready = true; }
+      if (!ready) { await p.evaluate(sc => window.setup(sc), seg.scene); await settle(); ready = true; }
       for (let f = start; f < end; f++) {
         await p.evaluate(a => window.draw(a[0], a[1]), [f / FPS, seg.frames / FPS]);
         fs.writeFileSync(`${seg.out}/${String(f).padStart(5, "0")}.jpg`, await p.screenshot({ type: "jpeg", quality: 95 })); n++;
