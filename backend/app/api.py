@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
@@ -546,13 +547,17 @@ async def upload_file(
     user: User = Depends(get_current_user),
 ):
     data = await read_upload(file, settings.max_upload_mb)
-    try:
-        rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
-    except UploadRejected as exc:
-        raise HTTPException(415, str(exc))
-    info = process_file(rec, db)
-    audit(db, user.id, "upload", "file", rec.id, rec.filename)
-    db.commit()
+
+    def work(data: bytes):   # lecture du PDF, OCR (jusqu'à une minute) : hors de la boucle, l'appli reste fluide pendant ce temps
+        try:
+            rec = save_upload(data, file.filename or "fichier", file.content_type or "", user.id, project_id, db)
+        except UploadRejected as exc:
+            raise HTTPException(415, str(exc))
+        info = process_file(rec, db)
+        audit(db, user.id, "upload", "file", rec.id, rec.filename)
+        db.commit()
+        return rec, info
+    rec, info = await run_in_threadpool(work, data)
     del data
     release_memory()
     return {
@@ -2002,7 +2007,7 @@ async def backups_restore(file: UploadFile = File(...), user: User = Depends(req
     from app import backup
     data = await read_upload(file, backup.MAX_RESTORE_MB, "Sauvegarde")
     try:
-        out = backup.restore(data)
+        out = await run_in_threadpool(backup.restore, data)   # copie de la base : hors de la boucle
     except backup.BackupError as exc:
         raise HTTPException(400, str(exc))
     finally:
