@@ -32,6 +32,19 @@ def _secs(v, lo: float, hi: float, dflt: float) -> float:
         return dflt
 
 
+def stat_value(v) -> int | float | None:
+    """Chiffre d'une scène « chiffres » : décimales gardées (2,5 % reste 2,5), négatif permis (−15 %), borné ; None si ce n'est pas un nombre."""
+    import math
+    try:
+        f = round(float(v), 2)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(f):
+        return None
+    f = min(max(f, -10 ** 9), 10 ** 9)
+    return int(f) if f == int(f) else f
+
+
 def _img(v) -> str:
     n = str(v or "")
     if not IMG_RE.match(n) or ".." in n:
@@ -90,11 +103,10 @@ def _scene(s: dict) -> dict:
     if t == "stats":
         items = []
         for it in (s.get("items") or [])[:4]:
-            try:
-                v = int(it.get("value"))
-            except (TypeError, ValueError, AttributeError):
+            v = stat_value(it.get("value")) if isinstance(it, dict) else None
+            if v is None:
                 continue
-            items.append({"value": min(max(v, 0), 10 ** 9), "suffix": CTRL.sub("", str(it.get("suffix") or ""))[:6], "label": _txt(it.get("label"), 28)})
+            items.append({"value": v, "suffix": CTRL.sub("", str(it.get("suffix") or ""))[:6], "label": _txt(it.get("label"), 28)})
         if len(items) < 2:
             raise ValueError("chiffres : au moins 2")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 9, 5), "items": items}

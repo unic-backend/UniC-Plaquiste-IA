@@ -202,3 +202,48 @@ def test_routes_protegees(monkeypatch):
         assert c.get("/api/website/video/ai/status").status_code == 401
         r = c.post("/api/website/video/plan", json={"brief": ""}, headers={"x-access-code": "s3cret-code"})
         assert r.status_code == 200 and r.json()["spec"]["scenes"]
+
+
+def _engine(name="video_spec_rendu"):
+    import importlib.util, pathlib
+    m = importlib.util.spec_from_file_location(name, pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py")
+    eng = importlib.util.module_from_spec(m)
+    m.loader.exec_module(eng)
+    return eng
+
+
+def test_chiffres_exacts_du_scenario_au_moteur():
+    """2,5 % restait « 2 % » (entier forcé) et −15 % devenait 0 : un chiffre faux à l'écran. Décimales et négatifs passent jusqu'au moteur."""
+    spec = vs.build_spec("vertical", [{"type": "stats", "items": [
+        {"value": 2.5, "suffix": " %", "label": "Croissance"}, {"value": "3900000", "label": "Habitants"},
+        {"value": -15, "suffix": " %", "label": "Baisse"}, {"value": float("nan"), "label": "x"}, {"value": "abc", "label": "y"}]}], NAMES)
+    items = spec["scenes"][0]["items"]
+    assert [i["value"] for i in items] == [2.5, 3900000, -15]
+    assert isinstance(items[1]["value"], int)                                  # un entier reste un entier (« 3 900 000 », pas « 3 900 000,0 »)
+    assert [i["value"] for i in _engine().clean(spec)["scenes"][0]["items"]] == [2.5, 3900000, -15]
+
+
+def test_textes_coupes_a_la_fin_d_un_mot():
+    assert vs._cut("Un plafond lumineux posé en trois jours par l'équipe de Dakar à Ouakam", 40) == "Un plafond lumineux posé en trois jours…"
+    assert vs._cut("Ligne une\nligne deux", 60) == "Ligne une ligne deux"                       # un retour à la ligne ne colle plus deux mots
+    assert vs._cut("Anticonstitutionnellement", 10) == "Anticonst…"                              # un seul mot trop long : coupé quand même
+    assert vs._cut("<b>gras</b>", 60) == "bgras/b" and vs._cut(None, 10) == ""
+    spec = vs.build_spec("vertical", [{"type": "text", "heading": "Titre", "bullets": ["mot " * 30]}], NAMES)
+    assert spec["scenes"][0]["bullets"][0].endswith("…") and len(spec["scenes"][0]["bullets"][0]) <= 70
+
+
+def test_le_temps_de_lire_chaque_scene():
+    """Une citation de 200 caractères en 3 s disparaissait avant la fin de sa propre animation : chaque scène dure au moins le temps d'être lue."""
+    long_quote = "Dakar est une ville qui ne dort jamais vraiment : elle respire au rythme de l'océan, des marchés et des cars rapides, et chaque quartier raconte une histoire."
+    spec = vs.build_spec("vertical", [
+        {"type": "quote", "text": long_quote, "author": "Guide", "seconds": 3},
+        {"type": "text", "heading": "Une ville au bord de l'Atlantique", "bullets": ["Fondée en 1857 sur la presqu'île du Cap-Vert, face à l'océan"] * 4, "seconds": 3},
+        {"type": "title", "l1": "DAKAR", "seconds": 2.5},
+        {"type": "stats", "items": [{"value": 1, "label": "a"}, {"value": 2, "label": "b"}], "seconds": 3}], NAMES)
+    quote, text, title, stats = spec["scenes"]
+    assert quote["seconds"] >= (len(long_quote) + 5) / vs.READ_CPS and quote["seconds"] <= 10
+    assert text["seconds"] == 10                                                # dense : le maximum du type, jamais au-delà
+    assert title["seconds"] == 2.5                                              # court : la durée demandée est gardée
+    assert stats["seconds"] >= 2 + .18 + .8                                     # les chiffres ont fini de monter avant le fondu
+    again = vs.build_spec(spec["format"], spec["scenes"], NAMES)                # « Lancer » reconstruit le scénario : mêmes durées
+    assert [s["seconds"] for s in again["scenes"]] == [s["seconds"] for s in spec["scenes"]]

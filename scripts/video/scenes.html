@@ -22,37 +22,41 @@ html,body{margin:0;width:100vw;height:100vh;overflow:hidden;background:var(--roy
 #sweep{position:absolute;inset:0;background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.2) 50%,transparent 65%);mix-blend-mode:screen;pointer-events:none}
 /* texte */
 .tx{align-items:flex-start;text-align:left;max-width:calc(var(--u)*560);width:100%}
-.tx h2{font-size:calc(var(--u)*40);color:var(--gold);margin:0 0 calc(var(--u)*18)}
+.tx h2{font-size:calc(var(--u)*40);color:var(--gold);margin:0 0 calc(var(--u)*18);text-wrap:balance}
 .bl{display:flex;gap:calc(var(--u)*12);align-items:flex-start;font-size:calc(var(--u)*19);font-weight:600;line-height:1.3;margin:calc(var(--u)*9) 0}
+.bl span{text-wrap:pretty}
 .bl i{flex:none;width:calc(var(--u)*10);height:calc(var(--u)*10);margin-top:calc(var(--u)*7);border-radius:50%;background:var(--gold)}
 /* photo */
 .ph{position:absolute;inset:0;overflow:hidden}
 .ph img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;will-change:transform}
-.shade{z-index:50;position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(2,8,58,.82))}
+.shade{z-index:50;position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,color-mix(in srgb,var(--royal) 82%,transparent))}
 .cap{z-index:51;position:absolute;left:calc(var(--u)*18);right:calc(var(--u)*18);bottom:calc(var(--u)*34);display:flex}
-.cap span{display:inline-block;background:rgba(2,8,58,.92);border:1px solid rgba(255,196,0,.55);border-radius:calc(var(--u)*14);padding:calc(var(--u)*10) calc(var(--u)*16);
+.cap span{display:inline-block;max-width:100%;text-wrap:balance;color:var(--fg);background:color-mix(in srgb,var(--royal) 92%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);border-radius:calc(var(--u)*14);padding:calc(var(--u)*10) calc(var(--u)*16);
   font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*19);letter-spacing:.1em;text-transform:uppercase}
 /* chiffres */
 .gr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:calc(var(--u)*14);width:100%;max-width:calc(var(--u)*520)}
 .cd2{min-width:0;background:var(--cardbg);color:var(--cardfg);border-radius:calc(var(--u)*18);padding:calc(var(--u)*18) calc(var(--u)*12);text-align:center}
 .cd2 b{display:block;font-family:Anton,Impact,sans-serif;font-weight:400;font-size:calc(var(--u)*50);line-height:1}
-.cd2 small{display:block;margin-top:calc(var(--u)*6);font-weight:600;font-size:calc(var(--u)*14)}
+.cd2 small{display:block;margin-top:calc(var(--u)*6);font-weight:600;font-size:calc(var(--u)*14);text-wrap:balance}
+.gr .cd2:last-child:nth-child(odd){grid-column:1/-1;justify-self:center;width:calc(50% - var(--u)*7)}
 /* citation */
 .qm{font-family:Anton,Impact,sans-serif;font-size:calc(var(--u)*120);line-height:.7;color:var(--gold)}
-.qt{font-size:calc(var(--u)*23);font-weight:600;line-height:1.35;max-width:calc(var(--u)*520)}
+.qt{font-size:calc(var(--u)*23);font-weight:600;line-height:1.35;max-width:calc(var(--u)*520);text-wrap:balance}
+.fit{display:flex;flex-direction:column;align-items:center;max-width:100%}
 .qa{margin-top:calc(var(--u)*18);font-size:calc(var(--u)*15);letter-spacing:.14em;color:var(--soft)}
 /* fin */
 .e1{font-size:calc(var(--u)*58);color:var(--gold)} .e2{font-size:calc(var(--u)*30)}
+.e1,.e2,.e3,.e5,.e6{text-wrap:balance;max-width:100%}
 .e3{font-size:calc(var(--u)*13);letter-spacing:.16em;color:var(--soft)}
 .e4{font-size:calc(var(--u)*19);letter-spacing:.1em;color:var(--royal);background:var(--gold);padding:calc(var(--u)*12) calc(var(--u)*22);border-radius:999px}
 .e5{font-size:calc(var(--u)*22);font-weight:600;letter-spacing:.04em}
 .e6{font-size:calc(var(--u)*15);font-weight:500;color:var(--soft);opacity:.85}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
-  border-radius:calc(var(--u)*14);background:rgba(2,8,58,.93);border:1px solid rgba(255,196,0,.55);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
+  border-radius:calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 93%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
 #pill .n{font-family:Anton,Impact,sans-serif;font-size:calc(var(--u)*22);color:var(--gold);line-height:1}
 #pill .b{width:2px;height:calc(var(--u)*22);background:var(--gold);opacity:.7}
-#pill .t{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*17);letter-spacing:.16em;color:#fff;text-transform:uppercase;white-space:nowrap}
+#pill .t{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*17);letter-spacing:.16em;color:var(--fg);text-transform:uppercase;white-space:nowrap}
 </style></head><body>
 <div id="root"><div id="bg"></div><div id="sc"></div><div id="sweep"></div></div>
 <div id="pill"><span class="n"></span><span class="b"></span><span class="t"></span></div>
@@ -66,38 +70,60 @@ const letters = (row, txt) => [...txt].map(c => el("span", "", c, row));
 // réduit la police jusqu'à ce que le texte tienne dans la largeur disponible
 const fit = (node, max) => { let f = parseFloat(getComputedStyle(node).fontSize); for (let i = 0; i < 40 && node.scrollWidth > max && f > 8; i++) { f *= .93; node.style.fontSize = f + "px"; } };
 const W = () => innerWidth;
+// grande ligne (titre de fin, bouton) : une seule ligne réduite si elle tient au-dessus de `min` px, sinon deux lignes équilibrées à `min` px
+const fitLine = (node, max, min) => { node.style.whiteSpace = "nowrap"; fit(node, max); if (node.scrollWidth > max || parseFloat(getComputedStyle(node).fontSize) < min) { node.style.fontSize = min + "px"; node.style.whiteSpace = ""; } };
+// typographie française : jamais « : », « ? », « % » ou « » » seul en début de ligne ; un nombre « 3 900 000 » ne se coupe pas
+const fr = v => String(v || "").replace(/\s+([:;!?»%])/g, "\u00a0$1").replace(/«\s+/g, "«\u00a0").replace(/(\d) (?=\d{3}(?!\d))/g, "$1\u00a0");
+// chiffres : décimales gardées (2,5 % ne devient jamais 3 %), séparateur des milliers à partir de 10 000 (une année reste « 1857 »)
+const decs = v => { const m = /\.(\d+)/.exec(String(v)); return m ? Math.min(2, m[1].length) : 0; };
+const num = (v, d) => (v < 0 ? "\u2212" : "") + Math.abs(v).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: Math.abs(v) >= 1e4 });
+// un bloc trop haut pour l'image (texte long en 16:9 ou en carré) est réduit au lieu d'être coupé en haut et en bas
+const fitH = (box, u) => { const avail = innerHeight - 56 * u, h = box.scrollHeight; if (h > avail) box.style.zoom = String(Math.max(.45, avail / h)); };
 let S = null, A = [];   // scène courante et éléments animés
 
 window.setup = sc => {
-  S = sc; A = []; const root = $("#sc"); root.textContent = ""; root.className = "";
+  S = sc; A = []; const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
   const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
   if (T === "title") {
     const r1 = el("div", "row an gold", "", root), r2 = el("div", "row an", "", root); r1.style.fontSize = 76 * u + "px"; r2.style.fontSize = 44 * u + "px";
     A.l1 = letters(r1, sc.l1 || ""); const ln = el("div", "ln", "", root); ln.style.margin = `${14 * u}px 0 ${12 * u}px`; A.l2 = letters(r2, sc.l2 || "");
-    const sub = el("div", "cd soft", sc.sub || "", root); sub.style.cssText = `font-size:${15 * u}px;letter-spacing:.42em;margin-top:${14 * u}px;padding-left:.42em`;
+    const sub = el("div", "cd soft", fr(sc.sub), root); sub.style.cssText = `font-size:${15 * u}px;letter-spacing:.42em;margin-top:${14 * u}px;padding-left:.42em;text-wrap:balance`;
     fit(r1, W() - 48 * u); fit(r2, W() - 48 * u); fit(sub, W() - 48 * u); A.ln = ln; A.sub = sub; if (!sc.l2) { r2.style.display = "none"; ln.style.display = "none"; }
   } else if (T === "text") {
-    root.className = ""; const box = el("div", "tx", "", root); const h = sc.heading ? el("h2", "an", sc.heading, box) : null; A.h = h;
-    A.b = sc.bullets.map(b => { const d = el("div", "bl", "", box); el("i", "", "", d); el("span", "", b, d); return d; });
+    const box = el("div", "tx", "", root); const h = sc.heading ? el("h2", "an", fr(sc.heading), box) : null; A.h = h;
+    A.b = sc.bullets.map(b => { const d = el("div", "bl", "", box); el("i", "", "", d); el("span", "", fr(b), d); return d; }); fitH(box, u);
   } else if (T === "photo" || T === "gallery") {
     root.style.padding = "0"; const srcs = T === "photo" ? [sc.src] : sc.srcs;
     A.p = srcs.map(s => { const w = el("div", "ph", "", root), im = el("img", "", "", w); im.src = s; im.decoding = "sync"; return { w, im }; });
     el("div", "shade", "", root);
-    if (sc.caption) { const c = el("div", "cap", "", root); A.cap = el("span", "", sc.caption, c); }
+    if (sc.caption) { const c = el("div", "cap", "", root); A.cap = el("span", "", fr(sc.caption), c); }
   } else if (T === "stats") {
-    const g = el("div", "gr", "", root); A.c = sc.items.map(it => { const c = el("div", "cd2", "", g), b = el("b", "", "", c); el("small", "", it.label, c); return { c, b, it }; });
-    A.c.forEach(o => { o.b.textContent = o.it.value + (o.it.suffix || ""); o.b.style.whiteSpace = "nowrap"; fit(o.b, o.c.clientWidth - 24 * u); });
-    const fs = Math.min(...A.c.map(o => parseFloat(getComputedStyle(o.b).fontSize))); A.c.forEach(o => { o.b.style.fontSize = fs + "px"; o.b.textContent = ""; });   // même taille pour tous les chiffres   // la police s'adapte au chiffre FINAL (« 80 km/h » ne déborde pas de la carte)
+    const g = el("div", "gr", "", root); A.c = sc.items.map(it => { const c = el("div", "cd2", "", g), b = el("b", "", "", c); el("small", "", fr(it.label), c); return { c, b, it, d: decs(it.value) }; });
+    A.c.forEach(o => { o.b.textContent = num(o.it.value, o.d) + (o.it.suffix || ""); o.b.style.whiteSpace = "nowrap"; fit(o.b, o.c.clientWidth - 24 * u); });
+    const fs = Math.min(...A.c.map(o => parseFloat(getComputedStyle(o.b).fontSize))); A.c.forEach(o => { o.b.style.fontSize = fs + "px"; }); fitH(g, u); A.c.forEach(o => { o.b.textContent = ""; });   // même taille pour tous les chiffres   // la police s'adapte au chiffre FINAL (« 80 km/h » ne déborde pas de la carte)
   } else if (T === "quote") {
-    el("div", "qm", "“", root); const q = el("div", "qt", "", root);
-    A.w = sc.text.split(/\s+/).map(w => el("span", "", w + " ", q)); A.a = sc.author ? el("div", "qa cd", "— " + sc.author, root) : null;
+    const box = el("div", "fit", "", root); el("div", "qm", "“", box); const q = el("div", "qt", "", box);
+    A.w = fr(sc.text).split(/[ \t\n]+/).filter(Boolean).map(w => el("span", "", w + " ", q)); A.a = sc.author ? el("div", "qa cd", "— " + fr(sc.author), box) : null; fitH(box, u);
   } else if (T === "outro") {
-    const L = sc.lines || [], mk = (i, cls, tag = "div") => L[i] ? el(tag, cls, L[i], root) : null;
-    A.e = [mk(0, "e1 an"), mk(1, "e2 an"), L[0] ? el("div", "ln", "", root) : null, mk(2, "e3 cd"), mk(3, "e4 cd"), mk(4, "e5"), mk(5, "e6")].filter(Boolean);
-    A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`; fit(e, W() - 48 * u); });
+    const L = sc.lines || [], box = el("div", "fit", "", root), mk = (i, cls, tag = "div") => L[i] ? el(tag, cls, fr(L[i]), box) : null;
+    A.e = [mk(0, "e1 an"), mk(1, "e2 an"), L[0] ? el("div", "ln", "", box) : null, mk(2, "e3 cd"), mk(3, "e4 cd"), mk(4, "e5"), mk(5, "e6")].filter(Boolean);
+    A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`;
+      const mins = { e1: 34, e2: 20, e4: 14 }, k = Object.keys(mins).find(c => e.classList.contains(c));
+      if (k) fitLine(e, W() - 48 * u, mins[k] * u); else fit(e, W() - 48 * u); }); fitH(box, u);
   }
 };
-window.ready = () => Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => 0))]);
+const FONTS = ["400 40px Anton", "500 20px Barlow", "600 20px Barlow", "600 20px 'Barlow Condensed'", "700 20px 'Barlow Condensed'"];
+window.fontsOk = async () => {   // rend la liste des polices manquantes (vide = tout est là)
+  await Promise.all(FONTS.map(f => document.fonts.load(f).catch(() => null)));
+  const miss = FONTS.filter(f => !document.fonts.check(f));
+  return [...document.fonts].some(f => /Anton/.test(f.family)) ? miss : ["feuille des polices"];
+};
+window.ready = async () => {      // rend la liste des images qui n'ont pas pu être chargées (vide = tout est là)
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(i => i.decode().catch(() => 0)));
+  return [...document.images].filter(i => !i.naturalWidth).map(i => i.src);
+};
+window.reloadImages = () => { for (const i of document.images) if (!i.naturalWidth) { const s = i.src; i.removeAttribute("src"); i.src = s; } };
 
 const kb = (p, t, dur, dir, i = 0) => {   // Ken Burns : zoom lent + dérive
   const k = ramp(t, 0, dur), z = dir === "out" ? lerp(1.16, 1.02, k) : lerp(1.02, 1.16, k), dx = dir === "left" ? lerp(3, -3, k) : dir === "right" ? lerp(-3, 3, k) : lerp(-1.2, 1.2, k) * (i % 2 ? -1 : 1);
@@ -121,7 +147,7 @@ window.draw = (t, dur) => {
     A.p.forEach((p, i) => { const a = i * seg; p.w.style.opacity = i === 0 ? 1 : eio(ramp(t, a - .5, a)); p.w.style.zIndex = i; kb(p, cl(t - a + (i ? .5 : 0), 0, seg + .5), seg + .5, sc.dir || (i % 2 ? "out" : "in"), i); });
     if (A.cap) { const k = eo(ramp(t, .5, 1.1)); fx(A.cap, k, (1 - k) * 22 * u); }
   } else if (T === "stats") {
-    A.c.forEach((o, i) => { const k = eo(ramp(t, .2 + i * .18, .8 + i * .18)); fx(o.c, k, (1 - k) * 40 * u, .94 + .06 * k); o.b.textContent = Math.round(o.it.value * eo(ramp(t, .5 + i * .18, 2 + i * .18))) + (o.it.suffix || ""); });
+    A.c.forEach((o, i) => { const k = eo(ramp(t, .2 + i * .18, .8 + i * .18)); fx(o.c, k, (1 - k) * 40 * u, .94 + .06 * k); o.b.textContent = num(o.it.value * eo(ramp(t, .5 + i * .18, 2 + i * .18)), o.d) + (o.it.suffix || ""); });
   } else if (T === "quote") {
     A.w.forEach((w, i) => { const k = eo(ramp(t, .3 + i * .09, .7 + i * .09)); fx(w, k, (1 - k) * 12 * u); });
     if (A.a) { const k = eo(ramp(t, .6 + A.w.length * .09, 1.2 + A.w.length * .09)); fx(A.a, k, (1 - k) * 10 * u); }
