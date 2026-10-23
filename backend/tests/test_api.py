@@ -2901,12 +2901,12 @@ def test_work_is_saved_first_and_visible_while_running(client, claude):
     def reply(kind, kw):
         cid = next(iter(A.RUNNING))
         seen.update(client.get(f"/api/conversations/{cid}").json())
-        return _resp("Devis prêt.")
+        return _resp("Voici ce que je propose pour l'appartement A.")
     claude(reply)
     out = client.post("/api/chat", json={"message": "Fais le devis de l'appartement A"}).json()
     assert seen["working"] is True and seen["messages"][-1]["content"] == "Fais le devis de l'appartement A"
     after = client.get(f"/api/conversations/{out['conversation_id']}").json()
-    assert after["working"] is False and after["messages"][-1]["content"] == "Devis prêt."
+    assert after["working"] is False and after["messages"][-1]["content"] == "Voici ce que je propose pour l'appartement A."
     assert out["conversation_id"] not in A.RUNNING
 
 

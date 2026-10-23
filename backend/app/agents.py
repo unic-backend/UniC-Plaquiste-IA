@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app import claims
 from app.models import CustomAgent
 
 logger = logging.getLogger("unic.agents")
@@ -267,6 +268,10 @@ def run(db: Session, a: CustomAgent) -> dict:
         row.last_ok = ok
         if ok:
             text = res.text.strip()
+            phantom = claims.unbacked(text, session.succeeded)   # rapport qui affirme une action jamais faite (claims.py)
+            if phantom:
+                text += claims.warning(phantom)
+                ag.audit(fresh, None, "agent_phantom_claim", "agent", a.id, f"run={run_id} " + ", ".join(phantom)[:240])
             if ctl.stop_reason:
                 text = f"⚠️ Passage interrompu ({ctl.stop_reason}). " + text
         elif timeout:

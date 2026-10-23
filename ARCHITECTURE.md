@@ -46,4 +46,5 @@ Frontend : `frontend/src` (React, Vite, TypeScript). Pages principales dans `App
 
 ## Garde-fous pour les outils IA
 `AGENTS.md` (règles), `scripts/core_manifest.txt` (fichiers essentiels), `scripts/guardrails.py` (contrôle CI), `.github/CODEOWNERS` (relecture du propriétaire sur les zones protégées).
+**Actions affirmées sans être faites** (`backend/app/claims.py`) : chaque réponse du chat, du chat public du site et des rapports d'agents est comparée aux outils qui ont réellement réussi pendant le tour (« j'ai créé », « c'est envoyé », « ta facture est prête », « rendez-vous noté »). Envoyer, publier, appeler, contacter, payer, approuver ou signer : jamais l'assistant. Chat : un tour de correction puis un avertissement ; site : une précision au visiteur ; agents : un avertissement dans le rapport. Tout ajout d'outil qui crée ou modifie quelque chose ajoute son objet dans `FAMILIES`.
 La structure est figée : dossiers `backend`, `frontend`, `desktop`, `docs`, `scripts`, `.github` ; un seul serveur (`backend/app/main.py`), un seul `Dockerfile`, un seul `docker-compose.yml`.
