@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -72,7 +73,7 @@ def voice_select(body: SelectIn, db: Session = Depends(get_db), user: User = Dep
 async def voice_clone(name: str = Form("Ma voix"), own_voice: bool = Form(False), file: UploadFile = File(...),
                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     audio = await read_upload(file, 10, "Échantillon")
-    out = _wrap(voice.clone, db, name, audio, file.filename or "", file.content_type or "", own_voice)
+    out = await run_in_threadpool(_wrap, voice.clone, db, name, audio, file.filename or "", file.content_type or "", own_voice)   # ElevenLabs : hors de la boucle
     audit(db, user.id, "voice_clone", "voice", out["id"])
     db.commit()
     return out

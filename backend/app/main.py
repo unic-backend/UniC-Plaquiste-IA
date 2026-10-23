@@ -71,7 +71,7 @@ async def access_code_guard(request: Request, call_next):
     if code and path.startswith("/api/") and path not in ("/api/ping", "/api/linkedin/callback", "/api/instagram/callback",
                                                           "/api/auth/login", "/api/auth/status", "/api/health/live", "/api/health/ready") \
             and not path.startswith(("/api/public-media/", "/api/public/")) and request.method != "OPTIONS":
-        ip = request.client.host if request.client else "?"
+        ip = ratelimit.client_ip(request)   # derrière Render, request.client = le relais : 10 codes faux d'un inconnu bloquaient tout le monde
         if ratelimit.blocked(ip, _MAX_FAILS, _WINDOW):
             return JSONResponse({"detail": "Trop d'essais. Réessayez dans 10 minutes."}, status_code=429)
         given = request.headers.get("x-access-code", "")
@@ -334,18 +334,23 @@ async def site_chat(request: Request):
         body = await request.json()
     except Exception:
         return JSONResponse({"detail": "Requête invalide"}, status_code=400)
+    from starlette.concurrency import run_in_threadpool
     from app.ratelimit import client_ip
     ip = client_ip(request)
-    db = SessionLocal()
+
+    def work():   # appel à Claude (plusieurs secondes) : hors de la boucle, sinon l'appli entière attend chaque visiteur
+        db = SessionLocal()
+        try:
+            return sitechat.reply(db, body.get("session_id"), str(body.get("message") or ""), ip, str(body.get("page") or ""))
+        finally:
+            db.close()
     try:
-        out = sitechat.reply(db, body.get("session_id"), str(body.get("message") or ""), ip, str(body.get("page") or ""))
+        out = await run_in_threadpool(work)
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=400)
     except Exception:
         logger.exception("chat du site")
         return JSONResponse({"reply": sitechat.limit_reply(), "whatsapp": sitechat.whatsapp_number()}, status_code=200)
-    finally:
-        db.close()
     return out
 
 

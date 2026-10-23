@@ -12,6 +12,7 @@ from app import trust
 from app.config import settings
 from fastapi.responses import FileResponse
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Request, Form, Query
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -631,14 +632,17 @@ def memory_decide(mid: str, body: MemoryDecision, db: Session = Depends(get_db),
 async def memory_import(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Importe un export ChatGPT / Claude (json, zip) ou un texte : suppositions à confirmer, jamais des faits."""
     raw = await read_upload(file, 60)
-    try:
-        texts = mem.candidates_from_export(raw, file.filename or "")
-    except mem.UnknownImport as exc:
-        raise HTTPException(400, str(exc))
-    result = mem.import_candidates(db, texts)
-    audit(db, user.id, "memory_import", "memory", file.filename or "", str(result))
-    db.commit()
-    return {**result, "candidats": len(texts)}
+
+    def work():   # un export de 60 Mo se lit longtemps : hors de la boucle
+        try:
+            texts = mem.candidates_from_export(raw, file.filename or "")
+        except mem.UnknownImport as exc:
+            raise HTTPException(400, str(exc))
+        result = mem.import_candidates(db, texts)
+        audit(db, user.id, "memory_import", "memory", file.filename or "", str(result))
+        db.commit()
+        return {**result, "candidats": len(texts)}
+    return await run_in_threadpool(work)
 
 
 @router.delete("/memory/{mid}")
@@ -875,8 +879,8 @@ async def publish_linkedin(pid: str, target: str = Form("profile"), photo: Uploa
     if err:
         raise HTTPException(400, err)
     data = await read_upload(photo, 8, "Photo") if photo is not None else None
-    out = _li(linkedin.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), data or None,
-              "page" if target == "page" else "profile")
+    out = await run_in_threadpool(_li, linkedin.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), data or None,
+                                  "page" if target == "page" else "profile")   # appel réseau : hors de la boucle
     p.status, p.published_at = "published", utcnow()
     p.external_id, p.external_url = out["id"][:500], out["url"][:500]
     audit(db, user.id, "linkedin_publish", "social_post", p.id, target)
@@ -979,11 +983,12 @@ async def publish_instagram(pid: str, request: Request, photo: UploadFile = File
     if err:
         raise HTTPException(400, err)
     raw = await read_upload(photo, 12, "Photo")
-    jpeg = _ig(instagram.prepare_photo, raw)
+    jpeg = await run_in_threadpool(_ig, instagram.prepare_photo, raw)
     token = instagram.host_photo(jpeg)
     base = _ig_redirect(request).rsplit("/instagram/", 1)[0]
-    try:
-        out = _ig(instagram.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(), f"{base}/public-media/{token}.jpg")
+    try:   # appels à Instagram (plusieurs secondes) : hors de la boucle
+        out = await run_in_threadpool(_ig, instagram.publish, db, (p.body + ("\n\n" + p.hashtags if p.hashtags else "")).strip(),
+                                      f"{base}/public-media/{token}.jpg")
     finally:
         pth = instagram.photo_path(token)
         if pth:
