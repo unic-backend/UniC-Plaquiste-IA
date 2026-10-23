@@ -1,11 +1,11 @@
 """Site web : connexion GitHub, rédaction d'une page par l'IA, aperçu, publication après approbation."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app import assistant, higgsfield, memory as mem, repair, video_studio, website
+from app import assistant, higgsfield, lessons, memory as mem, repair, video_studio, website
 from app.database import get_db
 from app.models import SocialPost, User, utcnow
 from app.security import get_current_user, require_roles
@@ -130,6 +130,9 @@ def _hf(fn, *a):
 class VideoPlanIn(BaseModel):
     brief: str = Field("", max_length=20000)
     format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
+    theme: str = Field("auto", pattern="^(auto|unic|night|light|earth|ocean|sunset)$")   # ambiance imposée, ou « auto » : l'IA choisit
+    current: dict | None = None                                                       # scénario affiché, pour une correction
+    changes: list[str] = Field(default_factory=list, max_length=50)   # corrections du patron, la dernière à appliquer (le scénariste garde les 12 dernières)
 
 
 class VideoStartIn(BaseModel):
@@ -150,9 +153,14 @@ class VideoAILongStartIn(BaseModel):
 
 
 @router.post("/video/plan")
-def video_plan(body: VideoPlanIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
-    """Scénario proposé par l'IA pour une consigne libre (rien n'est lancé)."""
-    return _v(video_studio.plan, db, body.brief, body.format)
+def video_plan(body: VideoPlanIn, background: BackgroundTasks, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Scénario proposé par l'IA pour une consigne libre, ou corrigé selon la dernière correction du patron (rien n'est lancé).
+    Une correction qui vaut en général (« jamais de… », « toujours… ») devient une leçon de la mémoire, après la réponse : les vidéos suivantes en tiennent compte."""
+    out = _v(video_studio.plan, db, body.brief, body.format, body.theme, body.current, body.changes)
+    last = (body.changes or [""])[-1]
+    if last and lessons.wants_to_learn(last, []):
+        background.add_task(mem.extract_in_background, lessons.payload(f"[Studio vidéo] {last}", f"Scénario de vidéo proposé : {out.get('understood') or ''}", []))
+    return out
 
 
 @router.post("/video/start")
