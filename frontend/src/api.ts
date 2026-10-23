@@ -217,7 +217,10 @@ export type JournalRow = { id: string; at: string | null; action: string; label:
 const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export type VideoScene = { type: string; seconds?: number; [k: string]: unknown };
-export type VideoPlan = { spec: { format: string; theme?: string; scenes: VideoScene[] }; seconds: number; note: string; ai?: { clips: number; images: number } };
+export type VideoPlan = {
+  spec: { format: string; theme?: string; scenes: VideoScene[] }; seconds: number; note: string; ai?: { clips: number; images: number };
+  understood?: string; assumptions?: string[]; limits?: string[]; target?: number | null; changes?: string[];   // ce que l'IA a compris, et le fil des corrections
+};
 export type VideoState = { state: string; detail: string; url?: string; can_retry?: boolean; ai?: { done: number; total: number } };
 export type VideoAIClip = {
   state: string; detail: string; duration?: number; format?: string; kind?: string;
@@ -248,7 +251,9 @@ export const net = {
     request<{ id: string; title: string }>("/api/website/draft", { method: "POST", body: JSON.stringify({ topic, details }) }),
   sitePreview: (id: string) => request<{ html: string; words: number; url: string }>(`/api/website/preview/${id}`),
   bookPreview: () => request<{ html: string; url: string }>("/api/website/book/preview"),
-  videoPlan: (brief: string, format: string) => request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format }) }),
+  /** Scénario proposé ; avec `current` et `changes` : le scénario affiché corrigé selon la dernière correction (les précédentes restent valables). */
+  videoPlan: (brief: string, format: string, theme = "auto", current?: VideoPlan["spec"], changes: string[] = []) =>
+    request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format, theme, current: current ?? null, changes }) }),
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<VideoState>("/api/website/video/status"),
   videoRetry: () => request<{ ok: boolean; note: string }>("/api/website/video/retry", { method: "POST" }),

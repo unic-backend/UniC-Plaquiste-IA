@@ -247,3 +247,126 @@ def test_le_temps_de_lire_chaque_scene():
     assert stats["seconds"] >= 2 + .18 + .8                                     # les chiffres ont fini de monter avant le fondu
     again = vs.build_spec(spec["format"], spec["scenes"], NAMES)                # « Lancer » reconstruit le scénario : mêmes durées
     assert [s["seconds"] for s in again["scenes"]] == [s["seconds"] for s in spec["scenes"]]
+
+
+def _story(**over):
+    """Réponse type du scénariste (outil « storyboard »)."""
+    base = {"understood": "Une vidéo de 30 s sur l'histoire de Dakar, ton documentaire, pour les réseaux.", "assumptions": ["Public : grand public"], "limits": [],
+            "theme": "sunset", "scenes": [
+                {"type": "title", "l1": "DAKAR", "l2": "SON HISTOIRE", "seconds": 3},
+                {"type": "text", "heading": "Les origines", "bullets": ["Village lébou", "Fondée en 1857"], "seconds": 4},
+                {"type": "stats", "items": [{"value": 1857, "label": "Fondation"}, {"value": 3.9, "suffix": " M", "label": "Habitants"}], "seconds": 4},
+                {"type": "outro", "lines": ["Merci", "À bientôt"], "seconds": 3}]}
+    base.update(over)
+    return base
+
+
+def test_le_scenariste_comprend_et_le_dit(monkeypatch):
+    """Ce que l'IA a compris est montré avant de lancer ; la durée et le format DEMANDÉS sont tenus, et c'est dit."""
+    seen = {}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user, tool=tool) or _story(target_seconds=30, format="horizontal"))
+    p = vs.plan(None, "Une vidéo de 30 secondes pour YouTube\nsur l'histoire de Dakar", "vertical")
+    assert "30 secondes pour YouTube\nsur l'histoire" in seen["user"]               # retours à la ligne gardés : les mots ne se collent plus
+    assert "COMPRENDS D'ABORD" in seen["system"] and "understood" in seen["tool"]["input_schema"]["properties"]
+    assert p["understood"].startswith("Une vidéo de 30 s") and p["assumptions"] == ["Public : grand public"] and p["limits"] == []
+    assert p["spec"]["format"] == "horizontal" and "Format horizontal 16:9 appliqué" in p["note"]
+    assert p["target"] == 30 and abs(p["seconds"] - 30) <= 2 and "Durée demandée : 30 s" in p["note"]
+    assert p["spec"]["theme"] == "sunset" and p["changes"] == []
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: _story(target_seconds=3600))
+    p = vs.plan(None, "Une heure sur Dakar", "vertical")                            # impossible avec 4 scènes : on le dit au lieu de tricher
+    assert p["seconds"] < 3600 and "demande d'ajouter des scènes" in p["note"]
+
+
+def test_correction_garde_le_fil_et_l_ambiance_choisie(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(user=user) or _story(understood="J'ai raccourci la vidéo à 20 s.", target_seconds=20))
+    first = vs.build_spec("vertical", _story()["scenes"], NAMES, "earth")
+    p = vs.plan(None, "Histoire de Dakar", "vertical", "ocean", first, ["ajoute une citation", "plus court : 20 secondes"])
+    u = seen["user"]
+    assert "Scénario actuel, à corriger (JSON)" in u and '"theme":"earth"' in u
+    assert "1. ajoute une citation" in u and "NOUVELLE correction à appliquer maintenant : plus court : 20 secondes" in u
+    assert "Ambiance imposée par le patron : ocean" in u and p["spec"]["theme"] == "ocean"      # l'ambiance choisie par le patron gagne
+    assert p["note"].startswith("Scénario corrigé") and p["changes"] == ["ajoute une citation", "plus court : 20 secondes"] and abs(p["seconds"] - 20) <= 2
+    with pytest.raises(repair.RepairError) as e:                                      # une correction sans scénario ni demande : on le dit
+        vs.plan(None, "", "vertical", "auto", None, ["plus court"])
+    assert e.value.status == 400
+
+
+def test_duree_demandee_sans_rendre_illisible():
+    import copy
+    spec = vs.build_spec("vertical", [
+        {"type": "quote", "text": "Dakar ne dort jamais : elle respire au rythme de l'océan et des marchés.", "author": "Guide", "seconds": 6},
+        {"type": "title", "l1": "DAKAR", "seconds": 4}, {"type": "page", "page": "portfolio"}], NAMES)
+    short = copy.deepcopy(spec)
+    got = vs.fit_duration(short, 10)
+    q = short["scenes"][0]
+    assert q["seconds"] >= vs._readable(q) and short["scenes"][1]["seconds"] >= 2.5      # jamais sous le temps de lecture ni sous le minimum du type
+    assert all(c["seconds"] >= 3 for c in short["scenes"][2]["chapters"]) and got > 10    # impossible à tenir : la durée rendue le montre
+    long = copy.deepcopy(spec)
+    assert abs(vs.fit_duration(long, 60) - 60) <= 1 and all(c["seconds"] <= 9 for c in long["scenes"][2]["chapters"])
+    again = vs.build_spec(long["format"], long["scenes"], NAMES)                            # « Lancer » reconstruit : la durée réglée tient
+    assert vs._duration(again) == vs._duration(long)
+    clip = vs.build_spec("vertical", [{"type": "ai_clip", "prompt": "Un lion court dans la savane au coucher du soleil", "seconds": 8},
+                                      {"type": "title", "l1": "LION", "seconds": 3}], NAMES, ai={"clips": 1, "images": 0})
+    vs.fit_duration(clip, 14)
+    assert clip["scenes"][0]["seconds"] == 8 and clip["scenes"][1]["seconds"] == 6           # le clip IA garde sa durée (payée), le titre s'allonge jusqu'à son maximum
+
+
+def test_la_memoire_du_patron_guide_le_scenario(monkeypatch):
+    from app import memory as mem
+    seen = {}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
+    monkeypatch.setattr(mem, "block", lambda db, query="", limit_chars=0: f"MÉMOIRE UNIC\n- Mes vidéos finissent toujours par « Le plafond de vos rêves » [{query[:12]}]")
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(user=user) or _story())
+    vs.plan(object(), "Promo de fin d'année", "vertical")
+    assert "Le plafond de vos rêves" in seen["user"] and "[vidéo Promo" in seen["user"]
+    monkeypatch.setattr(mem, "block", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("base indisponible")))
+    assert vs.plan(object(), "Promo", "vertical")["spec"]["scenes"]                          # mémoire en panne : le scénario s'écrit quand même
+
+
+def test_route_correction_et_lecon_retenue(monkeypatch):
+    """« Ne mets jamais… » dans une correction devient une leçon de la mémoire (après la réponse) ; « plus court » reste ponctuel."""
+    from fastapi.testclient import TestClient
+    from app import main, memory as mem
+    monkeypatch.setattr(vs.settings, "unic_access_code", "")
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: _story(understood="J'ai retiré le thème clair."))
+    learned = []
+    monkeypatch.setattr(mem, "extract_in_background", lambda payload: learned.append(payload))
+    main.ratelimit._mem.clear()
+    cur = vs.build_spec("vertical", _story()["scenes"], NAMES, "light")
+    with TestClient(main.app) as c:
+        r = c.post("/api/website/video/plan", json={"brief": "Histoire de Dakar", "format": "vertical", "theme": "auto", "current": cur,
+                                                    "changes": ["Ne mets jamais le thème clair dans mes vidéos"]})
+        assert r.status_code == 200 and r.json()["understood"] == "J'ai retiré le thème clair."
+        assert r.json()["changes"] == ["Ne mets jamais le thème clair dans mes vidéos"]
+        assert learned and learned[0]["kind"] == "lesson" and learned[0]["owner"].startswith("[Studio vidéo]")
+        learned.clear()
+        assert c.post("/api/website/video/plan", json={"brief": "Histoire de Dakar", "current": cur, "changes": ["plus court"]}).status_code == 200
+        assert learned == []
+        assert c.post("/api/website/video/plan", json={"brief": "x", "theme": "rose"}).status_code == 422
+
+
+def test_le_scenariste_utilise_le_modele_fort_en_flux(monkeypatch):
+    """Comprendre la demande = modèle le plus fort avec réflexion ; réponse en flux (un long scénario dépassait le délai d'un seul bloc)."""
+    from app import ai
+    seen = {}
+
+    def fake_complete(self, messages, **kw):
+        seen.update(kw, streaming=ai.STREAM_CB.get() is not None)
+        kw["tool_handler"]("storyboard", {"understood": "ok", "scenes": [{"type": "title", "l1": "A"}]})
+        return ai.AIResult("", "claude", kw["model"], True)
+    monkeypatch.setattr(ai.ClaudeAIProvider, "complete", fake_complete)
+    got = vs._ask("règles", "demande", vs.TOOL)
+    assert got["understood"] == "ok" and seen["model"] == vs.settings.anthropic_model and seen["thinking"] is True and seen["effort"] == "high"
+    assert seen["streaming"] and ai.STREAM_CB.get() is None                    # flux pendant l'appel seulement
+    monkeypatch.setattr(ai.ClaudeAIProvider, "complete", lambda self, messages, **kw: ai.AIResult("", "claude", "m", False, "quota"))
+    with pytest.raises(repair.RepairError) as e:
+        vs._ask("règles", "demande", vs.TOOL)
+    assert e.value.status == 502 and "quota" in str(e.value)

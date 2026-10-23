@@ -1,21 +1,77 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan, type VideoState } from "./api";
+import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan, type VideoScene, type VideoState } from "./api";
+import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from "./videoBoard";
 
 type Say = (m: string) => void;
 
-const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Avis client", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)" };
+const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)" };
 const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
   const d = c.type === "title" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" ? String(c.heading || "") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
   return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
 };
+
+const IMG_BASE = "https://www.unicplaquiste.com/images/";
+const txt = (s: VideoScene, k: string) => (typeof s[k] === "string" ? frText(s[k]) : "");
+const items = (s: VideoScene, k: string) => (Array.isArray(s[k]) ? (s[k] as unknown[]) : []);
+
+/** Vignette d'une scène : son image finale en petit, aux couleurs de l'ambiance (un aperçu fidèle au contenu, pas le rendu exact du moteur). */
+function SceneFrame({ s }: { s: VideoScene }) {
+  const t = s.type;
+  if (t === "title") return <>{txt(s, "l1") && <b className="f-t1">{txt(s, "l1")}</b>}{txt(s, "l2") && <b className="f-t2">{txt(s, "l2")}</b>}{txt(s, "sub") && <small className="f-sub">{txt(s, "sub")}</small>}</>;
+  if (t === "text") return <div className="f-text">{txt(s, "heading") && <b className="f-h">{txt(s, "heading")}</b>}<ul>{items(s, "bullets").slice(0, 4).map((b, i) => <li key={i}>{frText(b)}</li>)}</ul></div>;
+  if (t === "photo" || t === "gallery") {
+    const imgs = t === "photo" ? [String(s.image || "")] : items(s, "images").map(String);
+    const cap = [txt(s, "caption"), imgs.length > 1 ? `${imgs.length} photos` : ""].filter(Boolean).join(" · ");
+    return <>{imgs[0] && <img className="f-img" src={IMG_BASE + imgs[0]} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />}{cap && <span className="f-cap">{cap}</span>}</>;
+  }
+  if (t === "stats") {
+    const all = items(s, "items").slice(0, 4).map((it) => (it || {}) as { value?: unknown; suffix?: string; label?: string });
+    const shownValues = all.map((o) => statNumber(o.value) + (o.suffix || ""));
+    const fs = { "--fs": `${Math.min(12, 60 / Math.max(4, ...shownValues.map((v) => v.length)))}cqw` } as CSSProperties;   // même taille pour tous, le plus long tient (comme le moteur)
+    return <div className="f-stats" style={fs}>{all.map((o, i) => <span key={i}><b>{shownValues[i]}</b><small>{frText(o.label)}</small></span>)}</div>;
+  }
+  if (t === "quote") return <><b className="f-q" aria-hidden>“</b><span className="f-qt">{txt(s, "text")}</span>{txt(s, "author") && <small className="f-sub">— {txt(s, "author")}</small>}</>;
+  if (t === "outro") {
+    const L = items(s, "lines").map(frText).filter(Boolean);
+    return <>{L[0] && <b className="f-t1">{L[0]}</b>}{L.slice(1, 4).map((l, i) => <small key={i} className={i === 2 ? "f-btn" : "f-sub"}>{l}</small>)}</>;
+  }
+  if (t === "page") return <><b className="f-h">Le site défile</b>{items(s, "chapters").slice(0, 6).map((c, i) => <small key={i} className="f-chip">{frText((c as { label?: string })?.label)}</small>)}</>;
+  if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
+  return <small>{t}</small>;
+}
+
+/** Le scénario en vignettes, dans l'ordre : le patron voit ce que l'IA a compris avant de lancer ; une scène se retire d'un geste. */
+function Storyboard({ spec, onRemove, busy }: { spec: VideoPlan["spec"]; onRemove: (i: number) => void; busy: boolean }) {
+  const th = THEMES[spec.theme || "unic"] || THEMES.unic;
+  const vars = { "--vbg": th.bg, "--vfg": th.fg, "--vac": th.accent, "--vsoft": th.soft, "--vg1": th.g1, "--vg2": th.g2, "--vcbg": th.cardBg, "--vcfg": th.cardFg } as CSSProperties;
+  const n = spec.scenes.length;
+  return (
+    <ol className="vs-board" data-fmt={spec.format} style={vars} aria-label={`Aperçu du scénario : ${n} scènes, ambiance ${th.name}`}>
+      {spec.scenes.map((s, i) => (
+        <li key={`${i}:${sceneLabel(s)}`}>
+          <div className={`vs-frame is-${s.type}`} role="img" aria-label={`Scène ${i + 1} : ${sceneLabel(s)}`}>
+            <SceneFrame s={s} />
+            <span className="vs-n" aria-hidden>{i + 1}</span>
+          </div>
+          <span className="vs-cap">{SCENE_FR[s.type] || s.type} · {duration(sceneSeconds(s))}</span>
+          {n > 1 && <button type="button" className="vs-x" disabled={busy} aria-label={`Retirer la scène ${i + 1}`} title="Retirer cette scène" onClick={() => onRemove(i)}>×</button>}
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 /** Studio vidéo : montage déterministe long via GitHub et clips courts générés par Higgsfield, sans publication automatique. */
 export function VideoStudio({ say }: { say: Say }) {
   const [brief, setBrief] = useState("");
   const [fmt, setFmt] = useState("vertical");
   const [plan, setPlan] = useState<VideoPlan | null>(null);
+  const [theme, setTheme] = useState("auto");
+  const [changes, setChanges] = useState<string[]>([]);   // corrections déjà appliquées au scénario affiché
+  const [fix, setFix] = useState("");
+  const [planning, setPlanning] = useState(false);
   const [vid, setVid] = useState<VideoState | null>(null);
   const [got, setGot] = useState<{ url: string; filename: string } | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -64,6 +120,22 @@ export function VideoStudio({ say }: { say: Say }) {
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [aiState]);
   const running = !!aiClip && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state);
+  // le scénario tel qu'il partira : format et ambiance choisis maintenant (un changement de puce s'applique sans réécrire le scénario)
+  const shown = plan ? { ...plan.spec, format: fmt, theme: theme === "auto" ? plan.spec.theme || "unic" : theme } : null;
+  const propose = (correction?: string) => run(async () => {
+    setPlanning(true);
+    try {
+      const next = correction ? [...changes, correction].slice(-12) : [];   // le fil des corrections : les 12 dernières
+      const p = await net.videoPlan(brief, fmt, theme, correction && shown ? shown : undefined, next);
+      setPlan(p); setChanges(p.changes ?? next); setFix("");
+      if (p.spec.format !== fmt) setFmt(p.spec.format);   // la demande réclamait un autre format : la puce suit (la note le dit)
+    } finally { setPlanning(false); }
+  });
+  const removeScene = (i: number) => setPlan((p) => {
+    if (!p) return p;
+    const scenes = p.spec.scenes.filter((_, j) => j !== i);
+    return { ...p, spec: { ...p.spec, scenes }, seconds: totalSeconds(scenes), note: "Scène retirée : la durée est recalculée. « Corriger » pour aller plus loin." };
+  });
   const longLines = longPromptsText.split("\n").map((l) => l.trim()).filter(Boolean);
   const clipsNeeded = longDuration / 30;
   const fmtName = fmt === "vertical" ? "vertical 9:16" : fmt === "horizontal" ? "horizontal 16:9" : "carré 1:1";
@@ -91,25 +163,44 @@ export function VideoStudio({ say }: { say: Say }) {
         <>
           <textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Une vidéo de 40 secondes qui raconte l’histoire de Dakar, avec des chiffres clés et une citation" aria-label="Description de la vidéo" />
           <p className="vs-note">Montage gratuit : titres, textes, chiffres, citations, photos du site et ambiances de couleurs (l'IA choisit celle du sujet). Il ne crée pas d'images ni de films : pour un lion qui court, utilise « Clip IA ». Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle. {brief.length.toLocaleString("fr-FR")} / 20 000 caractères.</p>
+          <div className="vs-fmt" role="radiogroup" aria-label="Ambiance de la vidéo">
+            {["auto", ...Object.keys(THEMES)].map((k) => (
+              <button key={k} role="radio" aria-checked={theme === k} className={`chip${theme === k ? " on" : ""}`} onClick={() => setTheme(k)}>
+                {k !== "auto" && <i className="vs-dot" style={{ background: THEMES[k].bg, boxShadow: `inset 0 0 0 3px ${THEMES[k].accent}` }} aria-hidden />}
+                {k === "auto" ? "Ambiance auto" : THEMES[k].name}
+              </button>
+            ))}
+          </div>
           <div className="row-actions">
-            <button className="btn btn-copper btn-small" disabled={busy} onClick={() => run(async () => { setPlan(await net.videoPlan(brief, fmt)); })}>Proposer un scénario</button>
+            <button className="btn btn-copper btn-small" disabled={busy} onClick={() => propose()}>{plan ? "Nouveau scénario" : "Proposer un scénario"}</button>
             <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
           </div>
-          {plan && (
+          {planning && <p className="vs-status" role="status">UniC lit ta demande et écrit le scénario… Souvent moins d'une minute ; plus pour une longue vidéo.</p>}
+          {plan && shown && (
             <div className="vs-plan">
-              <p className="vs-sum"><b>{plan.spec.scenes.length} scènes</b> · environ {plan.seconds >= 60 ? `${Math.floor(plan.seconds / 60)} min ${plan.seconds % 60} s` : `${plan.seconds} s`}</p>
+              {plan.understood && <div className="vs-understood"><b>Ce que j'ai compris</b>{plan.understood}</div>}
+              {!!plan.assumptions?.length && (<><p className="vs-h">J'ai supposé — corrige-moi si c'est faux</p><ul className="vs-list">{plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
+              {!!plan.limits?.length && (<><p className="vs-h">Ce que le montage ne sait pas faire</p><ul className="vs-list">{plan.limits.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
+              <p className="vs-sum"><b>{shown.scenes.length} scènes</b> · environ {duration(plan.seconds)}</p>
               <p className="vs-note">{plan.note}</p>
               {plan.ai && plan.ai.clips + plan.ai.images > 0 && (
                 <p className="vs-status">⚠️ {plan.ai.clips} clip(s) et {plan.ai.images} image(s) générés par l'IA : <b>crédits Higgsfield payants</b>, un média à la fois. Les films IA sont muets dans le montage. Tu peux fermer l'application pendant la génération.</p>
               )}
-              <ol>{plan.spec.scenes.map((c, i) => <li key={i}>{sceneLabel(c)}</li>)}</ol>
+              <Storyboard spec={shown} onRemove={removeScene} busy={busy} />
+              <p className="vs-h">Corriger le scénario</p>
+              <textarea className="vs-fix" rows={3} value={fix} onChange={(e) => setFix(e.target.value)} maxLength={2000} aria-label="Corriger le scénario"
+                placeholder="Ex. plus court, change la scène 3, ajoute une citation…" />
+              <div className="row-actions">
+                <button className="btn btn-line btn-small" disabled={busy || !fix.trim()} onClick={() => propose(fix.trim())}>Corriger</button>
+              </div>
+              {changes.length > 0 && <p className="vs-note">Corrections appliquées : {changes.map((c, i) => `${i + 1}. ${c}`).join(" · ")}</p>}
               <button className="btn btn-copper" disabled={busy}
                 onClick={() => {
                   const paid = plan.ai ? plan.ai.clips + plan.ai.images : 0;
                   const msg = paid > 0
                     ? `Lancer la fabrication ? Elle génère ${plan.ai!.clips} clip(s) et ${plan.ai!.images} image(s) avec Higgsfield : ${paid} génération(s) payante(s) (crédits). Le montage part ensuite tout seul.`
                     : "Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.";
-                  if (window.confirm(msg)) run(async () => { const r = await net.videoStart(plan.spec); setPlan(null); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée.");
+                  if (window.confirm(msg)) run(async () => { const r = await net.videoStart(shown); setPlan(null); setChanges([]); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée.");
                 }}>{plan.ai && plan.ai.clips + plan.ai.images > 0 ? "Lancer (génération IA payante)" : "Lancer la fabrication"}</button>
             </div>
           )}

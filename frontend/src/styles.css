@@ -1606,4 +1606,64 @@ input[type="range"] { accent-color: var(--green); }
 .vs-plan ol { margin: 8px 0 12px; padding-left: 20px; font-size: 13px; line-height: 1.5; max-height: 220px; overflow-y: auto; }
 .vs-status { margin: 12px 0; padding: 10px 12px; border-left: 3px solid var(--copper); background: var(--surface-3); border-radius: 6px; font-size: 13px; line-height: 1.45; }
 .vs .btn:not(.btn-small) { width: 100%; margin-top: 4px; }
+/* Studio vidéo : ce que l'IA a compris, aperçu du scénario en vignettes (couleurs de l'ambiance), corrections */
+.vs-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.vs-understood { margin: 0 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--green); font-size: 14px; line-height: 1.5; }
+.vs-understood b { display: block; margin-bottom: 3px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.vs-h { margin: 12px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.vs-list { margin: 2px 0 8px; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.vs .vs-fix { margin-top: 0; }
+.vs-plan .vs-board {   /* plus précis que « .vs-plan ol » (liste de texte d'avant) : sinon la grille était coupée à 220 px */
+  --vs-min: 92px; list-style: none; margin: 10px 0 4px; padding: 2px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(var(--vs-min), 1fr));
+  max-height: min(70vh, 640px); overflow-y: auto; overscroll-behavior: contain;
+}
+.vs-board[data-fmt="horizontal"] { --vs-min: 150px; }
+.vs-board[data-fmt="square"] { --vs-min: 112px; }
+.vs-board li { position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vs-frame {
+  /* ses propres marges en % : une unité « cqw » posée sur le conteneur lui-même se mesurerait sur l'écran, pas sur la vignette */
+  --k: 1; position: relative; container-type: inline-size; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 10px; padding: 9% 8%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--vfg);
+  background: radial-gradient(60% 50% at 30% 20%, var(--vg1) 0, transparent 70%), radial-gradient(50% 50% at 80% 90%, var(--vg2) 0, transparent 70%), var(--vbg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 8px 18px -12px rgba(0, 0, 0, .5);
+}
+.vs-board[data-fmt="horizontal"] .vs-frame { --k: .56; aspect-ratio: 16 / 9; padding: 4% 7%; }
+.vs-board[data-fmt="square"] .vs-frame { --k: .8; aspect-ratio: 1; }
+.vs-frame > * { max-width: 100%; overflow-wrap: anywhere; }
+.vs-frame > * + * { margin-top: 3cqw; }
+.vs-frame > .vs-n, .vs-frame > .f-img { margin-top: 0; }
+.vs-frame.is-photo, .vs-frame.is-gallery { justify-content: flex-end; }   /* « is-… » : le type de la scène (les « f-… » sont ses éléments) */
+.f-t1 { font-size: calc(15cqw * var(--k)); line-height: 1; color: var(--vac); text-transform: uppercase; font-weight: 800; }
+.f-t2 { font-size: calc(10cqw * var(--k)); line-height: 1.05; text-transform: uppercase; font-weight: 800; }
+.f-sub { font-size: calc(6.5cqw * var(--k)); line-height: 1.3; letter-spacing: .04em; color: var(--vsoft); }
+.f-text { align-self: stretch; text-align: left; }
+.f-h { display: block; margin-bottom: 3cqw; font-size: calc(10cqw * var(--k)); line-height: 1.05; font-weight: 800; color: var(--vac); }
+.f-text ul { display: grid; gap: 2.5cqw; margin: 0; padding: 0; list-style: none; }
+.f-text li { position: relative; padding-left: 6cqw; font-size: calc(7cqw * var(--k)); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.f-text li::before { content: ""; position: absolute; left: 0; top: .45em; width: 3cqw; height: 3cqw; border-radius: 50%; background: var(--vac); }
+.f-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.f-cap {
+  position: relative; padding: 2cqw 4cqw; border-radius: 3cqw; font-size: calc(6.5cqw * var(--k)); font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  background: rgba(0, 0, 0, .6); background: color-mix(in srgb, var(--vbg) 90%, transparent); border: 1px solid color-mix(in srgb, var(--vac) 55%, transparent);
+}
+.f-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3cqw; width: 100%; }
+.f-stats span { display: flex; flex-direction: column; gap: 1cqw; min-width: 0; padding: 4cqw 2cqw; border-radius: 4cqw; background: var(--vcbg); color: var(--vcfg); }
+.f-stats span:last-child:nth-child(odd) { grid-column: 1 / -1; justify-self: center; width: calc(50% - 1.5cqw); }
+.f-stats b { font-size: calc(var(--fs, 10cqw) * var(--k)); line-height: 1; font-weight: 800; white-space: nowrap; }
+.f-stats small { font-size: calc(4.6cqw * var(--k)); line-height: 1.15; }
+.f-q { font-size: calc(22cqw * var(--k)); line-height: .6; font-weight: 800; color: var(--vac); }
+.f-qt { font-size: calc(7.5cqw * var(--k)); line-height: 1.3; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.f-btn { padding: 2cqw 5cqw; border-radius: 999px; font-size: calc(6.5cqw * var(--k)); font-weight: 700; color: var(--vbg); background: var(--vac); }
+.f-chip { padding: 1.5cqw 4cqw; border-radius: 3cqw; font-size: calc(6cqw * var(--k)); border: 1px solid color-mix(in srgb, var(--vac) 55%, transparent); }
+.f-ai { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3cqw; width: 100%; height: 100%; padding: 5cqw; border: 1.5px dashed var(--vac); border-radius: 6cqw; }
+.f-ai b { font-size: calc(9cqw * var(--k)); color: var(--vac); }
+.f-ai small { font-size: calc(6cqw * var(--k)); line-height: 1.3; color: var(--vsoft); display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.vs-n { position: absolute; top: 5px; left: 5px; z-index: 2; padding: 3px 6px; border-radius: 6px; font-size: 10px; font-weight: 700; line-height: 1; color: #fff; background: rgba(0, 0, 0, .55); }
+.vs-cap { font-size: 11px; line-height: 1.25; text-align: center; color: var(--muted); }
+.vs-x {
+  position: absolute; top: 2px; right: 2px; z-index: 3; display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 50%; font-size: 17px; line-height: 1; color: #fff; background: rgba(0, 0, 0, .6); cursor: pointer;
+}
+.vs-x:hover, .vs-x:focus-visible { background: #b42318; }
+.vs-x:disabled { opacity: .5; cursor: default; }
 
