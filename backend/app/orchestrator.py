@@ -239,6 +239,20 @@ def _match_supplier(db: Session, text: str) -> Supplier | None:
     return None
 
 
+_DOC_REF = re.compile(r"\b[A-Z]{1,5}-\d{4}-[A-Z0-9]+(?:-[A-Z0-9]+){0,4}\b")
+
+
+def known_documents(db: Session, text: str) -> set[str]:
+    """Numéros de documents cités dans une réponse qui EXISTENT en base : « le devis UC-… a été créé » parle alors d'un travail déjà fait."""
+    refs = set(_DOC_REF.findall(text or ""))
+    if not refs:
+        return set()
+    found: set[str] = set()
+    for model in (Quotation, Invoice, PurchaseOrder, DeliveryNote):
+        found |= {n for (n,) in db.query(model.number).filter(model.number.in_(refs)).all()}
+    return found
+
+
 def _match_project(db: Session, text: str) -> Project | None:
     t = text.lower()
     for p in db.query(Project).all():
@@ -1069,7 +1083,8 @@ def handle_turn(
                                            tool_handler=session, effort="low", max_tokens=1200)
                 if ai.provider in ("claude", "vibecode") and ai.raw:
                     usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider)   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
-                phantom = claims.unbacked(ai.text, session.succeeded) if (session is not None and ai.available and ai.text) else []
+                phantom = claims.unbacked(ai.text, session.succeeded, known=known_documents(db, ai.text)) \
+                    if (session is not None and ai.available and ai.text) else []
                 if phantom:
                     # « j'ai créé le devis » sans create_quote réussi : un tour de correction (faire vraiment, ou dire la vérité)
                     audit(db, user.id, "ai_phantom_claim", "conversation", conv.id, ", ".join(phantom)[:250])
@@ -1081,7 +1096,7 @@ def handle_turn(
                         if again.provider in ("claude", "vibecode") and again.raw:
                             usage.record(db, again.raw.get("usage"), again.model, provider=again.provider)
                         ai = again
-                    still = claims.unbacked(ai.text, session.succeeded)
+                    still = claims.unbacked(ai.text, session.succeeded, known=known_documents(db, ai.text))
                     if still:
                         audit(db, user.id, "ai_phantom_warned", "conversation", conv.id, ", ".join(still)[:250])
                         ai.text += claims.warning(still)

@@ -171,3 +171,19 @@ def test_corrupted_tool_list_never_widens_access_and_the_agent_does_not_run(db, 
     assert a.last_ok is False and "illisible" in a.last_result
     a.allowed_tools = '["list_unpaid"]'
     db.commit()
+
+
+def test_agent_report_claiming_an_impossible_action_is_flagged(db, monkeypatch):
+    """Un agent ne fait que lire et préparer : « j'ai relancé les clients » dans son rapport est signalé (claims.py)."""
+    monkeypatch.setattr(agents, "_complete", lambda msgs, tools=None, tool_handler=None, **kw: (
+        tool_handler("list_unpaid", {}), _ok("J'ai relancé les clients en retard.")) [1])
+    ghost = _agent(db, "Agent relances fantômes", tools=["list_unpaid"])
+    out = agents.run(db, ghost)
+    agents.set_status(db, ghost, "paused")                 # ne pas encombrer le briefing des autres tests
+    assert out["ok"] and "⚠️ Vérification" in out["rapport"] and "contact d'une personne" in out["rapport"]
+    monkeypatch.setattr(agents, "_complete", lambda msgs, tools=None, tool_handler=None, **kw: (
+        tool_handler("list_unpaid", {}), _ok("3 factures en retard : messages de relance préparés ci-dessous.")) [1])
+    honest = _agent(db, "Agent relances honnête", tools=["list_unpaid"])
+    out = agents.run(db, honest)
+    agents.set_status(db, honest, "paused")
+    assert out["ok"] and "Vérification" not in out["rapport"]
