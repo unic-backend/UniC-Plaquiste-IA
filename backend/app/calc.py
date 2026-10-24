@@ -203,8 +203,8 @@ def check_inputs(*, positive: dict[str, float] | None = None, surface_m2: float 
     if waste is not None and not 0 <= waste <= 0.5:
         raise ValueError(f"Le taux de chute doit être entre 0 % et 50 % (reçu : {waste:.0%}).")
     if surface_m2 is not None and surface_m2 > MAX_SURFACE_M2 and not confirmed_large:
-        raise ValueError(f"Surface de {surface_m2:,.0f} m² : au-delà de {MAX_SURFACE_M2:,.0f} m² pour un seul calcul. "
-                         "Vérifie les unités (m ou mm ?) puis confirme, ou découpe en plusieurs chantiers.".replace(",", " "))
+        raise ValueError((f"Surface de {surface_m2:,.0f} m² : au-delà de {MAX_SURFACE_M2:,.0f} m² pour un seul calcul. "
+                          "Vérifie les unités (m ou mm ?) puis confirme, ou découpe en plusieurs chantiers.").replace(",", " "))
 
 
 def calculate_partition(

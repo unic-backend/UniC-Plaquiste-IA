@@ -9,12 +9,13 @@ Tout est déterministe : les totaux sont recalculés ici, jamais par le modèle.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 
 from sqlalchemy.orm import Session
 
-from app import services as svc
+from app import pricecheck, services as svc
 from app.models import (Artifact, Customer, DeliveryNote, DeliveryNoteItem, Invoice, InvoiceItem, PurchaseOrder,
                         PurchaseOrderItem, Quotation, QuotationItem)
 
@@ -24,11 +25,24 @@ KINDS = {
     "po": (PurchaseOrder, PurchaseOrderItem, "order_id", PurchaseOrder.number),
     "dn": (DeliveryNote, DeliveryNoteItem, "note_id", DeliveryNote.number),
 }
+GRID_KIND = {"quote": "selling", "invoice": "selling", "po": "purchase", "dn": "selling"}   # vente ; achat pour un bon de commande
 LABEL = {"quote": "devis", "invoice": "facture", "po": "bon de commande", "dn": "bon de livraison"}
 
 
 class ReviseError(ValueError):
     pass
+
+
+def _number(value, what: str, line: str, *, positive: bool) -> float:
+    """Quantité ou prix donné pour une ligne : un nombre fini, jamais négatif (ni nul pour une quantité)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ReviseError(f"{what} illisible pour « {line} » : {value!r}.")
+    if not math.isfinite(v) or v < 0 or (positive and v == 0):
+        hint = " (pour retirer la ligne, utilise remove)" if positive else ""
+        raise ReviseError(f"{what} refusé pour « {line} » : {value!r}{hint}.")
+    return v
 
 
 def find(db: Session, kind: str, number: str = "", last_id: str | None = None):
@@ -111,9 +125,9 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     for u in update or []:
         it = _match(items, u.get("line"))
         if u.get("quantity") is not None:
-            it.quantity = float(u["quantity"])
+            it.quantity = _number(u["quantity"], "Quantité", it.description, positive=True)
         if u.get("unit_price") is not None and kind != "dn":
-            it.unit_price = float(u["unit_price"])
+            it.unit_price = _number(u["unit_price"], "Prix unitaire", it.description, positive=False)
         if u.get("description"):
             it.description = u["description"]
         if u.get("unit"):
@@ -122,10 +136,14 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     for a in add or []:
         if not (a.get("description") or "").strip() or a.get("quantity") is None:
             raise ReviseError("Une ligne ajoutée exige une désignation et une quantité.")
-        row = {"description": a["description"].strip(), "quantity": float(a["quantity"]), "unit": a.get("unit") or "u",
-               "position": len(items) + 1, fk: doc.id}
+        desc = a["description"].strip()
+        row = {"description": desc, "quantity": _number(a["quantity"], "Quantité", desc, positive=True),
+               "unit": a.get("unit") or "u", "position": len(items) + 1, fk: doc.id}
         if kind != "dn":
-            row["unit_price"] = float(a["unit_price"]) if a.get("unit_price") is not None else None
+            price = _number(a["unit_price"], "Prix unitaire", desc, positive=False) if a.get("unit_price") is not None else None
+            if price is None:   # pas de prix donné : celui de la grille du patron si l'article y figure, sinon « prix non renseigné »
+                price = pricecheck.grid_price(db, desc, kind=GRID_KIND[kind])
+            row["unit_price"] = price
         it = item_model(**row)
         db.add(it)
         items.append(it)
@@ -172,6 +190,10 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
             doc.client_label = client_name.strip()
         changes.append(f"client : {client_name.strip()}")
     _recompute(kind, doc, items)
+    if kind != "dn":
+        for o in pricecheck.off_grid(db, items, GRID_KIND[kind]):
+            changes.append((f"PRIX HORS GRILLE : « {o['ligne']} » à {o['trouve']:,.0f} (grille : {o['grille']:,.0f}) — "
+                            "à confirmer par le patron").replace(",", " "))
     if prev_status != "draft":   # modifié sur ordre du patron : il n'y a plus d'approbation valable sur le nouveau contenu
         doc.status = "draft"
         if hasattr(doc, "approved_by"):
@@ -235,8 +257,8 @@ def reissue(db: Session, doc: Invoice, *, user_id: str | None, **corrections) ->
         changes.append(f"versements déjà reçus ({moved:,.0f}) repris sur {new.number}".replace(",", " "))
     changes += revise(db, "invoice", new, user_id=user_id, **corrections)
     if new.total is not None and (new.paid or 0) > new.total + 0.005:
-        changes.append(f"ATTENTION : le client a déjà versé plus que le nouveau total ({new.paid:,.0f} > {new.total:,.0f}) : "
-                       "un remboursement ou un avoir est à prévoir".replace(",", " "))
+        changes.append((f"ATTENTION : le client a déjà versé plus que le nouveau total ({new.paid:,.0f} > {new.total:,.0f}) : "
+                        "un remboursement ou un avoir est à prévoir").replace(",", " "))
     return new, changes
 
 

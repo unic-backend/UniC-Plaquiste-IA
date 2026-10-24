@@ -247,7 +247,8 @@ TOOLS: list[dict] = [
                         "document pour une correction. Les totaux sont recalculés par le système. Un document approuvé n'est PAS un obstacle : exécute l'ordre du patron ; "
                         "le document repasse « à valider » et le PDF est refait. Ouvre-le d'abord avec get_document si tu dois connaître ses lignes. "
                         "Une FACTURE émise (approuvée, envoyée, payée) n'est jamais réécrite (loi) : le système fait un avoir qui l'annule et "
-                        "une nouvelle facture corrigée à valider ; annonce les deux numéros."),
+                        "une nouvelle facture corrigée à valider ; annonce les deux numéros. Une ligne ajoutée sans prix prend celui de la grille ; "
+                        "chaque « PRIX HORS GRILLE » renvoyé est à dire au patron tel quel (jamais de prix inventé)."),
         "input_schema": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
             "number": {"type": "string", "description": "Numéro du document ; omis = dernier devis de la conversation"},

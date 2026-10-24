@@ -2,6 +2,7 @@
 
 Il ne corrige rien : c'est le document et le tarif du patron. Il signale, avec la ligne fautive.
 - check_quote : chaque ligne d'un devis contre le prix de vente enregistré + cohérence des totaux ;
+- off_grid : après une correction, les lignes d'un document dont le prix diffère de la grille (article lié ou nom identique) ;
 - review_reply : une réponse de l'IA qui cite un article de la grille avec un autre prix.
 """
 from __future__ import annotations
@@ -56,6 +57,31 @@ def check_quote(q: Quotation) -> list[dict]:
         if abs(q.total - expected_total) > TOLERANCE:
             issues.append({"type": "total", "ligne": "Total", "attendu": expected_total, "trouve": q.total})
     return issues
+
+
+def grid_price(db: Session, description: str, material_id: str | None = None, kind: str = "selling") -> float | None:
+    """Prix de la grille pour une ligne : par l'article lié, sinon par un article actif de nom identique. None = hors grille."""
+    mat = db.get(Material, material_id) if material_id else None
+    if mat is None:
+        name = (description or "").strip().lower()
+        mat = next((m for m in db.query(Material).filter(Material.is_active.is_(True)).all()
+                    if name and (m.name or "").strip().lower() == name), None)
+    if mat is None:
+        return None
+    price = current_price(db, mat.id, kind)
+    return price.amount if price is not None else None
+
+
+def off_grid(db: Session, items: list, kind: str = "selling") -> list[dict]:
+    """Lignes dont le prix unitaire diffère de la grille du patron (rien n'est corrigé : il peut avoir voulu une remise)."""
+    out = []
+    for it in sorted(items, key=lambda x: x.position):
+        if it.unit_price is None:
+            continue
+        ref = grid_price(db, it.description, getattr(it, "material_id", None), kind)
+        if ref is not None and abs(ref - it.unit_price) > TOLERANCE:
+            out.append({"ligne": it.description, "grille": ref, "trouve": it.unit_price})
+    return out
 
 
 def review_reply(db: Session, reply: str) -> str:

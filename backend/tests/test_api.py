@@ -1260,8 +1260,40 @@ def test_agent_revise_on_issued_invoice_reissues(client, claude):
     db.add(InvoiceItem(invoice_id=inv.id, position=1, description="Plaque", quantity=2, unit="u", unit_price=5000, total=10000))
     db.commit()
     out = AgentSession(db, None, {})("revise_document", {"kind": "invoice", "number": inv.number, "update": [{"line": 1, "quantity": 1}]})
+    draft = db.query(Invoice).filter_by(number=q.number + "-F2").one()
+    db.add(InvoiceItem(invoice_id=draft.id, position=2, description="Sans prix", quantity=1, unit="u"))
+    db.commit()
+    r = client.post(f"/api/invoices/{draft.id}/approve")
+    assert r.status_code == 400 and "Prix manquants" in r.json()["detail"]   # jamais une facture émise incomplète
     assert out["numero"] == q.number + "-F2" and out["total"] == 5900 and "avoir" in out["note"]
     assert db.get(Invoice, inv.id).status == "cancelled"
+    db.close()
+
+
+def test_revise_checks_prices_and_quantities_against_the_grid(client):
+    """Une correction ne fait plus passer n'importe quel chiffre : quantités et prix absurdes refusés,
+    prix absent repris de la grille, prix différent de la grille signalé (jamais corrigé en silence)."""
+    from app import revise
+    from app.models import Material, MaterialPrice, QuotationItem
+    db, q = _mk_quote(client)
+    m = Material(sku="TEST-GRILLE-1", name="Cornière test grille", category="ossature", unit="u")
+    db.add(m)
+    db.flush()
+    db.add(MaterialPrice(material_id=m.id, kind="selling", amount=1250, currency="FCFA"))
+    db.commit()
+    for bad in ({"update": [{"line": 1, "quantity": -3}]}, {"update": [{"line": 1, "quantity": 0}]},
+                {"update": [{"line": 1, "unit_price": -5000}]}, {"update": [{"line": 1, "unit_price": float("nan")}]},
+                {"update": [{"line": 1, "unit_price": "beaucoup"}]}, {"add": [{"description": "X", "quantity": float("inf")}]}):
+        with pytest.raises(revise.ReviseError):
+            revise.revise(db, "quote", q, user_id=None, **bad)
+        db.rollback()
+    ch = revise.revise(db, "quote", q, user_id=None, add=[{"description": "cornière TEST grille", "quantity": 4}])
+    line = db.query(QuotationItem).filter_by(quotation_id=q.id, position=4).one()
+    assert line.unit_price == 1250 and line.total == 5000 and not any("HORS GRILLE" in c for c in ch)   # 4 × 1 250
+    ch = revise.revise(db, "quote", q, user_id=None, update=[{"line": 4, "unit_price": 1000}])
+    assert db.query(QuotationItem).filter_by(quotation_id=q.id, position=4).one().unit_price == 1000   # ordre du patron gardé
+    warn = [c for c in ch if "HORS GRILLE" in c]
+    assert len(warn) == 1 and "1 000" in warn[0] and "1 250" in warn[0]
     db.close()
 
 
@@ -2264,7 +2296,16 @@ def test_invoice_balance_pdf_and_message(client):
     # facture en brouillon, rien à rappeler
     d = client.get(f"/api/invoices/{iid}").json()
     assert "balance_url" not in d
-    client.post(f"/api/invoices/{iid}/approve")
+    assert client.post(f"/api/invoices/{iid}/approve").status_code == 400   # vis, bande, enduit sans prix : pas d'émission
+    from app import revise
+    from app.database import SessionLocal
+    from app.models import Invoice
+    db = SessionLocal()
+    i = db.get(Invoice, iid)
+    revise.revise(db, "invoice", i, user_id=None,
+                  update=[{"line": it.position, "unit_price": 1000} for it in i.items if it.unit_price is None])
+    db.close()
+    assert client.post(f"/api/invoices/{iid}/approve").status_code == 200
     d = client.get(f"/api/invoices/{iid}").json()
     total = d["total"]
     if not total:
