@@ -8,6 +8,7 @@ const Voix = lazyPage(() => import("./Voix"), "Voix");
 import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
 const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
+const Equipe = lazyPage(() => import("./Equipe"), "Equipe");
 const Suivi = lazyPage(() => import("./Suivi"), "Suivi");
 const SuiviClient = lazyPage(() => import("./Suivi"), "SuiviClient");
 const VideoPage = lazyPage(() => import("./Video"), "VideoPage");
@@ -1760,6 +1761,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/agenda", title: "Agenda", text: "Visites, métrés, poses, livraisons" },
       { to: "/prospects", title: "Prospects du site", text: "Demandes laissées sur unicplaquiste.com" },
       { to: "/chantiers", title: "Chantiers", text: "Projets et suivi" },
+      { to: "/equipe", title: "Équipe", text: "Ouvriers, journées, avances et paie" },
       { to: "/documents", title: "Fichiers reçus", text: "Plans, PDF, photos" },
     ],
   },
@@ -2194,6 +2196,7 @@ export default function App() {
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />
+        <Route path="/equipe" element={<Equipe />} />
         <Route path="/suivi" element={<Suivi />} />
         <Route path="/video" element={<VideoPage />} />
         <Route path="/suivi/:key" element={<SuiviClient />} />

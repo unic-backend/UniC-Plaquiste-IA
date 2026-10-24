@@ -889,3 +889,56 @@ class TrackingClient(Base):
     phone: Mapped[str] = mapped_column(String(40), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Worker(Base):
+    """Équipe : un ouvrier (ou un sous-traitant) et sa façon d'être payé. La main-d'œuvre n'est jamais mélangée aux matériaux."""
+
+    __tablename__ = "workers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    role: Mapped[str] = mapped_column(String(64), default="")            # plaquiste, aide, peintre, chef d'équipe…
+    pay_mode: Mapped[str] = mapped_column(String(16), default="jour")    # jour (tarif journalier) / tache (montant fixé par travail)
+    day_rate: Mapped[float | None] = mapped_column(Float, nullable=True)  # tarif d'une journée, donné par le patron (jamais deviné)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkEntry(Base):
+    """Travail dû à un ouvrier : une journée (ou demi-journée) au tarif du jour, ou une tâche à prix fixé. Rattaché à un chantier
+    (devis accepté) si possible : la somme y est alors comptée en dépense « main-d'œuvre » (expense_id)."""
+
+    __tablename__ = "work_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    worker_id: Mapped[str] = mapped_column(ForeignKey("workers.id"), index=True)
+    quotation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    day: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="jour")        # jour / tache
+    units: Mapped[float] = mapped_column(Float, default=1.0)             # journées (1, 0,5…) ; 1 pour une tâche
+    amount: Mapped[float] = mapped_column(Float)
+    label: Mapped[str] = mapped_column(String(255), default="")
+    expense_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="ok")        # ok / cancelled (erreur de saisie : jamais effacée)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkerPayment(Base):
+    """Argent remis à un ouvrier : avance ou paie. Le reste dû = travail − argent remis."""
+
+    __tablename__ = "worker_payments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    worker_id: Mapped[str] = mapped_column(ForeignKey("workers.id"), index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    kind: Mapped[str] = mapped_column(String(16), default="paie")        # avance / paie
+    method: Mapped[str] = mapped_column(String(64), default="")          # espèces, Wave, Orange Money…
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    note: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="ok")
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

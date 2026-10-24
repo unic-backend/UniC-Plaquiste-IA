@@ -1824,6 +1824,104 @@ def tracking_cancel_expense(eid: str, db: Session = Depends(get_db), user: User 
     return _tracked(lambda: tracking.cancel_expense(db, eid, user.id))
 
 
+# ---------- équipe et paie (team.py) ----------
+
+TEAM = require_roles("admin", "manager")
+
+
+def _team(fn):
+    from app import team
+    try:
+        return fn()
+    except team.TeamError as exc:
+        raise HTTPException(400, str(exc))
+
+
+def _worker_or_404(db: Session, wid: str):
+    from app.models import Worker
+    w = db.get(Worker, wid)
+    if w is None:
+        raise HTTPException(404, "Ouvrier introuvable")
+    return w
+
+
+def _day(value: str | None):
+    from datetime import datetime as _dt, timezone as _tz
+    if not value:
+        return None
+    try:
+        return _dt.strptime(value, "%Y-%m-%d").replace(hour=12, tzinfo=_tz.utc)
+    except ValueError:
+        raise HTTPException(400, "Date invalide")
+
+
+class WorkerIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=255)
+    pay_mode: str = Field("jour", pattern="^(jour|tache)$")
+    day_rate: float | None = Field(default=None, ge=0)
+    phone: str = Field("", max_length=40)
+    role: str = Field("", max_length=64)
+
+
+class WorkIn(BaseModel):
+    days: float | None = Field(default=None, gt=0, le=31)
+    amount: float | None = Field(default=None, gt=0)
+    label: str = Field("", max_length=200)
+    quote_id: str | None = None
+    day: str | None = None   # AAAA-MM-JJ
+
+
+class WorkerPayIn(BaseModel):
+    amount: float = Field(..., gt=0)
+    kind: str = Field("paie", pattern="^(avance|paie)$")
+    method: str = Field("", max_length=64)
+    note: str = Field("", max_length=500)
+    day: str | None = None
+
+
+@router.get("/team")
+def team_overview(db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    from app import team
+    return team.overview(db)
+
+
+@router.post("/team/workers")
+def team_add_worker(body: WorkerIn, db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    from app import team
+    w = _team(lambda: team.add_worker(db, body.name, body.pay_mode, body.day_rate, body.phone, body.role, user.id))
+    return team.summary(db, w)
+
+
+@router.get("/team/workers/{wid}")
+def team_worker(wid: str, db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    from app import team
+    return team.summary(db, _worker_or_404(db, wid))
+
+
+@router.post("/team/workers/{wid}/work")
+def team_add_work(wid: str, body: WorkIn, db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    from app import team
+    w = _worker_or_404(db, wid)
+    q = db.get(Quotation, body.quote_id) if body.quote_id else None
+    if body.quote_id and q is None:
+        raise HTTPException(404, "Chantier introuvable")
+    return _team(lambda: team.record_work(db, w, days=body.days, amount=body.amount, label=body.label, quote=q, day=_day(body.day), user_id=user.id))
+
+
+@router.post("/team/workers/{wid}/payments")
+def team_add_payment(wid: str, body: WorkerPayIn, db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    from app import team
+    w = _worker_or_404(db, wid)
+    return _team(lambda: team.record_payment(db, w, body.amount, body.kind, body.method, body.note, _day(body.day), user.id))
+
+
+@router.delete("/team/entries/{eid}")
+def team_cancel(eid: str, db: Session = Depends(get_db), user: User = Depends(TEAM)):
+    """Erreur de saisie : annulée (gardée au journal), jamais effacée."""
+    from app import team
+    return _team(lambda: team.cancel(db, eid, user.id))
+
+
 @router.post("/tracking/quotes/{qid}/decision")
 def tracking_decision(qid: str, body: DecisionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import tracking
