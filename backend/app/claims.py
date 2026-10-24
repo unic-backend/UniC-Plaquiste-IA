@@ -38,7 +38,8 @@ FAMILIES: dict[str, tuple[re.Pattern, frozenset[str]]] = {
                    frozenset({"make_pdf", "make_spreadsheet", "edit_file", "pdf_tool", "create_quote", "create_invoice",
                               "create_balance_invoice", "create_purchase_order", "create_delivery_note", "revise_document",
                               "visit_report"})),
-    "la mémoire": (re.compile(r"\bm[ée]moire\b|\bm[ée]moris|\bretenu\b|\bje m'en souviendrai\b", _I), frozenset({"remember", "forget_memory"})),
+    "la bibliothèque": (re.compile(r"\bbiblioth[èe]que\b|\bpage (?:apprise|gardée|retenue)\b", _I), frozenset({"learn_page", "deep_research"})),
+    "la mémoire": (re.compile(r"\bm[ée]moire\b|\bm[ée]moris|\bretenu\b|\bje m'en souviendrai\b", _I), frozenset({"remember", "forget_memory", "learn_page"})),
     "la fiche contact": (re.compile(r"\bfiches? (?:client|fournisseur|contact)\b|\bnouveau (?:client|fournisseur)\b|\b(?:dans|[àa]) (?:tes|vos|ton|votre|les) "
                                     r"(?:contacts|r[ée]pertoire|carnet)\b|\bcomme (?:client|fournisseur)\b", _I), frozenset({"create_contact"})),
     "le rappel": (re.compile(r"\brappels?\b|\brelances?\b", _I),

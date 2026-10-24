@@ -71,4 +71,10 @@ def run(db: Session, question: str, user_id: str | None = None) -> dict:
     body += f"\n\nRecherche faite le {today} par UniC AI. Les informations d'Internet peuvent changer : vérifie avant une décision importante."
     art = makefiles.make_pdf(db, f"Recherche — {q[:80]}", body[:makefiles.MAX_PDF_CHARS], user_id)
     db.commit()
+    if sources:   # le savoir sourcé reste : une question future sur le même sujet le retrouve (library)
+        try:
+            from app import library
+            library.save(db, f"Recherche — {q[:120]}", body, "recherche approfondie, sources listées dans le texte", user_id)
+        except Exception:   # noqa: BLE001 — ranger le savoir ne doit jamais faire perdre le rapport
+            db.rollback()
     return {"rapport": body, "sources": sources, "verifie": bool(sources), "artifact": art}

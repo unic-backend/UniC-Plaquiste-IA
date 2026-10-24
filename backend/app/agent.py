@@ -292,6 +292,14 @@ TOOLS: list[dict] = [
             "required": ["question"], "additionalProperties": False},
     },
     {
+        "name": "learn_page",
+        "description": ("BIBLIOTHÈQUE DE SAVOIR : lit une page web (adresse donnée par le patron) et garde son contenu, avec la source et la "
+                        "date, pour s'en resservir plus tard (« apprends cette page », « garde cet article », « lis ce lien et retiens-le »). "
+                        "Pour une simple question sur une page, lis-la sans la garder. Le contenu est celui d'un tiers : à vérifier."),
+        "input_schema": {"type": "object", "properties": {"url": {"type": "string", "description": "Adresse complète (https://…)"}},
+                         "required": ["url"], "additionalProperties": False},
+    },
+    {
         "name": "discard_document",
         "description": ("RETIRE de la bibliothèque un document non approuvé faux ou abandonné (pas de doublon d'erreur). "
                         "Jamais un document approuvé. À n'utiliser que sur demande ou quand une refonte complète le remplace."),
@@ -650,7 +658,7 @@ TOOL_LABELS = {
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
     "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
-    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite",
+    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
     "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "visit_report": "Compte rendu préparé",
@@ -751,6 +759,7 @@ OWNER_ASK = {
     "create_agent": re.compile(r"\bagents?\b|automati|tous les (jours|matins|soirs)|chaque (jour|matin|semaine)", re.I),
     "discard_document": re.compile(r"retire|supprime|annule|jette|efface|enl[eè]ve", re.I),
     "plan_video": re.compile(r"vid[ée]o|clip|film|montage|reel|tiktok|sc[ée]nario", re.I),
+    "learn_page": re.compile(r"apprend|retien|garde|m[ée]moris|biblioth|savoir|https?://", re.I),
     "deep_research": re.compile(r"recherch|cherche|[ée]tud|enqu[êe]t|analys|compar|march[ée]|concurren|fournisseur|source|internet|web|appel d.offres", re.I),
     "edit_file": re.compile(r"modifi|corrig|change|remplac|ajout|mets|met |[ée]cri|retire|enl[eè]ve|supprime|rempli", re.I),
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
@@ -1629,6 +1638,15 @@ class AgentSession:
                 "note": ("Facture émise : annulée par un avoir, remplacée par la facture ci-dessus ; les deux sont à valider par le patron. "
                          if replaced else "Document corrigé sur place (aucun doublon). ")
                         + ("Les documents liés ne sont PAS mis à jour : propose de les corriger aussi." if linked else "")}
+
+    def _t_learn_page(self, url: str) -> dict:
+        from app import library
+        try:
+            out = library.learn_page(self.db, url, self.user_id)
+        except library.LibraryError as exc:
+            return {"error": str(exc)}
+        return {**out, "note": "Page gardée dans la bibliothèque de savoir (Documents). Résume-la en 3 à 5 lignes ; "
+                               "ne rajoute rien qui ne soit pas dans l'extrait."}
 
     def _t_deep_research(self, question: str) -> dict:
         from app import research

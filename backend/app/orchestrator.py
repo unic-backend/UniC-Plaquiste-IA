@@ -106,6 +106,7 @@ def with_followup(text: str, history: list) -> str:
     return " ".join([text, *((m.content or "")[:600] for m in history[:2])])
 
 
+DEEP_SEARCHES = 6  # recherches Internet permises pour une question difficile (3 pour une question courante)
 HISTORY_SIZE = 8   # derniers messages envoyés tels quels au modèle ; au-delà, mem.thread_recall rappelle le fil utile
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
@@ -1033,6 +1034,8 @@ def handle_turn(
                     msgs[1]["content"] += (
                         "\n\nOUTIL DE RECHERCHE INTERNET DISPONIBLE : pour toute information récente ou vérifiable "
                         "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
+                        "Un LIEN donné par le patron, ou une page trouvée qui compte : lis-la en entier (web_fetch) avant de répondre, "
+                        "jamais d'après son seul titre. Un chiffre, une date ou un nom dont tu n'es pas sûr : vérifie-le plutôt que de le deviner. "
                         "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise. "
                         "Si le patron demande une ÉTUDE poussée (marché, concurrents, fournisseurs, normes, comparatif détaillé) : outil deep_research."
                     )
@@ -1077,8 +1080,10 @@ def handle_turn(
                     else:
                         voice_kw = {"effort": "low", "max_tokens": 1200}
                 with live_stream():
+                    # sujet difficile : plus de recherches et lecture de pages (pas en vocal, où la réponse doit venir vite)
+                    web_kw = {"fetch": not voice, **({"web_max_uses": DEEP_SEARCHES} if deep and not voice else {})} if can_search else {}
                     ai = chat_complete(msgs, deep=deep, web=can_search,
-                                       tools=agent.TOOLS if tools_on else None, tool_handler=session, **voice_kw)
+                                       tools=agent.TOOLS if tools_on else None, tool_handler=session, **voice_kw, **web_kw)
                     if voice_kw.get("model") and not (ai.available and ai.text) and ai.error != "refusal":
                         # le modèle rapide n'a pas répondu : on retombe sur le modèle courant, sans bruit
                         ai = chat_complete(msgs, deep=deep, web=can_search, tools=agent.TOOLS if tools_on else None,

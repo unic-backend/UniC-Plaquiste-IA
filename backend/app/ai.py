@@ -221,6 +221,10 @@ class ClaudeAIProvider(AIProvider):
     # refusent cette version : il leur faut la recherche de base `_20250305`. Sinon la requête échouait et l'IA répondait « pas d'accès à Internet ».
     WEB_TOOL = {"type": "web_search_20260209", "name": "web_search"}
     WEB_TOOL_BASIC = {"type": "web_search_20250305", "name": "web_search"}
+    # lecture d'une page entière (lien donné par le patron, page trouvée par la recherche) : seulement sur les modèles 5.x,
+    # où cette version ne demande aucun en-tête bêta ; ailleurs l'IA garde la recherche seule
+    FETCH_TOOL = {"type": "web_fetch_20260209", "name": "web_fetch"}
+    FETCH_MAX_USES = 4
     _DYNAMIC_WEB_RE = re.compile(r"^claude-(?:opus-(?:5|4-[6-9])|sonnet-(?:5|4-[6-9]))")
 
     @classmethod
@@ -360,7 +364,9 @@ class ClaudeAIProvider(AIProvider):
         client_tools = list(kwargs.get("tools") or [])
         handler = kwargs.get("tool_handler")
         max_uses = int(kwargs.get("web_max_uses") or settings.web_search_max_uses)   # recherche approfondie : plus de recherches (research.py)
-        tools = ([{**self.web_tool(model), "max_uses": max_uses}] if web else []) + client_tools
+        fetch = web and bool(kwargs.get("fetch")) and bool(self._DYNAMIC_WEB_RE.match(model or ""))
+        tools = ([{**self.web_tool(model), "max_uses": max_uses}] if web else []) \
+            + ([{**self.FETCH_TOOL, "max_uses": int(kwargs.get("fetch_max_uses") or self.FETCH_MAX_USES)}] if fetch else []) + client_tools
         if tools:
             params["tools"] = tools
         used: list[str] = []
