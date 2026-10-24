@@ -1741,6 +1741,47 @@ def tracking_cancel_receipt(rid: str, db: Session = Depends(get_db), user: User 
     return _tracked(lambda: tracking.cancel_receipt(db, rid, user.id))
 
 
+class ExpenseIn(BaseModel):
+    label: str = Field(..., min_length=1, max_length=255)
+    amount: float = Field(..., gt=0)
+    category: str = "autre"
+    spent_on: str | None = None   # AAAA-MM-JJ
+    note: str = Field("", max_length=500)
+
+
+@router.get("/tracking/quotes/{qid}/expenses")
+def tracking_expenses(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Dépenses d'un chantier (devis accepté) et ce qu'il rapporte."""
+    from app import tracking
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    return tracking.expenses(db, q)
+
+
+@router.post("/tracking/quotes/{qid}/expenses")
+def tracking_add_expense(qid: str, body: ExpenseIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from datetime import datetime as _dt, timezone as _tz
+    from app import tracking
+    q = db.get(Quotation, qid)
+    if q is None:
+        raise HTTPException(404, "Devis introuvable")
+    when = None
+    if body.spent_on:
+        try:
+            when = _dt.strptime(body.spent_on, "%Y-%m-%d").replace(hour=12, tzinfo=_tz.utc)
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+    return _tracked(lambda: tracking.add_expense(db, q, body.label, body.amount, body.category, user.id, when, body.note))
+
+
+@router.delete("/tracking/expenses/{eid}")
+def tracking_cancel_expense(eid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Erreur de saisie : la dépense est annulée (gardée dans le journal, plus comptée)."""
+    from app import tracking
+    return _tracked(lambda: tracking.cancel_expense(db, eid, user.id))
+
+
 @router.post("/tracking/quotes/{qid}/decision")
 def tracking_decision(qid: str, body: DecisionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import tracking

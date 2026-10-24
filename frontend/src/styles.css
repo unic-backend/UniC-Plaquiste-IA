@@ -1303,6 +1303,15 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .cb-body p { margin: 0; font-size: 14px; }
 .cb-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
 .cb-grid span { color: var(--muted); }
+.cb-grid .cb-sub2 { font-size: 13px; font-weight: 400; padding-left: 10px; }
+.cb-exp { display: grid; gap: 10px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.cb-exp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.cb-exp-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.cb-exp-list li span { overflow-wrap: anywhere; }
+.cb-exp-list li.off { opacity: .5; text-decoration: line-through; }
+.cb-exp-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cb-exp-form input:first-child { grid-column: 1 / -1; }
+.cb-exp-form button { grid-column: 1 / -1; }
 .cb-h { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
 
 /* Feuilles (« Ajouter du contexte »…) : fond plein, net, sans texte qui transparaît ; le fond derrière est assombri et flouté */

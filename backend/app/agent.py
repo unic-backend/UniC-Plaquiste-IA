@@ -438,6 +438,18 @@ TOOLS: list[dict] = [
             "required": ["amount"], "additionalProperties": False},
     },
     {
+        "name": "record_expense",
+        "description": ("CHANTIER : le patron dit avoir PAYÉ quelque chose pour un chantier (matériaux, main-d'œuvre, transport, location). "
+                        "Enregistre la dépense sur le bon devis accepté puis annonce ce que le chantier rapporte (marge prévue et encaissée "
+                        "données par l'outil). Montant exactement comme dit. Main-d'œuvre et matériaux toujours en catégories séparées "
+                        "(deux appels si le patron cite les deux). Plusieurs chantiers possibles → demande lequel."),
+        "input_schema": {"type": "object", "properties": {
+            "amount": {"type": "number"}, "label": {"type": "string", "description": "Ce qui a été payé, en clair."},
+            "category": {"type": "string", "enum": ["matériaux", "main-d'œuvre", "transport", "location", "autre"]},
+            "client": {"type": "string"}, "quote_number": {"type": "string"}},
+            "required": ["amount", "label"], "additionalProperties": False},
+    },
+    {
         "name": "create_balance_invoice",
         "description": ("SUIVI : crée la FACTURE DE RELIQUAT (solde) d'un devis accepté : lignes du devis, déjà reçu, reste dû. Brouillon : le patron "
                         "l'approuve et l'envoie lui-même. Cible par quote_number ou client."),
@@ -602,7 +614,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -706,6 +718,7 @@ OWNER_ASK = {
     "plan_video": re.compile(r"vid[ée]o|clip|film|montage|reel|tiktok|sc[ée]nario", re.I),
     "edit_file": re.compile(r"modifi|corrig|change|remplac|ajout|mets|met |[ée]cri|retire|enl[eè]ve|supprime|rempli", re.I),
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
+    "record_expense": re.compile(r"d[ée]pens|frais|achet|pay[ée]|co[uû]t|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
     "create_contact": re.compile(r"contact|fiche|ajoute|enregistr|cr[ée]e", re.I),
     "save_email_draft": re.compile(r"e-?mail|mail|courri|lettre|[ée]cri|r[ée]dig|r[ée]pon|envoi|message|dis[- ]lui|pr[ée]vien|inform", re.I),
@@ -1005,6 +1018,13 @@ class AgentSession:
         row = self._tracked(lambda: tracking.record_receipt(self.db, q, amount, kind, method, note, self.user_id))
         self.state["last_quote_id"] = q.id
         return row
+
+    def _t_record_expense(self, amount: float, label: str, category: str = "autre", client: str = "", quote_number: str = "") -> dict:
+        q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))
+        out = self._tracked(lambda: tracking.add_expense(self.db, q, label, amount, category, self.user_id))
+        self.state["last_quote_id"] = q.id
+        out.pop("lignes", None)   # l'IA n'a besoin que des totaux ; le détail est dans Chantiers
+        return out
 
     def _t_create_balance_invoice(self, client: str = "", quote_number: str = "") -> dict:
         q = self._tracked(lambda: tracking.find_quote(self.db, client=client, number=quote_number))

@@ -13,13 +13,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.models import InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, TrackingClient, utcnow
+from app.models import Expense, InboxMessage, Invoice, MailSeen, Payment, Quotation, QuoteAcceptance, Receipt, TrackingClient, utcnow
 from app.services import _ACCENTS, _LINK_WORDS, audit, client_name_of, company_dict, generate_invoice_pdf, invoice_from_quote
 
 DECISIONS = ("pending", "accepted", "declined")
 KINDS = ("avance", "acompte", "solde", "autre")
 MAX_AMOUNT = 10_000_000_000
 NO_REPLY_DAYS = 7   # un devis sans réponse depuis autant de jours est signalé
+EXPENSE_KINDS = ("matériaux", "main-d'œuvre", "transport", "location", "autre")   # main-d'œuvre jamais mélangée aux matériaux
 
 
 class TrackingError(ValueError):
@@ -143,11 +144,16 @@ def _reminders(groups: dict[str, dict]) -> list[dict]:
     return out
 
 
-def _chantiers(groups: dict[str, dict]) -> list[dict]:
-    """Un chantier par devis accepté, créé tout seul. L'avancement = le pourcentage encaissé (argent seulement, pas de photos ni de suivi terrain)."""
+def _chantiers(groups: dict[str, dict], costs: dict[str, float] | None = None) -> list[dict]:
+    """Un chantier par devis accepté, créé tout seul. L'avancement = le pourcentage encaissé (argent seulement, pas de photos ni de suivi terrain).
+    Rentabilité : marge prévue = montant du devis − dépenses saisies ; marge encaissée = déjà reçu − dépenses."""
+    costs = costs or {}
     out = [{"key": g["key"], "client": g["client"], "id": r["id"], "numero": r["numero"], "titre": r["titre"], "lieu": r["lieu"],
             "montant": r["montant"], "recu": r["recu"], "reste": r["reste"], "avancement": r["pct_recu"], "devise": r["devise"],
-            "termine": r["reste"] <= 0, "date": r["date"]}
+            "termine": r["reste"] <= 0, "date": r["date"], "depenses": costs.get(r["id"], 0.0),
+            "marge_prevue": round(r["montant"] - costs.get(r["id"], 0.0), 2),
+            "marge_pct": _pct(r["montant"] - costs.get(r["id"], 0.0), r["montant"]),
+            "marge_encaissee": round(r["recu"] - costs.get(r["id"], 0.0), 2)}
            for g in groups.values() for r in g["quotes"] if r["decision"] == "accepted"]
     out.sort(key=lambda x: (x["termine"], -(x["date"] and int(x["date"].replace("-", "")) or 0)))
     return out
@@ -232,7 +238,7 @@ def overview(db: Session) -> dict:
             "en_attente": sum(c["en_attente"] for c in clients), "nb_attente": sum(c["nb_attente"] for c in clients),
             "nb_clients": len(clients), "nb_a_encaisser": sum(1 for c in clients if c["etat"] == "à encaisser"),
             "clients": clients, "devise": clients[0]["devise"] if clients else "FCFA",
-            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups, company_dict(db).get("name") or ""), "retires": removed(db), "chantiers": _chantiers(groups),
+            "rappels": _reminders(groups), "sans_reponse": _no_reply(groups, company_dict(db).get("name") or ""), "retires": removed(db), "chantiers": _chantiers(groups, expense_totals(db)),
             "anciennete": _aging(groups), "conversion": _conversion(groups), "derniers_versements": _recent_receipts(db, groups)}
 
 
@@ -495,6 +501,67 @@ def update_receipt(db: Session, receipt_id: str, user_id: str | None, amount: fl
     if row["depasse"]:
         row["alerte"] = f"Attention : {row['depasse']} {row['devise']} de plus que le devis."
     return row
+
+
+def expense_totals(db: Session) -> dict[str, float]:
+    """Dépenses (non annulées) par devis."""
+    rows = db.query(Expense.quotation_id, func.sum(Expense.amount)).filter(
+        Expense.quotation_id.isnot(None), Expense.status != "cancelled").group_by(Expense.quotation_id).all()
+    return {qid: round(float(total or 0), 2) for qid, total in rows}
+
+
+def expenses(db: Session, quote: Quotation) -> dict:
+    """Dépenses d'un chantier, par catégorie (matériaux et main-d'œuvre séparés), et ce qu'il rapporte."""
+    rows = db.query(Expense).filter(Expense.quotation_id == quote.id).order_by(Expense.spent_at.desc(), Expense.created_at.desc()).all()
+    live = [e for e in rows if e.status != "cancelled"]
+    total = round(sum(e.amount for e in live), 2)
+    by_kind = {k: round(sum(e.amount for e in live if e.category == k), 2) for k in EXPENSE_KINDS}
+    got = round(sum(r.amount for r in db.query(Receipt).filter(Receipt.quotation_id == quote.id).all()), 2)
+    agreed = round(quote.total or 0, 2)
+    return {"numero": quote.number, "devise": quote.currency or "FCFA", "montant": agreed, "recu": got, "total": total,
+            "par_categorie": {k: v for k, v in by_kind.items() if v}, "marge_prevue": round(agreed - total, 2),
+            "marge_pct": _pct(agreed - total, agreed), "marge_encaissee": round(got - total, 2),
+            "lignes": [{"id": e.id, "libelle": e.label, "montant": e.amount, "categorie": e.category, "annulee": e.status == "cancelled",
+                        "date": (e.spent_at or e.created_at).date().isoformat() if (e.spent_at or e.created_at) else None} for e in rows]}
+
+
+def add_expense(db: Session, quote: Quotation, label: str, amount: float, category: str = "autre", user_id: str | None = None,
+                spent_at: datetime | None = None, note: str = "") -> dict:
+    """Enregistre ce qu'un chantier a coûté (montant tel que dit par le patron, jamais estimé)."""
+    try:
+        amount = round(float(amount), 2)
+    except (TypeError, ValueError):
+        raise TrackingError("Montant invalide.")
+    if not 0 < amount <= MAX_AMOUNT or amount != amount:
+        raise TrackingError("Le montant de la dépense doit être supérieur à zéro.")
+    label = " ".join(str(label or "").split())[:255]
+    if not label:
+        raise TrackingError("Dis ce qui a été payé (ex. « 20 plaques BA13 », « paie des 2 ouvriers »).")
+    if category not in EXPENSE_KINDS:
+        category = "autre"
+    when = spent_at or utcnow()
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    e = Expense(quotation_id=quote.id, project_id=quote.project_id, label=label, amount=amount, category=category,
+                currency=quote.currency or "", notes=(note or "")[:500], spent_at=when, created_by=user_id)
+    db.add(e)
+    audit(db, user_id, "chantier_expense", "quotation", quote.id, f"{quote.number} -{amount} {category}")
+    db.commit()
+    out = expenses(db, quote)
+    out["ajoutee"] = {"id": e.id, "libelle": label, "montant": amount, "categorie": category}
+    return out
+
+
+def cancel_expense(db: Session, expense_id: str, user_id: str | None) -> dict:
+    """Erreur de saisie : la dépense est marquée annulée (gardée dans le journal, plus comptée)."""
+    e = db.get(Expense, expense_id)
+    if e is None or not e.quotation_id:
+        raise TrackingError("Dépense introuvable.")
+    e.status = "cancelled"
+    audit(db, user_id, "chantier_expense_cancel", "quotation", e.quotation_id, f"{e.label} {e.amount}")
+    db.commit()
+    quote = db.get(Quotation, e.quotation_id)
+    return expenses(db, quote) if quote is not None else {"ok": True}
 
 
 def cancel_receipt(db: Session, receipt_id: str, user_id: str | None) -> dict:
