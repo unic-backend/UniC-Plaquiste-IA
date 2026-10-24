@@ -417,6 +417,10 @@ export const api = {
     if (projectId) fd.append("project_id", projectId);
     return request<Uploaded>("/api/files", { method: "POST", body: fd });
   },
+  library: () => request<{ sources: any[] }>("/api/library"),
+  libraryAddFile: async (file: File) => { const fd = new FormData(); fd.append("file", file); return request<any>("/api/library/files", { method: "POST", body: fd }); },
+  libraryAddUrl: (url: string) => request<any>("/api/library/url", { method: "POST", body: JSON.stringify({ url }) }),
+  libraryActive: (id: string, on: boolean) => request<any>(`/api/library/${id}/active`, { method: "POST", body: JSON.stringify({ on }) }),
   customers: (q = "") => request<any[]>(`/api/customers${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   createCustomer: (body: any) =>
     request("/api/customers", { method: "POST", body: JSON.stringify(body) }),

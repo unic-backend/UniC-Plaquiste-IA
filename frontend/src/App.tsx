@@ -9,6 +9,7 @@ import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
 const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
 const Equipe = lazyPage(() => import("./Equipe"), "Equipe");
+const Bibliotheque = lazyPage(() => import("./Bibliotheque"), "Bibliotheque");
 const Suivi = lazyPage(() => import("./Suivi"), "Suivi");
 const SuiviClient = lazyPage(() => import("./Suivi"), "SuiviClient");
 const VideoPage = lazyPage(() => import("./Video"), "VideoPage");
@@ -1736,6 +1737,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
     title: "Cerveau de l'IA",
     items: [
       { to: "/memoire", title: "Mémoire", text: "Ce que l'IA a appris de vous" },
+      { to: "/bibliotheque", title: "Bibliothèque", text: "Tes sources (livres, PDF, liens) que l'IA consulte en premier" },
       { to: "/journal", title: "Journal", text: "Ce que l'IA a fait, heure par heure" },
       { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
@@ -2197,6 +2199,7 @@ export default function App() {
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/equipe" element={<Equipe />} />
+        <Route path="/bibliotheque" element={<Bibliotheque />} />
         <Route path="/suivi" element={<Suivi />} />
         <Route path="/video" element={<VideoPage />} />
         <Route path="/suivi/:key" element={<SuiviClient />} />

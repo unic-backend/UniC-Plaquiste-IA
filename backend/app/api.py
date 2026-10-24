@@ -582,6 +582,69 @@ def list_files(db: Session = Depends(get_db), user: User = Depends(get_current_u
     ]
 
 
+# ---------- bibliothèque de savoir (library.py) ----------
+
+class LibraryUrlIn(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2000)
+
+
+class LibraryActiveIn(BaseModel):
+    on: bool
+
+
+def _lib(fn):
+    from app import library
+    try:
+        return fn()
+    except library.LibraryError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/library")
+def library_list(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import library
+    return {"sources": library.entries(db)}
+
+
+@router.post("/library/files")
+async def library_add_file(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Le patron ajoute sa source (PDF, livre, Word, Excel, texte) : lue hors de la boucle (un gros livre prend du temps)."""
+    from app import library
+    data = await read_upload(file, settings.max_upload_mb)
+
+    def work(data: bytes):
+        try:
+            out = library.add_file(db, data, file.filename or "source", file.content_type or "", user.id)
+        except UploadRejected as exc:
+            raise HTTPException(415, str(exc))
+        audit(db, user.id, "library_add", "file", out["id"], out["nom"])
+        db.commit()
+        return out
+    out = await run_in_threadpool(work, data)
+    del data
+    release_memory()
+    return out
+
+
+@router.post("/library/url")
+def library_add_url(body: LibraryUrlIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import library
+    out = _lib(lambda: library.learn_page(db, body.url, user.id))
+    audit(db, user.id, "library_url", "file", out["file_id"], body.url[:200])
+    db.commit()
+    return out
+
+
+@router.post("/library/{fid}/active")
+def library_set_active(fid: str, body: LibraryActiveIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Retirer une source (elle reste sur le disque, plus consultée) ou la remettre."""
+    from app import library
+    out = _lib(lambda: library.set_active(db, fid, body.on))
+    audit(db, user.id, "library_on" if body.on else "library_off", "file", fid)
+    db.commit()
+    return out
+
+
 @router.get("/files/{fid}/search")
 def file_search(fid: str, q: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rec = db.get(StoredFile, fid)

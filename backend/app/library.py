@@ -1,6 +1,7 @@
-"""Bibliothèque de savoir : ce que l'IA a appris (rapports de recherche, pages lues sur demande) est gardé comme un document
-du patron, découpé et indexé comme ses fichiers. Une question future le retrouve (context.knowledge_and_documents) : le savoir
-s'accumule au lieu de se perdre à la fin de la conversation.
+"""Bibliothèque de savoir : les SOURCES CHOISIES par le patron (PDF, livres, documents de métier, liens) et ce que l'IA a
+appris (rapports de recherche sourcés, pages lues sur demande). Chaque source est découpée et indexée ; une question la
+retrouve EN PRIORITÉ, avant les autres fichiers (context.knowledge_and_documents) : le savoir s'accumule et se spécialise.
+Une source retirée reste sur le disque (jamais effacée) et peut revenir.
 
 Garde-fous : c'est du contenu de TIERS (Internet) : il est relu comme une donnée (trust.wrap), jamais comme une consigne ;
 chaque entrée garde sa source et sa date ; la lecture d'une page passe par l'outil web_fetch d'Anthropic (le serveur UniC
@@ -14,6 +15,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 MAX_CHARS = 60_000
+KIND, RETIRED = "savoir", "savoir_retire"     # StoredFile.kind : source active / retirée (gardée, plus consultée)
+MAX_LIBRARY_CHUNKS = 20_000                   # passages relus pour une question (toute la bibliothèque, pas seulement le récent)
 URL_RE = re.compile(r"^https?://[^\s<>\"']{4,2000}$")
 
 READ_SYSTEM = """Tu lis une page web pour la bibliothèque de savoir d'UniC. Ouvre l'adresse donnée avec web_fetch.
@@ -37,8 +40,68 @@ def save(db: Session, title: str, text: str, source: str, user_id: str | None = 
     clean = re.sub(r"[^\w\s-]", "", title or "Savoir", flags=re.UNICODE).strip()[:80] or "Savoir"
     content = f"{title.strip()[:200]}\nSource : {source}\nAppris le {day} (contenu de tiers, à vérifier avant une décision)\n\n{body[:MAX_CHARS]}"
     rec = documents.save_upload(content.encode("utf-8"), f"Savoir - {clean}.txt", "text/plain", user_id, None, db)
+    rec.kind = KIND
+    db.commit()
     documents.process_file(rec, db)
     return rec
+
+
+def add_file(db: Session, data: bytes, filename: str, mime: str, user_id: str | None = None) -> dict:
+    """Le patron ajoute sa propre source (PDF, livre, Word, Excel, texte) : lue, découpée, consultée en priorité."""
+    from app import documents
+    rec = documents.save_upload(data, filename, mime, user_id, None, db)
+    rec.kind = KIND
+    db.commit()
+    info = documents.process_file(rec, db)
+    return {"id": rec.id, "nom": rec.filename, "pages": rec.page_count, "etat": rec.processing_status, "lecture": info}
+
+
+def _adopt_legacy(db: Session) -> None:
+    """Pages apprises avant que la bibliothèque ait son propre type de fichier : rangées avec les autres sources."""
+    from app.models import StoredFile
+    n = db.query(StoredFile).filter(StoredFile.kind == "upload", StoredFile.filename.like("Savoir - %")).update(
+        {StoredFile.kind: KIND}, synchronize_session=False)
+    if n:
+        db.commit()
+
+
+def entries(db: Session) -> list[dict]:
+    """Les sources de la bibliothèque (actives d'abord), avec leur taille lue."""
+    from sqlalchemy import func
+    from app.models import DocumentChunk, StoredFile
+    _adopt_legacy(db)
+    rows = db.query(StoredFile).filter(StoredFile.kind.in_((KIND, RETIRED))).order_by(StoredFile.created_at.desc()).all()
+    counts = dict(db.query(DocumentChunk.file_id, func.count(DocumentChunk.id)).filter(
+        DocumentChunk.file_id.in_([r.id for r in rows] or [""])).group_by(DocumentChunk.file_id).all())
+    out = [{"id": r.id, "nom": r.filename, "pages": r.page_count, "passages": counts.get(r.id, 0), "active": r.kind == KIND,
+            "etat": r.processing_status, "erreur": r.processing_error or "",
+            "appris_par_ia": r.filename.startswith("Savoir - "),
+            "date": r.created_at.date().isoformat() if r.created_at else None} for r in rows]
+    return sorted(out, key=lambda e: not e["active"])
+
+
+def set_active(db: Session, file_id: str, on: bool) -> dict:
+    from app.models import StoredFile
+    rec = db.get(StoredFile, file_id)
+    if rec is None or rec.kind not in (KIND, RETIRED):
+        raise LibraryError("Source introuvable dans la bibliothèque.")
+    rec.kind = KIND if on else RETIRED
+    db.commit()
+    return {"id": rec.id, "active": on}
+
+
+def search(db: Session, query: str, limit: int = 3) -> list[tuple[str, str, int]]:
+    """Meilleurs passages des sources ACTIVES pour la question : [(texte, nom de la source, page)]."""
+    from app import retrieval
+    from app.models import DocumentChunk, StoredFile
+    if not retrieval.tokens(query):
+        return []
+    _adopt_legacy(db)
+    rows = (db.query(DocumentChunk, StoredFile.filename).join(StoredFile, StoredFile.id == DocumentChunk.file_id)
+            .filter(StoredFile.kind == KIND).order_by(DocumentChunk.id.desc()).limit(MAX_LIBRARY_CHUNKS).all())
+    recs = [retrieval.Record(str(c.id), c.text, name) for c, name in rows]
+    meta = {str(c.id): (c, name) for c, name in rows}
+    return [(meta[rid][0].text, meta[rid][1], meta[rid][0].page_number) for rid, _ in retrieval.bm25(query, recs)[:limit]]
 
 
 def learn_page(db: Session, url: str, user_id: str | None = None) -> dict:
@@ -69,4 +132,5 @@ def learn_page(db: Session, url: str, user_id: str | None = None) -> dict:
 
 def count(db: Session) -> int:
     from app.models import StoredFile
-    return db.query(StoredFile).filter(StoredFile.filename.like("Savoir - %")).count()
+    _adopt_legacy(db)
+    return db.query(StoredFile).filter(StoredFile.kind == KIND).count()
