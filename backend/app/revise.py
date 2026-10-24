@@ -2,12 +2,15 @@
 
 Règle du patron : une correction MODIFIE le document fautif, elle n'en crée pas un second ; un document faux
 et abandonné est RETIRÉ de la bibliothèque (brouillons seulement). Un document approuvé, envoyé ou refusé SE MODIFIE aussi sur ordre du patron :
-il repasse « à valider » (à ré-approuver), la modification est tracée dans le journal. Une facture déjà payée garde son état et le patron en est averti.
+il repasse « à valider » (à ré-approuver), la modification est tracée dans le journal.
+Exception légale : une FACTURE émise (approuvée, envoyée, payée) ne se réécrit jamais. Sa correction = un avoir qui l'annule
++ une nouvelle facture corrigée « à valider » (reissue) ; les versements déjà reçus passent sur la nouvelle facture.
 Tout est déterministe : les totaux sont recalculés ici, jamais par le modèle.
 """
 from __future__ import annotations
 
 import os
+import re
 
 from sqlalchemy.orm import Session
 
@@ -94,6 +97,9 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
            new_number: str | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
     prev_status = doc.status
+    if kind == "invoice" and prev_status != "draft":
+        raise ReviseError(f"La facture {doc.number} est émise (« {prev_status} ») : elle ne se réécrit pas. "
+                          "Sa correction passe par un avoir et une nouvelle facture (reissue).")
     _model, item_model, fk, _col = KINDS[kind]
     items = db.query(item_model).filter(getattr(item_model, fk) == doc.id).order_by(item_model.position).all()
     changes: list[str] = []
@@ -167,13 +173,10 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
         changes.append(f"client : {client_name.strip()}")
     _recompute(kind, doc, items)
     if prev_status != "draft":   # modifié sur ordre du patron : il n'y a plus d'approbation valable sur le nouveau contenu
-        if prev_status in ("paid", "partial"):
-            changes.append(f"ATTENTION : cette facture est « {prev_status} » (des paiements existent) ; son état est gardé, vérifie le reste à payer")
-        else:
-            doc.status = "draft"
-            if hasattr(doc, "approved_by"):
-                doc.approved_by, doc.approved_at = None, None
-            changes.append(f"statut « {prev_status} » → « à valider » : à ré-approuver par le patron")
+        doc.status = "draft"
+        if hasattr(doc, "approved_by"):
+            doc.approved_by, doc.approved_at = None, None
+        changes.append(f"statut « {prev_status} » → « à valider » : à ré-approuver par le patron")
     doc.version = (doc.version or 1) + 1
     db.flush()
     db.expire(doc)
@@ -183,6 +186,58 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     db.commit()
     db.refresh(doc)
     return changes
+
+
+def _copy(db: Session, src: Invoice, *, number: str, kind: str, title: str, notes: str, version: int) -> Invoice:
+    new = Invoice(number=number, kind=kind, customer_id=src.customer_id, project_id=src.project_id, quotation_id=src.quotation_id,
+                  title=title, status="draft", currency=src.currency, subtotal=src.subtotal, vat_rate=src.vat_rate,
+                  vat_amount=src.vat_amount, total=src.total, paid=0, remaining=src.total, notes=notes, version=version,
+                  corrects_id=src.id)
+    db.add(new)
+    db.flush()
+    for it in db.query(InvoiceItem).filter(InvoiceItem.invoice_id == src.id).order_by(InvoiceItem.position).all():
+        db.add(InvoiceItem(invoice_id=new.id, position=it.position, description=it.description, quantity=it.quantity,
+                           unit=it.unit, unit_price=it.unit_price, total=it.total))
+    return new
+
+
+def reissue(db: Session, doc: Invoice, *, user_id: str | None, **corrections) -> tuple[Invoice, list[str]]:
+    """Corrige une facture ÉMISE sans la réécrire : avoir du montant total qui l'annule, nouvelle facture corrigée « à valider »
+    (numéro suivant, version suivante), versements reçus transférés. Rien n'est envoyé : le patron relit et approuve les deux."""
+    if doc.kind == "credit":
+        raise ReviseError(f"L'avoir {doc.number} est émis : il ne se corrige pas. Fais un nouvel avoir ou une nouvelle facture.")
+    if doc.status == "draft":
+        raise ReviseError("Une facture brouillon se corrige directement (revise).")
+    if doc.status == "cancelled":
+        raise ReviseError(f"La facture {doc.number} est déjà annulée : corrige la facture qui la remplace.")
+    root = re.sub(r"-F\d*$", "", doc.number)
+    credit = _copy(db, doc, number=svc.linked_number(db, "AV", quote_number=root), kind="credit",
+                   title=f"Avoir sur la facture {doc.number}", notes=f"Annule la facture {doc.number}.", version=1)
+    new = _copy(db, doc, number=svc.linked_number(db, "F", quote_number=root), kind=doc.kind, title=doc.title,
+                notes=f"Remplace la facture {doc.number} (annulée par l'avoir {credit.number}).", version=doc.version or 1)
+    moved = 0.0
+    for p in list(doc.payments):   # l'argent reçu reste acquis : il règle la facture qui remplace
+        p.invoice_id = new.id
+        moved += p.amount or 0
+    new.paid = svc.money_round(moved)
+    prev = doc.status
+    doc.status, doc.paid, doc.remaining = "cancelled", 0, 0
+    doc.notes = ((doc.notes or "") + f"\nAnnulée par l'avoir {credit.number}, remplacée par la facture {new.number}.").strip()
+    db.flush()
+    db.expire(doc)
+    svc.generate_invoice_pdf(db, doc, user_id)
+    svc.generate_invoice_pdf(db, credit, user_id)
+    svc.audit(db, user_id, "reissue_invoice", "invoice", doc.id, f"{doc.number} ({prev}) → avoir {credit.number} + facture {new.number}")
+    db.flush()
+    changes = [f"facture {doc.number} annulée par l'avoir {credit.number} (à valider)",
+               f"nouvelle facture {new.number} à valider"]
+    if moved:
+        changes.append(f"versements déjà reçus ({moved:,.0f}) repris sur {new.number}".replace(",", " "))
+    changes += revise(db, "invoice", new, user_id=user_id, **corrections)
+    if new.total is not None and (new.paid or 0) > new.total + 0.005:
+        changes.append(f"ATTENTION : le client a déjà versé plus que le nouveau total ({new.paid:,.0f} > {new.total:,.0f}) : "
+                       "un remboursement ou un avoir est à prévoir".replace(",", " "))
+    return new, changes
 
 
 def dump(db: Session, kind: str, doc) -> dict:

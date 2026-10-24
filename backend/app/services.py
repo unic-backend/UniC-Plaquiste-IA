@@ -544,7 +544,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         f"N° {q.number}",
         f"Date {q.created_at.strftime('%d/%m/%Y') if q.created_at else ''}",
         f"Validité {q.validity_days} jours",
-    ]
+    ] + ([f"Version {q.version}"] if (q.version or 1) > 1 else [])
     extra = []   # hypothèses et infos manquantes restent dans la conversation, pas sur le devis du client
     build_document_pdf(
         dest,
@@ -654,7 +654,8 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
         dest, company=company, doc_label=kind_label, number=inv.number,
         title=inv.title or kind_label, status=inv.status,
         meta_lines=[f"N° {inv.number}", f"Date {inv.created_at.strftime('%d/%m/%Y') if inv.created_at else ''}",
-                    "Type : " + {"invoice": "Facture", "deposit": "Acompte", "partial": "Situation", "final": "Solde", "credit": "Avoir"}.get(inv.kind, "Facture")],
+                    "Type : " + {"invoice": "Facture", "deposit": "Acompte", "partial": "Situation", "final": "Solde", "credit": "Avoir"}.get(inv.kind, "Facture")]
+                   + ([f"Version {inv.version}"] if (inv.version or 1) > 1 else []),
         party_left=("Émetteur", party_text_from_company(company)),
         party_right=("Client", party_text_customer(customer)),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
@@ -672,8 +673,11 @@ def reliquat_data(db: Session, inv: Invoice) -> dict:
     quote = db.get(Quotation, inv.quotation_id) if inv.quotation_id else None
     invoices = [inv]
     if quote is not None:
-        invoices = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind != "credit").all() or [inv]
-    credits = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind == "credit").all() if quote is not None else []
+        invoices = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind != "credit",
+                                            Invoice.status != "cancelled").all() or [inv]
+    # un avoir qui annule une facture remplacée (revise.reissue) ne réduit pas le montant convenu : seule la facture fautive disparaît
+    credits = db.query(Invoice).filter(Invoice.quotation_id == quote.id, Invoice.kind == "credit",
+                                       Invoice.corrects_id.is_(None)).all() if quote is not None else []
     agreed = quote.total if quote is not None and quote.total is not None else inv.total
     if agreed is not None and credits:
         agreed -= sum((c.total or 0) for c in credits)
@@ -925,6 +929,8 @@ def apply_payment(db: Session, invoice: Invoice, amount: float, method: str, ref
 
 def approve_entity(db, entity, user_id: str) -> None:
     entity.status = "approved"
+    if isinstance(entity, Invoice) and (entity.paid or 0) > 0 and entity.total is not None:   # versements repris d'une facture remplacée
+        entity.status = "paid" if (entity.remaining or 0) <= 0 else "partial"
     entity.approved_by = user_id
     entity.approved_at = utcnow()
     if isinstance(entity, Invoice) and entity.due_date is None:   # échéance : approbation + délai de l'entreprise
