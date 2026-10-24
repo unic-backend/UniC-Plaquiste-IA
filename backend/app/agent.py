@@ -887,7 +887,7 @@ class AgentSession:
             raise ConnectorError(str(exc), 400)
         self.db.commit()
         return {"ok": True, "rdv": agenda.to_dict(a), "conflits": [agenda.line(c) for c in clash],
-                "note": "Rappel sur le téléphone avant l'heure. Annonce la date en toutes lettres (jour, date, heure) pour que le patron vérifie."}
+                "note": "Rappel sur le téléphone avant l'heure. Annonce la date EXACTEMENT comme dans rdv.quand (calculée par le serveur), pour que le patron vérifie."}
 
     def _t_list_agenda(self, days: int = 14) -> dict:
         from app import agenda

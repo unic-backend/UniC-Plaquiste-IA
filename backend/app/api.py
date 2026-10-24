@@ -1463,6 +1463,8 @@ class SettingsIn(BaseModel):
     quote_validity_days: int | None = Field(default=None, ge=1, le=3650)
     invoice_due_days: int | None = Field(default=None, ge=0, le=365)
     payment_terms: str | None = None
+    wave_number: str | None = Field(default=None, max_length=64)
+    wave_link: str | None = Field(default=None, max_length=255, pattern=r"^(https://\S+)?$")   # lien https seulement (jamais javascript:)
     default_waste: float | None = Field(default=None, ge=0, le=0.5)           # borne du moteur (0 à 50 %)
     default_margin: float | None = Field(default=None, ge=0, le=1)
     board_width_m: float | None = Field(default=None, gt=0, le=3)

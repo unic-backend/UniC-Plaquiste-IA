@@ -383,6 +383,7 @@ def _render(
     notes: str = "",
     warnings: list[str] | None = None,
     extra_paragraphs: list[str] | None = None,
+    qr_url: str = "",
 ) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     e = _entreprise(company)
@@ -527,6 +528,16 @@ def _render(
         story.append(Spacer(1, P(8)))
     for p in extra_paragraphs or []:
         story += [Paragraph(p, txt), Spacer(1, P(5))]
+    if qr_url.startswith("https://"):   # QR du lien de paiement (Wave) : le client le scanne avec son téléphone
+        from reportlab.graphics.barcode.qr import QrCodeWidget
+        from reportlab.graphics.shapes import Drawing
+        w = QrCodeWidget(qr_url)
+        x0, y0, x1, y1 = w.getBounds()
+        side = P(70)
+        d = Drawing(side, side, transform=[side / (x1 - x0), 0, 0, side / (y1 - y0), 0, 0])
+        d.add(w)
+        story += [Table([[d, Paragraph("Scanne ce code avec ton téléphone pour payer par Wave.", txt)]], colWidths=[side + P(8), None],
+                        style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")])), Spacer(1, P(6))]
 
     # --- conditions et exclusions (devis), comme sur le devis de référence
     if is_quote:

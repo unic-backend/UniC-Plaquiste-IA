@@ -35,10 +35,21 @@ def parse_dt(value: str) -> datetime:
     return _aware(d)
 
 
+JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+
+
+def fr_when(d: datetime) -> str:
+    """« jeudi 30 octobre 2026 à 10 h 00 » (heure de Dakar = UTC) : calculé ici, l'IA n'a qu'à le répéter, jamais à le deviner."""
+    d = _aware(d)
+    day = "1er" if d.day == 1 else str(d.day)
+    return f"{JOURS[d.weekday()]} {day} {MOIS[d.month - 1]} {d.year} à {d.hour} h {d.minute:02d}"
+
+
 def to_dict(a: Appointment) -> dict:
     s, e = _aware(a.start_at), _aware(a.end_at)
     return {"id": a.id, "title": a.title, "kind": a.kind, "kind_label": KINDS.get(a.kind, a.kind),
-            "start_at": s.isoformat(), "end_at": e.isoformat() if e else None, "location": a.location,
+            "quand": fr_when(s), "start_at": s.isoformat(), "end_at": e.isoformat() if e else None, "location": a.location,
             "client_name": a.client_name, "phone": a.phone, "notes": a.notes, "status": a.status,
             "remind_minutes": a.remind_minutes}
 

@@ -1683,3 +1683,6 @@ input[type="range"] { accent-color: var(--green); }
 .vs-x:hover, .vs-x:focus-visible { background: #b42318; }
 .vs-x:disabled { opacity: .5; cursor: default; }
 
+
+.interp-typed { display: grid; gap: 8px; width: min(100%, 520px); margin: 10px auto 0; }
+.interp-typed textarea { width: 100%; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }

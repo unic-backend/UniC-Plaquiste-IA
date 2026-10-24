@@ -18,7 +18,10 @@ export const LANGS: { code: string; name: string; bcp: string }[] = [
   { code: "pt", name: "Portugais", bcp: "pt-PT" }, { code: "de", name: "Allemand", bcp: "de-DE" }, { code: "it", name: "Italien", bcp: "it-IT" },
   { code: "tr", name: "Turc", bcp: "tr-TR" }, { code: "zh", name: "Chinois", bcp: "zh-CN" }, { code: "ru", name: "Russe", bcp: "ru-RU" },
   { code: "nl", name: "Néerlandais", bcp: "nl-NL" }, { code: "ja", name: "Japonais", bcp: "ja-JP" }, { code: "hi", name: "Hindi", bcp: "hi-IN" },
+  { code: "wo", name: "Wolof (écrit)", bcp: "" },
 ];
+/** Langues sans moteur vocal fiable : l'autre personne lit et écrit, UniC parle seulement en français. */
+const TEXT_ONLY = new Set(["wo"]);
 const FR = "fr-FR";
 const LANG_KEY = "unic.interp.lang";
 const IDLE_MS = 3 * 60 * 1000;
@@ -50,6 +53,8 @@ export function Interpreter() {
   const [chain, setChain] = useState(true);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
+  const [typed, setTyped] = useState("");
+  const textOnly = TEXT_ONLY.has(lang);
   const startedRef = useRef(false);
   const langRef = useRef(lang);
   const chainRef = useRef(chain);
@@ -96,6 +101,7 @@ export function Interpreter() {
     const alive = () => startedRef.current && gen.current === my && !c.signal.aborted;
     while (alive()) {
       const code = langRef.current;
+      if (TEXT_ONLY.has(code) && who === "them") { setSide("them"); setPhase("idle"); return; }   // il écrit : zone de texte ci-dessous
       const srcLang = who === "me" ? "fr" : code, dstLang = who === "me" ? code : "fr";
       setSide(who); setPhase("listening"); setReady(false); setHearing(false); touchIdle();
       let heard = "";
@@ -115,6 +121,10 @@ export function Interpreter() {
       setNote("");
       const turn: Turn = { who, src: heard, out };
       turnsRef.current = [...turnsRef.current, turn].slice(-12); setTurns(turnsRef.current);
+      if (TEXT_ONLY.has(code)) {   // pas de voix wolof : la traduction se lit à l'écran, puis l'autre répond par écrit
+        setNote(`Montre l'écran : la traduction en ${nameOf(code).toLowerCase()} est à lire. Il peut répondre par écrit ci-dessous.`);
+        setPhase("idle"); setSide("them"); return;
+      }
       setPhase("speaking");
       const r = await sayIn(out, who === "me" ? bcpOf(code) : FR, who === "me" ? 0.95 : getVocalRate());
       if (!alive()) return;
@@ -123,6 +133,24 @@ export function Interpreter() {
       who = who === "me" ? "them" : "me";   // la parole passe à l'autre
     }
     if (gen.current === my && startedRef.current) { setPhase("idle"); setSide(null); setReady(false); setHearing(false); }
+  }
+
+  /** Langue écrite seulement : ce que l'autre a tapé → traduit en français et dit à voix haute. */
+  async function translateTyped() {
+    const src = typed.trim();
+    if (!src || !startedRef.current) return;
+    halt(); setErr(""); setNote(""); touchIdle();
+    setSide("them"); setPhase("thinking");
+    try {
+      const out = (await api.unicTranslate(src, lang, "fr", turnsRef.current.slice(-6).map((t) => ({ who: t.who, text: t.src })))).text;
+      if (!startedRef.current) return;
+      if (!out || out === "[?]") { setNote("Je n'ai pas compris ce texte : demande-lui de reformuler."); setPhase("idle"); return; }
+      const turn: Turn = { who: "them", src, out };
+      turnsRef.current = [...turnsRef.current, turn].slice(-12); setTurns(turnsRef.current); setTyped("");
+      setPhase("speaking");
+      await sayIn(out, FR, getVocalRate());
+    } catch (e: any) { setErr(e?.message || "Traduction impossible."); }
+    if (startedRef.current) { setPhase("idle"); setSide(null); }
   }
 
   useEffect(() => {
@@ -143,7 +171,9 @@ export function Interpreter() {
 
       {!started ? (
         <div className="interp-setup">
-          <p className="hint">Français ⇄ <b>{nameOf(lang)}</b>. Tu parles, UniC traduit à voix haute ; l'autre répond, UniC te traduit. Seul l'interprète est actif : aucune donnée de l'entreprise, rien d'enregistré.</p>
+          <p className="hint">Français ⇄ <b>{nameOf(lang)}</b>. {textOnly
+            ? "Tu parles, UniC écrit la traduction à l'écran ; l'autre répond par écrit, UniC te la dit en français. Traduction wolof par l'IA : qualité à vérifier, évite-la pour un prix ou un engagement."
+            : "Tu parles, UniC traduit à voix haute ; l'autre répond, UniC te traduit."} Seul l'interprète est actif : aucune donnée de l'entreprise, rien d'enregistré.</p>
           <div className="interp-langs" role="group" aria-label="Langue de l'interlocuteur">
             {LANGS.map((l) => <button key={l.code} className={l.code === lang ? "on" : ""} onClick={() => setLang(l.code)}>{l.name}</button>)}
           </div>
@@ -160,8 +190,15 @@ export function Interpreter() {
           <p className="unic-state" role="status">{label}</p>
           <div className="interp-btns">
             <button className={`interp-btn ${side === "me" && phase === "listening" ? "live" : ""}`} onClick={() => converse("me")}><I.Mic size={22} /> Moi · Français</button>
-            <button className={`interp-btn ${side === "them" && phase === "listening" ? "live" : ""}`} onClick={() => converse("them")}><I.Mic size={22} /> Lui · {nameOf(lang)}</button>
+            {!textOnly && <button className={`interp-btn ${side === "them" && phase === "listening" ? "live" : ""}`} onClick={() => converse("them")}><I.Mic size={22} /> Lui · {nameOf(lang)}</button>}
           </div>
+          {textOnly && (
+            <div className="interp-typed">
+              <textarea rows={3} value={typed} onChange={(e) => setTyped(e.target.value)} maxLength={1200}
+                placeholder="Il écrit ici en wolof…" aria-label={`Réponse écrite en ${nameOf(lang).toLowerCase()}`} />
+              <button className="btn btn-copper" disabled={!typed.trim() || phase === "thinking"} onClick={translateTyped}>Traduire en français</button>
+            </div>
+          )}
           <button className="btn interp-end" onClick={() => finish("Interprète terminé.")}>Terminer</button>
           {note && <p className="hint" role="status">{note}</p>}
           {err && <p className="error" role="alert">{err}</p>}

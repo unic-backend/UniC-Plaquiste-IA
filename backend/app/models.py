@@ -57,6 +57,9 @@ class CompanySettings(Base):
     quote_validity_days: Mapped[int] = mapped_column(Integer, default=30)
     invoice_due_days: Mapped[int] = mapped_column(Integer, default=15)   # échéance des factures, en jours après approbation
     payment_terms: Mapped[str] = mapped_column(Text, default="")
+    # paiement mobile : numéro Wave et lien de paiement Wave du patron, imprimés sur les factures et les relances (QR du lien)
+    wave_number: Mapped[str] = mapped_column(String(64), default="")
+    wave_link: Mapped[str] = mapped_column(String(255), default="")
     default_waste: Mapped[float] = mapped_column(Float, default=0.08)
     default_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     board_width_m: Mapped[float] = mapped_column(Float, default=1.20)

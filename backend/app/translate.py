@@ -13,7 +13,10 @@ from app.config import settings
 LANGUAGES: dict[str, str] = {
     "fr": "français", "en": "anglais", "ar": "arabe", "es": "espagnol", "pt": "portugais", "de": "allemand", "it": "italien",
     "tr": "turc", "zh": "chinois (mandarin)", "ru": "russe", "nl": "néerlandais", "ja": "japonais", "hi": "hindi",
+    # texte seulement (aucun moteur vocal fiable pour le wolof à ce jour) ; orthographe officielle en lettres latines
+    "wo": "wolof du Sénégal (écrit en lettres latines, orthographe officielle ; mots français courants gardés tels quels)",
 }
+TEXT_ONLY = {"wo"}
 MAX_TEXT = 1200
 MAX_CONTEXT = 6
 

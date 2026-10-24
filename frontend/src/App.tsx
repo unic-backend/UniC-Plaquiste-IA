@@ -1008,6 +1008,7 @@ function Chat({ initialId }: { initialId?: string }) {
             id="chat-file"
             ref={fileRef}
             className="sr-only"
+            aria-label="Joindre un fichier"
             type="file"
             multiple
             accept=".pdf,.docx,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.webp,.dxf,.ifc,.dwg"
@@ -1016,6 +1017,7 @@ function Chat({ initialId }: { initialId?: string }) {
           <input
             id="chat-photo"
             className="sr-only"
+            aria-label="Joindre une photo"
             type="file"
             multiple
             accept="image/*"
@@ -1025,6 +1027,7 @@ function Chat({ initialId }: { initialId?: string }) {
             id="chat-cam"
             ref={camRef}
             className="sr-only"
+            aria-label="Prendre une photo"
             type="file"
             accept="image/*"
             capture="environment"
@@ -1897,6 +1900,16 @@ function CompanyPage() {
           <label>
             Conditions de paiement
             <textarea value={s.payment_terms || ""} onChange={(e) => setS({ ...s, payment_terms: e.target.value })} />
+          </label>
+          <label>
+            Numéro Wave (imprimé sur les factures et les relances)
+            <input type="tel" inputMode="tel" maxLength={64} value={s.wave_number || ""} placeholder="77 000 00 00"
+              onChange={(e) => setS({ ...s, wave_number: e.target.value })} />
+          </label>
+          <label>
+            Lien de paiement Wave (facultatif, un QR code est ajouté aux factures)
+            <input type="url" inputMode="url" maxLength={255} value={s.wave_link || ""} placeholder="https://pay.wave.com/…"
+              onChange={(e) => setS({ ...s, wave_link: e.target.value.trim() })} />
           </label>
           <label className="check-row">
             <input type="checkbox" checked={s.ai_deep_stakes !== false}
