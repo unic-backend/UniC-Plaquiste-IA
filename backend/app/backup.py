@@ -2,6 +2,9 @@
 
 - Copie cohérente de la base SQLite (API de sauvegarde SQLite, même pendant l'utilisation), compressée en .zip.
 - Hors serveur : déposée dans ta boîte Gmail, dossier « UniC-Sauvegardes » (IMAP APPEND, rien n'est envoyé à un tiers).
+- Fichiers (plans, photos, documents reçus, fichiers créés) : déposés à part, dossier « UniC-Sauvegardes-Fichiers »,
+  seulement les nouveaux ou modifiés (paquets de 18 Mo au plus, jamais effacés là-bas). Les PDF de devis, factures,
+  bons et relevés n'y sont pas : ils se refont depuis la base. Restaurer un paquet : même bouton que la base.
 - Jamais dans l'archive : la clé de chiffrement des secrets (.secret_key). Après une perte du disque, les connecteurs
   (Gmail, LinkedIn, site, voix) se reconnectent ; tout le reste revient.
 - Restauration : une sauvegarde de sécurité de l'état actuel est faite juste avant.
@@ -32,6 +35,12 @@ KEEP_LOCAL = 14
 KEEP_REMOTE = 30
 REMOTE_FOLDER = "UniC-Sauvegardes"
 REMOTE_MAX_MB = 20
+FILES_FOLDER = "UniC-Sauvegardes-Fichiers"
+FILES_PART_MB = 18          # un paquet de fichiers par message (limite Gmail : 25 Mo pièces jointes comprises)
+# ce qui ne se refait pas depuis la base ; les PDF de devis, factures, bons, relevés se régénèrent
+FILE_DIRS = ("uploads", "signatures", "brand", "artifacts/generated", "artifacts/made", "artifacts/edited",
+             "artifacts/diagrams", "artifacts/pdftools")
+MAX_FILES_RESTORE_MB = 200
 EVERY_HOURS = 24
 MAX_RESTORE_MB = 300        # fichier .zip envoyé pour une restauration
 MAX_DB_MB = 1024            # base décompressée (protège d'une « bombe » zip)
@@ -200,29 +209,128 @@ def push_offsite(name: str) -> dict:
     p = path_of(name)
     if p.stat().st_size > REMOTE_MAX_MB * 1024 * 1024:
         raise BackupError(f"Sauvegarde trop lourde pour la boîte mail (> {REMOTE_MAX_MB} Mo) : gardée sur le serveur.")
+    _append(REMOTE_FOLDER, f"Sauvegarde UniC AI — {name[len(PREFIX):-4]}",
+            "Sauvegarde automatique d'UniC AI (devis, factures, clients, mémoire).\n"
+            "Pour restaurer : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier .zip.\n"
+            "Ne supprime pas ce dossier.", name, p.read_bytes(), prune=True)
+    when = datetime.now(timezone.utc).isoformat()
+    _save_status(last_remote=when, last_remote_name=name, last_remote_error="")
+    return {"ok": True, "folder": REMOTE_FOLDER, "at": when}
+
+
+def _append(folder: str, subject: str, body: str, filename: str, data: bytes, prune: bool = False) -> None:
+    """Dépose un message (une archive jointe) dans un dossier de la boîte du patron. Rien n'est envoyé à personne."""
     host, port, user, pwd = mailbox._imap()
     if not (host and user and pwd):
         raise BackupError("Boîte mail non connectée : sauvegarde gardée sur le serveur seulement.")
     msg = EmailMessage()
     msg["From"] = msg["To"] = user
-    msg["Subject"] = f"Sauvegarde UniC AI — {name[len(PREFIX):-4]}"
-    msg.set_content("Sauvegarde automatique d'UniC AI (devis, factures, clients, mémoire).\n"
-                    "Pour restaurer : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier .zip.\n"
-                    "Ne supprime pas ce dossier.")
-    msg.add_attachment(p.read_bytes(), maintype="application", subtype="zip", filename=name)
+    msg["Subject"] = subject
+    msg.set_content(body)
+    msg.add_attachment(data, maintype="application", subtype="zip", filename=filename)
     try:
         with imaplib.IMAP4_SSL(host, port, timeout=60) as box:
             box.login(user, pwd)
-            box.create(REMOTE_FOLDER)   # déjà présent : réponse « NO », sans effet
-            typ, _ = box.append(REMOTE_FOLDER, "(\\Seen)", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
+            box.create(folder)   # déjà présent : réponse « NO », sans effet
+            typ, _ = box.append(folder, "(\\Seen)", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
             if typ != "OK":
                 raise BackupError("La boîte mail a refusé la sauvegarde.")
-            _prune_remote(box)
+            if prune:
+                _prune_remote(box)
     except (imaplib.IMAP4.error, OSError) as exc:
         raise BackupError(f"Boîte mail injoignable : {type(exc).__name__}. Sauvegarde gardée sur le serveur.") from exc
+
+
+# ---------- fichiers hors serveur (incrémental) ----------
+
+def _index_file() -> Path:
+    return settings.backups_path / "files_index.json"
+
+
+def _index() -> dict:
+    try:
+        return json.loads(_index_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _changed_files() -> tuple[list[tuple[str, Path, str]], list[str]]:
+    """(chemin relatif, fichier, empreinte taille:date) des fichiers nouveaux ou modifiés ; et ceux trop lourds pour un message."""
+    root = settings.storage_path
+    known = _index()
+    todo, heavy = [], []
+    for d in FILE_DIRS:
+        base = root / d
+        if not base.is_dir():
+            continue
+        for f in sorted(base.rglob("*")):
+            if not f.is_file() or f.is_symlink() or f.name.startswith("."):
+                continue
+            st = f.stat()
+            rel, mark = f.relative_to(root).as_posix(), f"{st.st_size}:{int(st.st_mtime)}"
+            if known.get(rel) == mark:
+                continue
+            if st.st_size > FILES_PART_MB * 1024 * 1024:
+                heavy.append(rel)
+                continue
+            todo.append((rel, f, mark))
+    return todo, heavy
+
+
+def push_files_offsite() -> dict:
+    """Dépose les fichiers nouveaux ou modifiés, par paquets, dans la boîte du patron. L'index n'avance qu'après un dépôt réussi."""
+    with _lock:
+        todo, heavy = _changed_files()
+        parts, sent, limit = 0, 0, FILES_PART_MB * 1024 * 1024
+        known = _index()
+        while todo:
+            batch, size = [], 0
+            while todo and (not batch or size + todo[0][1].stat().st_size <= limit):
+                item = todo.pop(0)
+                batch.append(item)
+                size += item[1].stat().st_size
+            stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+            name = f"{PREFIX}Fichiers_{stamp}_{parts + 1}.zip"
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                for rel, f, _mark in batch:
+                    z.write(f, f"files/{rel}")
+                z.writestr("manifest.json", json.dumps({"app": "UniC AI", "kind": "files", "format": 1,
+                                                        "created_at": datetime.now(timezone.utc).isoformat(),
+                                                        "files": [rel for rel, _f, _m in batch]}, ensure_ascii=False))
+            _append(FILES_FOLDER, f"Fichiers UniC AI — {stamp} ({len(batch)})",
+                    "Fichiers d'UniC AI (plans, photos, documents reçus, fichiers créés) : nouveaux ou modifiés depuis le dépôt précédent.\n"
+                    "Pour les remettre : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier .zip.\n"
+                    "Ne supprime pas ce dossier : chaque message ne contient que ce qui a changé.", name, buf.getvalue())
+            for rel, _f, mark in batch:
+                known[rel] = mark
+            _index_file().write_text(json.dumps(known, ensure_ascii=False), encoding="utf-8")
+            parts += 1
+            sent += len(batch)
     when = datetime.now(timezone.utc).isoformat()
-    _save_status(last_remote=when, last_remote_name=name, last_remote_error="")
-    return {"ok": True, "folder": REMOTE_FOLDER, "at": when}
+    _save_status(last_files=when, files_heavy=heavy[:20], last_files_error="")
+    return {"ok": True, "files": sent, "parts": parts, "too_heavy": heavy, "folder": FILES_FOLDER, "at": when}
+
+
+def restore_files(z: zipfile.ZipFile) -> dict:
+    """Remet les fichiers d'un paquet à leur place (jamais hors des dossiers sauvegardés, jamais de chemin piégé)."""
+    root = settings.storage_path.resolve()
+    if sum(i.file_size for i in z.infolist()) > MAX_FILES_RESTORE_MB * 1024 * 1024:
+        raise BackupError("Paquet trop volumineux : rien n'a été changé.")
+    plan = []
+    for info in z.infolist():
+        if info.is_dir() or not info.filename.startswith("files/"):
+            continue
+        rel = info.filename[len("files/"):]
+        dest = (root / rel).resolve()
+        if ".." in Path(rel).parts or not any(dest.is_relative_to((root / d).resolve()) for d in FILE_DIRS):
+            raise BackupError(f"Chemin refusé dans le paquet : {rel[:80]}. Rien n'a été changé.")
+        plan.append((info, dest))
+    for info, dest in plan:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with z.open(info) as src_file, dest.open("wb") as dst:
+            shutil.copyfileobj(src_file, dst, 1024 * 1024)
+    return {"ok": True, "kind": "files", "restored_files": len(plan)}
 
 
 def _prune_remote(box: imaplib.IMAP4_SSL) -> None:
@@ -250,6 +358,9 @@ def restore(data: bytes) -> dict:
         manifest = json.loads(z.read("manifest.json")) if "manifest.json" in names else {}
     except (zipfile.BadZipFile, ValueError) as exc:
         raise BackupError("Fichier illisible : choisis un fichier UniC_Sauvegarde_….zip.") from exc
+    if manifest.get("app") == "UniC AI" and manifest.get("kind") == "files":   # paquet de fichiers : la base n'est pas touchée
+        with _lock:
+            return restore_files(z)
     if "unic.db" not in names or manifest.get("app") != "UniC AI":
         raise BackupError("Ce fichier n'est pas une sauvegarde UniC AI.")
     if z.getinfo("unic.db").file_size > MAX_DB_MB * 1024 * 1024:
@@ -310,6 +421,10 @@ def run_daily() -> dict | None:
             push_offsite(made["name"])
         except BackupError as exc:
             _save_status(last_remote_error=str(exc))
+        try:
+            push_files_offsite()
+        except (BackupError, OSError) as exc:
+            _save_status(last_files_error=str(exc)[:300])
     return made
 
 

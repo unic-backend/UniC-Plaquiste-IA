@@ -125,3 +125,28 @@ def summary(db: Session, now: datetime | None = None) -> dict:
         "avertissement": ("Estimation au tarif public Anthropic (jetons réels x prix). La facture exacte est sur "
                           "console.anthropic.com › Usage ; le solde exact aussi."),
     }
+
+
+SPIKE_FACTOR = 3.0        # une journée à plus de 3 fois la moyenne des 13 jours d'avant = anormale
+SPIKE_FLOOR_USD = 2.0     # en dessous, jamais d'alerte (quelques messages de plus ne sont pas un incident)
+LOW_CREDIT_SHARE = 0.10   # crédit déclaré presque épuisé : moins de 10 % restant
+
+
+def spend_alerts(db: Session, now: datetime | None = None) -> list[str]:
+    """Dépenses IA à signaler au patron : crédit presque épuisé, journée anormalement chère. Estimations, jamais la facture."""
+    now = now or datetime.now(timezone.utc)
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    out = []
+    today, _ = _sum(db, day0)
+    before = db.query(func.coalesce(func.sum(UsageLog.cost_usd), 0.0)).filter(
+        UsageLog.created_at >= day0 - timedelta(days=13), UsageLog.created_at < day0).scalar()
+    avg = float(before or 0) / 13
+    if today >= max(SPIKE_FLOOR_USD, SPIKE_FACTOR * avg):
+        out.append(f"Dépense IA inhabituelle aujourd'hui : {today:.2f} $ estimés (moyenne {avg:.2f} $ par jour sur 13 jours). "
+                   "Regarde Paramètres › Coût de Claude : un agent ou une boucle peut tourner trop.")
+    s = summary(db, now)
+    credit, left = s.get("credit_usd"), s.get("reste_usd")
+    if credit and left is not None and left <= credit * LOW_CREDIT_SHARE:
+        out.append(f"Crédit IA presque épuisé : {max(left, 0):.2f} $ restants sur {credit:.2f} $ (estimation). "
+                   "Recharge sur console.anthropic.com puis mets le nouveau montant dans Paramètres › Coût de Claude.")
+    return out
