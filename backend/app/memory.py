@@ -23,6 +23,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import ai, retrieval, trust
@@ -368,16 +369,62 @@ def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS) -> str:
 
 # ---------- échanges passés : « on en avait parlé il y a trois jours » ----------
 
-def recall_past(db: Session, query: str, exclude_conversation_id: str | None = None, budget: int = 2500,
-                max_lines: int = 6, now: datetime | None = None) -> str:
-    """Passages pertinents d'AUTRES conversations (mots communs + date évoquée). Vide si rien de net."""
-    now = now or _now()
-    window = retrieval.evoked_window(query, now)
-    q = db.query(Message, Conversation.title).join(Conversation, Conversation.id == Message.conversation_id) \
+RECENT_SCAN = 800      # derniers messages toujours lus
+SEARCH_SCAN = 3000     # recherche demandée : messages de TOUTE date (archives comprises) qui contiennent un mot de la question
+RECALL_SCAN = 400      # rappel automatique à chaque message : budget plus court (le classement coûte ~0,1 s par millier de messages)
+_LIKE_WORD = re.compile(r"[^\W_]{4,}")
+# mots de la demande « retrouve la conversation où on a parlé de… » : ils disent qu'on cherche, pas CE qu'on cherche
+_SEARCH_NOISE = frozenset(retrieval.normalize(w) for w in (
+    "conversation conversations discussion discussions échange échanges message messages parlé parler parlait dit dis "
+    "disais avais avait avions demande demandé est-ce retrouve retrouver cherche chercher rappelle souviens souvenir fois déjà ensemble").split())
+_DATE_WORDS = frozenset("hier avant-hier avant semaine semaines derniere dernier mois annee an ans jour jours il".split())
+
+
+def _like_words(query: str) -> list[tuple[str, ...]]:
+    """Mots distinctifs de la question, chacun tel que tapé ET sans accents (« métré » / « metre »), pour un filtre SQL."""
+    groups: list[tuple[str, ...]] = []
+    for w in sorted({w.lower() for w in _LIKE_WORD.findall(query or "")}, key=lambda w: (-len(w), w)):
+        n = retrieval.normalize(w)
+        if n in retrieval.STOP_WORDS or n in _SEARCH_NOISE or any(n in g for g in groups):
+            continue
+        groups.append(tuple(dict.fromkeys((w, n))))
+        if len(groups) >= 6:
+            break
+    return groups
+
+
+def _past_rows(db: Session, query: str, exclude_conversation_id: str | None, window: tuple[datetime, datetime] | None,
+               scan: int = RECALL_SCAN) -> list[tuple[Message, Conversation]]:
+    """Messages candidats : les plus récents, plus ceux de TOUTE date qui contiennent un mot de la question ou datent
+    de la période évoquée. Sans ce second filet, une conversation de plus de 800 messages en arrière était oubliée.
+    Un budget PAR MOT : un mot courant (« plafond ») ne noie jamais un mot rare (un nom, un quartier)."""
+    q = db.query(Message, Conversation).join(Conversation, Conversation.id == Message.conversation_id) \
         .filter(Message.role.in_(("user", "assistant")))
     if exclude_conversation_id:
         q = q.filter(Message.conversation_id != exclude_conversation_id)
-    rows = q.order_by(Message.created_at.desc()).limit(800).all()
+    rows = q.order_by(Message.created_at.desc()).limit(RECENT_SCAN).all()
+    seen = {m.id for m, _ in rows}
+    extra = []
+    groups = _like_words(query)
+    for g in groups:
+        extra += q.filter(or_(*[Message.content.ilike(f"%{w}%") for w in g])) \
+            .order_by(Message.created_at.desc()).limit(max(50, scan // len(groups))).all()
+    if window:
+        extra += q.filter(Message.created_at >= window[0], Message.created_at <= window[1]) \
+            .order_by(Message.created_at.desc()).limit(400).all()
+    for m, c in extra:
+        if m.id not in seen:
+            seen.add(m.id)
+            rows.append((m, c))
+    return rows
+
+
+def recall_past(db: Session, query: str, exclude_conversation_id: str | None = None, budget: int = 2500,
+                max_lines: int = 6, now: datetime | None = None) -> str:
+    """Passages pertinents d'AUTRES conversations (mots communs + date évoquée), de toute date. Vide si rien de net."""
+    now = now or _now()
+    window = retrieval.evoked_window(query, now)
+    rows = [(m, c.title) for m, c in _past_rows(db, query, exclude_conversation_id, window)]
     if not rows:
         return ""
     records = [retrieval.Record(m.id, (m.content or "")[:1200], title) for m, title in rows]
@@ -406,6 +453,54 @@ def recall_past(db: Session, query: str, exclude_conversation_id: str | None = N
         return ""
     return ("ÉCHANGES PASSÉS PERTINENTS (autres conversations ; ils peuvent contenir des erreurs : la MÉMOIRE et la BASE UNIC priment) :\n"
             + "\n".join(lines))
+
+
+def search_conversations(db: Session, query: str, *, date_from: datetime | None = None, date_to: datetime | None = None,
+                         limit: int = 5, per_conversation: int = 3, now: datetime | None = None) -> list[dict]:
+    """Retrouve les conversations passées (archivées comprises, jamais effacées) qui parlent d'un sujet, avec leurs passages.
+
+    Pour « on avait dit quoi pour le plafond de Mme Fall ? », « retrouve la conversation sur le devis Diop » : l'IA répond
+    d'après ce qui a VRAIMENT été écrit, avec la date et le titre, au lieu de reconstruire de mémoire. Sans appel à l'IA."""
+    now = now or _now()
+    window = retrieval.evoked_window(query, now)
+    if date_from or date_to:
+        window = (date_from or datetime(2000, 1, 1, tzinfo=timezone.utc), date_to or now)
+    noise = _SEARCH_NOISE | (_DATE_WORDS if window else frozenset())   # « la semaine dernière » : une période, pas un sujet
+    words = [w for w in retrieval.tokens(query) if w not in noise and not (window and w.isdigit())]
+    rows = _past_rows(db, query, None, window, SEARCH_SCAN)
+    if window:
+        rows = [(m, c) for m, c in rows if (d := _aware(m.created_at)) and window[0] <= d <= window[1]]
+    if not rows:
+        return []
+    by_id = {m.id: (m, c) for m, c in rows}
+    if words:
+        ranked = retrieval.bm25(" ".join(words), [retrieval.Record(m.id, (m.content or "")[:1500], c.title or "") for m, c in rows])
+        if not ranked:
+            return []
+        top = ranked[0][1]
+        ranked = [(i, sc) for i, sc in ranked if sc >= 0.3 * top]
+    else:   # seulement une période (« la semaine dernière ») : les échanges de cette période, du plus récent au plus ancien
+        ranked = [(m.id, 1.0) for m, _ in sorted(rows, key=lambda r: _aware(r[0].created_at) or now, reverse=True)]
+    groups: dict[str, dict] = {}
+    for mid, _score in ranked:
+        m, c = by_id[mid]
+        g = groups.get(c.id)
+        if g is None:
+            if len(groups) >= limit:
+                continue
+            g = groups[c.id] = {"id": c.id, "titre": c.title or "", "archivee": bool(c.archived), "extraits": []}
+        if len(g["extraits"]) < per_conversation:
+            d = _aware(m.created_at)
+            g["extraits"].append({"date": d.strftime("%d/%m/%Y") if d else "", "qui": "Patron" if m.role == "user" else "UniC",
+                                  "texte": " ".join((m.content or "").split())[:320], "_at": d or now})
+    out = []
+    for g in groups.values():
+        g["extraits"].sort(key=lambda e: e["_at"])
+        for e in g["extraits"]:
+            del e["_at"]
+        g["date"] = g["extraits"][-1]["date"] if g["extraits"] else ""
+        out.append(g)
+    return out
 
 
 def thread_recall(db: Session, conversation_id: str, query: str, exclude_ids: set[str], budget: int = 2500,

@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import or_
+from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app import learned
@@ -239,8 +239,9 @@ def list_conversations(
 ):
     query = db.query(Conversation).filter(Conversation.user_id == user.id, or_(Conversation.kind.is_(None), Conversation.kind != "suivi"))
     query = query.filter(Conversation.archived.is_(True)) if archived else query.filter(or_(Conversation.archived.is_(None), Conversation.archived.is_(False)))
-    if q:
-        query = query.filter(Conversation.title.ilike(f"%{q}%"))
+    if q:   # le titre OU ce qui a été écrit dedans : on retrouve « la conversation où on a parlé du plafond de Mme Fall »
+        query = query.filter(or_(Conversation.title.ilike(f"%{q}%"),
+                                 exists().where(Message.conversation_id == Conversation.id, Message.content.ilike(f"%{q}%"))))
     rows = query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc()).limit(80).all()
     return [
         {"id": c.id, "title": c.title, "pinned": bool(c.pinned), "archived": bool(c.archived),
