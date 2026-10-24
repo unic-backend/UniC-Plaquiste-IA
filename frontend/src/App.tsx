@@ -583,8 +583,8 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         </nav>
         <input
           className="side-search"
-          aria-label="Rechercher une conversation"
-          placeholder="Rechercher…"
+          aria-label="Rechercher une conversation (titres et messages)"
+          placeholder="Rechercher dans les conversations…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />

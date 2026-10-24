@@ -643,6 +643,18 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "additionalProperties": False},
     },
     {
+        "name": "search_conversations",
+        "description": ("RETROUVE les conversations passées (toutes, même anciennes ou archivées) qui parlent d'un sujet : « on avait dit "
+                        "quoi pour… », « retrouve la conversation sur… », « qu'est-ce que je t'avais demandé la semaine dernière ». Rend "
+                        "le titre, la date et les passages exacts. Réponds d'après ces passages, avec leur date ; rien trouvé = dis-le."),
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Mots-clés du sujet (nom du client, lieu, ouvrage, montant, numéro) ; une période "
+                                                       "dite par le patron peut y rester (« hier », « il y a 2 semaines »)."},
+            "date_from": {"type": "string", "description": "Début AAAA-MM-JJ si le patron donne une date précise."},
+            "date_to": {"type": "string", "description": "Fin AAAA-MM-JJ si le patron donne une date précise."}},
+            "required": ["query"], "additionalProperties": False},
+    },
+    {
         "name": "forget_memory",
         "description": "Retire un souvenir de la mémoire (id obtenu avec list_memory) quand le patron dit qu'il est faux ou périmé.",
         "input_schema": {"type": "object", "properties": {"memory_id": {"type": "string"}}, "required": ["memory_id"], "additionalProperties": False},
@@ -657,7 +669,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -735,6 +747,9 @@ AGENT_PROMPT = (
     "Ne dis JAMAIS que tu n'as pas de mémoire ou pas d'outil pour retenir. Si une règle est ambiguë, enregistre ce qui est clair "
     "et pose UNE question sur le reste. Les souvenirs t'arrivent dans MÉMOIRE : applique-les sans les redemander ; "
     "s'ils se contredisent avec la demande du moment, la demande du moment gagne et tu le signales."
+    "\nCONVERSATIONS PASSÉES : tu te souviens de TOUTES les conversations. Le patron évoque ce qui a été dit ou décidé avant "
+    "(« on avait dit », « comme la dernière fois », « la conversation sur… ») et les échanges passés déjà fournis ne suffisent pas : appelle "
+    "search_conversations. Ne cite jamais un échange passé qui n'y figure pas ; s'il est introuvable, dis-le."
 )
 
 
@@ -1221,6 +1236,25 @@ class AgentSession:
         q = (query or "").lower().split()
         rows = [m for m in rows if all(w in m.text.lower() for w in q)][:25]
         return {"souvenirs": [{"id": m.id, "texte": m.text, "nature": m.nature, **({"client_cle": m.subject} if m.subject else {})} for m in rows]}
+
+    def _t_search_conversations(self, query: str, date_from: str = "", date_to: str = "") -> dict:
+        from datetime import datetime, timedelta, timezone
+        from app import memory as mem
+        bounds = []
+        for raw, end in ((date_from, False), (date_to, True)):
+            if not raw:
+                bounds.append(None)
+                continue
+            try:
+                d = datetime.strptime(raw.strip()[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                return {"error": f"Date illisible : « {raw} » (attendu AAAA-MM-JJ)."}
+            bounds.append(d + timedelta(days=1) - timedelta(microseconds=1) if end else d)
+        found = mem.search_conversations(self.db, query, date_from=bounds[0], date_to=bounds[1])
+        if not found:
+            return {"conversations": [], "note": "Rien trouvé dans les conversations passées : dis-le, n'invente pas ce qui aurait été dit."}
+        return {"conversations": found,
+                "note": "Passages exacts, du plus ancien au plus récent : cite la date et le titre ; un message récent du patron prime."}
 
     def _t_forget_memory(self, memory_id: str) -> dict:
         from app import memory as mem
