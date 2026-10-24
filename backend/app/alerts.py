@@ -50,6 +50,7 @@ KIND_LABEL = {
     "sleeping": "fil de fond arrêté",
     "check": "contrôle en échec",
     "tool": "outil",
+    "budget": "dépenses IA",
 }
 
 
@@ -200,7 +201,10 @@ def send_pending(db: Session, sender=None) -> dict:
 def tick(db: Session) -> dict:
     """Un tour de surveillance des alertes (lancé par le fil de fond, ou à la main dans les tests)."""
     try:
-        from app import selfcare
+        from app import selfcare, usage
+        day = datetime.now(timezone.utc).date().isoformat()
+        for msg in usage.spend_alerts(db):   # une alerte par sujet et par jour (la source porte la date)
+            selfcare.report(f"dépenses IA {day}", msg, kind="budget")
         selfcare.flush(db)     # les incidents en attente deviennent annonçables sans attendre le tour suivant
     except Exception:
         pass

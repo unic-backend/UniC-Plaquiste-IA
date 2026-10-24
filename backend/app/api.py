@@ -1967,7 +1967,7 @@ def higgsfield_disconnect(db: Session = Depends(get_db), user: User = Depends(ge
 def backups_list(user: User = Depends(require_roles("admin", "manager"))):
     from app import backup
     return {"backups": backup.list_local(), "status": backup.status(), "offsite": backup.offsite_available(),
-            "folder": backup.REMOTE_FOLDER, "every_hours": backup.EVERY_HOURS}
+            "folder": backup.REMOTE_FOLDER, "files_folder": backup.FILES_FOLDER, "every_hours": backup.EVERY_HOURS}
 
 
 @router.post("/backups")
@@ -1983,6 +1983,10 @@ def backups_create(user: User = Depends(require_roles("admin", "manager"))):
             remote = backup.push_offsite(made["name"])
         except backup.BackupError as exc:
             remote = {"ok": False, "error": str(exc)}
+        try:
+            backup.push_files_offsite()   # plans, photos, documents reçus : ce qui a changé depuis le dernier dépôt
+        except (backup.BackupError, OSError) as exc:
+            backup._save_status(last_files_error=str(exc)[:300])
     release_memory()
     return {**made, "offsite": remote}
 

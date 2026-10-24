@@ -2009,14 +2009,18 @@ function BackupCard() {
     <section className="card-box backup-card">
       <h2>Sauvegardes</h2>
       <p className="hint">Chaque jour, tout seul : devis, factures, clients, mémoire, signature.
-        Gardées sur le serveur (14 dernières) et dans ta boîte Gmail, dossier « {d?.folder || "UniC-Sauvegardes"} » (30 dernières).</p>
+        Gardées sur le serveur (14 dernières) et dans ta boîte Gmail, dossier « {d?.folder || "UniC-Sauvegardes"} » (30 dernières).
+        Plans, photos et documents reçus : dossier « {d?.files_folder || "UniC-Sauvegardes-Fichiers"} » (seulement ce qui a changé).</p>
       {d && (
         <ul className="backup-status">
           <li>Dernière sauvegarde : <b>{when(st.last_local)}</b></li>
           <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b></li>
           {st.last_verified && !st.verify_error && <li>Relecture de contrôle : <b>✓ restaurable</b> ({when(st.last_verified)})</li>}
           {st.verify_error && <li className="error">Sauvegarde non restaurable : {st.verify_error}</li>}
+          <li>Fichiers dans Gmail : <b>{d.offsite ? when(st.last_files) : "boîte mail non connectée"}</b></li>
           {st.last_remote_error && <li className="error">{st.last_remote_error}</li>}
+          {st.last_files_error && <li className="error">{st.last_files_error}</li>}
+          {st.files_heavy?.length > 0 && <li className="error">Trop lourds pour Gmail (gardés sur le serveur seulement) : {st.files_heavy.join(", ")}</li>}
           {st.last_error && <li className="error">{st.last_error}</li>}
         </ul>
       )}
@@ -2034,9 +2038,16 @@ function BackupCard() {
       <input ref={ref} type="file" accept=".zip,application/zip" hidden onChange={async (e) => {
         const f = e.target.files?.[0]; e.target.value = "";
         if (!f) return;
-        if (!window.confirm(`Remplacer toutes les données par la sauvegarde « ${f.name} » ? Une copie de l'état actuel est faite avant.`)) return;
+        const files = f.name.includes("_Fichiers_");
+        if (!window.confirm(files ? `Remettre les fichiers du paquet « ${f.name} » à leur place ? Les données ne changent pas.`
+          : `Remplacer toutes les données par la sauvegarde « ${f.name} » ? Une copie de l'état actuel est faite avant.`)) return;
         setBusy("restore"); setMsg("");
-        try { const r = await api.restoreBackup(f); setMsg(`Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`); await load(); }
+        try {
+          const r = await api.restoreBackup(f);
+          setMsg(r.kind === "files" ? `${r.restored_files} fichier(s) remis à leur place.`
+            : `Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`);
+          await load();
+        }
         catch (err: any) { setMsg(err?.message || "Erreur"); } finally { setBusy(""); }
       }} />
       {msg && <p className="hint">{msg}</p>}
