@@ -22,11 +22,17 @@ def knowledge_and_documents(db: Session, query: str, articles: int = 3, chunks: 
     by_id = {a.id: a for a in arts}
     kb = "\n\n".join(f"### {by_id[i].title}\n{by_id[i].body[:1500]}" for i, _ in ranked[:articles])
 
+    from app import library
+    docs, flags = [], 0
+    for text, name, page in library.search(db, query):   # sources choisies par le patron : d'abord, et toute la bibliothèque
+        wrapped = trust.wrap(text[:1200], f"Bibliothèque · {name}, p. {page}")
+        flags += len(wrapped.suspicions)
+        docs.append(wrapped.text)
     rows = (db.query(DocumentChunk, StoredFile.filename).join(StoredFile, StoredFile.id == DocumentChunk.file_id)
+            .filter(StoredFile.kind.notin_((library.KIND, library.RETIRED)))
             .order_by(DocumentChunk.id.desc()).limit(MAX_CHUNKS_SCANNED).all())
     recs = [retrieval.Record(str(c.id), c.text, name) for c, name in rows]
     meta = {str(c.id): (c, name) for c, name in rows}
-    docs, flags = [], 0
     for rid, _score in retrieval.bm25(query, recs)[:chunks]:
         c, name = meta[rid]
         wrapped = trust.wrap(c.text[:1200], f"{name}, p. {c.page_number}")
