@@ -50,7 +50,8 @@ def test_calendrier_du_telephone_par_lien_secret(c):
     assert body.startswith("BEGIN:VCALENDAR\r\n") and body.endswith("END:VCALENDAR\r\n")
     assert "SUMMARY:Pose plafond Diop\\; salon\\, cuisine" in body.replace("\r\n ", "")       # échappés ; pas de « Pose · Pose »
     assert "Médina" in body and "Awa Diop" in body
-    assert "+221770009999" not in body and "4321" not in body                                 # ni téléphone ni notes
+    # ni téléphone ni notes (on cherche le texte de la note, pas « 4321 » seul : un identifiant aléatoire peut le contenir)
+    assert "+221770009999" not in body and "code portail" not in body
     assert "Visite annulée" not in body
     assert all(len(line.encode()) <= 75 for line in body.split("\r\n"))                       # lignes pliées (RFC 5545)
 
