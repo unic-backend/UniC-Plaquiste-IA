@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import secrets
@@ -384,7 +385,15 @@ def health_ready():
 
 @app.get("/api/ping")
 def ping():
-    return {"ok": True, "app": "UniC AI", "version": __version__}
+    return {"ok": True, "app": "UniC AI", "version": __version__, "web_build": _web_build()}
+
+
+def _web_build() -> str:
+    """Empreinte de l'interface servie (dist/version.json, posé par vite.config.ts) : l'appli du téléphone la compare à la sienne."""
+    try:
+        return str(json.loads((FRONTEND_DIST / "version.json").read_text(encoding="utf-8")).get("build") or "")[:32]
+    except (OSError, ValueError, AttributeError):
+        return ""
 
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
