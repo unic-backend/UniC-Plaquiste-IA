@@ -646,6 +646,54 @@ def library_set_active(fid: str, body: LibraryActiveIn, db: Session = Depends(ge
     return out
 
 
+class VeilleIn(BaseModel):
+    on: bool
+    topics: list[str] = Field(default_factory=list, max_length=20)
+    hour: int = Field(default=7, ge=0, le=23)
+
+
+def _veille_view(db: Session) -> dict:
+    from app import veille
+    cfg = veille.config(db)
+    return {**cfg, "running": "run" in veille.RUNNING, "max_topics": veille.MAX_TOPICS}
+
+
+@router.get("/veille")
+def veille_get(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    return _veille_view(db)
+
+
+@router.post("/veille")
+def veille_set(body: VeilleIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Le patron active ou coupe la veille du matin, choisit ses sujets et l'heure."""
+    from app import veille
+    try:
+        cfg = veille.configure(db, on=body.on, topics=body.topics, hour=body.hour)
+    except veille.VeilleError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "veille_on" if cfg["on"] else "veille_off", "setting", "veille", ", ".join(cfg["topics"])[:300])
+    db.commit()
+    return _veille_view(db)
+
+
+@router.post("/veille/run")
+def veille_run(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """« Lancer maintenant » (clic du patron) : la veille tourne en fond, le résultat arrive dans la Bibliothèque."""
+    from app import veille
+    if not veille.config(db)["topics"]:
+        raise HTTPException(400, "Ajoute au moins un sujet à surveiller.")
+    why = veille.unavailable()
+    if why:
+        raise HTTPException(400, why)
+    try:
+        veille.start_background(user.id, manual=True)
+    except veille.VeilleError as exc:
+        raise HTTPException(409, str(exc))
+    audit(db, user.id, "veille_run", "setting", "veille")
+    db.commit()
+    return {"started": True}
+
+
 @router.get("/files/{fid}/search")
 def file_search(fid: str, q: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rec = db.get(StoredFile, fid)

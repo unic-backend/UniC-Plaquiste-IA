@@ -22,12 +22,13 @@ def _fake(monkeypatch, text, sources):
     seen = {}
     claude = PROVIDERS["claude"]
 
-    def complete(messages, **kw):
+    def complete(self, messages, **kw):
         seen.update(kw, system=messages[0]["content"], user=messages[1]["content"])
         return AIResult(text, "claude", "claude-opus-5-5", True, "", raw={"usage": [{"input": 1000, "output": 500, "cache_read": 0,
                                                                                     "cache_write": 0, "web": 8}], "sources": sources})
-    monkeypatch.setattr(claude, "health", lambda: {"available": True})
-    monkeypatch.setattr(claude, "complete", complete)
+    # sur la classe (pas sur l'objet partagé) : remis exactement en place, sans masquer les tests suivants
+    monkeypatch.setattr(type(claude), "health", lambda self: {"available": True})
+    monkeypatch.setattr(type(claude), "complete", complete)
     return seen
 
 
