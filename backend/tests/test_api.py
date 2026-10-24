@@ -1211,19 +1211,57 @@ def test_revise_quote_edits_in_place_and_recomputes(client):
     db.close()
 
 
-def test_paid_invoice_can_be_revised_but_keeps_its_state_with_a_warning(client):
-    from app import revise
-    from app.models import Invoice
+def test_issued_invoice_is_never_rewritten_it_is_cancelled_by_a_credit_note_and_reissued(client):
+    """Facture émise (ici partiellement payée) : jamais réécrite. Avoir qui l'annule + nouvelle facture corrigée, versements repris."""
+    from app import revise, services as svc
+    from app.models import AuditLog, Invoice, InvoiceItem, Payment
     db, q = _mk_quote(client)
-    inv = Invoice(number="UC-2026-TEST-F", quotation_id=q.id, status="partial", vat_rate=0.18, paid=1000, subtotal=0, total=0, remaining=0)
+    inv = Invoice(number=q.number + "-F", quotation_id=q.id, status="partial", vat_rate=0.18, paid=1000,
+                  subtotal=10000, vat_amount=1800, total=11800, remaining=10800, version=1)
     db.add(inv)
     db.flush()
-    from app.models import InvoiceItem
+    db.add(InvoiceItem(invoice_id=inv.id, position=1, description="Plaque", quantity=2, unit="u", unit_price=5000, total=10000))
+    db.add(Payment(invoice_id=inv.id, amount=1000, method="wave"))
+    db.commit()
+    with pytest.raises(revise.ReviseError, match="ne se réécrit pas"):
+        revise.revise(db, "invoice", inv, user_id=None, update=[{"line": 1, "quantity": 3}])
+    new, ch = revise.reissue(db, inv, user_id=None, update=[{"line": 1, "quantity": 3}])
+    old = db.get(Invoice, inv.id)
+    assert old.status == "cancelled" and old.subtotal == 10000 and old.paid == 0   # contenu d'origine intact
+    assert db.query(InvoiceItem).filter_by(invoice_id=old.id).one().quantity == 2
+    credit = db.query(Invoice).filter_by(kind="credit", corrects_id=old.id).one()
+    assert credit.number == q.number + "-AV" and credit.total == 11800 and credit.status == "draft"
+    assert new.number == q.number + "-F2" and new.corrects_id == old.id and new.status == "draft" and new.version == 2
+    assert new.subtotal == 15000 and new.vat_amount == 2700 and new.total == 17700          # 3 × 5 000 ; TVA 18 %
+    assert new.paid == 1000 and new.remaining == 16700                                       # versement repris
+    assert db.query(Payment).filter_by(invoice_id=new.id).count() == 1
+    assert any(old.number in c and credit.number in c for c in ch) and any("repris" in c for c in ch)
+    assert db.query(AuditLog).filter_by(action="reissue_invoice").count() == 1
+    d = svc.reliquat_data(db, new)                     # l'avoir de remplacement ne réduit pas le convenu
+    assert d["credits"] == 0 and d["paid"] == 1000 and old not in d["invoices"]
+    svc.approve_entity(db, new, "u")
+    assert new.status == "partial"                     # approuvée avec un versement : reste « partielle »
+    for bad in (old, credit):
+        with pytest.raises(revise.ReviseError):
+            revise.reissue(db, bad, user_id=None)
+    with pytest.raises(revise.ReviseError):
+        revise.reissue(db, Invoice(number="X", status="draft", kind="invoice"), user_id=None)   # brouillon : correction directe
+    db.close()
+
+
+def test_agent_revise_on_issued_invoice_reissues(client, claude):
+    from app.agent import AgentSession
+    from app.models import Invoice, InvoiceItem
+    db, q = _mk_quote(client)
+    inv = Invoice(number=q.number + "-F", quotation_id=q.id, status="approved", vat_rate=0.18, paid=0,
+                  subtotal=10000, vat_amount=1800, total=11800, remaining=11800)
+    db.add(inv)
+    db.flush()
     db.add(InvoiceItem(invoice_id=inv.id, position=1, description="Plaque", quantity=2, unit="u", unit_price=5000, total=10000))
     db.commit()
-    ch = revise.revise(db, "invoice", inv, user_id=None, update=[{"line": 1, "quantity": 3}])
-    inv = db.get(Invoice, inv.id)
-    assert inv.status == "partial" and any("ATTENTION" in c for c in ch) and inv.subtotal == 15000
+    out = AgentSession(db, None, {})("revise_document", {"kind": "invoice", "number": inv.number, "update": [{"line": 1, "quantity": 1}]})
+    assert out["numero"] == q.number + "-F2" and out["total"] == 5900 and "avoir" in out["note"]
+    assert db.get(Invoice, inv.id).status == "cancelled"
     db.close()
 
 

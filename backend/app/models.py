@@ -293,6 +293,8 @@ class Invoice(Base):
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    # facture émise corrigée : l'avoir qui l'annule et la facture qui la remplace pointent vers elle (revise.reissue)
+    corrects_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     artifact_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

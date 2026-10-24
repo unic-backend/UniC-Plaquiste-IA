@@ -245,7 +245,9 @@ TOOLS: list[dict] = [
         "description": ("CORRIGE un document déjà créé, QUEL QUE SOIT SON STATUT (brouillon, approuvé, envoyé, refusé) : retirer / ajouter / changer des lignes, TVA, titre, client. "
                         "À utiliser dès que le patron dit « retire ça », « ajoute ça », « corrige ». Ne crée JAMAIS un second "
                         "document pour une correction. Les totaux sont recalculés par le système. Un document approuvé n'est PAS un obstacle : exécute l'ordre du patron ; "
-                        "le document repasse « à valider » et le PDF est refait. Ouvre-le d'abord avec get_document si tu dois connaître ses lignes."),
+                        "le document repasse « à valider » et le PDF est refait. Ouvre-le d'abord avec get_document si tu dois connaître ses lignes. "
+                        "Une FACTURE émise (approuvée, envoyée, payée) n'est jamais réécrite (loi) : le système fait un avoir qui l'annule et "
+                        "une nouvelle facture corrigée à valider ; annonce les deux numéros."),
         "input_schema": {"type": "object", "properties": {
             "kind": {"type": "string", "enum": ["quote", "invoice", "po", "dn"]},
             "number": {"type": "string", "description": "Numéro du document ; omis = dernier devis de la conversation"},
@@ -634,6 +636,7 @@ AGENT_PROMPT = (
     "\nCORRECTIONS : si le patron dit « retire », « ajoute », « change », « corrige » sur un document, appelle revise_document "
     "sur CE document (jamais create_* : pas de doublon). Un brouillon devenu faux et remplacé se retire avec discard_document. "
     "Un document approuvé, envoyé ou refusé se corrige aussi : le patron commande, tu exécutes (get_document pour voir ses lignes, puis revise_document) ; il repasse « à valider ». "
+    "Une facture émise ne se réécrit pas : revise_document crée l'avoir et la facture de remplacement ; dis leurs numéros et que les deux sont à valider. "
     "N'impose jamais de « nouvelle version » à la place d'une correction. Pas de question « je le fais ? » pour une correction demandée : fais-la, puis annonce ce qui a changé et le nouveau total."
     "\nPLANS : quand un plan est joint (PDF, scan, photo), appelle read_plan. Présente en court : pièces avec plafond (oui / à confirmer), "
     "surfaces, références placo et cloisons du plan, résultat du contrôle d'emprise (controle_emprise), doutes. Ne crée jamais un devis depuis un plan sans que le patron confirme les pièces "
@@ -1502,9 +1505,13 @@ class AgentSession:
         last = self.state.get("last_quote_id") if kind == "quote" else None
         try:
             doc = revise.find(self.db, kind, number, last)
-            changes = revise.revise(self.db, kind, doc, user_id=self.user_id, remove=remove, update=update, add=add,
-                                    title=title or None, vat_rate=vat_rate, client_name=client_name or None,
-                                    objet=objet or None, lieu=lieu or None, new_number=new_number or None)
+            fix = dict(remove=remove, update=update, add=add, title=title or None, vat_rate=vat_rate,
+                       client_name=client_name or None, objet=objet or None, lieu=lieu or None, new_number=new_number or None)
+            replaced = kind == "invoice" and doc.status != "draft"
+            if replaced:   # facture émise : avoir + nouvelle facture, jamais réécrite
+                doc, changes = revise.reissue(self.db, doc, user_id=self.user_id, **fix)
+            else:
+                changes = revise.revise(self.db, kind, doc, user_id=self.user_id, **fix)
         except revise.ReviseError as exc:
             raise ConnectorError(str(exc), 400)
         if kind == "quote":
@@ -1516,7 +1523,8 @@ class AgentSession:
             linked = [i.number for i in self.db.query(Invoice).filter(Invoice.quotation_id == doc.id).all()]
         return {"numero": doc.number, "modifications": changes, "total": getattr(doc, "total", None),
                 "version": doc.version, "documents_lies": linked,
-                "note": "Document corrigé sur place (aucun doublon). "
+                "note": ("Facture émise : annulée par un avoir, remplacée par la facture ci-dessus ; les deux sont à valider par le patron. "
+                         if replaced else "Document corrigé sur place (aucun doublon). ")
                         + ("Les documents liés ne sont PAS mis à jour : propose de les corriger aussi." if linked else "")}
 
     def _t_discard_document(self, kind: str, number: str) -> dict:
