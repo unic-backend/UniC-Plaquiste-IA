@@ -7,7 +7,7 @@ import { Link } from "react-router-dom";
 type Rdv = { id: string; title: string; kind: string; kind_label: string; start_at: string; end_at?: string; location: string;
   client_name: string; phone: string; notes: string; status: string; remind_minutes: number };
 
-const KINDS: [string, string][] = [["metre", "Métré"], ["visite", "Visite"], ["pose", "Pose"], ["livraison", "Livraison"], ["rdv", "Rendez-vous"], ["autre", "Autre"]];
+const KINDS: [string, string][] = [["metre", "Métré"], ["visite", "Visite"], ["pose", "Pose"], ["livraison", "Livraison"], ["rdv", "Rendez-vous"], ["tache", "À faire (tâche)"], ["autre", "Autre"]];
 const REMIND_BASE = 5000;   // identifiants des rappels : 5000 à 5199
 
 const dayKey = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
@@ -31,13 +31,51 @@ async function scheduleReminders(rows: Rdv[]) {
   } catch { /* rappels indisponibles : l'agenda reste utilisable */ }
 }
 
+/** Abonnement du calendrier du téléphone : un lien secret (.ics) que Google Agenda ou le calendrier de l'iPhone relit tout seul. */
+function Abonnement() {
+  const [f, setF] = useState<{ enabled: boolean; url: string; webcal: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.agendaFeed().then(setF).catch(() => setF(null)); }, []);
+  if (!f) return null;
+  const turn = async (on: boolean, ask: string) => {
+    if (!window.confirm(ask)) return;
+    try { setF(await api.setAgendaFeed(on)); setMsg(on ? "Lien prêt : ajoute-le à ton calendrier." : "Abonnement coupé : le lien ne marche plus."); }
+    catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(f.url); setMsg("Lien copié."); } catch { setMsg(f.url); } };
+  return (
+    <section className="card-box agenda-feed">
+      <b>Calendrier du téléphone</b>
+      {!f.enabled ? (
+        <>
+          <p className="hint">Tes rendez-vous et tâches apparaissent dans Google Agenda ou le calendrier de l'iPhone, mis à jour tout seuls (environ toutes les heures). Ni téléphone ni notes des clients dans le lien.</p>
+          <button className="btn btn-copper btn-small" onClick={() => turn(true, "Créer un lien secret pour ton calendrier ? Garde-le pour toi : qui l'a voit ton agenda.")}>Activer l'abonnement</button>
+        </>
+      ) : (
+        <>
+          <p className="hint">Google Agenda (sur ordinateur) : Autres agendas › « + » › À partir de l'URL › colle le lien. iPhone : touche « Ouvrir dans le calendrier ».</p>
+          <code className="agenda-feed-url">{f.url}</code>
+          <div className="row-actions">
+            <button className="btn btn-copper btn-small" onClick={copy}>Copier le lien</button>
+            <a className="btn btn-line btn-small" href={f.webcal}>Ouvrir dans le calendrier</a>
+            <button className="btn btn-line btn-small" onClick={() => turn(true, "Changer le lien ? L'ancien cesse de marcher : il faudra ajouter le nouveau.")}>Changer le lien</button>
+            <button className="btn btn-line btn-small" onClick={() => turn(false, "Couper l'abonnement ? Le calendrier du téléphone ne recevra plus rien.")}>Couper</button>
+          </div>
+        </>
+      )}
+      {msg && <p className="hint" role="status">{msg}</p>}
+    </section>
+  );
+}
+
 export function Agenda() {
   const [rows, setRows] = useState<Rdv[]>([]);
+  const [late, setLate] = useState<Rdv[]>([]);
   const [msg, setMsg] = useState("");
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
   const [f, setF] = useState({ title: "", kind: "metre", date: today, time: "09:00", duration_min: "", location: "", client_name: "", phone: "", remind_minutes: "60" });
-  const load = () => api.agenda().then((d) => { setRows(d.rdv); scheduleReminders(d.rdv); }).catch((e) => setMsg(e?.message || "Erreur"));
+  const load = () => api.agenda().then((d) => { setRows(d.rdv); setLate(d.taches_en_retard || []); scheduleReminders(d.rdv); }).catch((e) => setMsg(e?.message || "Erreur"));
   useEffect(() => { load(); }, []);
 
   const save = async () => {
@@ -45,7 +83,7 @@ export function Agenda() {
     try {
       const r = await api.addAppointment({ ...f, start: `${f.date} ${f.time}`, duration_min: f.duration_min ? Number(f.duration_min) : null,
         remind_minutes: Number(f.remind_minutes) });
-      setMsg(r.conflits.length ? `Noté. ⚠️ Chevauche : ${r.conflits.join(" ; ")}` : "Rendez-vous noté.");
+      setMsg(r.conflits.length ? `Noté. ⚠️ Chevauche : ${r.conflits.join(" ; ")}` : f.kind === "tache" ? "Tâche notée." : "Rendez-vous noté.");
       setOpen(false); setF({ ...f, title: "", location: "", client_name: "", phone: "" }); load();
     } catch (e: any) { setMsg(e?.message || "Erreur"); }
   };
@@ -78,7 +116,23 @@ export function Agenda() {
           </section>
         )}
         {msg && <p className="hint">{msg}</p>}
-        {!rows.length && !open && (
+        <Abonnement />
+        {late.length > 0 && (
+          <section className="agenda-day">
+            <h3>À faire · en retard</h3>
+            {late.map((r) => (
+              <article key={r.id} className="agenda-item k-tache late">
+                <div className="agenda-time">{new Date(r.start_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</div>
+                <div className="agenda-body">
+                  <b>{r.title}</b>
+                  {(r.client_name || r.location) && <span>{[r.client_name, r.location].filter(Boolean).join(" · ")}</span>}
+                  <div className="row-actions"><button className="btn btn-copper btn-small" onClick={() => set(r.id, "done")}>Fait</button></div>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+        {!rows.length && !late.length && !open && (
           <div className="empty empty-state">
             <span className="empty-ic" aria-hidden><I.Calendar size={26} /></span>
             <b>Rien de prévu dans les 60 prochains jours</b>

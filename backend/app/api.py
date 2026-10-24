@@ -1570,7 +1570,47 @@ class AppointmentIn(BaseModel):
 @router.get("/agenda")
 def agenda_list(days: int = 30, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import agenda
-    return {"rdv": [agenda.to_dict(a) for a in agenda.upcoming(db, days=max(1, min(days, 365)))], "kinds": agenda.KINDS}
+    return {"rdv": [agenda.to_dict(a) for a in agenda.upcoming(db, days=max(1, min(days, 365)))], "kinds": agenda.KINDS,
+            "taches_en_retard": [agenda.to_dict(a) for a in agenda.overdue_tasks(db)]}
+
+
+def _feed_out(request: Request, token: str) -> dict:
+    if not token:
+        return {"enabled": False, "url": "", "webcal": ""}
+    base = (settings.unic_public_url or str(request.base_url)).rstrip("/")
+    url = f"{base}/api/public/agenda/{token}.ics"
+    return {"enabled": True, "url": url, "webcal": "webcal://" + url.split("://", 1)[-1]}
+
+
+@router.get("/agenda/feed")
+def agenda_feed(request: Request, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Lien d'abonnement du calendrier du téléphone (coupé tant que le patron ne l'active pas)."""
+    from app import agenda
+    return _feed_out(request, agenda.feed_token(db))
+
+
+class FeedIn(BaseModel):
+    on: bool
+
+
+@router.post("/agenda/feed")
+def agenda_feed_set(body: FeedIn, request: Request, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Clic du patron : active (nouveau lien, l'ancien cesse de marcher) ou coupe l'abonnement."""
+    from app import agenda
+    token = agenda.set_feed(db, body.on)
+    audit(db, user.id, "agenda_feed_on" if body.on else "agenda_feed_off", "agenda", "feed")
+    db.commit()
+    return _feed_out(request, token)
+
+
+@router.get("/public/agenda/{token}.ics")
+def agenda_public_ics(token: str, db: Session = Depends(get_db)):
+    """Abonnement lu par le calendrier du téléphone : seul le lien secret ouvre ; coupé ou faux → introuvable."""
+    from app import agenda
+    if not agenda.feed_matches(db, token):
+        raise HTTPException(404, "Introuvable")
+    return Response(agenda.ics(db), media_type="text/calendar; charset=utf-8",
+                    headers={"Cache-Control": "private, max-age=900", "Content-Disposition": 'inline; filename="unic-agenda.ics"'})
 
 
 @router.post("/agenda")

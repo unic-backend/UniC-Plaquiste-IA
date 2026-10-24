@@ -912,6 +912,10 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .agenda-item { display: flex; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-bottom: 8px; border-left: 4px solid var(--copper); }
 .agenda-item.k-pose { border-left-color: #2e7d4f; }
 .agenda-item.k-livraison { border-left-color: #1f3a93; }
+.agenda-item.k-tache { border-left-color: #8a6d1f; }
+.agenda-item.late { border-left-color: var(--warn); }
+.agenda-feed { display: grid; gap: 8px; margin: 12px 0; }
+.agenda-feed-url { display: block; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: var(--paper); border: 1px solid var(--line); overflow-wrap: anywhere; user-select: all; }
 .agenda-item.k-visite, .agenda-item.k-metre { border-left-color: var(--copper); }
 .agenda-time { font-weight: 700; font-size: 15px; display: grid; align-content: start; min-width: 48px; }
 .agenda-time span { font-weight: 400; font-size: 12px; color: var(--muted); }

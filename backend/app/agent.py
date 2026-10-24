@@ -327,11 +327,11 @@ TOOLS: list[dict] = [
     },
     {
         "name": "add_appointment",
-        "description": ("AGENDA : note une visite, un métré, une pose, une livraison ou un rendez-vous. start = « AAAA-MM-JJ HH:MM » heure de Dakar "
+        "description": ("AGENDA : note une visite, un métré, une pose, une livraison, un rendez-vous ou une TÂCHE à faire (kind=tache, start = échéance). start = « AAAA-MM-JJ HH:MM » heure de Dakar "
                         "(calcule la date à partir d'aujourd'hui si le patron dit « jeudi », « demain »). Signale tout conflit d'horaire rendu."),
         "input_schema": {"type": "object", "properties": {
             "title": {"type": "string"}, "start": {"type": "string"},
-            "kind": {"type": "string", "enum": ["visite", "metre", "pose", "livraison", "rdv", "autre"]},
+            "kind": {"type": "string", "enum": ["visite", "metre", "pose", "livraison", "rdv", "tache", "autre"]},
             "duration_min": {"type": "integer"}, "location": {"type": "string"}, "client_name": {"type": "string"},
             "phone": {"type": "string"}, "notes": {"type": "string"}, "remind_minutes": {"type": "integer"}},
             "required": ["title", "start"], "additionalProperties": False},
