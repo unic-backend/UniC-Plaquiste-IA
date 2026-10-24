@@ -337,8 +337,9 @@ def _intent(text: str, state: dict) -> str:
 
     if mem.parse_remember(text):
         return "remember"
-    if re.search(r"\bbriefing\b|\bbrief du (jour|matin)\b|r[eé]sum[eé] de ma journ[eé]e|qu'est[- ]ce que j'ai (aujourd'hui|[aà] faire)", t):
-        return "briefing"
+    if re.search(r"\bbriefing\b|\bbrief du (jour|matin)\b|r[eé]sum[eé] de ma journ[eé]e|qu'est[- ]ce que j'ai (aujourd'hui|[aà] faire)", t) \
+            and not re.search(r"\bbriefing\s+(?:du|de la|de l'|de|des|sur|d')\s*(?=\S)(?!jour\b|matin\b|ma journ|aujourd)", t):
+        return "briefing"   # « briefing du marché de l'immobilier » est une recherche, pas MON briefing
     if re.search(r"annule|cancel|oublie", t) and state.get("pending"):
         return "cancel_pending"
     if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t):

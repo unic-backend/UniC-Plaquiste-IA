@@ -287,6 +287,8 @@ def company_dict(db: Session) -> dict:
         "quote_validity_days": row.quote_validity_days,
         "invoice_due_days": row.invoice_due_days if row.invoice_due_days is not None else 15,
         "payment_terms": row.payment_terms,
+        "wave_number": row.wave_number or "",
+        "wave_link": row.wave_link or "",
         "default_waste": row.default_waste,
         "default_margin": row.default_margin,
         "board_width_m": row.board_width_m,
@@ -641,6 +643,11 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     warnings = []
     if inv.total is None:
         warnings.append("Total incomplet : prix manquants dans la base UniC.")
+    extra, qr = [], ""
+    pay = wave_lines(company)
+    if pay and inv.kind != "credit" and inv.status != "cancelled":   # un avoir ou une facture annulée ne se paie pas
+        extra.append("<b>Payer par Wave</b> : " + " · ".join(pay))
+        qr = company.get("wave_link") or ""
     kind_label = {
         "invoice": "FACTURE",
         "deposit": "FACTURE D'ACOMPTE",
@@ -660,11 +667,21 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
         party_right=("Client", party_text_customer(customer)),
         headers=["#", "Désignation", "Qté", "Unité", "P.U.", "Total"],
         rows=rows, col_widths=[18, 210, 50, 40, 80, 80],
-        totals=totals, notes=inv.notes, warnings=warnings,
+        totals=totals, notes=inv.notes, warnings=warnings, extra_paragraphs=extra, qr_url=qr,
     )
     art = store_artifact(db, dest, filename, "invoice", inv.id, f"unic-invoice-{inv.number.lower()}", user_id)
     inv.artifact_id = art.id
     return art
+
+
+def wave_lines(company: dict) -> list[str]:
+    """Comment payer par Wave (numéro, lien) d'après les réglages du patron ; vide s'il n'a rien renseigné."""
+    out = []
+    if (company.get("wave_number") or "").strip():
+        out.append(f"numéro {company['wave_number'].strip()}")
+    if (company.get("wave_link") or "").startswith("https://"):
+        out.append(company["wave_link"])
+    return out
 
 
 def reliquat_data(db: Session, inv: Invoice) -> dict:
@@ -698,6 +715,7 @@ def balance_message(db: Session, inv: Invoice, client: str, currency: str, phone
     lines = [f"Bonjour{(' ' + first) if first else ''},", "",
              f"Voici le point sur votre dossier {ref} : montant convenu {amt(d['agreed'])}, déjà versé {amt(d['paid'])}.",
              f"Il reste {amt(d['remaining'])} à régler.", "Le reliquat détaillé est joint à ce message.",
+             *([f"Paiement Wave possible : {' · '.join(wave_lines(company_dict(db)))}."] if wave_lines(company_dict(db)) else []),
              "Merci d'avance et bonne journée.", "", "UniC Plaquiste"]
     if phone:
         lines.append(phone)
