@@ -181,15 +181,26 @@ function Evals({ onMsg }: { onMsg: (m: string) => void }) {
     onMsg("");
     try { await api.runEvals(); setE({ ...(e || {}), running: true }); } catch (x: any) { onMsg(x?.message || "Erreur"); }
   };
+  const weekly = async (on: boolean) => {
+    onMsg("");
+    try { await api.setEvalsWeekly(on); setE({ ...(e || {}), weekly: on }); onMsg(on ? "Examen chaque semaine activé : tu es prévenu si la note baisse." : "Examen hebdomadaire coupé."); }
+    catch (x: any) { onMsg(x?.message || "Erreur"); }
+  };
   const last = e?.last;
   const fails = (last?.results || []).filter((r: any) => !r.ok);
+  const hist: any[] = (e?.history || []).slice(-6);
   return (
     <section className="card-box">
       <div className="at-head"><h3>Banc d'essai IA</h3>
         <button className="btn btn-line btn-small" disabled={!!e?.running} onClick={start}>{e?.running ? "En cours…" : "Lancer"}</button></div>
-      <p className="hint">{e?.cases ?? 16} demandes de référence : métrés (cloisons, plafonds, unités, faces, ouvertures), e-mails, PDF et Excel, agenda.
+      <label className="at-toggle"><input type="checkbox" checked={!!e?.weekly} onChange={(x) => weekly(x.target.checked)} />
+        <span>Examen automatique chaque semaine (alerte si la note baisse ou si l'IA invente)</span></label>
+      <p className="hint">{e?.cases ?? 21} demandes de référence : métrés (cloisons, plafonds, unités, faces, ouvertures), e-mails, PDF et Excel, agenda et tâches, factures émises, dépenses, versements, vidéo.
         Le code vérifie que l'IA choisit le bon outil, reprend les bons chiffres et n'invente rien : ni dimension, ni adresse, ni action « faite ».
-        Mêmes consignes et même modèle que la vraie conversation. À relancer après chaque changement de l'IA. ≈ {e?.cases ?? 16} appels à Claude.</p>
+        Mêmes consignes et même modèle que la vraie conversation. À relancer après chaque changement de l'IA. ≈ {e?.cases ?? 21} appels à Claude.</p>
+      {hist.length > 1 && (
+        <p className="hint">Tendance : {hist.map((h) => `${new Date(h.at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} ${String(h.score).replace(".", ",")} %`).join(" → ")}</p>
+      )}
       {last && (
         <>
           <p className={last.passed === last.total ? "hint ic" : "error"}><b>{last.passed}/{last.total} réussis · {String(last.score).replace(".", ",")} %</b>

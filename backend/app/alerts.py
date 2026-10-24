@@ -205,6 +205,9 @@ def tick(db: Session) -> dict:
         day = datetime.now(timezone.utc).date().isoformat()
         for msg in usage.spend_alerts(db):   # une alerte par sujet et par jour (la source porte la date)
             selfcare.report(f"dépenses IA {day}", msg, kind="budget")
+        from app import evals
+        if evals.weekly_due(db):               # examen hebdomadaire de l'IA (seulement si le patron l'a activé)
+            evals.start_background(weekly=True)
         selfcare.flush(db)     # les incidents en attente deviennent annonçables sans attendre le tour suivant
     except Exception:
         pass

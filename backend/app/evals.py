@@ -6,6 +6,8 @@ déterministe (code, pas un modèle) : la même réponse donne toujours la même
 l'essai (aucun devis, aucune écriture) : on regarde seulement ce que le modèle demande.
 
 À relancer après chaque changement de consigne, de modèle ou d'orchestrateur (Paramètres › Atelier › Banc d'essai IA).
+Examen hebdomadaire (facultatif, coupé par défaut : il coûte des jetons) : relancé tout seul tous les 7 jours ; si la note baisse,
+si un cas qui passait échoue ou si l'IA invente, le patron est prévenu par le canal des alertes (incident « examen IA »).
 """
 from __future__ import annotations
 
@@ -18,6 +20,10 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger("unic.evals")
 SETTING_KEY = "ai_eval_last"
+WEEKLY_KEY = "ai_eval_weekly"     # « 1 » : examen relancé tout seul chaque semaine (réglage du patron)
+HISTORY_KEY = "ai_eval_history"   # notes des derniers examens, pour voir la tendance
+HISTORY_MAX = 12
+WEEK_S = 7 * 86400
 MIN_INTERVAL_S = 600   # un essai coûte des jetons : pas plus d'une fois toutes les 10 minutes
 
 # expect : arguments attendus (nombres comparés à 1 % près) ; absent : arguments qui ne doivent PAS être inventés ;
@@ -58,6 +64,17 @@ CASES: list[dict[str, Any]] = [
      "tool": "make_pdf", "expect": {}},
     {"id": "rendez-vous", "message": "Note un rendez-vous avec Awa jeudi à 10 h pour un métré.",
      "tool": "add_appointment", "expect": {}},
+    # fonctions ajoutées par la feuille de route du diagnostic (étapes 4 à 10)
+    {"id": "facture-emise", "message": "Sur la facture UC-2026-1008-MR-F, passe la quantité de la ligne 1 à 12.",
+     "tool": "revise_document", "expect": {"kind": "invoice", "number": "UC-2026-1008-MR-F"}, "not_before": "create_invoice"},
+    {"id": "depense-chantier", "message": "J'ai payé 150 000 de plaques BA13 pour le chantier de Moussa Diop.",
+     "tool": "record_expense", "expect": {"amount": 150000, "category": "matériaux"}},
+    {"id": "versement", "message": "Moussa Diop m'a versé 200 000 d'avance sur son devis.",
+     "tool": "record_receipt", "expect": {"amount": 200000}},
+    {"id": "tache", "message": "Note de commander les rails chez Sotiba demain matin.",
+     "tool": "add_appointment", "expect": {"kind": "tache"}},
+    {"id": "video-chat", "message": "Fais-moi une vidéo de 30 secondes pour présenter UniC sur TikTok.",
+     "tool": "plan_video", "expect": {}},
 ]
 
 
@@ -109,7 +126,6 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
     from app import agent, claims
     from app.ai import PROVIDERS
     from app.config import settings
-    from app.models import AppSetting
     from app.orchestrator import SYSTEM_RULES, wants_deep
     last = report_last(db)
     if complete is None:
@@ -145,13 +161,70 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
     passed = sum(1 for r in results if r["ok"])
     report = {"at": datetime.now(timezone.utc).isoformat(), "passed": passed, "total": len(results),
               "score": round(100 * passed / len(results), 1) if results else 0.0, "results": results}
-    row = db.get(AppSetting, SETTING_KEY)
-    if row is None:
-        db.add(AppSetting(key=SETTING_KEY, value=json.dumps(report, ensure_ascii=False)))
-    else:
-        row.value = json.dumps(report, ensure_ascii=False)
+    _put(db, SETTING_KEY, json.dumps(report, ensure_ascii=False))
+    hist = (history(db) + [{"at": report["at"], "score": report["score"], "passed": passed, "total": len(results)}])[-HISTORY_MAX:]
+    _put(db, HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
     db.flush()
     return report
+
+
+def _put(db: Session, key: str, value: str) -> None:
+    from app.models import AppSetting
+    row = db.get(AppSetting, key)
+    if row is None:
+        db.add(AppSetting(key=key, value=value))
+    else:
+        row.value = value
+
+
+def history(db: Session) -> list[dict]:
+    from app.models import AppSetting
+    row = db.get(AppSetting, HISTORY_KEY)
+    try:
+        data = json.loads(row.value) if row and row.value else []
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def weekly_enabled(db: Session) -> bool:
+    from app.models import AppSetting
+    row = db.get(AppSetting, WEEKLY_KEY)
+    return bool(row and row.value == "1")
+
+
+def set_weekly(db: Session, on: bool) -> None:
+    _put(db, WEEKLY_KEY, "1" if on else "0")
+    db.flush()
+
+
+def regressions(prev: dict | None, now: dict) -> list[str]:
+    """Ce qui a empiré depuis l'examen précédent : note en baisse, cas qui passait et échoue, invention. Vide = rien à signaler."""
+    out: list[str] = []
+    if prev and now["score"] < prev.get("score", 0):
+        out.append(f"note en baisse : {now['score']} % (avant {prev.get('score')} %)")
+    before = {r["id"] for r in (prev or {}).get("results", []) if r.get("ok")}
+    broke = [r["id"] for r in now["results"] if not r["ok"] and r["id"] in before]
+    if broke:
+        out.append("cas qui passaient et échouent : " + ", ".join(broke))
+    invented = [r["id"] for r in now["results"] if any("invent" in p.lower() for p in r.get("problems", []))]
+    if invented:
+        out.append("l'IA invente (dimension, adresse ou action) : " + ", ".join(invented))
+    return out
+
+
+def weekly_due(db: Session, now: datetime | None = None) -> bool:
+    """Examen de la semaine à lancer : réglage actif, aucun en cours, le dernier date de 7 jours ou plus (ou n'existe pas)."""
+    if not weekly_enabled(db) or "run" in RUNNING:
+        return False
+    last = report_last(db)
+    if not last:
+        return True
+    try:
+        age = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(last["at"])).total_seconds()
+    except (KeyError, ValueError):
+        return True
+    return age >= WEEK_S
 
 
 def report_last(db: Session) -> dict | None:
@@ -166,8 +239,9 @@ def report_last(db: Session) -> dict | None:
 RUNNING: set[str] = set()
 
 
-def start_background() -> None:
-    """Lance le banc d'essai en arrière-plan (≈ 1 min) ; le rapport apparaît ensuite dans l'Atelier."""
+def start_background(weekly: bool = False) -> None:
+    """Lance le banc d'essai en arrière-plan (≈ 1 min) ; le rapport apparaît ensuite dans l'Atelier.
+    `weekly` : examen automatique de la semaine — ce qui a empiré devient un incident « examen IA » (alerte au patron)."""
     import threading
     from app.database import SessionLocal
     if "run" in RUNNING:
@@ -184,8 +258,15 @@ def start_background() -> None:
     def job() -> None:
         session = SessionLocal()
         try:
-            run(session)
+            prev = report_last(session)
+            report = run(session)
             session.commit()
+            worse = regressions(prev, report) if weekly else []
+            if worse:   # un seul incident par semaine (la semaine est dans la source : l'alerte de la semaine suivante repart)
+                from app import selfcare
+                year, week, _ = datetime.now(timezone.utc).isocalendar()
+                selfcare.report(f"examen IA {year}-S{week:02d}", f"Examen de l'IA ({report['passed']}/{report['total']}) : " + " ; ".join(worse) + ".",
+                                kind="check")
         except Exception:
             logger.exception("banc d'essai en échec")
             session.rollback()
