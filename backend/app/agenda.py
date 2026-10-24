@@ -1,14 +1,17 @@
 """Agenda des chantiers : visites, métrés, poses, livraisons, rendez-vous. Conflits d'horaires signalés, jamais cachés."""
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import Appointment, Customer
+from app.models import AppSetting, Appointment, Customer
 
-KINDS = {"visite": "Visite", "metre": "Métré", "pose": "Pose", "livraison": "Livraison", "rdv": "Rendez-vous", "autre": "Autre"}
-DEFAULT_MIN = {"visite": 60, "metre": 90, "pose": 480, "livraison": 60, "rdv": 60, "autre": 60}
+KINDS = {"visite": "Visite", "metre": "Métré", "pose": "Pose", "livraison": "Livraison", "rdv": "Rendez-vous", "tache": "À faire", "autre": "Autre"}
+DEFAULT_MIN = {"visite": 60, "metre": 90, "pose": 480, "livraison": 60, "rdv": 60, "tache": 30, "autre": 60}
+FEED_KEY = "agenda_feed_token"   # lien secret du calendrier du téléphone (abonnement .ics), coupé tant que le patron ne l'active pas
+FEED_PAST_DAYS, FEED_NEXT_DAYS = 30, 365
 # Dakar : UTC+0 toute l'année. Les heures saisies sont donc directement des heures UTC.
 
 
@@ -44,7 +47,7 @@ def conflicts(db: Session, start: datetime, end: datetime, exclude_id: str | Non
     rows = db.query(Appointment).filter(Appointment.status == "planned").all()
     out = []
     for r in rows:
-        if r.id == exclude_id:
+        if r.id == exclude_id or r.kind == "tache":   # une tâche a une échéance, pas un créneau : jamais un conflit
             continue
         rs, re_ = _aware(r.start_at), _aware(r.end_at) or _aware(r.start_at) + timedelta(minutes=60)
         if rs < end and start < re_:
@@ -66,7 +69,7 @@ def create(db: Session, *, title: str, start: str, kind: str = "rdv", duration_m
     cust = None
     if client_name.strip():
         cust = next((c for c in db.query(Customer).all() if (c.name or "").strip().lower() == client_name.strip().lower()), None)
-    clash = conflicts(db, s, e)
+    clash = [] if kind == "tache" else conflicts(db, s, e)
     a = Appointment(title=title[:255], kind=kind, start_at=s, end_at=e, location=location[:255], client_name=client_name[:255],
                     phone=(phone or (getattr(cust, "phone", "") or ""))[:64], customer_id=cust.id if cust else None,
                     notes=notes, remind_minutes=max(0, min(int(remind_minutes), 24 * 60)))
@@ -81,6 +84,86 @@ def upcoming(db: Session, days: int = 14, now: datetime | None = None, include_p
     rows = db.query(Appointment).filter(Appointment.status == "planned").all()
     rows = [r for r in rows if start <= _aware(r.start_at) <= now + timedelta(days=days)]
     return sorted(rows, key=lambda r: _aware(r.start_at))
+
+
+def overdue_tasks(db: Session, now: datetime | None = None) -> list[Appointment]:
+    """Tâches pas encore faites dont l'échéance est passée (avant aujourd'hui) : elles restent visibles jusqu'à « Fait »."""
+    day0 = (now or datetime.now(timezone.utc)).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = db.query(Appointment).filter(Appointment.status == "planned", Appointment.kind == "tache").all()
+    return sorted((r for r in rows if _aware(r.start_at) < day0), key=lambda r: _aware(r.start_at))
+
+
+# ---------- calendrier du téléphone (abonnement iCalendar, RFC 5545) ----------
+
+def feed_token(db: Session) -> str:
+    row = db.get(AppSetting, FEED_KEY)
+    return (row.value or "") if row else ""
+
+
+def set_feed(db: Session, on: bool) -> str:
+    """Active (nouveau lien secret : l'ancien cesse de marcher) ou coupe le flux. Rend le jeton actif ('' si coupé)."""
+    token = secrets.token_urlsafe(32) if on else ""
+    row = db.get(AppSetting, FEED_KEY)
+    if row is None:
+        db.add(AppSetting(key=FEED_KEY, value=token))
+    else:
+        row.value = token
+    db.commit()
+    return token
+
+
+def feed_matches(db: Session, token: str) -> bool:
+    good = feed_token(db)
+    return bool(good) and secrets.compare_digest(good.encode(), (token or "").encode())
+
+
+def _esc(text: str) -> str:
+    return (text or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r", "").replace("\n", "\\n")
+
+
+def _fold(line_: str) -> str:
+    """Lignes de 75 octets au plus, suite précédée d'un espace (sans couper un caractère accentué)."""
+    out, cur = [], ""
+    for ch in line_:
+        if len((cur + ch).encode("utf-8")) > (75 if not out else 74):
+            out.append(cur)
+            cur = ""
+        cur += ch
+    out.append(cur)
+    return "\r\n ".join(out)
+
+
+def ics(db: Session, now: datetime | None = None) -> str:
+    """Rendez-vous et tâches (prévus ou faits, jamais annulés) du mois passé à l'an prochain. Ni téléphone ni notes :
+    le lien peut circuler, il ne montre que l'essentiel (quoi, quand, où, qui)."""
+    now = now or datetime.now(timezone.utc)
+    lo, hi = now - timedelta(days=FEED_PAST_DAYS), now + timedelta(days=FEED_NEXT_DAYS)
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//UniC Plaquiste//UniC AI//FR", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+             "X-WR-CALNAME:UniC — chantiers", "X-WR-TIMEZONE:Africa/Dakar", "REFRESH-INTERVAL;VALUE=DURATION:PT1H"]
+    rows = db.query(Appointment).filter(Appointment.status != "cancelled").all()
+    for a in sorted(rows, key=lambda r: _aware(r.start_at)):
+        s = _aware(a.start_at)
+        if not lo <= s <= hi:
+            continue
+        e = _aware(a.end_at) or s + timedelta(minutes=DEFAULT_MIN.get(a.kind, 60))
+        label = KINDS.get(a.kind, a.kind)
+        title = a.title if a.title.lower().startswith(label.lower()) else f"{label} · {a.title}"
+        if a.status == "done":
+            title = "✓ " + title
+        desc = " · ".join(x for x in (a.client_name, a.location) if x)
+        lines += ["BEGIN:VEVENT", f"UID:{a.id}@unic-ai", f"DTSTAMP:{stamp}", f"DTSTART:{s.strftime('%Y%m%dT%H%M%SZ')}",
+                  f"DTEND:{e.strftime('%Y%m%dT%H%M%SZ')}", f"SUMMARY:{_esc(title)}"]
+        if a.location:
+            lines.append(f"LOCATION:{_esc(a.location)}")
+        if desc:
+            lines.append(f"DESCRIPTION:{_esc(desc)}")
+        lines.append("STATUS:CONFIRMED")
+        if a.status == "planned" and a.remind_minutes:
+            lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{_esc(title)}", f"TRIGGER:-PT{int(a.remind_minutes)}M", "END:VALARM"]
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_fold(x) for x in lines) + "\r\n"
 
 
 def line(a: Appointment) -> str:
