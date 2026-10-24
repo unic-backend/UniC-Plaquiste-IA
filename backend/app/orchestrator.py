@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app import usage
 from app import calc
 from app import agent, briefing as brief, context as ctx, learned, memory as mem, metier, pricecheck
-from app import claims, lessons
+from app import claims, lessons, relecture
 from app.ai import chat_complete, deep_available, live as live_stream, provider_chain
 from app.config import settings
 from app.documents import find_in_document, process_file, search_pages
@@ -1109,6 +1109,13 @@ def handle_turn(
                     if still:
                         audit(db, user.id, "ai_phantom_warned", "conversation", conv.id, ", ".join(still)[:250])
                         ai.text += claims.warning(still)
+                if ai.available and ai.text and ai.error != "refusal" and not locked:
+                    # relecture avant envoi : calculs refaits sans IA ; réponse à enjeu relue et corrigée (relecture.py)
+                    checked = relecture.review(db, question=text, reply=ai.text, context=msgs[1]["content"], deep=deep, voice=voice,
+                                               succeeded=session.succeeded if session is not None else [])
+                    if checked.status != "skipped":
+                        audit(db, user.id, f"ai_review_{checked.status}", "conversation", conv.id, checked.note[:250])
+                    ai.text = checked.text
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
                     if session.cards or session.documents or session.images or session.files:

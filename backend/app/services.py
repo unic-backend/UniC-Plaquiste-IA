@@ -295,6 +295,7 @@ def company_dict(db: Session) -> dict:
         "board_height_m": row.board_height_m,
         "stud_spacing_m": row.stud_spacing_m,
         "ai_deep_stakes": row.ai_deep_stakes is not False,
+        "ai_self_review": row.ai_self_review is not False,
         "website": row.website,
         "notes": row.notes,
     }
