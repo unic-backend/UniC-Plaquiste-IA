@@ -282,6 +282,16 @@ TOOLS: list[dict] = [
             "required": ["brief"], "additionalProperties": False},
     },
     {
+        "name": "deep_research",
+        "description": ("RECHERCHE APPROFONDIE sur Internet (1 à 3 minutes, plusieurs recherches) : marché, concurrents, fournisseurs, prix publics, "
+                        "normes, lois, appels d'offres, comparaisons… Rend un rapport sourcé et daté, rangé en PDF. À n'utiliser que si le patron "
+                        "demande une recherche, une étude ou une comparaison poussée (une question simple se traite avec la recherche rapide). "
+                        "Jamais de données privées de l'entreprise dans la question."),
+        "input_schema": {"type": "object", "properties": {
+            "question": {"type": "string", "description": "La question complète à étudier, avec le contexte utile (lieu, période, budget…)."}},
+            "required": ["question"], "additionalProperties": False},
+    },
+    {
         "name": "discard_document",
         "description": ("RETIRE de la bibliothèque un document non approuvé faux ou abandonné (pas de doublon d'erreur). "
                         "Jamais un document approuvé. À n'utiliser que sur demande ou quand une refonte complète le remplace."),
@@ -615,7 +625,7 @@ TOOL_LABELS = {
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
     "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
-    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt",
+    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
     "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "visit_report": "Compte rendu préparé",
@@ -716,6 +726,7 @@ OWNER_ASK = {
     "create_agent": re.compile(r"\bagents?\b|automati|tous les (jours|matins|soirs)|chaque (jour|matin|semaine)", re.I),
     "discard_document": re.compile(r"retire|supprime|annule|jette|efface|enl[eè]ve", re.I),
     "plan_video": re.compile(r"vid[ée]o|clip|film|montage|reel|tiktok|sc[ée]nario", re.I),
+    "deep_research": re.compile(r"recherch|cherche|[ée]tud|enqu[êe]t|analys|compar|march[ée]|concurren|fournisseur|source|internet|web|appel d.offres", re.I),
     "edit_file": re.compile(r"modifi|corrig|change|remplac|ajout|mets|met |[ée]cri|retire|enl[eè]ve|supprime|rempli", re.I),
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "record_expense": re.compile(r"d[ée]pens|frais|achet|pay[ée]|co[uû]t|\d", re.I),
@@ -1560,6 +1571,18 @@ class AgentSession:
                 "note": ("Facture émise : annulée par un avoir, remplacée par la facture ci-dessus ; les deux sont à valider par le patron. "
                          if replaced else "Document corrigé sur place (aucun doublon). ")
                         + ("Les documents liés ne sont PAS mis à jour : propose de les corriger aussi." if linked else "")}
+
+    def _t_deep_research(self, question: str) -> dict:
+        from app import research
+        try:
+            out = research.run(self.db, question, self.user_id)
+        except research.ResearchError as exc:
+            return {"error": str(exc)}
+        self._made(out["artifact"])
+        return {"rapport": out["rapport"][:12000], "nb_sources": len(out["sources"]), "verifie": out["verifie"],
+                "note": ("Rapport rangé en PDF (carte dans la conversation). Résume-le en 5 à 8 lignes avec les numéros de sources ; "
+                         "ne rajoute AUCUN chiffre qui n'est pas dans le rapport." if out["verifie"] else
+                         "AUCUNE source trouvée : dis-le clairement au patron, ce rapport n'est pas vérifié.")}
 
     def _t_plan_video(self, brief: str, format: str = "vertical", theme: str = "auto") -> dict:
         from app import repair, video_studio
