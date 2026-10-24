@@ -163,6 +163,12 @@ def video_plan(body: VideoPlanIn, background: BackgroundTasks, db: Session = Dep
     return out
 
 
+@router.get("/video/draft")
+def video_draft(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Scénario préparé dans le chat (outil plan_video), à relire puis lancer dans le Studio."""
+    return video_studio.draft(db)
+
+
 @router.post("/video/start")
 def video_start(body: VideoStartIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Clic du patron : lance la fabrication (GitHub Actions)."""

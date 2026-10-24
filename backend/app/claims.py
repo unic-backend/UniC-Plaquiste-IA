@@ -41,7 +41,9 @@ FAMILIES: dict[str, tuple[re.Pattern, frozenset[str]]] = {
                   frozenset({"set_collect_reminder", "add_appointment", "update_appointment", "list_unpaid"})),
     "le visuel": (re.compile(r"\bvisuels?\b|\bimages?\b|\baffiches?\b|\bflyers?\b|\bsch[ée]mas?\b|\bdiagrammes?\b", _I),
                   frozenset({"generate_visual", "draw_diagram", "audit_logo"})),
-    "la vidéo": (re.compile(r"\bvid[ée]os?\b|\bclip\b", _I), frozenset()),
+    # « Studio vidéo », « scénario de la vidéo » : le lieu et le plan, pas la vidéo elle-même (qui n'est jamais faite dans le chat)
+    "la vidéo": (re.compile(r"(?<!studio )(?<!sc[ée]nario de la )(?<!sc[ée]nario )\b(?:vid[ée]os?|clip)\b", _I), frozenset()),
+    "le scénario vidéo": (re.compile(r"\bsc[ée]narios?\b", _I), frozenset({"plan_video"})),
     "l'agent": (re.compile(r"\bagents?\b", _I), frozenset({"create_agent"})),
     "le site": (re.compile(r"\bsite (?:web|internet)\b|\bpage du site\b|\bton site\b", _I), frozenset()),
     "le compte rendu": (re.compile(r"\bcompte[- ]rendu\b|\brapport de visite\b", _I), frozenset({"visit_report", "make_pdf"})),
