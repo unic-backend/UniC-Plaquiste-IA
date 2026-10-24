@@ -256,6 +256,7 @@ export const net = {
     request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format, theme, current: current ?? null, changes }) }),
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<VideoState>("/api/website/video/status"),
+  videoDraft: () => request<{ at?: string; brief?: string; plan?: VideoPlan }>("/api/website/video/draft"),
   videoRetry: () => request<{ ok: boolean; note: string }>("/api/website/video/retry", { method: "POST" }),
   videoFetch: () => request<{ id: string; filename: string; size: number; url: string }>("/api/website/video/fetch", { method: "POST" }),
   videoAiStart: (prompt: string, duration: number, format: string, generate_audio: boolean) =>

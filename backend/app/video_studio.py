@@ -474,6 +474,35 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
             "target": target, "changes": changes}
 
 
+DRAFT_KEY = "video_draft"
+
+
+def save_draft(db: Session, planned: dict, brief: str) -> str:
+    """Scénario préparé depuis le chat : gardé pour que le Studio vidéo l'ouvre tel quel (le patron relit et lance lui-même)."""
+    from datetime import datetime, timezone
+    from app.models import AppSetting
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    value = json.dumps({"at": at, "brief": _brief(brief), "plan": planned}, ensure_ascii=False)
+    row = db.get(AppSetting, DRAFT_KEY)
+    if row is None:
+        db.add(AppSetting(key=DRAFT_KEY, value=value))
+    else:
+        row.value = value
+    db.commit()
+    return at
+
+
+def draft(db: Session) -> dict:
+    """Dernier scénario préparé depuis le chat ({} s'il n'y en a pas)."""
+    from app.models import AppSetting
+    row = db.get(AppSetting, DRAFT_KEY)
+    try:
+        data = json.loads(row.value) if row and row.value else {}
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) and isinstance(data.get("plan"), dict) else {}
+
+
 def _transport(spec: dict) -> str:
     """Scénario à transmettre à GitHub : JSON brut, ou « gz:<base64> » s'il dépasse la limite d'une entrée de workflow."""
     raw = json.dumps(spec, ensure_ascii=False, separators=(",", ":"))

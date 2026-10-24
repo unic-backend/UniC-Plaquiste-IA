@@ -91,6 +91,13 @@ export function VideoStudio({ say }: { say: Say }) {
     let alive = true;
     api.higgsfield().then((s) => { if (alive) setHf(s); }).catch(() => {});
     net.videoAiStatus().then((s) => { if (alive && s.state !== "idle") setAiClip(s); }).catch(() => {});
+    net.videoDraft().then((d) => {   // scénario préparé dans le chat (outil plan_video) : ouvert une fois, prêt à relire et lancer
+      if (!alive || !d.plan || !d.at) return;
+      try { if (localStorage.getItem("unic.video.draft") === d.at) return; localStorage.setItem("unic.video.draft", d.at); } catch { /* ignoré */ }
+      setMode("montage"); setBrief(d.brief || ""); setPlan(d.plan); setChanges(d.plan.changes ?? []);
+      if (d.plan.spec?.format) setFmt(d.plan.spec.format);
+      say("Scénario préparé dans le chat : relis-le, corrige si besoin, puis « Lancer la fabrication ».");
+    }).catch(() => {});
     return () => { alive = false; };
   }, []);
   const vidState = vid?.state;

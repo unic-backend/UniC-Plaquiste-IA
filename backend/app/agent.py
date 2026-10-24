@@ -270,6 +270,18 @@ TOOLS: list[dict] = [
             "required": ["kind"], "additionalProperties": False},
     },
     {
+        "name": "plan_video",
+        "description": ("VIDÉO depuis le chat : écrit le SCÉNARIO d'une vidéo (montage : titres, textes, photos du site, chiffres, avis, fin) "
+                        "sur n'importe quel sujet, et le range dans le Studio vidéo. Rien n'est fabriqué ni publié : le patron ouvre "
+                        "Menu › Studio vidéo, relit, corrige et appuie lui-même sur « Lancer la fabrication ». À appeler quand il demande une vidéo, un clip, un reel."),
+        "input_schema": {"type": "object", "properties": {
+            "brief": {"type": "string", "description": "La demande du patron, complète (sujet, durée, ton, public, ce qu'il veut montrer)."},
+            "format": {"type": "string", "enum": ["vertical", "horizontal", "square"],
+                       "description": "vertical : WhatsApp, TikTok, Reels ; horizontal : YouTube ; carré : Facebook, Instagram."},
+            "theme": {"type": "string", "enum": ["auto", "unic", "night", "light", "earth", "ocean", "sunset"]}},
+            "required": ["brief"], "additionalProperties": False},
+    },
+    {
         "name": "discard_document",
         "description": ("RETIRE de la bibliothèque un document non approuvé faux ou abandonné (pas de doublon d'erreur). "
                         "Jamais un document approuvé. À n'utiliser que sur demande ou quand une refonte complète le remplace."),
@@ -591,7 +603,7 @@ TOOL_LABELS = {
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
     "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "forget_memory": "Souvenir retiré",
-    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré",
+    "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
     "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "visit_report": "Compte rendu préparé",
@@ -691,6 +703,7 @@ OWNER_ASK = {
     "generate_visual": re.compile(r"visuel|image|photo|illustr|affiche|dessin|g[ée]n[èe]re|higgsfield|rendu|cr[ée]e", re.I),
     "create_agent": re.compile(r"\bagents?\b|automati|tous les (jours|matins|soirs)|chaque (jour|matin|semaine)", re.I),
     "discard_document": re.compile(r"retire|supprime|annule|jette|efface|enl[eè]ve", re.I),
+    "plan_video": re.compile(r"vid[ée]o|clip|film|montage|reel|tiktok|sc[ée]nario", re.I),
     "edit_file": re.compile(r"modifi|corrig|change|remplac|ajout|mets|met |[ée]cri|retire|enl[eè]ve|supprime|rempli", re.I),
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
@@ -1527,6 +1540,20 @@ class AgentSession:
                 "note": ("Facture émise : annulée par un avoir, remplacée par la facture ci-dessus ; les deux sont à valider par le patron. "
                          if replaced else "Document corrigé sur place (aucun doublon). ")
                         + ("Les documents liés ne sont PAS mis à jour : propose de les corriger aussi." if linked else "")}
+
+    def _t_plan_video(self, brief: str, format: str = "vertical", theme: str = "auto") -> dict:
+        from app import repair, video_studio
+        try:
+            out = video_studio.plan(self.db, brief, format, theme)
+        except repair.RepairError as exc:
+            raise ConnectorError(str(exc), getattr(exc, "status", 400))
+        video_studio.save_draft(self.db, out, brief)
+        scenes = out["spec"].get("scenes") or []
+        return {"ok": True, "compris": out.get("understood", ""), "duree_secondes": out.get("seconds"), "format": out["spec"].get("format"),
+                "scenes": len(scenes), "types": [s.get("type") for s in scenes[:12]], "hypotheses": out.get("assumptions", []),
+                "limites": out.get("limits", []), "note": ("Scénario rangé dans le Studio vidéo, PAS fabriqué : dis au patron d'ouvrir "
+                                                         "Menu › Studio vidéo pour le relire, le corriger et appuyer lui-même sur « Lancer la fabrication ». "
+                                                         "Ne dis jamais que la vidéo est faite, lancée ou envoyée.")}
 
     def _t_discard_document(self, kind: str, number: str) -> dict:
         try:
