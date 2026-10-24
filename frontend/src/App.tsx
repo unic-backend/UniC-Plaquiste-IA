@@ -1920,6 +1920,11 @@ function CompanyPage() {
               onChange={(e) => setS({ ...s, ai_deep_stakes: e.target.checked })} />
             Réflexion approfondie pour les devis, factures, métrés, plans et paiements (plus juste, un peu plus lent et plus cher)
           </label>
+          <label className="check-row">
+            <input type="checkbox" checked={s.ai_self_review !== false}
+              onChange={(e) => setS({ ...s, ai_self_review: e.target.checked })} />
+            Relecture avant envoi : les calculs sont refaits, et les réponses importantes (prix, droit, argent) relues et corrigées (quelques secondes de plus)
+          </label>
         </div>
         <button
           className="btn btn-copper"

@@ -67,6 +67,7 @@ class CompanySettings(Base):
     stud_spacing_m: Mapped[float] = mapped_column(Float, default=0.60)
     # devis, factures, métrés, plans, argent : le modèle le plus fort réfléchit plus longtemps (coût et délai plus élevés)
     ai_deep_stakes: Mapped[bool] = mapped_column(Boolean, default=True)
+    ai_self_review: Mapped[bool] = mapped_column(Boolean, default=True)   # relecture des réponses importantes avant envoi (relecture.py)
     notes: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
