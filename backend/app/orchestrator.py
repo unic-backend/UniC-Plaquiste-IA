@@ -1032,7 +1032,8 @@ def handle_turn(
                     msgs[1]["content"] += (
                         "\n\nOUTIL DE RECHERCHE INTERNET DISPONIBLE : pour toute information récente ou vérifiable "
                         "(actualité, cours, météo, prix publics, lois, résultats), cherche sur Internet puis cite tes sources. "
-                        "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise."
+                        "Cette consigne remplace la règle 2. N'utilise pas la recherche pour les données privées de l'entreprise. "
+                        "Si le patron demande une ÉTUDE poussée (marché, concurrents, fournisseurs, normes, comparatif détaillé) : outil deep_research."
                     )
                 tools_on = bool(chain) and chain[0].id in ("claude", "vibecode") and not locked   # outils client : protocole Anthropic, supporté aussi par le relais Vibecode
                 state["owner_message"] = text[:2000]   # ce que le patron vient de demander (l'IA ne se modifie pas sans son ordre)

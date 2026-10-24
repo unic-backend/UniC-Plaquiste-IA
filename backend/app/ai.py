@@ -359,7 +359,8 @@ class ClaudeAIProvider(AIProvider):
         web = bool(kwargs.get("web")) and settings.web_search_enabled
         client_tools = list(kwargs.get("tools") or [])
         handler = kwargs.get("tool_handler")
-        tools = ([{**self.web_tool(model), "max_uses": settings.web_search_max_uses}] if web else []) + client_tools
+        max_uses = int(kwargs.get("web_max_uses") or settings.web_search_max_uses)   # recherche approfondie : plus de recherches (research.py)
+        tools = ([{**self.web_tool(model), "max_uses": max_uses}] if web else []) + client_tools
         if tools:
             params["tools"] = tools
         used: list[str] = []
@@ -384,9 +385,10 @@ class ClaudeAIProvider(AIProvider):
             if getattr(resp, "stop_reason", "") == "refusal":
                 return AIResult("", self.id, model, False, "refusal", raw={"tools_used": used, "usage": tally}, error_kind="refusal")
             text, sources = self._text_and_sources(resp)
-            if web and sources:
+            if web and sources and not kwargs.get("sources_raw"):
                 text += "\n\n**Sources**\n" + "\n".join(f"- [{s['title']}]({s['url']})" for s in sources[:6])
-            return AIResult(text, self.id, model, bool(text), "" if text else "empty", raw={"tools_used": used, "usage": tally})
+            return AIResult(text, self.id, model, bool(text), "" if text else "empty",
+                            raw={"tools_used": used, "usage": tally, "sources": sources if web else []})
         except Exception as exc:  # la clé n'apparaît jamais dans le message
             return AIResult("", self.id, model, False, f"claude: {explain_error(exc)}",
                             raw={"tools_used": used, "usage": tally}, error_kind=classify_exc(exc))
