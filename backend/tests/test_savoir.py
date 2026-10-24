@@ -51,11 +51,11 @@ def _fake_claude(monkeypatch, text):
     claude = PROVIDERS["claude"]
     asked = {}
 
-    def complete(messages, **kw):
+    def complete(self, messages, **kw):
         asked.update(kw, system=messages[0]["content"], user=messages[1]["content"])
         return AIResult(text, "claude", "claude-sonnet-5-5", True, "", raw={"usage": [], "sources": []})
-    monkeypatch.setattr(claude, "health", lambda: {"available": True})
-    monkeypatch.setattr(claude, "complete", complete)
+    monkeypatch.setattr(type(claude), "health", lambda self: {"available": True})
+    monkeypatch.setattr(type(claude), "complete", complete)
     return asked
 
 
@@ -83,8 +83,8 @@ def test_page_illisible_ou_adresse_fausse(monkeypatch):
 
 def test_une_recherche_sourcee_enrichit_la_bibliotheque(monkeypatch):
     claude = PROVIDERS["claude"]
-    monkeypatch.setattr(claude, "health", lambda: {"available": True})
-    monkeypatch.setattr(claude, "complete", lambda messages, **kw: AIResult(
+    monkeypatch.setattr(type(claude), "health", lambda self: {"available": True})
+    monkeypatch.setattr(type(claude), "complete", lambda self, messages, **kw: AIResult(
         "# Réponse courte\nLe port autonome de Dakar traite environ 20 millions de tonnes par an [1].", "claude", "claude-opus-5-5", True, "",
         raw={"usage": [], "sources": [{"title": "PAD", "url": "https://portdakar.sn"}]}))
     with SessionLocal() as db:

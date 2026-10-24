@@ -50,6 +50,7 @@ export function Bibliotheque() {
           </div>
           <p className="hint">Un gros livre peut prendre une minute à lire. Le contenu d'Internet reste à vérifier avant une décision importante.</p>
         </section>
+        <Veille onMsg={setMsg} onDone={load} />
         {msg && <p className="hint" role="status">{msg}</p>}
         {!rows && <p className="hint">Chargement…</p>}
         {rows && !rows.length && <p className="hint">Bibliothèque vide : ajoute ta première source ci-dessus.</p>}
@@ -57,5 +58,60 @@ export function Bibliotheque() {
         {retired.length > 0 && <><h3 className="cb-h">Retirées · {retired.length}</h3><ul className="cb-exp-list lib-list">{retired.map(line)}</ul></>}
       </div>
     </div>
+  );
+}
+
+const ETAT: Record<string, string> = { ok: "rangé", rien: "rien de nouveau", erreur: "échec" };
+
+/** Veille du matin : coupée par défaut ; le patron l'active ou la coupe d'un clic, choisit ses sujets et l'heure. */
+function Veille({ onMsg, onDone }: { onMsg: (m: string) => void; onDone: () => void }) {
+  const [v, setV] = useState<any>(null);
+  const [topics, setTopics] = useState("");
+  const [hour, setHour] = useState(7);
+  const [busy, setBusy] = useState(false);
+  const list = () => topics.split("\n").map((t) => t.trim()).filter(Boolean);
+  const fill = (d: any) => { setV(d); setTopics((d.topics || []).join("\n")); setHour(d.hour ?? 7); };
+  useEffect(() => { api.veille().then(fill).catch(() => setV({ on: false, topics: [], hour: 7, last: [], max_topics: 5 })); }, []);
+  useEffect(() => {   // veille en cours : on suit son avancement, puis la bibliothèque se recharge
+    if (!v?.running) return;
+    const t = window.setInterval(() => api.veille().then((d) => { setV(d); if (!d.running) { onDone(); onMsg("Veille terminée."); } }).catch(() => {}), 5000);
+    return () => window.clearInterval(t);
+  }, [v?.running, onDone, onMsg]);
+  const save = async (on: boolean) => {
+    setBusy(true); onMsg("");
+    try {
+      fill(await api.setVeille(on, list(), hour));
+      onMsg(on ? `Veille activée : chaque jour vers ${hour} h, rangée ici.` : "Veille coupée : plus aucune recherche automatique.");
+    } catch (e: any) { onMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  const runNow = async () => {
+    setBusy(true); onMsg("");
+    try { await api.runVeille(); setV({ ...v, running: true }); onMsg("Veille lancée : une à deux minutes."); }
+    catch (e: any) { onMsg(e?.message || "Erreur"); } finally { setBusy(false); }
+  };
+  if (!v) return null;
+  const changed = list().join("\n") !== (v.topics || []).join("\n") || hour !== v.hour;
+  return (
+    <section className="card-box lib-veille">
+      <label className="at-toggle">
+        <input type="checkbox" checked={!!v.on} disabled={busy || (!v.on && !list().length)} onChange={(e) => save(e.target.checked)} />
+        <span><b>Veille du matin</b> — chaque jour, l'IA lit l'actualité de tes sujets et range l'essentiel, daté et sourcé, dans la Bibliothèque.
+          {v.on ? " Activée." : " Coupée."}</span>
+      </label>
+      <textarea rows={3} value={topics} onChange={(e) => setTopics(e.target.value)} aria-label="Sujets à surveiller, un par ligne"
+        placeholder={"Un sujet par ligne (5 au plus), par exemple :\nprix du ciment et du plâtre au Sénégal\nappels d'offres BTP Dakar"} />
+      <div className="lib-veille-row">
+        <label>Heure <select value={hour} onChange={(e) => setHour(Number(e.target.value))} aria-label="Heure de la veille">
+          {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{h} h</option>)}</select></label>
+        {changed && <button className="btn btn-line btn-small" disabled={busy} onClick={() => save(!!v.on && list().length > 0)}>Enregistrer</button>}
+        <button className="btn btn-line btn-small" disabled={busy || v.running || !v.topics?.length || changed} onClick={runNow}>
+          {v.running ? "Veille en cours…" : "Lancer maintenant"}</button>
+      </div>
+      {list().length > (v.max_topics || 5) && <p className="hint error">{v.max_topics || 5} sujets au plus.</p>}
+      {v.last?.length > 0 && <ul className="cb-exp-list lib-list">
+        {v.last.map((r: any, i: number) => <li key={i}><span><b>{r.sujet}</b><small> · {ETAT[r.etat] || r.etat}{r.apercu ? ` · ${r.apercu}` : ""}{r.detail ? ` · ${r.detail}` : ""}</small></span></li>)}
+      </ul>}
+      <p className="hint">{v.last_day ? `Dernière veille : ${v.last_day}. ` : ""}Une recherche courte par sujet, comptée dans les dépenses IA. Après 30 jours, une veille passe dans « Retirées ».</p>
+    </section>
   );
 }

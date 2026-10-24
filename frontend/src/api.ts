@@ -421,6 +421,9 @@ export const api = {
   libraryAddFile: async (file: File) => { const fd = new FormData(); fd.append("file", file); return request<any>("/api/library/files", { method: "POST", body: fd }); },
   libraryAddUrl: (url: string) => request<any>("/api/library/url", { method: "POST", body: JSON.stringify({ url }) }),
   libraryActive: (id: string, on: boolean) => request<any>(`/api/library/${id}/active`, { method: "POST", body: JSON.stringify({ on }) }),
+  veille: () => request<any>("/api/veille"),
+  setVeille: (on: boolean, topics: string[], hour: number) => request<any>("/api/veille", { method: "POST", body: JSON.stringify({ on, topics, hour }) }),
+  runVeille: () => request<{ started: boolean }>("/api/veille/run", { method: "POST" }),
   customers: (q = "") => request<any[]>(`/api/customers${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   createCustomer: (body: any) =>
     request("/api/customers", { method: "POST", body: JSON.stringify(body) }),

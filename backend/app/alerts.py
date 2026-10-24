@@ -208,6 +208,12 @@ def tick(db: Session) -> dict:
         from app import evals
         if evals.weekly_due(db):               # examen hebdomadaire de l'IA (seulement si le patron l'a activé)
             evals.start_background(weekly=True)
+        from app import veille
+        if veille.due(db):                     # veille du matin (seulement si le patron l'a activée)
+            try:
+                veille.start_background()
+            except veille.VeilleError:
+                pass
         selfcare.flush(db)     # les incidents en attente deviennent annonçables sans attendre le tour suivant
     except Exception:
         pass

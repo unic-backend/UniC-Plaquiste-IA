@@ -1696,4 +1696,8 @@ input[type="range"] { accent-color: var(--green); }
 .lib-url { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .lib-url input { min-width: 0; }
 .lib-list li small { color: var(--muted); }
+.lib-veille { display: grid; gap: 10px; margin-top: 14px; }
+.lib-veille textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; }
+.lib-veille-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lib-veille-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 @media (max-width: 420px) { .lib-url { grid-template-columns: 1fr; } }
