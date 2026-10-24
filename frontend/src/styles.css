@@ -968,6 +968,8 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .atelier .card-box { margin-bottom: 14px; }
 .atelier h3 { margin: 0 0 6px; }
 .at-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.at-toggle { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.4; margin: 6px 0; cursor: pointer; }
+.at-toggle input { width: 20px; height: 20px; margin-top: 1px; flex: none; accent-color: var(--copper); }
 .at-checks { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
 .at-checks li { display: grid; grid-template-columns: 20px auto 1fr; align-items: center; gap: 8px; font-size: 14px; }
 .at-checks li span { color: var(--muted); text-align: right; overflow-wrap: anywhere; }

@@ -512,6 +512,7 @@ export const api = {
   quality: () => request<any>("/api/quality"),
   evals: () => request<any>("/api/evals"),
   runEvals: () => request<any>("/api/evals/run", { method: "POST" }),
+  setEvalsWeekly: (on: boolean) => request<{ weekly: boolean }>("/api/evals/weekly", { method: "POST", body: JSON.stringify({ on }) }),
   buildApk: () => request<any>("/api/selfcare/release/apk", { method: "POST" }),
   checkin: (b: any) => request<any>("/api/checkins", { method: "POST", body: JSON.stringify(b) }),
   checkins: () => request<any[]>("/api/checkins"),

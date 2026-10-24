@@ -2000,7 +2000,22 @@ def quality_report(days: int = 30, db: Session = Depends(get_db), user: User = D
 def evals_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Banc d'essai de l'IA : dernier rapport, nombre de cas, essai en cours."""
     from app import evals
-    return {"last": evals.report_last(db), "cases": len(evals.CASES), "running": "run" in evals.RUNNING}
+    return {"last": evals.report_last(db), "cases": len(evals.CASES), "running": "run" in evals.RUNNING,
+            "weekly": evals.weekly_enabled(db), "history": evals.history(db)}
+
+
+class WeeklyIn(BaseModel):
+    on: bool
+
+
+@router.post("/evals/weekly")
+def evals_weekly(body: WeeklyIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Clic du patron : examen de l'IA relancé tout seul chaque semaine (≈ un essai de jetons par semaine), ou coupé."""
+    from app import evals
+    evals.set_weekly(db, body.on)
+    audit(db, user.id, "evals_weekly_on" if body.on else "evals_weekly_off", "evals", "weekly")
+    db.commit()
+    return {"weekly": body.on}
 
 
 @router.post("/evals/run")
