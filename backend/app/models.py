@@ -208,6 +208,11 @@ class Expense(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # dépense d'un chantier (= devis accepté, voir tracking) : ce qu'il a coûté, pour savoir ce qu'il rapporte
+    quotation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String(32), default="autre")   # matériaux / main-d'œuvre / transport / location / autre
+    spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="ok")        # ok / cancelled (erreur de saisie : jamais effacée)
 
 
 class Quotation(Base):

@@ -458,6 +458,10 @@ export const api = {
   devices: () => request<{ devices: { device: string; last_used: string }[]; account: boolean; email: string }>("/api/auth/devices"),
   unpaid: () => request<any>("/api/invoices-unpaid"),
   tracking: () => request<any>("/api/tracking"),
+  chantierExpenses: (qid: string) => request<any>(`/api/tracking/quotes/${qid}/expenses`),
+  addChantierExpense: (qid: string, body: { label: string; amount: number; category: string }) =>
+    request<any>(`/api/tracking/quotes/${qid}/expenses`, { method: "POST", body: JSON.stringify(body) }),
+  cancelChantierExpense: (eid: string) => request<any>(`/api/tracking/expenses/${eid}`, { method: "DELETE" }),
   trackingClient: (key: string) => request<any>(`/api/tracking/${encodeURIComponent(key)}`),
   trackingMail: (refresh = false) => request<any>(`/api/tracking/mail${refresh ? "?refresh=true" : ""}`),
   trackingDismiss: (mailId: string) => request<any>(`/api/tracking/mail/${mailId}/dismiss`, { method: "POST" }),
