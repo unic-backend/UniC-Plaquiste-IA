@@ -37,6 +37,7 @@ import { useTheme, type ThemeMode } from "./theme";
 import { pickGreeting, type Greeting } from "./greetings";
 import { md } from "./markdown";
 import { queueMessage, readOutbox, takeQueued, useOnline } from "./offline";
+import UpdateBanner from "./UpdateBanner";
 import { api, net, AuthError, Interrupted, Stopped, authStatus, clearConnection, DEFAULT_SERVER, getSavedEmail, loginWithPassword, setAccount, signOut, downloadAuth, fetchBlobUrl, shareText, getCode, getServer, hasServerField, isNative, needsServer, saveConnection, type ChatMessage, type Conv, type Usage, type User } from "./api";
 
 function Logo({ size = 28 }: { size?: number }) {
@@ -632,6 +633,7 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
               onGone={() => { setStamp((n) => n + 1); nav("/"); }} />
           )}
         </div>
+        <UpdateBanner />
         {loc.pathname === "/" || loc.pathname.startsWith("/c/") ? null : <PageBar />}
         <div className="route-anim" key={loc.pathname.startsWith("/c/") ? "/" : loc.pathname}>
           {children}

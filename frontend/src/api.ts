@@ -489,6 +489,7 @@ export const api = {
   saveSettings: (body: any) =>
     request("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   health: () => request<any>("/api/health"),
+  ping: () => request<{ ok: boolean; version: string; web_build?: string }>("/api/ping"),
   connectors: () => request<Record<string, boolean>>("/api/connectors"),
   selfcare: () => request<any>("/api/selfcare"),
   release: () => request<any>("/api/selfcare/release"),

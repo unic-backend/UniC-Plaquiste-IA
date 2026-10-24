@@ -1261,6 +1261,7 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 .sv-quick button:disabled { opacity: .5; }
 
 /* Atelier : tâches en bannières (5 visibles, le reste en archive) */
+.update-banner { display: grid; gap: 8px; margin: 8px 16px 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid var(--copper); border-radius: 14px; background: var(--card); font-size: 14px; line-height: 1.4; }
 .at-banner { border: 1px solid var(--line); border-radius: 14px; background: var(--card); margin-bottom: 8px; overflow: hidden; }
 .at-banner.s-proposed { border-left: 4px solid var(--copper); }
 .at-banner.s-working { border-left: 4px solid #2e7d4f; }
