@@ -28,8 +28,11 @@ FAMILIES: dict[str, tuple[re.Pattern, frozenset[str]]] = {
                  frozenset({"save_email_draft", "save_email_reply_draft"})),
     "le rendez-vous": (re.compile(r"\brendez-vous\b|\brdv\b|\bagenda\b|\bvisite\b|" + _WEEKDAY_TIME, _I),
                        frozenset({"add_appointment", "update_appointment"})),
+    "la paie de l'ouvrier": (re.compile(r"\bpaie\b|\bsalaires?\b|\bjourn[ée]es? (?:de travail|d[’']ouvrier)\b|\bouvriers?\b", _I),
+                             frozenset({"record_work", "record_worker_payment"})),
     "la dépense": (re.compile(r"\bd[ée]penses?\b|\bfrais\b", _I), frozenset({"record_expense"})),
-    "le versement": (re.compile(r"\bversement\b|\bpaiement\b|\bacompte\b|\bavance\b|\bencaissement\b", _I), frozenset({"record_receipt"})),
+    "le versement": (re.compile(r"\bversement\b|\bpaiement\b|\bacompte\b|\bavance\b|\bencaissement\b", _I),
+                     frozenset({"record_receipt", "record_worker_payment"})),   # « avance » : du client ou à un ouvrier
     "la publication": (re.compile(r"\bpublication\b|\bpost\b|\bannonce\b|\bstory\b", _I), frozenset({"save_social_post_draft"})),
     "le fichier": (re.compile(r"\bpdf\b|\bexcel\b|\bxlsx\b|\btableur\b|\bfichier\b|\bdocument\b", _I),
                    frozenset({"make_pdf", "make_spreadsheet", "edit_file", "pdf_tool", "create_quote", "create_invoice",

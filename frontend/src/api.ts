@@ -458,6 +458,12 @@ export const api = {
   devices: () => request<{ devices: { device: string; last_used: string }[]; account: boolean; email: string }>("/api/auth/devices"),
   unpaid: () => request<any>("/api/invoices-unpaid"),
   tracking: () => request<any>("/api/tracking"),
+  team: () => request<any>("/api/team"),
+  teamWorker: (id: string) => request<any>(`/api/team/workers/${id}`),
+  teamAddWorker: (body: any) => request<any>("/api/team/workers", { method: "POST", body: JSON.stringify(body) }),
+  teamWork: (id: string, body: any) => request<any>(`/api/team/workers/${id}/work`, { method: "POST", body: JSON.stringify(body) }),
+  teamPay: (id: string, body: any) => request<any>(`/api/team/workers/${id}/payments`, { method: "POST", body: JSON.stringify(body) }),
+  teamCancel: (eid: string) => request<any>(`/api/team/entries/${eid}`, { method: "DELETE" }),
   chantierExpenses: (qid: string) => request<any>(`/api/tracking/quotes/${qid}/expenses`),
   addChantierExpense: (qid: string, body: { label: string; amount: number; category: string }) =>
     request<any>(`/api/tracking/quotes/${qid}/expenses`, { method: "POST", body: JSON.stringify(body) }),

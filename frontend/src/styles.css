@@ -1686,3 +1686,8 @@ input[type="range"] { accent-color: var(--green); }
 
 .interp-typed { display: grid; gap: 8px; width: min(100%, 520px); margin: 10px auto 0; }
 .interp-typed textarea { width: 100%; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+
+.team-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin: 0; }
+.team-form legend { font-size: 13px; font-weight: 600; padding: 0 6px; }
+.team-form input[aria-label="Travail"], .team-form button { grid-column: 1 / -1; }
+.team-new { display: grid; gap: 8px; margin-top: 14px; }
