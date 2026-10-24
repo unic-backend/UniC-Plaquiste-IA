@@ -1316,6 +1316,8 @@ def approve_invoice(iid: str, db: Session = Depends(get_db), user: User = Depend
     i = db.get(Invoice, iid)
     if not i:
         raise HTTPException(404)
+    if i.total is None or any(it.unit_price is None for it in i.items):   # une facture émise porte un montant complet
+        raise HTTPException(400, "Prix manquants sur cette facture : complète chaque ligne avant de l'approuver.")
     approve_entity(db, i, user.id)
     generate_invoice_pdf(db, i, user.id)
     db.commit()
