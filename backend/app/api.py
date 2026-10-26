@@ -677,6 +677,59 @@ def analyse_pdf(body: AnalyseIn, db: Session = Depends(get_db), user: User = Dep
     return {"id": art.id, "filename": art.filename, "download_url": f"/api/artifacts/{art.id}/download"}
 
 
+# ---------- trésorerie prévisionnelle (tresorerie.py) ----------
+
+class SoldeIn(BaseModel):
+    montant: float = Field(ge=-1e12, le=1e12)
+
+
+class ChargeIn(BaseModel):
+    libelle: str = Field(max_length=80)
+    montant: float = Field(ge=0, le=1e12)
+    jour: int = Field(ge=1, le=31)
+
+
+class TresoOptionsIn(BaseModel):
+    charges: list[ChargeIn] | None = Field(default=None, max_length=30)
+    seuil: float | None = Field(default=None, ge=-1e12, le=1e12)
+
+
+def _treso(fn):
+    from app import tresorerie
+    try:
+        return fn()
+    except tresorerie.TresorerieError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/tresorerie")
+def treso_get(jours: int = 90, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Solde du jour et prévision semaine par semaine (prudent / probable), sans IA."""
+    from app import tresorerie
+    return tresorerie.forecast(db, jours)
+
+
+@router.post("/tresorerie/solde")
+def treso_balance(body: SoldeIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Le patron donne son solde du moment (caisse + banque + Wave) : point de départ de la prévision."""
+    from app import tresorerie
+    _treso(lambda: tresorerie.set_balance(db, body.montant))
+    audit(db, user.id, "treso_balance", "setting", "tresorerie", f"{body.montant:.0f}")
+    db.commit()
+    return tresorerie.forecast(db)
+
+
+@router.post("/tresorerie/reglages")
+def treso_options(body: TresoOptionsIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Charges fixes du mois et seuil d'alerte."""
+    from app import tresorerie
+    charges = [c.model_dump() for c in body.charges] if body.charges is not None else None
+    _treso(lambda: tresorerie.set_options(db, charges=charges, seuil=body.seuil))
+    audit(db, user.id, "treso_options", "setting", "tresorerie", f"{len(charges or [])} charge(s)")
+    db.commit()
+    return tresorerie.forecast(db)
+
+
 class VeilleIn(BaseModel):
     on: bool
     topics: list[str] = Field(default_factory=list, max_length=20)

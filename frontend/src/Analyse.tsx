@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, downloadAuth } from "./api";
 
 /**
@@ -71,6 +72,7 @@ export function Analyse() {
   return (
     <div className="page">
       <div className="page-inner sv">
+        <div className="an-tabs"><span aria-current="page">Bilan</span><Link to="/tresorerie">Trésorerie</Link></div>
         <h1>Analyse & bilan</h1>
         <p className="lede">Tes vrais chiffres, calculés sur la base UniC (sans IA), comparés à la période d'avant. Demande aussi à l'IA : « fais-moi le bilan du mois ».</p>
         <div className="an-periods" role="tablist" aria-label="Période">

@@ -11,6 +11,7 @@ const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
 const Equipe = lazyPage(() => import("./Equipe"), "Equipe");
 const Bibliotheque = lazyPage(() => import("./Bibliotheque"), "Bibliotheque");
 const Analyse = lazyPage(() => import("./Analyse"), "Analyse");
+const Tresorerie = lazyPage(() => import("./Tresorerie"), "Tresorerie");
 const Suivi = lazyPage(() => import("./Suivi"), "Suivi");
 const SuiviClient = lazyPage(() => import("./Suivi"), "SuiviClient");
 const VideoPage = lazyPage(() => import("./Video"), "VideoPage");
@@ -574,7 +575,7 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/suivi" className={`side-brief side-code ${loc.pathname.startsWith("/suivi") ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Receipt size={18} /> <span>Encaissements</span>
         </Link>
-        <Link to="/analyse" className={`side-brief side-code ${loc.pathname === "/analyse" ? "active" : ""}`} onClick={() => setOpen(false)}>
+        <Link to="/analyse" className={`side-brief side-code ${loc.pathname === "/analyse" || loc.pathname === "/tresorerie" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Chart size={18} /> <span>Analyse</span>
         </Link>
         <Link to="/video" className={`side-brief side-code ${loc.pathname === "/video" ? "active" : ""}`} onClick={() => setOpen(false)}>
@@ -1753,6 +1754,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
     title: "Entreprise",
     items: [
       { to: "/analyse", title: "Analyse & bilan", text: "Encaissé, signé, dépenses, marges, meilleurs clients, PDF" },
+      { to: "/tresorerie", title: "Trésorerie", text: "L'argent des 90 prochains jours, alerte avant un trou" },
       { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, paramètres de calcul" },
       { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
       { to: "/clients", title: "Clients", text: "Fiches clients" },
@@ -2211,6 +2213,7 @@ export default function App() {
         <Route path="/equipe" element={<Equipe />} />
         <Route path="/bibliotheque" element={<Bibliotheque />} />
         <Route path="/analyse" element={<Analyse />} />
+        <Route path="/tresorerie" element={<Tresorerie />} />
         <Route path="/suivi" element={<Suivi />} />
         <Route path="/video" element={<VideoPage />} />
         <Route path="/suivi/:key" element={<SuiviClient />} />
