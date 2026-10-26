@@ -179,7 +179,9 @@ TOOLS: list[dict] = [
                         "method='unic' = ratios réels du patron (surface en m², cloisons fermées) ; 'generic' = formules standard. "
                         "Le résultat est gardé pour create_quote / create_purchase_order / create_delivery_note."),
         "input_schema": {"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["partition", "ceiling", "paint", "plaster", "surface"]},
+            "kind": {"type": "string", "enum": ["partition", "ceiling", "paint", "plaster", "surface", "a_preciser"],
+                     "description": ("ceiling = faux plafond BA13 ; partition = cloison sèche. « a_preciser » quand le patron donne une "
+                                     "surface ou des plaques SANS dire plafond ou cloison : les deux calculs sont faits.")},
             "method": {"type": "string", "enum": ["generic", "unic"]},
             "length_m": {"type": "number"}, "height_m": {"type": "number"}, "width_m": {"type": "number"},
             "area_m2": {"type": "number"},
@@ -1557,6 +1559,21 @@ class AgentSession:
                                area_m2: float | None = None, sides: int | None = None, parois: int | None = None,
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
                                board_length_m: float | None = None, no_openings: bool = False) -> dict:
+        if kind == "a_preciser":   # surface sans dire plafond ou cloison : les deux calculs, puis UNE question
+            dims = {"length_m": length_m, "width_m": width_m or height_m} if length_m and (width_m or height_m) else {"area_m2": area_m2}
+            if not any(dims.values()):
+                raise ConnectorError("Surface (area_m2) ou dimensions requises.", 400)
+            ceiling = self._t_calculate_materials("ceiling", board_length_m=board_length_m, **dims)
+            part_dims = {"length_m": length_m, "height_m": height_m or width_m} if length_m and (height_m or width_m) else {"area_m2": area_m2}
+            partition = self._t_calculate_materials("partition", sides=sides, board_length_m=board_length_m, **part_dims)
+            self.state.pop("last_calc", None)   # ouvrage inconnu : aucun devis ni bon tant que le patron n'a pas dit lequel
+            keep = ("titre", "compris", "quantites", "hypotheses", "remarques")
+            return {"ouvrage": "à préciser", "si_plafond": {k: ceiling.get(k) for k in keep},
+                    "si_cloison": {k: partition.get(k) for k in keep},
+                    "note": ("Le patron n'a pas dit plafond ou cloison : ne suppose JAMAIS la cloison. Donne les deux listes en bref "
+                             "(plafond BA13 : tiges, pivots, chevilles à laiton, fourrures, cornières, chevilles à frapper, plaques ; cloison : "
+                             "rails, montants, chevilles à frapper, vis 9 mm, plaques, vis, bande, enduit), puis UNE question : "
+                             "plafond ou cloison ? Aucun devis avant sa réponse.")}
         sides_known = sides is not None
         sides = int(sides) if sides_known else 2
         co = company_dict(self.db)
@@ -1614,11 +1631,12 @@ class AgentSession:
         self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible
         return {"titre": data.get("title"), "compris": data.get("understanding"), "etapes": data.get("steps", [])[:12],
                 "quantites": data.get("quantities", []), "hypotheses": data.get("assumptions", []),
-                "manquant": data.get("missing", []),
+                "manquant": data.get("missing", []), "remarques": data.get("notes", []),
                 "donnees": [f"{d['label']} : {d['value']} {d.get('unit') or ''} [{d['status']}]".replace("  ", " ") for d in data.get("data_used", [])],
                 "verification": data.get("verification"),
                 "note": ("Calcul gardé en mémoire de la conversation : prêt pour un devis ou un bon si le patron le demande. "
-                         "Présente les données avec leur statut (confirmé, supposé, estimé, manquant) et demande les manquantes. "
+                         "Donne TOUT le matériel tout de suite, avec le statut des données (confirmé, supposé, estimé). Ce qui manque ne "
+                         "bloque pas : travaille avec l'hypothèse affichée et pose au plus UNE question courte, à la fin. "
                          "Si verification.ok est faux, dis-le et ne fais pas de devis.")}
 
     def _quantities(self) -> list[dict]:

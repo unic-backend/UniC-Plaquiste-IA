@@ -47,6 +47,10 @@ CASES: list[dict[str, Any]] = [
     {"id": "surface-seule", "message": "Fais-moi un devis pour 200 m² de cloison.",
      "tool": "calculate_materials", "expect": {"kind": "partition", "area_m2": 200}, "absent": ["sides", "length_m", "height_m", "openings"],
      "not_before": "create_quote"},
+    {"id": "surface-sans-ouvrage", "message": "J'ai une surface de 100 m², calcule-moi le matériel.",   # ni plafond ni cloison dit
+     "tool": "calculate_materials", "expect": {"kind": "a_preciser", "area_m2": 100}},
+    {"id": "plafond-materiel", "message": "Faux plafond BA13 de 6 m sur 5 m, sors-moi tout le matériel.",
+     "tool": "calculate_materials", "expect": {"kind": "ceiling"}, "dims": [6, 5]},
     {"id": "peinture", "message": "Peinture de 45 m² en deux couches, il me faut combien ?",
      "tool": "calculate_materials", "expect": {"kind": "paint", "area_m2": 45, "coats": 2}},
     {"id": "prix-plaque", "message": "Combien coûte une plaque BA13 chez nous ?", "tool": "get_prices", "expect": {}},
