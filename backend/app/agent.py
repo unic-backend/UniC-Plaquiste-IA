@@ -399,6 +399,20 @@ TOOLS: list[dict] = [
             "additionalProperties": False},
     },
     {
+        "name": "cash_forecast",
+        "description": ("TRÉSORERIE PRÉVISIONNELLE (calculée en code) : solde d'aujourd'hui, puis semaine par semaine sur 90 jours, en deux "
+                        "scénarios (prudent / probable) : encaissements attendus, charges fixes, paie des ouvriers, dépenses prévues ; plus bas "
+                        "prévu et premier trou sous le seuil. Pour « est-ce que j'aurai assez d'argent », « ma trésorerie », « je peux payer… »."),
+        "input_schema": {"type": "object", "properties": {"jours": {"type": "integer", "description": "Horizon en jours (90 par défaut, 180 au plus)."}},
+                         "additionalProperties": False},
+    },
+    {
+        "name": "set_cash_balance",
+        "description": ("ENREGISTRE le solde d'argent du patron à cet instant (caisse + banque + Wave), point de départ de la trésorerie. "
+                        "Seulement quand le patron donne ce montant (« j'ai 2 millions en caisse et en banque »). Négatif = découvert."),
+        "input_schema": {"type": "object", "properties": {"montant": {"type": "number"}}, "required": ["montant"], "additionalProperties": False},
+    },
+    {
         "name": "business_calc",
         "description": ("CALCULS D'AFFAIRES EXACTS (en code, jamais de tête) : « echeancier » (répartir un montant en acompte/avancement/solde selon des pourcentages : "
                         "la somme des étapes égale toujours le total), « delai » (un délai demandé est-il tenable en comptant le risque de retard), « marge » "
@@ -684,7 +698,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "business_report": "Chiffres de l'entreprise analysés", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -764,7 +778,8 @@ AGENT_PROMPT = (
     "s'ils se contredisent avec la demande du moment, la demande du moment gagne et tu le signales."
     "\nCHIFFRES DE L'ENTREPRISE : chiffre d'affaires, argent encaissé, devis signés, dépenses, rentabilité d'un chantier, meilleurs "
     "clients, évolution, bilan d'une période → business_report. Ne calcule jamais ces totaux de tête et ne les devine pas : cite "
-    "ceux de l'outil, avec la période et la comparaison."
+    "ceux de l'outil, avec la période et la comparaison. Argent à venir, « aurai-je assez », trésorerie → cash_forecast ; le patron "
+    "donne son solde (caisse + banque + Wave) → set_cash_balance."
     "\nCONVERSATIONS PASSÉES : tu te souviens de TOUTES les conversations. Le patron évoque ce qui a été dit ou décidé avant "
     "(« on avait dit », « comme la dernière fois », « la conversation sur… ») et les échanges passés déjà fournis ne suffisent pas : appelle "
     "search_conversations. Ne cite jamais un échange passé qui n'y figure pas ; s'il est introuvable, dis-le."
@@ -798,6 +813,7 @@ OWNER_ASK = {
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "record_work": re.compile(r"journ[ée]e|travaill|tâche|tache|ouvrier|pointe|\d", re.I),
     "record_worker_payment": re.compile(r"avance|pay[ée]|donn[ée]|remis|paie|vers[ée]|\d", re.I),
+    "set_cash_balance": re.compile(r"solde|caisse|banque|compte|tr[ée]sorerie|wave|\d", re.I),
     "record_expense": re.compile(r"d[ée]pens|frais|achet|pay[ée]|co[uû]t|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
     "create_contact": re.compile(r"contact|fiche|ajoute|enregistr|cr[ée]e", re.I),
@@ -1340,6 +1356,24 @@ class AgentSession:
         info = {"id": art.id, "filename": art.filename, "mime": art.mime_type, "size": art.size}
         self.files.append(info)
         return {"artifact_id": art.id, "fichier": art.filename, "note": "Fichier créé : le patron peut l'ouvrir, le partager ou le joindre à un e-mail."}
+
+    def _t_cash_forecast(self, jours: int = 90) -> dict:
+        from app import tresorerie
+        out = tresorerie.forecast(self.db, jours)
+        out["semaines"] = out["semaines"][:13]
+        return {**out, "note": out["note"] + (" Cite les chiffres tels quels, avec les deux scénarios ; ne recalcule rien de tête. "
+                                             "Sans solde donné : demande-le au patron (caisse + banque + Wave).")}
+
+    def _t_set_cash_balance(self, montant: float) -> dict:
+        from app import tresorerie
+        try:
+            cfg = tresorerie.set_balance(self.db, montant)
+        except tresorerie.TresorerieError as exc:
+            return {"error": str(exc)}
+        self.db.commit()
+        f = tresorerie.forecast(self.db)
+        return {"solde_enregistre": cfg["solde"], "le": cfg["solde_at"], "plus_bas_prudent": f["plus_bas"]["prudent"],
+                "premier_trou": f["premier_trou"], "points_attention": f["points_attention"]}
 
     def _t_business_report(self, periode: str = "ce_mois", date_from: str = "", date_to: str = "", pdf: bool = False) -> dict:
         from app import analyste

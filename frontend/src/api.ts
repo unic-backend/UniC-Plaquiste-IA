@@ -423,6 +423,10 @@ export const api = {
   libraryActive: (id: string, on: boolean) => request<any>(`/api/library/${id}/active`, { method: "POST", body: JSON.stringify({ on }) }),
   analyse: (periode: string) => request<any>(`/api/analyse?periode=${encodeURIComponent(periode)}`),
   analysePdf: (periode: string) => request<{ id: string; filename: string; download_url: string }>("/api/analyse/pdf", { method: "POST", body: JSON.stringify({ periode }) }),
+  tresorerie: () => request<any>("/api/tresorerie"),
+  tresorerieSolde: (montant: number) => request<any>("/api/tresorerie/solde", { method: "POST", body: JSON.stringify({ montant }) }),
+  tresorerieReglages: (charges: { libelle: string; montant: number; jour: number }[], seuil: number) =>
+    request<any>("/api/tresorerie/reglages", { method: "POST", body: JSON.stringify({ charges, seuil }) }),
   veille: () => request<any>("/api/veille"),
   setVeille: (on: boolean, topics: string[], hour: number) => request<any>("/api/veille", { method: "POST", body: JSON.stringify({ on, topics, hour }) }),
   runVeille: () => request<{ started: boolean }>("/api/veille/run", { method: "POST" }),

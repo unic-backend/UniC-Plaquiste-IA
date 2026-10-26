@@ -1733,3 +1733,39 @@ input[type="range"] { accent-color: var(--green); }
 .an-sites li.alert { border-color: var(--copper); }
 .an-sites b.warn { color: #b3261e; }
 @media (prefers-reduced-motion: reduce) { .an-trio i { transition: none; } }
+
+/* Trésorerie (Tresorerie.tsx) et onglets Bilan / Trésorerie */
+.an-tabs { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); margin-bottom: 10px; }
+.an-tabs > * { padding: 6px 14px; border-radius: 999px; font-size: 13px; text-decoration: none; color: var(--muted); }
+.an-tabs > [aria-current="page"] { background: var(--green); color: var(--on-green); font-weight: 600; }
+.an-tabs a:hover { color: var(--ink); }
+.tr-solde { display: grid; gap: 10px; }
+.tr-solde > div:first-child { display: grid; gap: 2px; }
+.tr-solde b { font-size: 24px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.tr-solde b.neg { color: #b3261e; }
+.tr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tr-row > input { flex: 1 1 160px; min-width: 0; }
+.tr-alert { margin: 12px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid #b3261e66; color: #b3261e; background: color-mix(in srgb, #b3261e 7%, transparent); font-weight: 600; }
+.tr-ok { margin: 12px 0; color: #2e7d4f; font-size: 14px; }
+.tr-curve { width: 100%; height: auto; display: block; }
+.tr-curve .tr-grid { stroke: var(--line); stroke-width: 1; }
+.tr-curve .tr-zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.tr-curve .tr-seuil { stroke: #b3261e; stroke-width: 1; stroke-dasharray: 6 4; }
+.tr-curve .tr-prud { fill: none; stroke: #2e7d4f; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.tr-curve .tr-prob { fill: none; stroke: var(--copper); stroke-width: 2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.tr-curve .tr-gap { fill: #b3261e; }
+.tr-curve .tr-tick { font-size: 15px; fill: var(--muted); }
+.an-legend .prud::before { background: #2e7d4f; }
+.an-legend .prob::before { background: var(--copper); }
+.an-legend .seu::before { background: #b3261e; }
+.tr-charges { display: grid; gap: 8px; }
+.tr-charge { display: grid; grid-template-columns: 1fr 120px auto auto; gap: 6px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.tr-charge input { min-width: 0; }
+.tr-charge label, .tr-seuil-in { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.tr-charge label input { width: 58px; }
+.tr-charge .btn { justify-self: end; min-width: 40px; }
+.tr-seuil-in input { width: 120px; }
+@media (max-width: 480px) {
+  .tr-charge { grid-template-columns: 1fr auto auto; }
+  .tr-charge > input:first-child { grid-column: 1 / -1; }
+}

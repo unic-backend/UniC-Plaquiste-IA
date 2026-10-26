@@ -208,6 +208,10 @@ def tick(db: Session) -> dict:
         from app import evals
         if evals.weekly_due(db):               # examen hebdomadaire de l'IA (seulement si le patron l'a activé)
             evals.start_background(weekly=True)
+        from app import tresorerie
+        gap = tresorerie.daily_alert(db)             # trou de trésorerie prévu dans les 30 jours (seulement si le patron a donné son solde)
+        if gap:
+            selfcare.report(f"trésorerie {day}", gap, kind="budget")
         from app import veille
         if veille.due(db):                     # veille du matin (seulement si le patron l'a activée)
             try:
