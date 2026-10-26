@@ -38,6 +38,7 @@ from app.models import (
     utcnow,
 )
 from app.services import (
+    calc_fixings,
     approve_entity,
     audit,
     company_dict,
@@ -502,6 +503,7 @@ def _calc_defaults(db: Session) -> dict:
         "board_width_m": company.get("board_width_m") or 1.2,
         "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
+        "fixings": calc_fixings(company),
     }
 
 

@@ -1904,6 +1904,26 @@ function CompanyPage() {
             />
           </label>
           <label>
+            Chevilles à frapper par paquet (vide = 100 supposé)
+            <input type="number" min={1} max={10000} inputMode="numeric" value={s.anchors_per_pack ?? ""} placeholder="100"
+              onChange={(e) => setS({ ...s, anchors_per_pack: e.target.value === "" ? null : Number(e.target.value) })} />
+          </label>
+          <label>
+            Vis de 9 mm par paquet (vide = 100 supposé)
+            <input type="number" min={1} max={10000} inputMode="numeric" value={s.screws9_per_pack ?? ""} placeholder="100"
+              onChange={(e) => setS({ ...s, screws9_per_pack: e.target.value === "" ? null : Number(e.target.value) })} />
+          </label>
+          <label>
+            Une cheville à frapper tous les … m (vide = 0,50 supposé)
+            <input type="number" min={0.05} max={2} step={0.05} inputMode="decimal" value={s.anchor_spacing_m ?? ""} placeholder="0.5"
+              onChange={(e) => setS({ ...s, anchor_spacing_m: e.target.value === "" ? null : Number(e.target.value) })} />
+          </label>
+          <label>
+            Vis de 9 mm par montant (vide = 4 supposé)
+            <input type="number" min={1} max={20} inputMode="numeric" value={s.screws9_per_stud ?? ""} placeholder="4"
+              onChange={(e) => setS({ ...s, screws9_per_stud: e.target.value === "" ? null : Number(e.target.value) })} />
+          </label>
+          <label>
             Échéance des factures (jours après approbation)
             <input type="number" min={0} max={365} value={s.invoice_due_days ?? 15}
               onChange={(e) => setS({ ...s, invoice_due_days: e.target.value === "" ? null : Number(e.target.value) })} />
