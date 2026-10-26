@@ -44,6 +44,7 @@ export const Send = mk(<path d="M21 3 10.5 13.5M21 3l-6.5 18-4-7.5L3 9.5z" />);
 export const Mail = mk(<><rect x="3.5" y="5.5" width="17" height="13" rx="2.5" /><path d="m4.5 7.5 7.5 5.5 7.5-5.5" /></>);
 export const Calendar = mk(<><rect x="4" y="5.5" width="16" height="14.5" rx="2.5" /><path d="M8 3.5v4M16 3.5v4M4 10h16" /></>);
 export const Note = mk(<><path d="M6.5 4h11A1.5 1.5 0 0 1 19 5.5V15l-5 5H6.5A1.5 1.5 0 0 1 5 18.5v-13A1.5 1.5 0 0 1 6.5 4Z" /><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4" /></>);
+export const Chart = mk(<><path d="M4 20h16" /><path d="M7 16.5v-5M12 16.5V7M17 16.5v-8" strokeWidth={2.4} /></>);
 export const Receipt = mk(<><path d="M6 3.5h12V20.5l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3-2 1.3z" /><path d="M9 8.5h6M9 12h6M9 15.5h3.5" /></>);
 export const Globe = mk(<><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.4 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.4-3.5-8.5s1-5.9 3.5-8.5Z" /></>);
 export const Star = mk(<path d="m12 4 2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z" />);

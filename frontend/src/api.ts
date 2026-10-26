@@ -421,6 +421,8 @@ export const api = {
   libraryAddFile: async (file: File) => { const fd = new FormData(); fd.append("file", file); return request<any>("/api/library/files", { method: "POST", body: fd }); },
   libraryAddUrl: (url: string) => request<any>("/api/library/url", { method: "POST", body: JSON.stringify({ url }) }),
   libraryActive: (id: string, on: boolean) => request<any>(`/api/library/${id}/active`, { method: "POST", body: JSON.stringify({ on }) }),
+  analyse: (periode: string) => request<any>(`/api/analyse?periode=${encodeURIComponent(periode)}`),
+  analysePdf: (periode: string) => request<{ id: string; filename: string; download_url: string }>("/api/analyse/pdf", { method: "POST", body: JSON.stringify({ periode }) }),
   veille: () => request<any>("/api/veille"),
   setVeille: (on: boolean, topics: string[], hour: number) => request<any>("/api/veille", { method: "POST", body: JSON.stringify({ on, topics, hour }) }),
   runVeille: () => request<{ started: boolean }>("/api/veille/run", { method: "POST" }),
