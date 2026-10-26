@@ -166,6 +166,7 @@ class LocalAIProvider(AIProvider):
 
 # Rappel de progression pour l'écran (flux en direct) : {"t": "status"|"delta"|"reset", ...}. Absent = réponse d'un bloc.
 STREAM_CB: ContextVar = ContextVar("unic_stream_cb", default=None)
+ROUNDS: ContextVar = ContextVar("unic_tool_rounds", default=0)   # tours d'outils permis pour CET appel (0 = valeur du fournisseur)
 
 STREAM_SINK: ContextVar = ContextVar("unic_stream_sink", default=None)  # où vont les événements (posé par l'API)
 
@@ -204,7 +205,7 @@ TOOL_LABELS = {
     "get_prices": "Je regarde les prix…", "calculate_materials": "Je calcule les quantités…",
     "create_quote": "Je prépare le devis…", "create_invoice": "Je prépare la facture…",
     "create_purchase_order": "Je prépare le bon de commande…", "create_delivery_note": "Je prépare le bon de livraison…",
-    "revise_document": "Je corrige le document…", "list_documents": "Je cherche dans tes documents…",
+    "revise_document": "Je corrige le document…", "table_info": "Je lis le tableur…", "table_query": "Je calcule sur le tableur…", "list_documents": "Je cherche dans tes documents…",
     "list_directory": "Je consulte l'annuaire…", "read_inbox": "Je lis ta boîte mail…", "search_inbox": "Je cherche dans ta boîte mail…", "read_email": "Je lis le mail…",
     "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
     "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
@@ -309,12 +310,13 @@ class ClaudeAIProvider(AIProvider):
                     sources.append({"title": getattr(cit, "title", "") or url, "url": url})
         return "".join(parts).strip(), sources
 
-    MAX_ROUNDS = 8  # tours d'outils maximum par réponse
+    MAX_ROUNDS = 8  # tours d'outils maximum par réponse (une tâche complexe peut en demander plus : max_rounds, borné à 16)
 
     def _run(self, client, params: dict, handler, used: list[str]):
         """Boucle : pause_turn (recherche longue) et tool_use (connecteurs). Rend la dernière réponse."""
+        rounds = ROUNDS.get() or self.MAX_ROUNDS
         resp = self._send(client, params)
-        for _ in range(self.MAX_ROUNDS):
+        for _ in range(rounds):
             stop = getattr(resp, "stop_reason", "")
             if stop == "pause_turn":
                 params["messages"] = params["messages"] + [{"role": "assistant", "content": resp.content}]
@@ -340,9 +342,16 @@ class ClaudeAIProvider(AIProvider):
             else:
                 break
             resp = self._send(client, params)
-        return close_tool_budget(self._send, client, params, resp, self.MAX_ROUNDS) if handler is not None else resp
+        return close_tool_budget(self._send, client, params, resp, rounds) if handler is not None else resp
 
     def complete(self, messages: list[dict], **kwargs) -> AIResult:
+        rtok = ROUNDS.set(max(1, min(16, int(kwargs["max_rounds"]))) if kwargs.get("max_rounds") else 0)
+        try:
+            return self._complete(messages, **kwargs)
+        finally:
+            ROUNDS.reset(rtok)
+
+    def _complete(self, messages: list[dict], **kwargs) -> AIResult:
         model = kwargs.get("model") or settings.anthropic_model
         if not settings.anthropic_api_key:
             return AIResult("", self.id, model, False, "not_configured")

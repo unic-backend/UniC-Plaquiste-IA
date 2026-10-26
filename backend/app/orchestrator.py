@@ -107,6 +107,7 @@ def with_followup(text: str, history: list) -> str:
 
 
 DEEP_SEARCHES = 6  # recherches Internet permises pour une question difficile (3 pour une question courante)
+DEEP_TOOL_ROUNDS = 14  # étapes d'outils permises pour une tâche complexe (8 pour une demande courante)
 HISTORY_SIZE = 8   # derniers messages envoyés tels quels au modèle ; au-delà, mem.thread_recall rappelle le fil utile
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
 
@@ -1064,6 +1065,7 @@ def handle_turn(
                     msgs[1]["content"] += ("\n\nFICHIER(S) JOINT(S) À CETTE DEMANDE : " + " ; ".join(attached)
                                            + ". Le patron parle de CE fichier : plan, métré, photo, tableur ou document. "
                                            "Plan, PDF d'architecte, DXF, IFC ou « lis le plan » → appelle read_plan (file_id ci-dessus) puis présente le résultat ; "
+                                           "tableur (Excel, CSV) → table_info puis table_query pour tout chiffre (calcul exact sur toutes les lignes) ; "
                                            "autre document → réponds d'après son contenu indexé. Question précise sur l'image ou le plan (angles, jonctions, équerres, "
                                            "cloisons, cotes) → read_plan(file_id, question=«…»). Ne réponds jamais hors sujet.")
                 if tools_on and state.get("files") and not attached:
@@ -1084,6 +1086,8 @@ def handle_turn(
                 with live_stream():
                     # sujet difficile : plus de recherches et lecture de pages (pas en vocal, où la réponse doit venir vite)
                     web_kw = {"fetch": not voice, **({"web_max_uses": DEEP_SEARCHES} if deep and not voice else {})} if can_search else {}
+                    if deep and not voice:   # tâche complexe : plus d'étapes d'outils (tableur, bilan, devis en plusieurs temps)
+                        web_kw["max_rounds"] = DEEP_TOOL_ROUNDS
                     ai = chat_complete(msgs, deep=deep, web=can_search,
                                        tools=agent.TOOLS if tools_on else None, tool_handler=session, **voice_kw, **web_kw)
                     if voice_kw.get("model") and not (ai.available and ai.text) and ai.error != "refusal":
@@ -1111,8 +1115,12 @@ def handle_turn(
                         ai.text += claims.warning(still)
                 if ai.available and ai.text and ai.error != "refusal" and not locked:
                     # relecture avant envoi : calculs refaits sans IA ; réponse à enjeu relue et corrigée (relecture.py)
-                    checked = relecture.review(db, question=text, reply=ai.text, context=msgs[1]["content"], deep=deep, voice=voice,
-                                               succeeded=session.succeeded if session is not None else [])
+                    recent = "\n".join(f"{m['role']} : {str(m['content'])[:1500]}" for m in msgs[2:-1])   # ce qui a été dit juste avant
+                    checked = relecture.review(db, question=text, reply=ai.text, deep=deep, voice=voice,
+                                               context=(f"ÉCHANGES RÉCENTS DE LA CONVERSATION :\n{recent}\n\n" if recent else "") + msgs[1]["content"],
+                                               succeeded=session.succeeded if session is not None else [],
+                                               tool_results="\n".join(f"[{n}] {r}" for n, r in session.results) if session is not None else "",
+                                               web_used=bool((ai.raw or {}).get("sources")) or "Sources" in ai.text)
                     if checked.status != "skipped":
                         audit(db, user.id, f"ai_review_{checked.status}", "conversation", conv.id, checked.note[:250])
                     ai.text = checked.text

@@ -163,8 +163,29 @@ def _cell(v):
     return s[:32000]
 
 
-def make_spreadsheet(db: Session, title: str, sheets: list, user_id: str | None) -> Artifact:
-    """Classeur Excel : une feuille par entrée {name, rows} ; la 1re ligne est l'en-tête (gras, figée) ; « =… » reste une formule."""
+def _excel_chart(worksheets: list, spec: dict) -> None:
+    """Graphique natif (modifiable dans Excel) à droite du tableau ; une demande incohérente est ignorée, jamais une erreur."""
+    from openpyxl.chart import BarChart, LineChart, Reference
+    from openpyxl.utils import get_column_letter
+    try:
+        ws = worksheets[int(spec.get("feuille") or 1) - 1]
+        x, ys = int(spec.get("x") or 1), [int(c) for c in (spec.get("y") or [2])]
+    except (IndexError, TypeError, ValueError):
+        return
+    if ws.max_row < 2 or x > ws.max_column or not all(1 <= c <= ws.max_column for c in ys):
+        return
+    chart = LineChart() if spec.get("type") == "courbe" else BarChart()
+    chart.title = str(spec.get("titre") or "")[:80] or None
+    chart.height, chart.width = 9, 18
+    for c in ys:
+        chart.add_data(Reference(ws, min_col=c, min_row=1, max_row=ws.max_row), titles_from_data=True)
+    chart.set_categories(Reference(ws, min_col=x, min_row=2, max_row=ws.max_row))
+    ws.add_chart(chart, f"{get_column_letter(ws.max_column + 2)}2")
+
+
+def make_spreadsheet(db: Session, title: str, sheets: list, user_id: str | None, charts: list[dict] | None = None) -> Artifact:
+    """Classeur Excel : une feuille par entrée {name, rows} ; la 1re ligne est l'en-tête (gras, figée) ; « =… » reste une formule.
+    `charts` : graphiques Excel natifs {"feuille": 1, "type": "barres"|"courbe", "titre", "x": 1, "y": [2]} (colonnes à partir de 1)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -198,6 +219,8 @@ def make_spreadsheet(db: Session, title: str, sheets: list, user_id: str | None)
         for col in range(1, max(len(r) for r in rows) + 1):
             width = max((len(str(r[col - 1])) for r in rows if len(r) >= col and r[col - 1] is not None), default=8)
             ws.column_dimensions[get_column_letter(col)].width = min(max(width + 2, 8), 60)
+    for spec in charts or []:
+        _excel_chart(wb.worksheets, spec)
     name = _filename(title, "xlsx")
     dest = _out("xlsx", name)
     wb.save(str(dest))

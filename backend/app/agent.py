@@ -7,6 +7,7 @@ Sécurité (conçue contre l'injection de consigne) :
 """
 from __future__ import annotations
 
+import json
 import re
 import logging
 import uuid
@@ -584,6 +585,37 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"query": {"type": "string", "description": "Morceau du nom du fichier (facultatif)"}}, "additionalProperties": False},
     },
     {
+        "name": "table_info",
+        "description": ("TABLEUR (Excel .xlsx ou CSV reçu) : feuilles, colonnes (type, cases vides, exemples, totaux des colonnes de nombres) et "
+                        "aperçu. À appeler AVANT table_query pour connaître les vrais noms de colonnes. file_id omis = dernier fichier joint."),
+        "input_schema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "additionalProperties": False},
+    },
+    {
+        "name": "table_query",
+        "description": ("CALCUL EXACT sur un tableur reçu (toutes les lignes, en code, jamais de tête) : filtres, regroupement (par colonne, ou par "
+                        "date avec « Date:mois », « Date:annee », « Date:jour »), calculs (somme, moyenne, min, max, nombre, nombre_distinct, mediane), "
+                        "tri, limite ; sans regroupement ni calcul = les lignes elles-mêmes. chart=« barres » ou « courbe » : graphique dans la "
+                        "conversation ; export=true : fichier Excel du résultat avec graphique. Plusieurs appels pour une analyse en plusieurs temps."),
+        "input_schema": {"type": "object", "properties": {
+            "file_id": {"type": "string"},
+            "sheet": {"type": "string", "description": "Nom ou numéro de la feuille (1re par défaut)."},
+            "filters": {"type": "array", "items": {"type": "object", "properties": {
+                "colonne": {"type": "string"},
+                "op": {"type": "string", "enum": ["=", "!=", ">", ">=", "<", "<=", "contient", "ne_contient_pas", "commence_par", "vide", "non_vide", "entre", "parmi"]},
+                "valeur": {"description": "Valeur, [début, fin] pour « entre », liste pour « parmi »."}}, "required": ["colonne", "op"]}},
+            "group_by": {"type": "array", "items": {"type": "string"}, "description": "1 ou 2 colonnes ; « Date:mois » pour une date."},
+            "aggregates": {"type": "array", "items": {"type": "object", "properties": {
+                "fonction": {"type": "string", "enum": ["somme", "moyenne", "min", "max", "nombre", "nombre_distinct", "mediane"]},
+                "colonne": {"type": "string"}}, "required": ["fonction", "colonne"]}},
+            "columns": {"type": "array", "items": {"type": "string"}, "description": "Colonnes à montrer (lignes brutes)."},
+            "sort": {"type": "object", "properties": {"colonne": {"type": "string"}, "decroissant": {"type": "boolean"}}},
+            "limit": {"type": "integer", "description": "Lignes rendues (50 par défaut, 200 au plus)."},
+            "chart": {"type": "string", "enum": ["barres", "courbe"]},
+            "title": {"type": "string", "description": "Titre du graphique ou du fichier."},
+            "export": {"type": "boolean"}},
+            "additionalProperties": False},
+    },
+    {
         "name": "inspect_file",
         "description": ("LIT la structure d'un fichier reçu du patron (PDF, Word .docx, Excel .xlsx) pour pouvoir le MODIFIER : blocs de texte numérotés "
                         "(PDF), paragraphes (Word), cellules (Excel). À appeler AVANT edit_file pour reprendre le texte exact. "
@@ -698,7 +730,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -780,6 +812,9 @@ AGENT_PROMPT = (
     "clients, évolution, bilan d'une période → business_report. Ne calcule jamais ces totaux de tête et ne les devine pas : cite "
     "ceux de l'outil, avec la période et la comparaison. Argent à venir, « aurai-je assez », trésorerie → cash_forecast ; le patron "
     "donne son solde (caisse + banque + Wave) → set_cash_balance."
+    "\nTABLEURS (Excel, CSV) : pour tout total, moyenne, classement, comparaison ou tendance sur un fichier reçu → table_info "
+    "puis table_query (autant d'appels que l'analyse en demande) ; jamais un calcul de tête sur un extrait. Une analyse complexe : "
+    "découpe-la en étapes, vérifie chaque résultat, et dis ce qui manque plutôt que de supposer."
     "\nCONVERSATIONS PASSÉES : tu te souviens de TOUTES les conversations. Le patron évoque ce qui a été dit ou décidé avant "
     "(« on avait dit », « comme la dernière fois », « la conversation sur… ») et les échanges passés déjà fournis ne suffisent pas : appelle "
     "search_conversations. Ne cite jamais un échange passé qui n'y figure pas ; s'il est introuvable, dis-le."
@@ -800,7 +835,7 @@ SELF_EDIT = re.compile(
 # Contenu de tiers lu pendant le tour (e-mail, fichier, plan, avis) : à partir de là, certaines actions exigent que le
 # patron les ait demandées DANS SON MESSAGE. Contrôle déterministe côté serveur : une consigne cachée dans un document
 # ne suffit jamais, quoi que le modèle en pense.
-UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan"}
+UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan"}
 OWNER_ASK = {
     "forget_memory": re.compile(r"oubli|retire|supprime|efface|enl[eè]ve|m[ée]moire", re.I),
     "generate_visual": re.compile(r"visuel|image|photo|illustr|affiche|dessin|g[ée]n[èe]re|higgsfield|rendu|cr[ée]e", re.I),
@@ -831,6 +866,8 @@ def owner_backs(text: str, owner_message: str, ratio: float = 0.6) -> bool:
     return len(words & said) / len(words) >= ratio
 
 
+RESULT_CHARS = 8000   # résultat d'un outil gardé pour la relecture (relecture.py)
+
 PARTIAL_OK = re.compile(r"quand m[eê]me|devis partiel|calcul partiel|seulement les plaques|sans (l')?ossature|sans (les )?montants", re.I)
 
 
@@ -852,6 +889,7 @@ class AgentSession:
         self.changes: list[str] = []   # ce que l'assistant a modifié dans les documents (sert à tirer une leçon d'une correction)
         self.used: list[str] = []
         self.succeeded: list[str] = []   # outils qui ont RÉUSSI (sans erreur) : base du contrôle des actions affirmées (claims.py)
+        self.results: list[tuple[str, str]] = []   # (outil, résultat) réussis : la relecture vérifie les chiffres de la réponse contre eux
 
     @property
     def tainted(self) -> bool:
@@ -892,6 +930,7 @@ class AgentSession:
             out = fn(**args)
             if not (isinstance(out, dict) and out.get("error")):
                 self.succeeded.append(name)
+                self.results.append((name, json.dumps(out, ensure_ascii=False, default=str)[:RESULT_CHARS]))
             return out
         except ConnectorError as exc:
             audit(self.db, self.user_id, "agent_tool_declined", "tool", name, f"run={self.run_id}")   # refus du connecteur ou d'une règle métier
@@ -915,6 +954,42 @@ class AgentSession:
         return {"fichiers": [{"file_id": r.id, "nom": r.filename, "type": r.mime_type, "pages": r.page_count,
                               "date": r.created_at.strftime("%d/%m/%Y %H:%M") if r.created_at else ""} for r in rows],
                 "note": "Utilise le file_id avec inspect_file (lire/modifier) ou read_plan (plan)."}
+
+    def _t_table_info(self, file_id: str = "") -> dict:
+        from app import tableur
+        try:
+            out = tableur.info(self.db, file_id or self.state.get("last_file_id") or "")
+        except tableur.TableurError as exc:
+            return {"error": str(exc)}
+        flag = self._flag(json.dumps(out, ensure_ascii=False, default=str)[:20000], "tableur reçu")
+        return {**out, "untrusted_note": UNTRUSTED_NOTE, **flag}
+
+    def _t_table_query(self, file_id: str = "", sheet: str = "", filters: list | None = None, group_by: list | None = None,
+                       aggregates: list | None = None, columns: list | None = None, sort: dict | None = None, limit: int = 50,
+                       chart: str = "", title: str = "", export: bool = False) -> dict:
+        from app import diagrams, makefiles, tableur
+        fid = file_id or self.state.get("last_file_id") or ""
+        try:
+            out = tableur.query(self.db, fid, sheet=sheet or None, filters=filters, group_by=group_by, aggregates=aggregates,
+                                columns=columns, sort=sort, limit=limit)
+            if chart:
+                heading, labels, values = tableur.chart_from_result(out, chart, title)
+                art = diagrams.render(self.db, heading, tableur.chart_svg(heading, labels, values, chart), self.user_id)
+                self.images.append({"id": art.id, "filename": art.filename, "title": heading[:80]})
+                out["graphique"] = "affiché dans la conversation"
+            if export:
+                rows = [out["colonnes"]] + out["lignes"]
+                nk = int(out.get("nb_cles") or 0)
+                charts = [{"feuille": 1, "type": chart or "barres", "titre": title or out["colonnes"][nk],
+                           "x": 1, "y": [nk + 1]}] if nk and len(out["colonnes"]) > nk else None
+                out["fichier"] = self._made(makefiles.make_spreadsheet(self.db, title or f"Analyse {out['fichier']}",
+                                                                       [{"name": "Résultat", "rows": rows}], self.user_id, charts=charts))
+                self.succeeded.append("make_spreadsheet")   # un fichier Excel a VRAIMENT été créé (claims.py)
+        except (tableur.TableurError, diagrams.DiagramError, makefiles.MakeFileError) as exc:
+            return {"error": str(exc)}
+        flag = self._flag(json.dumps(out.get("lignes", []), ensure_ascii=False, default=str)[:20000], "tableur reçu")
+        return {**out, "untrusted_note": UNTRUSTED_NOTE, **flag,
+                "note": "Résultat EXACT calculé sur toutes les lignes : cite ces chiffres tels quels, n'en ajoute aucun de tête."}
 
     def _t_inspect_file(self, file_id: str = "") -> dict:
         from app import fileedit
