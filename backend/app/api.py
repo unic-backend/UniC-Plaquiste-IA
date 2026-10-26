@@ -646,6 +646,37 @@ def library_set_active(fid: str, body: LibraryActiveIn, db: Session = Depends(ge
     return out
 
 
+# ---------- analyste d'entreprise (analyste.py) ----------
+
+class AnalyseIn(BaseModel):
+    periode: str = Field(default="ce_mois", max_length=20)
+    du: str = Field(default="", max_length=10)
+    au: str = Field(default="", max_length=10)
+
+
+@router.get("/analyse")
+def analyse_get(periode: str = "ce_mois", du: str = "", au: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Les vrais chiffres de la période (encaissé, signé, dépenses, clients, chantiers), comparés à la période d'avant."""
+    from app import analyste
+    try:
+        return analyste.report(db, periode, du[:10], au[:10])
+    except analyste.AnalyseError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/analyse/pdf")
+def analyse_pdf(body: AnalyseIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Le même bilan en PDF, avec le graphique mois par mois."""
+    from app import analyste
+    try:
+        art = analyste.to_pdf(db, analyste.report(db, body.periode, body.du, body.au), user.id)
+    except analyste.AnalyseError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "analyse_pdf", "artifact", art.id, body.periode)
+    db.commit()
+    return {"id": art.id, "filename": art.filename, "download_url": f"/api/artifacts/{art.id}/download"}
+
+
 class VeilleIn(BaseModel):
     on: bool
     topics: list[str] = Field(default_factory=list, max_length=20)

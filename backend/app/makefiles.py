@@ -43,8 +43,49 @@ def _out(kind: str, filename: str) -> Path:
     return folder / f"{Path(filename).stem}_{new_id()[:8]}.{kind}"
 
 
-def make_pdf(db: Session, title: str, content: str, user_id: str | None) -> Artifact:
-    """PDF A4 : en-tête de l'entreprise, titre, date, texte (titres « # », listes « - », **gras**), pages numérotées."""
+CHART_MARK = re.compile(r"^\[\[graphique (\d+)\]\]$")
+
+
+def _bar_chart(spec: dict, width: float):
+    """Histogramme groupé (reportlab) : {"titre", "labels": [...], "series": [{"nom", "valeurs": [...], "couleur": "#hex"}]}."""
+    from reportlab.graphics.charts.barcharts import VerticalBarChart
+    from reportlab.graphics.charts.legends import Legend
+    from reportlab.graphics.shapes import Drawing, String
+    from reportlab.lib import colors
+
+    labels = [str(x)[:12] for x in spec.get("labels") or []]
+    series = [s for s in spec.get("series") or [] if len(s.get("valeurs") or []) == len(labels)]
+    if not labels or not series:
+        return None
+    d = Drawing(width, 200)
+    d.add(String(0, 188, str(spec.get("titre") or "")[:90], fontName="Helvetica-Bold", fontSize=10))
+    bc = VerticalBarChart()
+    bc.x, bc.y, bc.width, bc.height = 46, 38, width - 56, 132
+    bc.data = [[float(v or 0) for v in s["valeurs"]] for s in series]
+    bc.categoryAxis.categoryNames = labels
+    bc.categoryAxis.labels.fontName = bc.valueAxis.labels.fontName = "Helvetica"
+    bc.categoryAxis.labels.fontSize = 7
+    bc.categoryAxis.labels.angle = 30 if len(labels) > 6 else 0
+    bc.categoryAxis.labels.dy = -8 if len(labels) > 6 else -2
+    bc.valueAxis.labels.fontSize = 7
+    bc.valueAxis.valueMin = min(0.0, *(v for row in bc.data for v in row))
+    bc.valueAxis.labelTextFormat = lambda v: f"{v / 1e6:.1f} M" if abs(v) >= 1e6 else f"{v / 1e3:.0f} k" if abs(v) >= 1e3 else f"{v:.0f}"
+    bc.groupSpacing, bc.barSpacing = 6, 1
+    for i, s in enumerate(series):
+        bc.bars[i].fillColor = colors.HexColor(s.get("couleur") or ("#B86B2F", "#2E7D4F", "#6B7280")[i % 3])
+        bc.bars[i].strokeColor = None
+    d.add(bc)
+    lg = Legend()
+    lg.fontName, lg.fontSize, lg.columnMaximum, lg.dx, lg.dy, lg.deltax = "Helvetica", 8, 1, 8, 8, 72
+    lg.x, lg.y = width - 72 * len(series), 192
+    lg.colorNamePairs = [(bc.bars[i].fillColor, str(s.get("nom") or "")[:20]) for i, s in enumerate(series)]
+    d.add(lg)
+    return d
+
+
+def make_pdf(db: Session, title: str, content: str, user_id: str | None, charts: list[dict] | None = None) -> Artifact:
+    """PDF A4 : en-tête de l'entreprise, titre, date, texte (titres « # », listes « - », **gras**), pages numérotées.
+    `charts` : histogrammes placés là où le texte porte « [[graphique N]] » (N à partir de 1), sinon à la fin."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -70,10 +111,20 @@ def make_pdf(db: Session, title: str, content: str, user_id: str | None) -> Arti
             story.append(ListFlowable([ListItem(Paragraph(b, body), leftIndent=10) for b in bullets], bulletType="bullet", start="•"))
             bullets.clear()
 
+    width = A4[0] - 36 * mm
+    placed: set[int] = set()
     for raw in content.splitlines():
         line = raw.strip()
         if not line:
             flush()
+            continue
+        mark = CHART_MARK.match(line)
+        if mark:
+            flush()
+            n = int(mark.group(1)) - 1
+            if charts and 0 <= n < len(charts) and (drawing := _bar_chart(charts[n], width)) is not None:
+                story.append(drawing)
+                placed.add(n)
             continue
         if re.match(r"^[-*•]\s+", line):
             bullets.append(_inline(re.sub(r"^[-*•]\s+", "", line)))
@@ -82,6 +133,9 @@ def make_pdf(db: Session, title: str, content: str, user_id: str | None) -> Arti
         m = re.match(r"^(#{1,3})\s+(.*)$", line)
         story.append(Paragraph(_inline(m.group(2)), h2) if m else Paragraph(_inline(line), body))
     flush()
+    for n, spec in enumerate(charts or []):
+        if n not in placed and (drawing := _bar_chart(spec, width)) is not None:
+            story.append(drawing)
 
     head = " · ".join(x for x in (company.get("name"), company.get("phone"), company.get("email")) if x)
 
