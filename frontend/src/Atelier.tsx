@@ -195,7 +195,7 @@ function Evals({ onMsg }: { onMsg: (m: string) => void }) {
         <button className="btn btn-line btn-small" disabled={!!e?.running} onClick={start}>{e?.running ? "En cours…" : "Lancer"}</button></div>
       <label className="at-toggle"><input type="checkbox" checked={!!e?.weekly} onChange={(x) => weekly(x.target.checked)} />
         <span>Examen automatique chaque semaine (alerte si la note baisse ou si l'IA invente)</span></label>
-      <p className="hint">{e?.cases ?? 21} demandes de référence : métrés (cloisons, plafonds, unités, faces, ouvertures), e-mails, PDF et Excel, agenda et tâches, factures émises, dépenses, versements, vidéo.
+      <p className="hint">{e?.cases ?? 21} demandes de référence : métrés (cloisons, plafonds, unités, faces, ouvertures), e-mails, PDF et Excel, agenda et tâches, factures émises, dépenses, versements, vidéo, bilan et trésorerie.
         Le code vérifie que l'IA choisit le bon outil, reprend les bons chiffres et n'invente rien : ni dimension, ni adresse, ni action « faite ».
         Mêmes consignes et même modèle que la vraie conversation. À relancer après chaque changement de l'IA. ≈ {e?.cases ?? 21} appels à Claude.</p>
       {hist.length > 1 && (

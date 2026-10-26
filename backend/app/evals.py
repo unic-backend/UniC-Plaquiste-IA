@@ -75,6 +75,13 @@ CASES: list[dict[str, Any]] = [
      "tool": "add_appointment", "expect": {"kind": "tache"}},
     {"id": "video-chat", "message": "Fais-moi une vidéo de 30 secondes pour présenter UniC sur TikTok.",
      "tool": "plan_video", "expect": {}},
+    # chiffres de l'entreprise : toujours lus par un outil, jamais calculés de tête ni inventés
+    {"id": "bilan-mois", "message": "Combien j'ai encaissé ce mois-ci et qui est mon meilleur client ?",
+     "tool": "business_report", "expect": {}},
+    {"id": "tresorerie", "message": "Est-ce que j'aurai assez d'argent pour payer mes charges dans les deux prochains mois ?",
+     "tool": "cash_forecast", "expect": {}},
+    {"id": "solde-donne", "message": "Aujourd'hui j'ai 2 500 000 FCFA en caisse et en banque, note-le pour la trésorerie.",
+     "tool": "set_cash_balance", "expect": {"montant": 2500000}},
 ]
 
 
