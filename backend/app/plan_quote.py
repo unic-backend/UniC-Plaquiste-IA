@@ -52,6 +52,18 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     steps, assumptions, missing = [], [], []
     others: dict[str, dict] = {}
     area_by_type = {"": 0.0, "-H": 0.0}
+    fx = calc.fixings(fixings)
+    # articles vendus au paquet : les pièces de TOUTES les pièces du plan sont additionnées, puis arrondies au paquet une seule
+    # fois (sinon 5 pièces à 30 chevilles = 5 paquets au lieu de 2)
+    pack = {"UC-PIVOT": 100, "UC-CHEVILLES-A-LETON": 100, "UC-PAQUET-CHEVILLES-A-FRAPPER": fx["anchors_per_pack"],
+            "UC-VIS-9-MM": fx["screws9_per_pack"]}
+    pieces: dict[str, int] = {}
+
+    def count(sku: str, n: int) -> None:
+        pieces[sku] = pieces.get(sku, 0) + int(n)
+
+    def step_result(res, prefix: str) -> int:
+        return int(next(st.result for st in res.steps if st.label.startswith(prefix)))
 
     def add(line: calc.QuantityLine) -> None:
         cur = others.get(line.sku)
@@ -72,6 +84,10 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         suffix = "-H" if _match(p["nom"], hydro) else ""
         area_by_type[suffix] += area
         res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length, fixing_values=fixings)
+        hangers = step_result(res, "Points d'accroche")
+        count("UC-PIVOT", hangers)
+        count("UC-CHEVILLES-A-LETON", hangers)
+        count("UC-PAQUET-CHEVILLES-A-FRAPPER", calc.anchor_points(2 * (L + l), 4, fx["anchor_spacing_m"]))
         for q in res.quantities:
             if not q.sku.startswith("BA13-"):   # plaques comptées plus bas, sur le total
                 add(q)
@@ -99,6 +115,8 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         sides = int(c.get("sides") or 2)
         res = calc.calculate_partition(length, height, sides, [], waste=waste, board_width=board_width,
                                        board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings)
+        count("UC-PAQUET-CHEVILLES-A-FRAPPER", calc.anchor_points(2 * length, 2, fx["anchor_spacing_m"]))
+        count("UC-VIS-9-MM", step_result(res, "Nombre de montants") * fx["screws9_per_stud"])
         for q in res.quantities:
             add(q)
         label = c.get("label") or "Cloison"
@@ -106,6 +124,10 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
                                    round(length * height, 2), "m²", calc.STATUS_CALCULATED))
         assumptions.append(f"{label} : {length:g} m × {height:g} m, {sides} face(s).")
 
+    for sku, n in pieces.items():   # paquets recalculés sur le total des pièces
+        if sku in others:
+            others[sku]["quantity"] = calc.ceil_int(n / pack[sku])
+            others[sku]["formula"] = f"⌈ {n} pièces (toutes les pièces du plan) / {pack[sku]} ⌉"
     # plaques des cloisons fusionnées avec celles des plafonds de même référence
     quantities = boards[:]
     for sku, q in others.items():
