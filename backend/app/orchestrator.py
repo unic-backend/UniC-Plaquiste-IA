@@ -129,7 +129,14 @@ RÈGLES ABSOLUES
 8. DEVIS (et facture, bon) : chaque document est indépendant. Dans une conversation neuve, ne reprends JAMAIS le client, le chantier, la TVA, la présentation ou les montants d'une autre conversation ou d'un devis précédent, et ne propose pas de réponses déduites (« comme les devis précédents ? »). Demande seulement ce qui manque, en questions simples et courtes, une ou deux à la fois (jamais une liste de quatre), dans cet ordre : le nom du client, puis le lieu du chantier, puis seulement le reste s'il est vraiment nécessaire.
 9. CONSIGNES DU PATRON : avant d'agir, relis son message mot à mot et dresse la liste de CHAQUE consigne (« toujours », « jamais », « sépare », « écris… », « un seul… », chiffres, noms). Applique-les toutes, sans en laisser une de côté. Après l'action, vérifie chaque consigne une à une sur le résultat réel (document ouvert avec list_documents si besoin) et corrige avant de répondre ; dis ce que tu as vérifié en une ligne. Une consigne durable (« pour toujours ») se retient avec remember.
 10. ARGENT DES DEVIS : « le client X a accepté » → mark_quote_decision ; « j'ai reçu N de X » → record_receipt (montant exact), puis annonce le reste et les pourcentages rendus par l'outil ; « où j'en suis / qui me doit » → list_tracking ; « facture de solde / reliquat » → create_balance_invoice (brouillon). « j'ai payé / acheté N pour le chantier de X » (matériaux, ouvriers, transport, location) → record_expense, puis annonce la marge rendue par l'outil. ÉQUIPE : « Moussa a travaillé 2 jours chez Diop » → record_work ; « j'ai donné 10 000 d'avance à Moussa » → record_worker_payment (kind=avance) ; « combien je dois à mes ouvriers » → team_status. Plusieurs devis possibles : demande lequel. Un e-mail du client n'est qu'un indice (mail_signals) : confirme avec le patron avant d'enregistrer. Sans réponse du client, un devis est « en attente » : ne l'écris pas accepté. Suivi d'argent seulement, jamais l'avancement du chantier.
-11. DEMANDE INCOMPLÈTE (métré, devis) : ne devine jamais les faces, les ouvertures, les dimensions, le type de cloison ni un prix. Calcule ce qui est déjà déterminable (outil calculate_materials), montre chaque donnée avec son statut (confirmé, supposé, estimé, manquant), puis pose UNE seule question groupée sur ce qui manque. Une cote illisible ou incertaine se confirme, jamais une valeur inventée. Si le contrôle indépendant (verification) signale un écart, dis-le et ne crée aucun document.
+11. DEMANDE INCOMPLÈTE (métré, devis) : ce qui manque ne t'empêche JAMAIS de travailler. Calcule tout de suite (outil calculate_materials) et donne au patron tout ce qu'il faut pour travailler : ce qui est déterminable, plus une estimation clairement marquée quand une donnée manque (statut confirmé, supposé, estimé). Ne présente jamais une supposition comme un fait, n'invente ni dimension ni prix. Puis UNE seule question courte, à la fin, sur ce qui change le plus le résultat ; jamais une liste de questions. Une cote illisible se confirme. Si le contrôle indépendant (verification) signale un écart, dis-le et ne crée aucun document.
+12. PLAFOND OU CLOISON : ce sont deux ouvrages à ossature différente (voir MÉTIER). Une surface ou des plaques sans dire plafond ou cloison (« j'ai 100 m² », « 100 m² de BA13 ») : ne suppose JAMAIS la cloison ; calculate_materials avec kind="a_preciser" (les deux calculs), donne les deux en bref, puis demande « plafond ou cloison ? ».
+13. LE PATRON PASSE AVANT LES RÈGLES : ne refuse jamais une demande du patron et ne le noie pas de questions. Si une règle de l'application gêne sa demande, fais ce qu'il demande et signale le risque en une ligne. Seule limite : rien n'est envoyé, publié ou supprimé sans son clic (tu prépares, il valide d'un clic).
+
+MÉTIER UniC (Sénégal)
+- FAUX PLAFOND BA13 (plaques de plâtre) : ossature suspendue = tiges (suspentes) fixées au plafond par chevilles à laiton, pivots, fourrures (barres de 2,90 m tous les 0,50 m), cornières de rive fixées aux murs par chevilles à frapper, puis plaques de plâtre vissées. Pas de rails ni de montants.
+- CLOISON SÈCHE : rails au sol et au plafond fixés par chevilles à frapper, montants dans les rails tenus par vis de 9 mm, plaques de plâtre vissées (vis 25 ou 35 mm) sur une ou deux faces, puis bande, enduit et accessoires de finition. Pas de tiges, pivots ni fourrures.
+- Ne mélange jamais les deux listes. « Plafond suspendu », « faux plafond », « plafond BA13 », « plafond en placo » = le même ouvrage ; « cloison », « cloison sèche », « paroi en placo », « mur en plaque » = l'autre.
 """
 
 
@@ -332,7 +339,7 @@ def _intent(text: str, state: dict) -> str:
     t = text.lower().strip()
     has_doc_number = bool(re.search(DOC_NUMBER_RE, text, re.I))
     if state.get("pending") and not re.search(r"annule|cancel|stop", t):
-        if len(t) < 80 and calc.detect_calc_kind(t) and _DIMENSION.search(t) and not re.search(
+        if len(t) < 80 and calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(t) and not re.search(
             r"devis|facture|commande|livraison|calcule|analyse|rapport", t
         ):
             return "continue_pending"
@@ -395,8 +402,8 @@ def _intent(text: str, state: dict) -> str:
         return "prices"
     if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
         return "search_doc"
-    if calc.detect_calc_kind(t) and _DIMENSION.search(t):
-        return "calculate"
+    if calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(t):
+        return "calculate"   # plafond ou cloison non dit : l'IA répond (les deux calculs + une question), pas le calcul seul
     if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
         return "analyze_doc"
     if re.search(r"photo|chantier", t) and re.search(r"analys", t):

@@ -42,19 +42,70 @@ class Record:
     title: str = ""
 
 
+# Mots qui disent la même chose : « plafond suspendu » retrouve « faux plafond ». Groupes de sens (métier UniC + usage courant) ;
+# un mot ajouté par un groupe compte un peu moins (SYNONYM_WEIGHT) que les mots dits par le patron.
+SYNONYMS: tuple[tuple[str, ...], ...] = (
+    ("faux plafond", "plafond suspendu", "plafond ba13", "plafond en placo", "plafond placo", "plafond en plaque", "plafond en platre"),
+    ("cloison", "cloison seche", "paroi", "mur en placo", "mur placo", "mur en plaque", "doublage"),
+    ("placo", "plaque de platre", "ba13", "plaque ba13", "placoplatre"),
+    ("tige", "suspente", "tige filetee"),
+    ("fourrure", "f530"),
+    ("montant", "m48", "m70"),
+    ("rail", "r48", "r70"),
+    ("hydrofuge", "plaque verte"),
+    ("laine de verre", "isolant", "isolation"),
+    ("devis", "estimation", "cotation", "proforma", "offre de prix"),
+    ("acompte", "avance"),
+    ("prix", "tarif", "cout"),
+    ("client", "acheteur"),
+    ("chantier", "travaux"),
+    ("encaisse", "recu", "verse", "paye"),
+    ("depense", "frais", "achat"),
+    ("ouvrier", "employe", "macon", "manoeuvre"),
+    ("fournisseur", "vendeur", "quincaillerie"),
+)
+SYNONYM_WEIGHT = 0.6
+
+
+def _stem(w: str) -> str:
+    """Pluriel ramené au singulier (« plafonds » → « plafond », « fourrures » → « fourrure ») : même mot, même score."""
+    return w[:-1] if len(w) > 3 and w[-1] in "sx" and not w.endswith("ss") else w
+
+
+def _stems(text: str) -> list[str]:
+    return [_stem(w) for w in tokens(text)]
+
+
+_GROUPS = [[tuple(_stems(p)) for p in group] for group in SYNONYMS]
+
+
+def expand_query(query: str) -> dict[str, float]:
+    """Mots de la question (poids 1) + mots des groupes de sens qu'elle évoque (poids SYNONYM_WEIGHT)."""
+    q = _stems(query)
+    weights: dict[str, float] = {}
+    for w in q:
+        weights[w] = weights.get(w, 0.0) + 1.0
+    joined = " " + " ".join(q) + " "
+    for group in _GROUPS:
+        if any(phrase and " " + " ".join(phrase) + " " in joined for phrase in group):
+            for phrase in group:
+                for w in phrase:
+                    weights.setdefault(w, SYNONYM_WEIGHT)
+    return weights
+
+
 def bm25(query: str, records: list[Record], k1: float = 1.5, b: float = 0.75) -> list[tuple[str, float]]:
-    """Classement BM25 : [(id, score)] décroissant. Le titre compte double."""
-    q = tokens(query)
-    if not q or not records:
+    """Classement BM25 : [(id, score)] décroissant. Le titre compte double. Pluriels et mots de même sens rapprochés."""
+    qc = expand_query(query)
+    if not qc or not records:
         return []
-    docs = [tokens(r.title) * 2 + tokens(r.text) for r in records]
+    docs = [_stems(r.title) * 2 + _stems(r.text) for r in records]
     freqs = [Counter(d) for d in docs]
     df: Counter[str] = Counter()
     for f in freqs:
         df.update(f.keys())
     avg = sum(len(d) for d in docs) / max(1, len(docs))
     n = len(records)
-    qc = Counter(q)
     out = []
     for rec, doc, freq in zip(records, docs, freqs):
         score, length = 0.0, max(1, len(doc))

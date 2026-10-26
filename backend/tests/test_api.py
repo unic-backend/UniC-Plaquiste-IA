@@ -144,9 +144,12 @@ def test_price_not_invented_in_quote_when_missing(client, token):
     q = quotes[0]
     assert q["prices_complete"] is False
     for it in q["items"]:
-        # unités incompatibles avec la grille (vis à l'unité, bande, enduit au kg) : jamais de prix deviné
-        if it["description"].startswith(("Vis", "Bande", "Enduit")):
+        # unités incompatibles avec la grille (vis à plaque à l'unité, bande, enduit au kg) : jamais de prix deviné
+        if it["description"].startswith(("Vis à plaque", "Bande", "Enduit")):
             assert it["unit_price"] is None, it
+        # vis de 9 mm et chevilles à frapper comptées au paquet : prix du paquet dans la grille du patron
+        if it["description"].startswith(("Vis 9 mm", "Chevilles à frapper")):
+            assert it["unit"] == "paquet" and it["unit_price"] == 5000, it
         # rails comptés en barres de 2,90 m : prix de la grille du patron
         if it["description"].startswith(("Plaque", "Montant", "Rails")):
             assert it["unit_price"] is not None, it
