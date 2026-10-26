@@ -18,7 +18,7 @@ from app import calc, connectors, pricecheck, provenance, revise, tracking, trus
 from app import services as svc
 from app.connectors import ConnectorError
 from app.models import ConstructionSite, Customer, Project, Supplier, Invoice, InboxMessage, Material, Quotation, SocialPost
-from app.services import (audit, company_dict, create_delivery_note, create_purchase_order, current_price,
+from app.services import (audit, calc_fixings, company_dict, create_delivery_note, create_purchase_order, current_price,
                           invoice_from_quote, next_number, quotation_from_quantities, search_documents)
 from app.social import PLATFORMS
 
@@ -193,6 +193,18 @@ TOOLS: list[dict] = [
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}}},
             "required": ["kind"], "additionalProperties": False},
+    },
+    {
+        "name": "set_fixings",
+        "description": ("ENREGISTRE les valeurs de fixation du patron, utilisées par tous les calculs suivants : nombre de chevilles à frapper "
+                        "par paquet, de vis de 9 mm par paquet, espacement des chevilles (m), vis de 9 mm par montant. Seulement les valeurs "
+                        "qu'il donne (« mes paquets de vis 9 font 1000 »)."),
+        "input_schema": {"type": "object", "properties": {
+            "anchors_per_pack": {"type": "integer", "minimum": 1, "maximum": 10000},
+            "screws9_per_pack": {"type": "integer", "minimum": 1, "maximum": 10000},
+            "anchor_spacing_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 2},
+            "screws9_per_stud": {"type": "integer", "minimum": 1, "maximum": 20}},
+            "additionalProperties": False},
     },
     {
         "name": "create_quote",
@@ -732,7 +744,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -850,6 +862,7 @@ OWNER_ASK = {
     "record_receipt": re.compile(r"re[çc]u|vers[ée]|pay[ée]|r[ée]gl[ée]|avance|acompte|solde|encaiss|enregistr|\d", re.I),
     "record_work": re.compile(r"journ[ée]e|travaill|tâche|tache|ouvrier|pointe|\d", re.I),
     "record_worker_payment": re.compile(r"avance|pay[ée]|donn[ée]|remis|paie|vers[ée]|\d", re.I),
+    "set_fixings": re.compile(r"paquet|vis|cheville|espac|fixation|\d", re.I),
     "set_cash_balance": re.compile(r"solde|caisse|banque|compte|tr[ée]sorerie|wave|\d", re.I),
     "record_expense": re.compile(r"d[ée]pens|frais|achet|pay[ée]|co[uû]t|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
@@ -1296,7 +1309,7 @@ class AgentSession:
                                     hydrofuge_rooms=hydrofuge_rooms, partitions=partitions,
                                     waste=co.get("default_waste") or 0.08, board_width=co.get("board_width_m") or 1.2,
                                     board_length=board_length_m or co.get("board_height_m") or 2.0,
-                                    stud_spacing=co.get("stud_spacing_m") or 0.6)
+                                    stud_spacing=co.get("stud_spacing_m") or 0.6, fixings=calc_fixings(co))
         except plan_quote.PlanQuoteError as exc:
             raise ConnectorError(str(exc), 400)
         except ValueError as exc:
@@ -1433,6 +1446,29 @@ class AgentSession:
         info = {"id": art.id, "filename": art.filename, "mime": art.mime_type, "size": art.size}
         self.files.append(info)
         return {"artifact_id": art.id, "fichier": art.filename, "note": "Fichier créé : le patron peut l'ouvrir, le partager ou le joindre à un e-mail."}
+
+    def _t_set_fixings(self, anchors_per_pack: int | None = None, screws9_per_pack: int | None = None,
+                       anchor_spacing_m: float | None = None, screws9_per_stud: int | None = None) -> dict:
+        from app.models import CompanySettings
+        bounds = {"anchors_per_pack": (1, 10000), "screws9_per_pack": (1, 10000), "anchor_spacing_m": (0.01, 2), "screws9_per_stud": (1, 20)}
+        given = {k: v for k, v in (("anchors_per_pack", anchors_per_pack), ("screws9_per_pack", screws9_per_pack),
+                                   ("anchor_spacing_m", anchor_spacing_m), ("screws9_per_stud", screws9_per_stud)) if v is not None}
+        if not given:
+            return {"error": "Aucune valeur donnée."}
+        for k, v in given.items():
+            lo, hi = bounds[k]
+            if not (isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi):
+                return {"error": f"{k} hors limites ({lo} à {hi})."}
+        row = self.db.query(CompanySettings).first()
+        if row is None:
+            row = CompanySettings()
+            self.db.add(row)
+        for k, v in given.items():
+            setattr(row, k, float(v) if k == "anchor_spacing_m" else int(v))
+        audit(self.db, self.user_id, "set_fixings", "settings", row.id or "", str(given)[:200])
+        self.db.commit()
+        return {"enregistre": given, "valeurs": {k: v for k, v in calc.fixings(calc_fixings(company_dict(self.db))).items() if k != "donne"},
+                "note": "Enregistré : tous les calculs suivants utilisent ces valeurs (statut confirmé). Dis-le en une ligne."}
 
     def _t_cash_forecast(self, jours: int = 90) -> dict:
         from app import tresorerie
@@ -1578,7 +1614,8 @@ class AgentSession:
         sides = int(sides) if sides_known else 2
         co = company_dict(self.db)
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
-               "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6}
+               "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6,
+               "fixings": calc_fixings(co)}
         try:
             if method == "unic":
                 surface = area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None
@@ -1588,7 +1625,7 @@ class AgentSession:
                 if not sides_known:
                     res.assumptions.append("Nombre de faces = 2 (non précisé : à confirmer, la surface en dépend directement).")
             elif kind == "partition" and not (length_m and height_m) and area_m2:
-                res = calc.calculate_partition_from_area(area_m2, sides, sides_known=sides_known, waste=cfg["waste"],
+                res = calc.calculate_partition_from_area(area_m2, sides, sides_known=sides_known, waste=cfg["waste"], fixing_values=cfg["fixings"],
                                                          board_width=cfg["board_width"], board_height=cfg["board_height"])
             elif kind == "partition":
                 if not (length_m and height_m):
@@ -1598,7 +1635,7 @@ class AgentSession:
                                     assumed_size=not (o.get("width_m") and o.get("height_m")))
                        for o in (openings or [])]
                 res = calc.calculate_partition(length_m, height_m, sides, ops, waste=cfg["waste"], board_width=cfg["board_width"],
-                                               board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"],
+                                               board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"], fixing_values=cfg["fixings"],
                                                sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
             elif kind == "ceiling":
                 a = length_m or None
@@ -1611,6 +1648,7 @@ class AgentSession:
                 if not (a and b):
                     raise ConnectorError("Longueur et largeur (ou surface) du plafond requises.", 400)
                 res = calc.calculate_ceiling(a, b, waste=cfg["waste"], board_width=cfg["board_width"], board_height=cfg["board_height"],
+                                             fixing_values=cfg["fixings"],
                                              dims_known=not square)
             elif kind == "paint":
                 if not area_m2:

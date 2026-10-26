@@ -47,6 +47,7 @@ from app import ai as ai_mod
 from app.orchestrator import AssistantReply, handle_turn
 from app.security import get_current_user, require_roles
 from app.services import (
+    calc_fixings,
     read_upload,
     NUMBER_RE,
     _taken_numbers,
@@ -1668,6 +1669,10 @@ class SettingsIn(BaseModel):
     stud_spacing_m: float | None = Field(default=None, gt=0, le=2)
     ai_deep_stakes: bool | None = None
     ai_self_review: bool | None = None
+    anchor_spacing_m: float | None = Field(default=None, gt=0, le=2)
+    anchors_per_pack: int | None = Field(default=None, ge=1, le=10000)
+    screws9_per_stud: int | None = Field(default=None, ge=1, le=20)
+    screws9_per_pack: int | None = Field(default=None, ge=1, le=10000)
     notes: str | None = None
 
 
@@ -2490,6 +2495,7 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
         "board_width_m": company.get("board_width_m") or 1.2,
         "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,
+        "fixings": calc_fixings(company),
     }
     if body.text and body.text.strip():
         r = calcmod.calculate_from_text(body.text, defaults)
@@ -2500,9 +2506,11 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     # pas silencieusement transformé en « paramètres insuffisants ».
     try:
         if body.kind == "partition" and body.length_m is not None and body.height_m is not None:
-            return calcmod.calculate_partition(body.length_m, body.height_m, body.sides, waste=defaults["waste"]).to_dict()
+            return calcmod.calculate_partition(body.length_m, body.height_m, body.sides, waste=defaults["waste"],
+                                               fixing_values=defaults["fixings"]).to_dict()
         if body.kind == "ceiling" and body.length_m is not None and body.width_m is not None:
-            return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"]).to_dict()
+            return calcmod.calculate_ceiling(body.length_m, body.width_m, waste=defaults["waste"],
+                                             fixing_values=defaults["fixings"]).to_dict()
         if body.kind == "surface" and body.length_m is not None and body.width_m is not None:
             return calcmod.calculate_surface(body.length_m, body.width_m).to_dict()
     except ValueError as exc:   # saisie impossible : on renvoie la raison du moteur, pas une erreur interne

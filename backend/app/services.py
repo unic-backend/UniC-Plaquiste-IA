@@ -269,6 +269,11 @@ def linked_number(db: Session, code: str, *, quote_number: str | None = None,
     return number
 
 
+def calc_fixings(company: dict) -> dict:
+    """Valeurs de fixation données par le patron (Réglages) ; les absentes restent les suppositions du moteur (calc.fixings)."""
+    return {k: company.get(k) for k in ("anchor_spacing_m", "anchors_per_pack", "screws9_per_stud", "screws9_per_pack") if company.get(k)}
+
+
 def company_dict(db: Session) -> dict:
     row = db.query(CompanySettings).first()
     if row is None:
@@ -296,6 +301,10 @@ def company_dict(db: Session) -> dict:
         "stud_spacing_m": row.stud_spacing_m,
         "ai_deep_stakes": row.ai_deep_stakes is not False,
         "ai_self_review": row.ai_self_review is not False,
+        "anchor_spacing_m": row.anchor_spacing_m,
+        "anchors_per_pack": row.anchors_per_pack,
+        "screws9_per_stud": row.screws9_per_stud,
+        "screws9_per_pack": row.screws9_per_pack,
         "website": row.website,
         "notes": row.notes,
     }

@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.5"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.6"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -47,11 +47,20 @@ DOOR_STUDS = 3        # règle UniC : chaque porte prend 3 montants de renfort
 ANCHOR_SPACING_M = 0.50   # une cheville à frapper tous les 0,50 m de rail (cloison) ou de cornière (plafond)
 SCREWS9_PER_STUD = 4      # vis de 9 mm : 2 en tête + 2 en pied pour tenir chaque montant dans les rails
 PACK = 100                # chevilles et vis vendues par paquet de 100 (comme les pivots et chevilles à laiton)
+FIXINGS_DEFAULT = {"anchor_spacing_m": ANCHOR_SPACING_M, "anchors_per_pack": PACK, "screws9_per_stud": SCREWS9_PER_STUD,
+                   "screws9_per_pack": PACK}
 
 
-def anchor_points(run_ml: float, runs: int = 1) -> int:
-    """Chevilles à frapper le long d'un rail ou d'une cornière : une tous les 0,50 m, plus une au bout de chaque longueur."""
-    return ceil_int(run_ml / ANCHOR_SPACING_M) + runs
+def fixings(given: dict | None = None) -> dict:
+    """Valeurs de fixation : celles du patron (Réglages) quand il les a données, sinon les suppositions par défaut.
+    `donne` dit lesquelles viennent du patron (statut confirmé) ; les autres restent « supposé »."""
+    given = {k: v for k, v in (given or {}).items() if k in FIXINGS_DEFAULT and v not in (None, "", 0)}
+    return {**FIXINGS_DEFAULT, **{k: float(v) if k == "anchor_spacing_m" else int(v) for k, v in given.items()}, "donne": sorted(given)}
+
+
+def anchor_points(run_ml: float, runs: int = 1, spacing: float = ANCHOR_SPACING_M) -> int:
+    """Chevilles à frapper le long d'un rail ou d'une cornière : une tous les `spacing` m, plus une au bout de chaque longueur."""
+    return ceil_int(run_ml / spacing) + runs
 
 
 def board_sku(board_width_m: float, board_height_m: float, suffix: str = "") -> tuple[str, str]:
@@ -216,6 +225,18 @@ def check_inputs(*, positive: dict[str, float] | None = None, surface_m2: float 
                           "Vérifie les unités (m ou mm ?) puis confirme, ou découpe en plusieurs chantiers.").replace(",", " "))
 
 
+def _fx_status(fx: dict, *keys: str) -> str:
+    return STATUS_CONFIRMED if all(k in fx["donne"] for k in keys) else STATUS_ASSUMED
+
+
+def _fx_text(fx: dict, support: str) -> str:
+    told = "données par le patron" if len(fx["donne"]) == len(FIXINGS_DEFAULT) else \
+        "supposées, à régler dans Réglages › Paramètres de calcul" if not fx["donne"] else "en partie supposées (Réglages)"
+    return (f"Fixations ({told}) : 1 cheville à frapper tous les {fx['anchor_spacing_m']:g} m de {support}, paquets de "
+            f"{fx['anchors_per_pack']}" + (f" ; {fx['screws9_per_stud']} vis de 9 mm par montant, paquets de {fx['screws9_per_pack']}"
+                                           if support == "rail" else "") + ".")
+
+
 def calculate_partition(
     length_m: float,
     height_m: float,
@@ -230,6 +251,7 @@ def calculate_partition(
     confirmed_large: bool = False,
     sides_known: bool = True,
     openings_known: bool | None = None,
+    fixing_values: dict | None = None,
 ) -> CalcResult:
     openings = openings or []
     if openings_known is None:
@@ -247,8 +269,9 @@ def calculate_partition(
     door_studs = DOOR_STUDS * n_doors   # règle UniC : 3 montants de renfort par porte
     n_stud_bars = stud_bars(n_studs, height_m) + door_studs
     tracks = tracks_length(length_m, 2)
-    anchors = anchor_points(tracks, 2)                       # rail haut + rail bas
-    screws9 = (n_studs + door_studs) * SCREWS9_PER_STUD
+    fx = fixings(fixing_values)
+    anchors = anchor_points(tracks, 2, fx["anchor_spacing_m"])   # rail haut + rail bas
+    screws9 = (n_studs + door_studs) * fx["screws9_per_stud"]
     # montants : un par montant, hauteur = hauteur cloison
     stud_ml = round_qty(n_studs * height_m, 3)
     screws = ceil_int(areas["net"] * DEFAULTS["screws_per_m2"])
@@ -276,6 +299,7 @@ def calculate_partition(
             "board_width": board_width,
             "board_height": board_height,
             "stud_spacing": stud_spacing,
+            "fixings": fixings(fixing_values),
         },
         next_step="Je peux transformer ces quantités en devis, bon de commande ou rapport.",
     )
@@ -378,10 +402,13 @@ def calculate_partition(
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
                      f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
         # rails fixés au sol et au plafond par chevilles à frapper ; montants tenus dans les rails par vis de 9 mm
-        QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", "Chevilles à frapper (paquet de 100)", ceil_int(anchors / PACK), "paquet",
-                     f"⌈ {anchors} chevilles (1 tous les {ANCHOR_SPACING_M:g} m de rail, {tracks:g} ml) / {PACK} ⌉", STATUS_ASSUMED),
-        QuantityLine("UC-VIS-9-MM", "Vis 9 mm (paquet de 100)", ceil_int(screws9 / PACK), "paquet",
-                     f"⌈ {screws9} vis ({n_studs + door_studs} montants × {SCREWS9_PER_STUD}) / {PACK} ⌉", STATUS_ASSUMED),
+        QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", f"Chevilles à frapper (paquet de {fx['anchors_per_pack']})",
+                     ceil_int(anchors / fx["anchors_per_pack"]), "paquet",
+                     f"⌈ {anchors} chevilles (1 tous les {fx['anchor_spacing_m']:g} m de rail, {tracks:g} ml) / {fx['anchors_per_pack']} ⌉",
+                     _fx_status(fx, "anchor_spacing_m", "anchors_per_pack")),
+        QuantityLine("UC-VIS-9-MM", f"Vis 9 mm (paquet de {fx['screws9_per_pack']})", ceil_int(screws9 / fx["screws9_per_pack"]), "paquet",
+                     f"⌈ {screws9} vis ({n_studs + door_studs} montants × {fx['screws9_per_stud']}) / {fx['screws9_per_pack']} ⌉",
+                     _fx_status(fx, "screws9_per_stud", "screws9_per_pack")),
     ]
     if include_finish:
         result.quantities += [
@@ -399,8 +426,7 @@ def calculate_partition(
         "le montant de jonction est partagé entre deux plaques.",
         f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (règle professionnelle par défaut).",
         "Portes : 3 montants de renfort par porte (règle UniC). Fenêtres : renforts non ajoutés automatiquement.",
-        f"Fixations supposées (à confirmer) : 1 cheville à frapper tous les {ANCHOR_SPACING_M:g} m de rail, {SCREWS9_PER_STUD} vis de 9 mm "
-        f"par montant, paquets de {PACK}.",
+        _fx_text(fx, "rail"),
         "Aucun prix n'est appliqué : les tarifs UniC ne sont pas inventés.",
     ]
     result.missing = [
@@ -437,6 +463,7 @@ def calculate_partition_from_area(
     board_height: float = DEFAULTS["board_height_m"],
     include_finish: bool = True,
     confirmed_large: bool = False,
+    fixing_values: dict | None = None,
 ) -> CalcResult:
     """Cloison dont seule la SURFACE est connue (« 200 m² de cloison ») : on calcule ce qui est déterminable (plaques, vis, bande, enduit,
     qui ne dépendent que de la surface) et on dit CLAIREMENT ce qui ne l'est pas (ossature : montants et rails demandent la longueur et la
@@ -499,10 +526,13 @@ def calculate_partition_from_area(
     est_l = area_m2 / est_h
     est_studs = studs_needed(est_l, DEFAULTS["stud_spacing_m"], board_width)
     est_tracks = tracks_length(est_l, 2)
+    fx = fixings(fixing_values)
     result.notes.append(
         f"Ossature ESTIMÉE si la cloison fait {est_h:g} m de haut (soit ≈ {est_l:.1f} m de long) : ≈ {est_studs} montants, "
-        f"≈ {ceil_int(est_tracks / BAR_LENGTH_M)} barres de rail, ≈ {ceil_int(anchor_points(est_tracks, 2) / PACK)} paquet(s) de chevilles "
-        f"à frapper, ≈ {ceil_int(est_studs * SCREWS9_PER_STUD / PACK)} paquet(s) de vis 9 mm. À confirmer avec la longueur et la hauteur réelles.")
+        f"≈ {ceil_int(est_tracks / BAR_LENGTH_M)} barres de rail, "
+        f"≈ {ceil_int(anchor_points(est_tracks, 2, fx['anchor_spacing_m']) / fx['anchors_per_pack'])} paquet(s) de chevilles à frapper, "
+        f"≈ {ceil_int(est_studs * fx['screws9_per_stud'] / fx['screws9_per_pack'])} paquet(s) de vis 9 mm. "
+        "À confirmer avec la longueur et la hauteur réelles.")
     return result
 
 
@@ -516,6 +546,8 @@ def calculate_ceiling(
     system: str = "ba13",
     confirmed_large: bool = False,
     dims_known: bool = True,
+    include_finish: bool = True,
+    fixing_values: dict | None = None,
 ) -> CalcResult:
     check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
                            "hauteur de plaque": board_height},
@@ -533,6 +565,11 @@ def calculate_ceiling(
 
     rows, hangers, furring_ml = min(layout(length_m, width_m), layout(width_m, length_m), key=lambda t: (t[1], t[2]))
     perimeter = round_qty(2 * (length_m + width_m), 2)
+    fx = fixings(fixing_values)
+    anchors = anchor_points(perimeter, 4, fx["anchor_spacing_m"])   # cornière de rive : une longueur par mur
+    screws = ceil_int(area * DEFAULTS["screws_per_m2"])
+    tape = round_qty(area * DEFAULTS["tape_m_per_m2"], 2)
+    compound = round_qty(area * DEFAULTS["compound_kg_per_m2_per_coat"] * DEFAULTS["compound_coats"], 2)
 
     result = CalcResult(
         kind="ceiling",
@@ -543,6 +580,7 @@ def calculate_ceiling(
             "width_m": width_m,
             "waste": waste,
             "system": system,
+            "fixings": fx,
         },
         next_step="Je peux préparer un devis quantité ou un bon de commande matériaux.",
     )
@@ -578,23 +616,33 @@ def calculate_ceiling(
         QuantityLine("UC-CORNIERES", "Cornière de rive (barre de 2,90 m)", ceil_int(perimeter / BAR_LENGTH_M), "barre",
                      f"⌈ périmètre {perimeter:g} ml / 2,90 ⌉", STATUS_ESTIMATED if dims_known else STATUS_ASSUMED),
         # la cornière de rive est fixée aux murs par des chevilles à frapper
-        QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", "Chevilles à frapper (paquet de 100)", ceil_int(anchor_points(perimeter, 4) / PACK),
-                     "paquet", f"⌈ {anchor_points(perimeter, 4)} chevilles (1 tous les {ANCHOR_SPACING_M:g} m de cornière, {perimeter:g} ml) / {PACK} ⌉",
-                     STATUS_ASSUMED),
+        QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", f"Chevilles à frapper (paquet de {fx['anchors_per_pack']})",
+                     ceil_int(anchors / fx["anchors_per_pack"]), "paquet",
+                     f"⌈ {anchors} chevilles (1 tous les {fx['anchor_spacing_m']:g} m de cornière, {perimeter:g} ml) / {fx['anchors_per_pack']} ⌉",
+                     _fx_status(fx, "anchor_spacing_m", "anchors_per_pack")),
     ]
+    if include_finish:   # plaques vissées sous les fourrures, joints bandés et enduits : de quoi finir le plafond
+        result.quantities += [
+            QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
+            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_ASSUMED),
+            QuantityLine("ENDUIT-JOINT", "Enduit à joint", compound, "kg",
+                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_ASSUMED),
+        ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
         "Méthode UniC : fourrures tous les 0,50 m, une tige tous les 0,90 m (tige + pivot + cheville à laiton), "
         "plaques de 2 m posées en travers des fourrures.",
-        "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)), fixée aux murs par chevilles à frapper "
-        f"(1 tous les {ANCHOR_SPACING_M:g} m, supposé) ; entretoises non comptées.",
+        "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)), fixée aux murs par chevilles à frapper ; "
+        "entretoises non comptées.",
+        _fx_text(fx, "cornière"),
+        f"Finitions : {DEFAULTS['screws_per_m2']:g} vis à plaque / m², {DEFAULTS['tape_m_per_m2']:g} ml de bande / m², enduit "
+        f"{DEFAULTS['compound_kg_per_m2_per_coat']:g} kg / m² × {DEFAULTS['compound_coats']} couches (règles par défaut).",
         "Aucun prix n'est appliqué.",
     ]
     result.missing = [
         "Type exact de faux plafond (BA13, dalles 600×600, démontable, acoustique) si différent du défaut.",
         "Hauteur de plénum (longueur des tiges).",
-        "Vis, bande et enduit des joints du plafond : non chiffrés.",
         "Prix UniC non renseignés.",
     ]
     if not dims_known:
@@ -890,7 +938,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         return calculate_partition(
             L, H, sides=_sides(t), openings=_openings(t), waste=waste,
             board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
-            stud_spacing=cfg["stud_spacing_m"],
+            stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"),
         )
 
     if kind == "ceiling":
@@ -914,7 +962,8 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 next_step="Indiquez par exemple : faux plafond 8 x 5 m.",
             )
         return calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
-                                 board_height=cfg["board_height_m"], dims_known=square_from_area is None)
+                                 board_height=cfg["board_height_m"], dims_known=square_from_area is None,
+                                 fixing_values=cfg.get("fixings"))
 
     if kind == "paint":
         from_pair = False
@@ -1055,13 +1104,15 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             bars = _min_count(2 * L, _F(BAR_LENGTH_M))
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
-            pts = _min_count(2 * L, _F(ANCHOR_SPACING_M)) + 2
-            if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != _min_count(Fraction(pts), Fraction(PACK)):
-                problems.append(f"Chevilles à frapper : moteur {qty['UC-PAQUET-CHEVILLES-A-FRAPPER']} ≠ contrôle "
-                                f"{_min_count(Fraction(pts), Fraction(PACK))} paquet(s).")
+            fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
+            pts = _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
+            packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
+            if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != packs:
+                problems.append(f"Chevilles à frapper : moteur {qty['UC-PAQUET-CHEVILLES-A-FRAPPER']} ≠ contrôle {packs} paquet(s).")
             placed = n + DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
-            if "UC-VIS-9-MM" in qty and qty["UC-VIS-9-MM"] != _min_count(Fraction(placed * SCREWS9_PER_STUD), Fraction(PACK)):
-                problems.append(f"Vis 9 mm : moteur {qty['UC-VIS-9-MM']} ≠ contrôle {_min_count(Fraction(placed * SCREWS9_PER_STUD), Fraction(PACK))}.")
+            packs9 = _min_count(Fraction(placed * int(fx["screws9_per_stud"])), Fraction(int(fx["screws9_per_pack"])))
+            if "UC-VIS-9-MM" in qty and qty["UC-VIS-9-MM"] != packs9:
+                problems.append(f"Vis 9 mm : moteur {qty['UC-VIS-9-MM']} ≠ contrôle {packs9}.")
         elif result.kind == "partition_area" and inp:
             net = _F(inp["area_m2"]) * int(inp["sides"])
             sku, _ = board_sku(inp["board_width"], inp["board_height"])
@@ -1077,6 +1128,11 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             rive = _min_count(2 * (_F(inp["length_m"]) + _F(inp["width_m"])), _F(BAR_LENGTH_M))
             if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
                 problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
+            fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
+            per = 2 * (_F(inp["length_m"]) + _F(inp["width_m"]))
+            packs = _min_count(Fraction(_min_count(per, _F(fx["anchor_spacing_m"])) + 4), Fraction(int(fx["anchors_per_pack"])))
+            if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != packs:
+                problems.append(f"Chevilles à frapper : moteur {qty['UC-PAQUET-CHEVILLES-A-FRAPPER']} ≠ contrôle {packs} paquet(s).")
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         problems.append(f"Contrôle impossible : {type(exc).__name__}.")
     return {"ok": not problems, "problems": problems,

@@ -29,7 +29,8 @@ def _match(name: str, wanted: list[str]) -> bool:
 
 def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm: bool = False,
           hydrofuge_rooms: list[str] | None = None, partitions: list[dict] | None = None,
-          waste: float = 0.08, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6) -> dict:
+          waste: float = 0.08, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
+          fixings: dict | None = None) -> dict:
     """Métré (format de CalcResult.to_dict) à partir de l'analyse du plan."""
     pieces = analysis.get("pieces") or []
     if not pieces and not partitions:
@@ -70,7 +71,7 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             assumptions.append(f"{p['nom']} : dimensions non cotées, ossature estimée sur un carré de {area:g} m².")
         suffix = "-H" if _match(p["nom"], hydro) else ""
         area_by_type[suffix] += area
-        res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length)
+        res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length, fixing_values=fixings)
         for q in res.quantities:
             if not q.sku.startswith("BA13-"):   # plaques comptées plus bas, sur le total
                 add(q)
@@ -97,7 +98,7 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             raise PlanQuoteError("Cloison : longueur et hauteur requises (la hauteur n'est pas sur le plan, demande-la).")
         sides = int(c.get("sides") or 2)
         res = calc.calculate_partition(length, height, sides, [], waste=waste, board_width=board_width,
-                                       board_height=board_length, stud_spacing=stud_spacing)
+                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings)
         for q in res.quantities:
             add(q)
         label = c.get("label") or "Cloison"
