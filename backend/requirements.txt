@@ -5,7 +5,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.0
 python-multipart==0.0.31
 PyJWT==2.15.0
-pypdf==6.21.1
+pypdf==6.21.2
 python-docx==1.1.2
 openpyxl==3.1.5
 ezdxf==1.4.4

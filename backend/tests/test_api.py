@@ -2895,6 +2895,39 @@ def test_login_email_password_tokens_and_reset(client, monkeypatch):
     assert auth.verify_password("x", auth.hash_password("x")) and not auth.verify_password("y", auth.hash_password("x"))
 
 
+def test_logout_other_devices_keeps_only_this_one(client, monkeypatch):
+    """Téléphone perdu : « Déconnecter les autres appareils » coupe tout de suite les autres sessions (même en cache),
+    garde celle-ci, et n'efface rien (les sessions expirent)."""
+    from app import auth
+    from app.config import settings
+    from app.database import SessionLocal
+    from app.models import AuthSession
+    monkeypatch.setattr(settings, "unic_access_code", "code-render-123")
+    H = {"X-Access-Code": "code-render-123"}
+    assert client.put("/api/auth/account", headers=H, json={"email": "moi@exemple.com", "password": "Appareils-42"}).status_code == 200
+
+    def login(device):
+        r = client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "Appareils-42", "device": device})
+        return {"X-Access-Code": r.json()["token"]}
+    pc, lost = login("PC bureau"), login("Téléphone perdu")
+    seen = {(d["device"], d["current"]) for d in client.get("/api/auth/devices", headers=pc).json()["devices"]}
+    assert {("PC bureau", True), ("Téléphone perdu", False), ("Cet appareil", False)} == seen
+    assert client.get("/api/auth/me", headers=lost).status_code == 200           # jeton du téléphone désormais en cache
+    with SessionLocal() as db:
+        rows = db.query(AuthSession).count()
+    r = client.post("/api/auth/logout-others", headers=pc).json()
+    assert r == {"ok": True, "deconnectes": 2}
+    assert client.get("/api/auth/me", headers=lost).status_code == 401           # tout de suite, malgré le cache
+    assert client.get("/api/auth/me", headers=pc).status_code == 200
+    assert [d["device"] for d in client.get("/api/auth/devices", headers=pc).json()["devices"]] == ["PC bureau"]
+    assert client.post("/api/auth/logout-others", headers=pc).json()["deconnectes"] == 0
+    with SessionLocal() as db:
+        assert db.query(AuthSession).count() == rows                              # rien d'effacé
+    assert client.post("/api/auth/logout-others", headers=H).json()["deconnectes"] == 1   # code d'accès : plus aucune session
+    assert client.get("/api/auth/me", headers=pc).status_code == 401
+    auth._cache.clear()
+
+
 def test_ceiling_uses_owner_hanging_kit_not_suspente(client):
     from app import calc
     from app.agent import AgentSession

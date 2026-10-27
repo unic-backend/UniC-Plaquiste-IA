@@ -160,9 +160,19 @@ def auth_account(body: AccountIn, request: Request, db: Session = Depends(get_db
 
 
 @router.get("/auth/devices")
-def auth_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def auth_devices(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import auth
-    return {"devices": auth.devices(db), "account": auth.account_ready(db), "email": user.email if auth.account_ready(db) else ""}
+    return {"devices": auth.devices(db, request.headers.get("x-access-code", "")), "account": auth.account_ready(db),
+            "email": user.email if auth.account_ready(db) else ""}
+
+
+@router.post("/auth/logout-others")
+def auth_logout_others(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Bouton « Déconnecter les autres appareils » (Réglages › Mon compte) : seul cet appareil reste connecté."""
+    from app import auth
+    ended = auth.logout_others(db, request.headers.get("x-access-code", ""))
+    db.commit()
+    return {"ok": True, "deconnectes": ended}
 
 
 @router.get("/auth/me")
