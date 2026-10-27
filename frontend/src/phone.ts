@@ -120,6 +120,9 @@ export const wakeApi = {
   keepScreenOn: async (on: boolean): Promise<void> => { await Native.keepScreenOn({ on }); },
 };
 
+/** Écran ouvert par « Hey UniC », souvent par-dessus l'écran verrouillé (drapeau posé par main.tsx avant le premier affichage). */
+export const isWakeScreen = (): boolean => !!(window as unknown as { __unicWake?: boolean }).__unicWake;
+
 const PHONE_LOCK_KEY = "unic.phoneWhenLocked";
 /** Appeler / écrire un SMS par la voix téléphone verrouillé : NON par défaut (n'importe qui près du téléphone pourrait le dire). */
 export const getPhoneWhenLocked = (): boolean => { try { return localStorage.getItem(PHONE_LOCK_KEY) === "1"; } catch { return false; } };

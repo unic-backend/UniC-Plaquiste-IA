@@ -1,5 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lazyPage } from "./lazyPage";
+import { isWakeScreen, wakeApi } from "./phone";
 import ErrorBoundary from "./ErrorBoundary";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
@@ -2209,6 +2210,16 @@ export default function App() {
     try { if (sessionStorage.getItem("unic.boot")) return; sessionStorage.setItem("unic.boot", "1"); } catch { /* ignoré */ }
     net.mailPurge().catch(() => {});
   }, [user]);
+  // « Hey UniC » téléphone verrouillé : jamais d'écran de connexion ni de choix du serveur (un inconnu pourrait le changer)
+  if (isWakeScreen() && (gate === "connect" || gate === "error"))
+    return (
+      <div className="login">
+        <div className="login-card" role="alert">
+          <p className="hint">Déverrouille le téléphone et ouvre UniC pour te reconnecter.</p>
+          <button className="btn btn-line" onClick={() => wakeApi.finish().catch(() => {})}>Fermer</button>
+        </div>
+      </div>
+    );
   if (gate === "connect") return <Connexion onDone={check} />;
   if (gate === "error")
     return (
@@ -2223,6 +2234,14 @@ export default function App() {
       </div>
     );
   if (gate === "loading" || !user) return <div className="login">Chargement…</div>;
+  // « Hey UniC » par-dessus l'écran verrouillé : la voix SEULE. Ni menu ni autre page, même pendant le chargement ou après une
+  // erreur : sinon, un inconnu qui tient le téléphone verrouillé ouvrirait clients, devis et factures.
+  if (isWakeScreen())
+    return (
+      <ErrorBoundary full>
+        <Suspense fallback={<div className="login">Chargement…</div>}><UnicVoice /></Suspense>
+      </ErrorBoundary>
+    );
   return (
     <Shell user={user}>
       <ErrorBoundary resetKey={loc.pathname}>

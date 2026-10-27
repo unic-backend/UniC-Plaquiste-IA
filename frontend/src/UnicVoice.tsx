@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api, isNative, Stopped } from "./api";
 import * as I from "./Icons";
 import { listenOnce } from "./listen";
-import { audioOutputs, audioRoute, getPhoneWhenLocked, getReadWhenLocked, getVoiceOutput, notifApi, phone, setVoiceOutput, wakeApi, type VoiceOutput } from "./phone";
+import { audioOutputs, audioRoute, getPhoneWhenLocked, getReadWhenLocked, getVoiceOutput, isWakeScreen, notifApi, phone, setVoiceOutput, wakeApi, type VoiceOutput } from "./phone";
 import { looksLikePhoneTask, runNotifCommand, type Notif } from "./notifs";
 import { createSpeaker, ding, getSpeechIssue, getVocalRate, say as sayRate, stop as stopSpeech } from "./speech";
 import { END_RE, HANGUP_RE, runPhoneIntent, type Intent } from "./unicPhone";
@@ -36,7 +36,7 @@ export function UnicVoice() {
   const failed = useRef(false);   // erreur affichée : l'écran reste ouvert pour qu'on la lise
   const manual = useRef(false);   // arrêt par un toucher : on ne ferme pas
   const interp = useRef("");   // l'interprète a été demandé à voix haute : on y va quand la conversation se termine
-  const wake = useRef(!!(window as unknown as { __unicWake?: boolean }).__unicWake);   // ouvert par « Hey UniC »
+  const wake = useRef(isWakeScreen());   // ouvert par « Hey UniC »
   const speaking = useRef<SpeechPipeline | null>(null);   // réponse en cours de lecture : la toucher la coupe et UniC réécoute
 
   const refreshBt = () => { if (isNative) audioOutputs().then((o) => setBt(o.bluetooth || "")); };
