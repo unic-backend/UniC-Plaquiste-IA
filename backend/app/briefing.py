@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -206,11 +206,32 @@ def _health(db: Session) -> Section | None:
     return Section("Santé d'UniC", OK, " · ".join(parts) + ". (Paramètres → Atelier)")
 
 
+def _security(db: Session, now: datetime) -> Section | None:
+    """Connexions et essais bloqués des dernières 24 h : seulement s'il y en a. Une connexion inconnue se voit le matin même."""
+    from app.models import AuditLog
+    since = now - timedelta(hours=24)
+    rows = [r for r in db.query(AuditLog).filter(AuditLog.action.in_(("login", "login_blocked")))
+            .order_by(AuditLog.created_at.desc()).limit(50).all()
+            if r.created_at and (r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)) >= since]
+    if not rows:
+        return None
+    logins = [r for r in rows if r.action == "login"]
+    blocked = [r for r in rows if r.action == "login_blocked"]
+    parts = []
+    if logins:
+        parts.append(f"{len(logins)} connexion(s) à ton compte : " + ", ".join(sorted({r.entity_id for r in logins})[:5]))
+    if blocked:
+        parts.append(f"{len(blocked)} source(s) bloquée(s) après 8 mots de passe faux")
+    return Section("Sécurité", OK, " · ".join(parts) + ". Pas toi ? Réglages → Mon compte → Déconnecter les autres appareils, "
+                   "puis change ton mot de passe.")
+
+
 def compose(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     sections: list[Section] = []
     for fn in (lambda: _agenda(db), lambda: _leads(db), lambda: _tasks(db), lambda: _quotes(db), lambda: _invoices(db), lambda: _collections(db), lambda: _mail(db), _reviews,
-               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db), lambda: _agents(db), lambda: _health(db)):
+               lambda: _google_plan(db), lambda: _drafts(db), lambda: _memory(db), lambda: _agents(db), lambda: _health(db),
+               lambda: _security(db, now)):
         try:
             s = fn()
         except Exception as exc:   # une rubrique en panne n'arrête pas les autres

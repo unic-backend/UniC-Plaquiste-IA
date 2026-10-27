@@ -124,10 +124,14 @@ def auth_login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
         token = auth.login(db, body.email, body.password, body.device)
     except auth.AuthError as exc:
         _login_fails[ip] = recent + [_time.time()]
+        if len(recent) + 1 == 8:   # une seule trace par source bloquée (pas une ligne par essai : la base ne grossit pas sous attaque)
+            audit(db, None, "login_blocked", "ip", ip[:64], "8 mots de passe faux en 15 minutes : source bloquée 15 minutes.")
+            db.commit()
         if len(_login_fails) > 5000:   # mémoire bornée
             _login_fails.clear()
         raise HTTPException(401, str(exc))
     _login_fails.pop(ip, None)
+    audit(db, None, "login", "appareil", (body.device or "Appareil")[:64], f"IP {ip}")   # trace de chaque connexion (briefing, Journal)
     db.commit()
     return {"token": token}
 
@@ -155,6 +159,7 @@ def auth_account(body: AccountIn, request: Request, db: Session = Depends(get_db
         token = auth.login(db, body.email, body.password, "Cet appareil")
     except auth.AuthError as exc:
         raise HTTPException(400, str(exc))
+    audit(db, user.id, "account_change", "compte", "", "par le code d'accès" if by_code else "par le mot de passe actuel")
     db.commit()
     return {"ok": True, "token": token}
 
@@ -171,6 +176,7 @@ def auth_logout_others(request: Request, db: Session = Depends(get_db), user: Us
     """Bouton « Déconnecter les autres appareils » (Réglages › Mon compte) : seul cet appareil reste connecté."""
     from app import auth
     ended = auth.logout_others(db, request.headers.get("x-access-code", ""))
+    audit(db, user.id, "logout_others", "appareils", str(ended))
     db.commit()
     return {"ok": True, "deconnectes": ended}
 
