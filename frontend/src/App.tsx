@@ -1,6 +1,7 @@
 import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lazyPage } from "./lazyPage";
 import { isWakeScreen, wakeApi } from "./phone";
+import { AppLockCard, AppLockGate } from "./AppLock";
 import ErrorBoundary from "./ErrorBoundary";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
@@ -1756,7 +1757,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
     items: [
       { to: "/analyse", title: "Analyse & bilan", text: "Encaissé, signé, dépenses, marges, meilleurs clients, PDF" },
       { to: "/tresorerie", title: "Trésorerie", text: "L'argent des 90 prochains jours, alerte avant un trou" },
-      { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, paramètres de calcul" },
+      { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, calcul, mon compte, code de l'appli" },
       { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
       { to: "/clients", title: "Clients", text: "Fiches clients" },
     ],
@@ -1964,6 +1965,7 @@ function CompanyPage() {
           Enregistrer
         </button>
         <AccountCard />
+        <AppLockCard />
         <SignatureCard />
       </div>
     </div>
@@ -2293,6 +2295,7 @@ export default function App() {
       </Suspense>
       )}
       </ErrorBoundary>
+      <AppLockGate />
     </Shell>
   );
 }

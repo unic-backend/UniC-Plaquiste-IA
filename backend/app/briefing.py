@@ -222,8 +222,8 @@ def _security(db: Session, now: datetime) -> Section | None:
         parts.append(f"{len(logins)} connexion(s) à ton compte : " + ", ".join(sorted({r.entity_id for r in logins})[:5]))
     if blocked:
         parts.append(f"{len(blocked)} source(s) bloquée(s) après 8 mots de passe faux")
-    return Section("Sécurité", OK, " · ".join(parts) + ". Pas toi ? Réglages → Mon compte → Déconnecter les autres appareils, "
-                   "puis change ton mot de passe.")
+    return Section("Sécurité", OK, " · ".join(parts) + ". Pas toi ? Paramètres → Informations société → Mon compte → "
+                   "Déconnecter les autres appareils, puis change ton mot de passe.")
 
 
 def compose(db: Session, now: datetime | None = None) -> dict:

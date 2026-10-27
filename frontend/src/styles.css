@@ -481,6 +481,9 @@ input, textarea, select {
   box-shadow: var(--shadow);
 }
 .login-card h1 { font-family: var(--serif); margin: 8px 0 4px; }
+/* Code de l'appli : par-dessus tout (voix, aperçus, menus), l'appli reste montée derrière */
+.app-lock { position: fixed; inset: 0; z-index: 10000; min-height: 0; overflow-y: auto; }
+.app-lock-pin { font-size: 28px; letter-spacing: .5em; text-align: center; padding: 12px; }
 .login-card p { color: var(--muted); font-size: 14px; }
 .login-card form { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 .hint { font-size: 12px; color: var(--muted); background: var(--paper); padding: 10px; border-radius: 6px; }
