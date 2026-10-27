@@ -2928,6 +2928,38 @@ def test_logout_other_devices_keeps_only_this_one(client, monkeypatch):
     auth._cache.clear()
 
 
+def test_logins_and_blocked_attempts_are_traced_and_shown_in_the_briefing(client, monkeypatch):
+    """Chaque connexion laisse une trace (Journal) ; 8 mots de passe faux = UNE trace « bloqué », pas une ligne par essai ;
+    le briefing du matin montre les connexions et blocages des dernières 24 h."""
+    from app import api as api_mod, auth, briefing
+    from app.config import settings
+    from app.database import SessionLocal
+    from app.models import AuditLog
+    monkeypatch.setattr(settings, "unic_access_code", "code-render-123")
+    monkeypatch.setattr(api_mod, "_login_fails", {})
+    monkeypatch.setattr(auth.time, "sleep", lambda s: None)
+    H = {"X-Access-Code": "code-render-123"}
+    assert client.put("/api/auth/account", headers=H, json={"email": "moi@exemple.com", "password": "Trace-ok-77"}).status_code == 200
+
+    def count(action):
+        with SessionLocal() as db:
+            return db.query(AuditLog).filter(AuditLog.action == action).count()
+    logins, blocked = count("login"), count("login_blocked")
+    assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "Trace-ok-77", "device": "Tecno Spark"}).status_code == 200
+    assert count("login") == logins + 1
+    for _ in range(8):
+        assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "faux-faux"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": "moi@exemple.com", "password": "faux-faux"}).status_code == 429
+    assert count("login_blocked") == blocked + 1                                    # une seule trace, même sous attaque
+    with SessionLocal() as db:
+        sec = next(s for s in briefing.compose(db)["sections"] if s["title"] == "Sécurité")
+    assert "Tecno Spark" in sec["text"] and "bloquée" in sec["text"] and "Déconnecter les autres appareils" in sec["text"]
+    labels = {r["action"]: r["label"] for r in client.get("/api/journal", headers=H).json()}
+    assert labels["login"] == "Connexion à ton compte" and labels["login_blocked"] == "Essais de mot de passe bloqués"
+    assert labels["account_change"] == "E-mail / mot de passe changé"
+    auth._cache.clear()
+
+
 def test_ceiling_uses_owner_hanging_kit_not_suspente(client):
     from app import calc
     from app.agent import AgentSession
