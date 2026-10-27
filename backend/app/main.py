@@ -206,17 +206,18 @@ async def watch_requests(request: Request, call_next):
             integrity.record_request(status, (_t.perf_counter() - start) * 1000)
 
 
-# Politique de sécurité du contenu. Deux niveaux, volontairement :
-#
-# 1. APPLIQUÉE (protège tout de suite, ne peut rien casser) : aucun script en ligne n'existe dans l'interface
-#    (`index.html` ne charge que le module compilé), donc `script-src 'self'` bloque l'injection de script —
-#    la faille qui ferait le plus de dégâts. Rien n'utilise <object>/<embed>, ni <base>, ni de formulaire externe.
-# 2. MESURÉE (report-only) : la politique large (images, styles, connexions, cadres). Elle est envoyée sans être
-#    appliquée pour voir dans la console ce qui serait refusé, avant de l'imposer. L'interface pose en effet des
-#    styles à l'exécution (thème, animation de révélation) et un aperçu de site dans un cadre `srcdoc`.
-_CSP_ENFORCED = ("script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
-_CSP_REPORT_ONLY = ("default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
-                    "font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self'")
+# Politique de sécurité du contenu, APPLIQUÉE en entier :
+# - aucun script en ligne n'existe dans l'interface (`index.html` ne charge que le module compilé) : `script-src 'self'`
+#   bloque l'injection de script, la faille qui ferait le plus de dégâts ; ni <object>/<embed>, ni <base>, ni formulaire externe ;
+# - la politique large (connexions, images, médias, polices, cadres) a d'abord été MESURÉE en report-only, puis vérifiée
+#   page par page sans aucun refus (octobre 2026) avant d'être imposée : une page piégée ne peut plus envoyer de données
+#   ailleurs (`connect-src 'self'`) ni charger d'image d'un domaine inconnu. Seule exception : les images du site public
+#   (aperçu des réalisations, page Site). Les styles posés à l'exécution (thème, animations) restent permis.
+_CSP_SITE_IMAGES = "https://www.unicplaquiste.com"
+_CSP_ENFORCED = ("default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
+                 "frame-ancestors 'none'; connect-src 'self'; img-src 'self' data: blob: " + _CSP_SITE_IMAGES + "; "
+                 "media-src 'self' blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; "
+                 "frame-src 'self'")
 
 
 @app.middleware("http")
@@ -231,7 +232,6 @@ async def security_headers(request: Request, call_next):
         # La politique ne protège que les DOCUMENTS HTML (l'interface). Elle n'est pas posée sur les PDF, images, téléchargements et
         # réponses JSON : `object-src 'none'` sur un PDF peut empêcher le lecteur PDF du navigateur de l'afficher (non testable ici).
         h.setdefault("Content-Security-Policy", _CSP_ENFORCED)
-        h.setdefault("Content-Security-Policy-Report-Only", _CSP_REPORT_ONLY)
     if settings.unic_env == "production":
         h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp

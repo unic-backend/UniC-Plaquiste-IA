@@ -824,3 +824,13 @@ def test_unreadable_saved_secrets_are_reported_by_name_and_readable_ones_are_not
     db.commit()
     db.close()
     assert client.get("/api/selfcare").json()["secrets_unreadable"] == []
+
+
+def test_android_app_is_not_debuggable():
+    """APK du téléphone : ni débogable par câble USB (données et jeton lisibles), ni vue web inspectable."""
+    front = Path(__file__).resolve().parents[2] / "frontend"
+    gradle = (front / "android" / "app" / "build.gradle").read_text(encoding="utf-8")
+    debug_block = gradle.split("buildTypes", 1)[1].split("debug {", 1)[1].split("}", 1)[0]
+    assert "debuggable false" in debug_block
+    assert "webContentsDebuggingEnabled: false" in (front / "capacitor.config.ts").read_text(encoding="utf-8")
+    assert 'android:allowBackup="false"' in (front / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
