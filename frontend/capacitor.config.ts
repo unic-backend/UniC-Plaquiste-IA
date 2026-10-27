@@ -7,6 +7,7 @@ const config: CapacitorConfig = {
   android: {
     adjustMarginsForEdgeToEdge: "force",
     allowMixedContent: false, // https uniquement
+    webContentsDebuggingEnabled: false, // vue web non inspectable par câble (jeton de connexion protégé)
   },
   plugins: {
     Keyboard: { resize: "none" }, // la page est remontée par --kb (voir App.tsx), fiable en plein écran

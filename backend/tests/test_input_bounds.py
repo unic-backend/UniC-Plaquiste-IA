@@ -242,13 +242,16 @@ def test_content_security_policy_is_enforced(client):
     assert "frame-ancestors 'none'" in csp
 
 
-def test_wider_policy_is_only_measured(client):
-    """La politique large part en « report-only » : mesurée, pas appliquée (aucune régression d'affichage possible)."""
+def test_wider_policy_is_enforced_after_being_measured(client):
+    """La politique large, d'abord mesurée en « report-only », est maintenant APPLIQUÉE : une page piégée ne peut ni envoyer de
+    données ailleurs ni charger une image d'un domaine inconnu. Seule exception d'images : le site public (page Site)."""
     h = _html_headers(client)
-    report = h.get("content-security-policy-report-only")
-    assert report and "default-src 'self'" in report
-    assert "connect-src 'self'" in report
-    assert "blob:" in report          # aperçus de PDF, photos et lectures vocales
+    csp = h.get("content-security-policy")
+    assert "default-src 'self'" in csp and "connect-src 'self'" in csp
+    img = csp.split("img-src")[1].split(";")[0]
+    assert img.split() == ["'self'", "data:", "blob:", "https://www.unicplaquiste.com"]
+    assert "content-security-policy-report-only" not in h
+    assert "media-src 'self' blob:" in csp      # aperçus de PDF, photos et lectures vocales
 
 
 # ---------------------------------------------------------------- route d'API inconnue = 404, jamais 200

@@ -39,6 +39,9 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.unicdebug
+            // APK installée sur le téléphone du patron : NON débogable. Sinon, un câble USB suffit pour lire les données de
+            // l'appli (jeton de connexion) et inspecter sa vue web. La signature ne change pas : la mise à jour s'installe.
+            debuggable false
         }
         release {
             minifyEnabled false
