@@ -102,8 +102,7 @@ def token_valid(db: Session, token: str) -> bool:
     row = db.query(AuthSession).filter(AuthSession.token_hash == h).first()
     if row is None:
         return False
-    exp = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
-    if exp < datetime.now(timezone.utc):
+    if _expires(row) <= datetime.now(timezone.utc):
         return False
     # lecture seule : aucune écriture ici (une conversation en cours peut tenir l'écriture de la base)
     _cache[h] = time.time() + CACHE_SECONDS
@@ -129,6 +128,29 @@ def logout(db: Session, token: str) -> None:
         db.flush()
 
 
-def devices(db: Session) -> list[dict]:
-    return [{"device": r.device or "Appareil", "last_used": r.last_used.isoformat() if r.last_used else None}
-            for r in db.query(AuthSession).order_by(AuthSession.last_used.desc()).all()]
+def _expires(row: AuthSession) -> datetime:
+    return row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+
+
+def logout_others(db: Session, keep_token: str) -> int:
+    """« Déconnecter les autres appareils » (téléphone perdu, ordinateur prêté) : chaque autre session expire tout de suite,
+    seule celle de cet appareil reste. Rien n'est effacé : la session expirée ne vaut plus rien. Connecté par le code d'accès
+    (pas de session) : toutes les sessions expirent."""
+    keep = hashlib.sha256(keep_token.encode()).hexdigest() if keep_token and keep_token.startswith(TOKEN_PREFIX) else ""
+    now = datetime.now(timezone.utc)
+    ended = 0
+    for row in db.query(AuthSession).filter(AuthSession.token_hash != keep).all():
+        if _expires(row) > now:
+            row.expires_at = now
+            ended += 1
+    _cache.clear()   # aucun jeton gardé en cache ne survit ; celui de cet appareil est simplement relu en base
+    db.flush()
+    return ended
+
+
+def devices(db: Session, token: str = "") -> list[dict]:
+    """Appareils encore connectés (les sessions expirées n'en font plus partie) ; « current » = celui qui demande."""
+    h = hashlib.sha256(token.encode()).hexdigest() if token and token.startswith(TOKEN_PREFIX) else ""
+    now = datetime.now(timezone.utc)
+    return [{"device": r.device or "Appareil", "last_used": r.last_used.isoformat() if r.last_used else None, "current": r.token_hash == h}
+            for r in db.query(AuthSession).order_by(AuthSession.last_used.desc()).all() if _expires(r) > now]

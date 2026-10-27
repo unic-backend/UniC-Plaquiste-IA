@@ -1983,6 +1983,13 @@ function AccountCard() {
     try { await setAccount(email, pw, cur); setCur(""); setPw(""); setMsg("Enregistré. Les autres appareils devront se reconnecter."); load(); }
     catch (e: any) { setMsg(e?.message || "Erreur"); }
   };
+  const others = (d?.devices || []).filter((x: any) => !x.current).length;
+  const logoutOthers = async () => {
+    if (!window.confirm("Déconnecter tous les autres appareils ? Seul celui-ci restera connecté.")) return;
+    setMsg("");
+    try { const r = await api.logoutOthers(); setMsg(r.deconnectes ? `${r.deconnectes} appareil(s) déconnecté(s).` : "Aucun autre appareil connecté."); load(); }
+    catch (e: any) { setMsg(e?.message || "Erreur"); }
+  };
   return (
     <section className="card-box account-card">
       <h2>Mon compte</h2>
@@ -1996,8 +2003,11 @@ function AccountCard() {
       {msg && <p className="hint">{msg}</p>}
       {d?.devices?.length > 0 && (
         <ul className="backup-list">{d.devices.map((x: any, i: number) => (
-          <li key={i}><span>{x.device}</span><span>{x.last_used ? new Date(x.last_used).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}</span></li>
+          <li key={i}><span>{x.device}{x.current ? " (cet appareil)" : ""}</span><span>{x.last_used ? new Date(x.last_used).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""}</span></li>
         ))}</ul>
+      )}
+      {others > 0 && (
+        <button className="btn btn-line btn-small" type="button" onClick={logoutOthers}>Déconnecter les autres appareils</button>
       )}
     </section>
   );
