@@ -8,9 +8,13 @@
 - Jamais dans l'archive : la clé de chiffrement des secrets (.secret_key). Après une perte du disque, les connecteurs
   (Gmail, LinkedIn, site, voix) se reconnectent ; tout le reste revient.
 - Restauration : une sauvegarde de sécurité de l'état actuel est faite juste avant.
+- Copies hors serveur CHIFFRÉES si le patron choisit un mot de passe des sauvegardes (AES-256-GCM, clé tirée du mot de passe
+  par scrypt). Le mot de passe n'est jamais gardé : seule la clé, chiffrée par le coffre (`secrets_box`), hors des archives.
+  Gmail piraté = archives illisibles. Restaurer sur un nouveau serveur demande le mot de passe.
 """
 from __future__ import annotations
 
+import hashlib
 import imaplib
 import io
 import json
@@ -25,7 +29,10 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-from app import mailbox
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from app import mailbox, secrets_box
 from app.config import settings
 
 logger = logging.getLogger("unic.backup")
@@ -45,6 +52,10 @@ EVERY_HOURS = 24
 MAX_RESTORE_MB = 300        # fichier .zip envoyé pour une restauration
 MAX_DB_MB = 1024            # base décompressée (protège d'une « bombe » zip)
 MAX_BRAND_MB = 15
+ENC_MAGIC = b"UNICENC1"     # en-tête d'une copie chiffrée : MAGIC + sel (16) + nonce (12) + données chiffrées
+ENC_SUFFIX = ".enc"
+MIN_PASSWORD = 8
+NEED_PASSWORD = "Sauvegarde chiffrée : entre le mot de passe des sauvegardes."
 _lock = threading.Lock()
 
 
@@ -198,6 +209,84 @@ def path_of(name: str) -> Path:
     return p
 
 
+# ---------- chiffrement des copies hors serveur ----------
+
+def _key_file() -> Path:
+    return settings.backups_path / ".backup_key.json"   # jamais dans une archive (seuls la base et les fichiers y vont)
+
+
+def _derive(password: str, salt: bytes) -> bytes:
+    return hashlib.scrypt(password.encode(), salt=salt, n=2 ** 15, r=8, p=1, dklen=32, maxmem=64 * 1024 * 1024)
+
+
+def _stored() -> tuple[bytes, bytes] | None:
+    """(sel, clé) du mot de passe en cours ; None si le chiffrement est coupé ou la clé illisible."""
+    try:
+        data = json.loads(_key_file().read_text(encoding="utf-8"))
+        key = secrets_box.decrypt(data["key"])
+        return (bytes.fromhex(data["salt"]), bytes.fromhex(key)) if key else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def encryption_on() -> bool:
+    return _stored() is not None
+
+
+def set_password(password: str) -> None:
+    """Choisit (ou change) le mot de passe des sauvegardes. Les copies suivantes seront chiffrées avec ; les anciennes gardent
+    le leur. Le mot de passe lui-même n'est écrit nulle part."""
+    if len(password or "") < MIN_PASSWORD:
+        raise BackupError(f"Mot de passe trop court : {MIN_PASSWORD} caractères minimum.")
+    salt = os.urandom(16)
+    key = _derive(password, salt)
+    if _open(_seal_with(salt, key, b"essai"), password) != b"essai":   # contrôle avant de l'adopter
+        raise BackupError("Chiffrement impossible sur ce serveur : rien n'a été changé.")
+    path = _key_file()
+    path.write_text(json.dumps({"salt": salt.hex(), "key": secrets_box.encrypt(key.hex()),
+                                "at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def clear_password() -> None:
+    _key_file().unlink(missing_ok=True)
+
+
+def _seal_with(salt: bytes, key: bytes, data: bytes) -> bytes:
+    nonce = os.urandom(12)
+    return ENC_MAGIC + salt + nonce + AESGCM(key).encrypt(nonce, data, ENC_MAGIC)
+
+
+def seal(data: bytes) -> bytes:
+    """Chiffre une copie qui part hors du serveur (inchangée si aucun mot de passe n'est choisi)."""
+    st = _stored()
+    return _seal_with(*st, data) if st else data
+
+
+def _open(data: bytes, password: str = "") -> bytes:
+    """Déchiffre une copie (clé du serveur si c'est le même mot de passe, sinon le mot de passe donné). Non chiffrée : telle quelle."""
+    if not data.startswith(ENC_MAGIC):
+        return data
+    salt, nonce, body = data[8:24], data[24:36], data[36:]
+    keys = []
+    st = _stored()
+    if st and st[0] == salt:
+        keys.append(st[1])
+    if password:
+        keys.append(_derive(password, salt))
+    if not keys:
+        raise BackupError(NEED_PASSWORD)
+    for key in keys:
+        try:
+            return AESGCM(key).decrypt(nonce, body, ENC_MAGIC)
+        except InvalidTag:
+            continue
+    raise BackupError("Mot de passe des sauvegardes incorrect (ou fichier abîmé) : rien n'a été changé.")
+
+
 # ---------- hors serveur : boîte Gmail ----------
 
 def offsite_available() -> bool:
@@ -209,10 +298,13 @@ def push_offsite(name: str) -> dict:
     p = path_of(name)
     if p.stat().st_size > REMOTE_MAX_MB * 1024 * 1024:
         raise BackupError(f"Sauvegarde trop lourde pour la boîte mail (> {REMOTE_MAX_MB} Mo) : gardée sur le serveur.")
+    data = seal(p.read_bytes())
+    locked = data.startswith(ENC_MAGIC)
     _append(REMOTE_FOLDER, f"Sauvegarde UniC AI — {name[len(PREFIX):-4]}",
             "Sauvegarde automatique d'UniC AI (devis, factures, clients, mémoire).\n"
-            "Pour restaurer : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier .zip.\n"
-            "Ne supprime pas ce dossier.", name, p.read_bytes(), prune=True)
+            "Pour restaurer : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier.\n"
+            + ("Copie CHIFFRÉE : le mot de passe des sauvegardes sera demandé sur un nouveau serveur.\n" if locked else "")
+            + "Ne supprime pas ce dossier.", name + (ENC_SUFFIX if locked else ""), data, prune=True)
     when = datetime.now(timezone.utc).isoformat()
     _save_status(last_remote=when, last_remote_name=name, last_remote_error="")
     return {"ok": True, "folder": REMOTE_FOLDER, "at": when}
@@ -227,7 +319,7 @@ def _append(folder: str, subject: str, body: str, filename: str, data: bytes, pr
     msg["From"] = msg["To"] = user
     msg["Subject"] = subject
     msg.set_content(body)
-    msg.add_attachment(data, maintype="application", subtype="zip", filename=filename)
+    msg.add_attachment(data, maintype="application", subtype="octet-stream" if filename.endswith(ENC_SUFFIX) else "zip", filename=filename)
     try:
         with imaplib.IMAP4_SSL(host, port, timeout=60) as box:
             box.login(user, pwd)
@@ -298,10 +390,13 @@ def push_files_offsite() -> dict:
                 z.writestr("manifest.json", json.dumps({"app": "UniC AI", "kind": "files", "format": 1,
                                                         "created_at": datetime.now(timezone.utc).isoformat(),
                                                         "files": [rel for rel, _f, _m in batch]}, ensure_ascii=False))
+            data = seal(buf.getvalue())
+            locked = data.startswith(ENC_MAGIC)
             _append(FILES_FOLDER, f"Fichiers UniC AI — {stamp} ({len(batch)})",
                     "Fichiers d'UniC AI (plans, photos, documents reçus, fichiers créés) : nouveaux ou modifiés depuis le dépôt précédent.\n"
-                    "Pour les remettre : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier .zip.\n"
-                    "Ne supprime pas ce dossier : chaque message ne contient que ce qui a changé.", name, buf.getvalue())
+                    "Pour les remettre : Paramètres › Moteur & santé › Sauvegardes › Restaurer, et choisis ce fichier.\n"
+                    + ("Copie CHIFFRÉE : le mot de passe des sauvegardes sera demandé sur un nouveau serveur.\n" if locked else "")
+                    + "Ne supprime pas ce dossier : chaque message ne contient que ce qui a changé.", name + (ENC_SUFFIX if locked else ""), data)
             for rel, _f, mark in batch:
                 known[rel] = mark
             _index_file().write_text(json.dumps(known, ensure_ascii=False), encoding="utf-8")
@@ -350,8 +445,10 @@ def _prune_remote(box: imaplib.IMAP4_SSL) -> None:
 
 # ---------- restauration ----------
 
-def restore(data: bytes) -> dict:
-    """Remplace la base par celle d'une sauvegarde (après une sauvegarde de sécurité de l'état actuel)."""
+def restore(data: bytes, password: str = "") -> dict:
+    """Remplace la base par celle d'une sauvegarde (après une sauvegarde de sécurité de l'état actuel).
+    Copie chiffrée : déchiffrée d'abord (clé du serveur, ou mot de passe des sauvegardes sur un nouveau serveur)."""
+    data = _open(data, password)
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
         names = set(z.namelist())

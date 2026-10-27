@@ -2065,8 +2065,33 @@ function BackupCard() {
   const [d, setD] = useState<any>(null);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [locked, setLocked] = useState<File | null>(null);   // copie chiffrée venue d'un autre serveur : mot de passe demandé
+  const [rpw, setRpw] = useState("");
   const ref = useRef<HTMLInputElement>(null);
   const load = () => api.backups().then(setD).catch((e) => setMsg(e?.message || "Erreur"));
+  const restore = async (f: File, password = "") => {
+    setBusy("restore"); setMsg("");
+    try {
+      const r = await api.restoreBackup(f, password);
+      setLocked(null); setRpw("");
+      setMsg(r.kind === "files" ? `${r.restored_files} fichier(s) remis à leur place.`
+        : `Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`);
+      await load();
+    }
+    catch (err: any) {
+      const text = err?.message || "Erreur";
+      if (text.startsWith("Sauvegarde chiffrée")) setLocked(f);
+      setMsg(text);
+    } finally { setBusy(""); }
+  };
+  const encrypt = async () => {
+    if (pw !== pw2) { setMsg("Les deux mots de passe ne sont pas pareils."); return; }
+    setBusy("pw"); setMsg("");
+    try { await api.backupPassword(pw); setPw(""); setPw2(""); setMsg("Copies Gmail chiffrées à partir de maintenant. Garde ce mot de passe hors de l'appli."); await load(); }
+    catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
+  };
   useEffect(() => { load(); }, []);
   const st = d?.status || {};
   return (
@@ -2078,7 +2103,7 @@ function BackupCard() {
       {d && (
         <ul className="backup-status">
           <li>Dernière sauvegarde : <b>{when(st.last_local)}</b></li>
-          <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b></li>
+          <li>Copie dans Gmail : <b>{d.offsite ? when(st.last_remote) : "boîte mail non connectée"}</b>{d.offsite && <> · <b>{d.encrypted ? "chiffrée" : "non chiffrée"}</b></>}</li>
           {st.last_verified && !st.verify_error && <li>Relecture de contrôle : <b>✓ restaurable</b> ({when(st.last_verified)})</li>}
           {st.verify_error && <li className="error">Sauvegarde non restaurable : {st.verify_error}</li>}
           <li>Fichiers dans Gmail : <b>{d.offsite ? when(st.last_files) : "boîte mail non connectée"}</b></li>
@@ -2099,22 +2124,40 @@ function BackupCard() {
         }}>{busy === "save" ? "Sauvegarde…" : "Sauvegarder maintenant"}</button>
         <button className="btn btn-line" disabled={!!busy} onClick={() => ref.current?.click()}>Restaurer…</button>
       </div>
-      <input ref={ref} type="file" accept=".zip,application/zip" hidden onChange={async (e) => {
+      <input ref={ref} type="file" accept=".zip,.enc,application/zip,application/octet-stream" hidden onChange={async (e) => {
         const f = e.target.files?.[0]; e.target.value = "";
         if (!f) return;
         const files = f.name.includes("_Fichiers_");
         if (!window.confirm(files ? `Remettre les fichiers du paquet « ${f.name} » à leur place ? Les données ne changent pas.`
           : `Remplacer toutes les données par la sauvegarde « ${f.name} » ? Une copie de l'état actuel est faite avant.`)) return;
-        setBusy("restore"); setMsg("");
-        try {
-          const r = await api.restoreBackup(f);
-          setMsg(r.kind === "files" ? `${r.restored_files} fichier(s) remis à leur place.`
-            : `Restauré (sauvegarde du ${when(r.restored_from)}). Copie de sécurité : ${r.safety_backup}.`);
-          await load();
-        }
-        catch (err: any) { setMsg(err?.message || "Erreur"); } finally { setBusy(""); }
+        await restore(f);
       }} />
       {msg && <p className="hint">{msg}</p>}
+      {locked && (
+        <form className="form-grid" onSubmit={(e) => { e.preventDefault(); restore(locked, rpw); }}>
+          <label>Mot de passe des sauvegardes<input type="password" autoComplete="off" value={rpw} onChange={(e) => setRpw(e.target.value)} /></label>
+          <button className="btn btn-copper btn-small" type="submit" disabled={!!busy || !rpw}>Restaurer « {locked.name} »</button>
+        </form>
+      )}
+      <h3>Chiffrement des copies Gmail</h3>
+      <p className="hint">{d?.encrypted
+        ? "Actif : si ta boîte Gmail est piratée, les sauvegardes restent illisibles. Sur un nouveau serveur, le mot de passe des sauvegardes sera demandé : garde-le sur papier, hors de l'appli."
+        : "Avec un mot de passe, les copies déposées dans Gmail deviennent illisibles sans lui. Garde-le sur papier : sans lui, une copie chiffrée ne se restaure pas sur un nouveau serveur."}</p>
+      <div className="form-grid">
+        <label>{d?.encrypted ? "Nouveau mot de passe des sauvegardes" : "Mot de passe des sauvegardes"} (8 caractères ou plus)
+          <input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></label>
+        <label>Le même, encore<input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></label>
+        <div className="row-actions">
+          <button className="btn btn-copper btn-small" disabled={!!busy || pw.length < 8 || !pw2} onClick={encrypt}>
+            {busy === "pw" ? "Chiffrement…" : d?.encrypted ? "Changer le mot de passe" : "Chiffrer les copies Gmail"}</button>
+          {d?.encrypted && (
+            <button className="btn btn-line btn-small" disabled={!!busy} onClick={async () => {
+              if (!window.confirm("Arrêter le chiffrement ? Les prochaines copies Gmail seront lisibles par qui ouvre ta boîte. Celles déjà chiffrées le restent.")) return;
+              try { await api.backupPasswordOff(); setMsg("Chiffrement arrêté."); await load(); } catch (e: any) { setMsg(e?.message || "Erreur"); }
+            }}>Arrêter le chiffrement</button>
+          )}
+        </div>
+      </div>
       {d?.backups?.length > 0 && (
         <ul className="backup-list">
           {d.backups.slice(0, 5).map((b: any) => (
