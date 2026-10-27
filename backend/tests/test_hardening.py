@@ -834,3 +834,14 @@ def test_android_app_is_not_debuggable():
     assert "debuggable false" in debug_block
     assert "webContentsDebuggingEnabled: false" in (front / "capacitor.config.ts").read_text(encoding="utf-8")
     assert 'android:allowBackup="false"' in (front / "android" / "app" / "src" / "main" / "AndroidManifest.xml").read_text(encoding="utf-8")
+
+
+def test_hey_unic_on_locked_phone_shows_the_voice_only():
+    """« Hey UniC » s'ouvre par-dessus l'écran verrouillé : la page n'affiche que la voix (ni menu, ni connexion, ni choix du serveur),
+    même pendant le chargement ou après une erreur. Vérifié aussi dans un navigateur (drapeau __unicWake)."""
+    app_tsx = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
+    body = app_tsx.split("export default function App()", 1)[1]
+    wake_gate = body.index('if (isWakeScreen() && (gate === "connect" || gate === "error"))')
+    voice_only = body.index("if (isWakeScreen())\n")
+    assert wake_gate < body.index("<Connexion") and voice_only < body.index("<Shell user")
+    assert "<Shell" not in body[voice_only:body.index("<Shell user")] and "<UnicVoice />" in body[voice_only:body.index("<Shell user")]
