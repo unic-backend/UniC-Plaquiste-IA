@@ -667,6 +667,7 @@ def get_briefing(db: Session = Depends(get_db), user: User = Depends(get_current
 JOURNAL_LABELS = {
     "login": "Connexion à ton compte", "login_blocked": "Essais de mot de passe bloqués", "account_change": "E-mail / mot de passe changé",
     "logout_others": "Autres appareils déconnectés",
+    "backup_password": "Mot de passe des sauvegardes (chiffrement)",
     "agent_tool": "Outil appelé par l'IA", "mail_reply_draft": "Réponse e-mail préparée", "mail_approve": "E-mail approuvé",
     "mail_sent": "E-mail envoyé", "social_draft": "Brouillon de publication", "social_review": "Publication en revue",
     "social_approved": "Publication approuvée", "social_published": "Publication marquée publiée",

@@ -2381,7 +2381,35 @@ def higgsfield_disconnect(db: Session = Depends(get_db), user: User = Depends(ge
 def backups_list(user: User = Depends(require_roles("admin", "manager"))):
     from app import backup
     return {"backups": backup.list_local(), "status": backup.status(), "offsite": backup.offsite_available(),
-            "folder": backup.REMOTE_FOLDER, "files_folder": backup.FILES_FOLDER, "every_hours": backup.EVERY_HOURS}
+            "folder": backup.REMOTE_FOLDER, "files_folder": backup.FILES_FOLDER, "every_hours": backup.EVERY_HOURS,
+            "encrypted": backup.encryption_on()}
+
+
+class BackupPasswordIn(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+
+
+@router.put("/backups/password")
+def backups_password(body: BackupPasswordIn, db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Clic du patron : les copies déposées dans Gmail seront chiffrées avec ce mot de passe (jamais enregistré tel quel)."""
+    from app import backup
+    try:
+        backup.set_password(body.password)
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    audit(db, user.id, "backup_password", "sauvegardes", "on")
+    db.commit()
+    return {"encrypted": True}
+
+
+@router.delete("/backups/password")
+def backups_password_off(db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Clic du patron : les prochaines copies Gmail ne sont plus chiffrées (celles déjà déposées le restent)."""
+    from app import backup
+    backup.clear_password()
+    audit(db, user.id, "backup_password", "sauvegardes", "off")
+    db.commit()
+    return {"encrypted": False}
 
 
 @router.post("/backups")
@@ -2423,11 +2451,12 @@ def backups_download(name: str, user: User = Depends(require_roles("admin", "man
 
 
 @router.post("/backups/restore")
-async def backups_restore(file: UploadFile = File(...), user: User = Depends(require_roles("admin"))):
+async def backups_restore(file: UploadFile = File(...), password: str = Form("", max_length=200),
+                          user: User = Depends(require_roles("admin"))):
     from app import backup
     data = await read_upload(file, backup.MAX_RESTORE_MB, "Sauvegarde")
     try:
-        out = await run_in_threadpool(backup.restore, data)   # copie de la base : hors de la boucle
+        out = await run_in_threadpool(backup.restore, data, password)   # copie de la base : hors de la boucle
     except backup.BackupError as exc:
         raise HTTPException(400, str(exc))
     finally:
