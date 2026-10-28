@@ -511,6 +511,7 @@ export const api = {
   restoreBackup: (file: File, password = "") => { const fd = new FormData(); fd.append("file", file); if (password) fd.append("password", password); return request<any>("/api/backups/restore", { method: "POST", body: fd }); },
   backupPassword: (password: string) => request<{ encrypted: boolean }>("/api/backups/password", { method: "PUT", body: JSON.stringify({ password }) }),
   backupPasswordOff: () => request<{ encrypted: boolean }>("/api/backups/password", { method: "DELETE" }),
+  backupPurgePlain: () => request<{ trashed: number; to_trash: boolean; files_resent: number }>("/api/backups/purge-plain", { method: "POST" }),
   uploadSignature: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/signature", { method: "PUT", body: fd }); },
   deleteSignature: () => request<{ ok: boolean }>("/api/settings/signature", { method: "DELETE" }),
   uploadStamp: (file: File) => { const fd = new FormData(); fd.append("file", file); return request<{ ok: boolean }>("/api/settings/stamp", { method: "PUT", body: fd }); },

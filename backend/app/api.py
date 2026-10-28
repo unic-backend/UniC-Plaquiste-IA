@@ -2402,6 +2402,21 @@ def backups_password(body: BackupPasswordIn, db: Session = Depends(get_db), user
     return {"encrypted": True}
 
 
+@router.post("/backups/purge-plain")
+def backups_purge_plain(db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
+    """Clic du patron : renvoie tout chiffré, puis met à la corbeille Gmail les anciennes copies NON chiffrées."""
+    from app import backup
+    try:
+        out = backup.purge_plain_remote()
+    except backup.BackupError as exc:
+        raise HTTPException(400, str(exc))
+    finally:
+        release_memory()
+    audit(db, user.id, "backup_purge_plain", "sauvegardes", str(out["trashed"]))
+    db.commit()
+    return out
+
+
 @router.delete("/backups/password")
 def backups_password_off(db: Session = Depends(get_db), user: User = Depends(require_roles("admin"))):
     """Clic du patron : les prochaines copies Gmail ne sont plus chiffrées (celles déjà déposées le restent)."""
