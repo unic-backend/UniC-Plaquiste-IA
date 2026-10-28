@@ -2109,6 +2109,7 @@ function BackupCard() {
           <li>Fichiers dans Gmail : <b>{d.offsite ? when(st.last_files) : "boîte mail non connectée"}</b></li>
           {st.last_remote_error && <li className="error">{st.last_remote_error}</li>}
           {st.last_files_error && <li className="error">{st.last_files_error}</li>}
+          {st.last_purge && <li>Anciennes copies en clair supprimées : <b>{when(st.last_purge)}</b> ({st.last_purge_count})</li>}
           {st.files_heavy?.length > 0 && <li className="error">Trop lourds pour Gmail (gardés sur le serveur seulement) : {st.files_heavy.join(", ")}</li>}
           {st.last_error && <li className="error">{st.last_error}</li>}
         </ul>
@@ -2150,6 +2151,20 @@ function BackupCard() {
         <div className="row-actions">
           <button className="btn btn-copper btn-small" disabled={!!busy || pw.length < 8 || !pw2} onClick={encrypt}>
             {busy === "pw" ? "Chiffrement…" : d?.encrypted ? "Changer le mot de passe" : "Chiffrer les copies Gmail"}</button>
+          {d?.encrypted && d?.offsite && (
+            <button className="btn btn-line btn-small" disabled={!!busy} onClick={async () => {
+              if (!window.confirm("Supprimer les anciennes copies NON chiffrées de ta boîte Gmail ?\n\nD'abord, UniC renvoie une sauvegarde et tous tes fichiers, chiffrés. "
+                + "Ensuite seulement, les anciennes copies en clair vont dans la corbeille Gmail (vidée par Gmail après 30 jours). "
+                + "Tu perds l'historique d'avant le chiffrement. Les copies chiffrées et tes autres e-mails ne sont pas touchés.")) return;
+              setBusy("purge"); setMsg("Renvoi chiffré puis nettoyage… (peut prendre quelques minutes)");
+              try {
+                const r = await api.backupPurgePlain();
+                setMsg(`${r.trashed} ancienne(s) copie(s) en clair ${r.to_trash ? "mise(s) à la corbeille Gmail" : "retirée(s) des dossiers UniC"}. `
+                  + `Fichiers renvoyés chiffrés : ${r.files_resent}.`);
+                await load();
+              } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
+            }}>{busy === "purge" ? "Nettoyage…" : "Supprimer les anciennes copies non chiffrées"}</button>
+          )}
           {d?.encrypted && (
             <button className="btn btn-line btn-small" disabled={!!busy} onClick={async () => {
               if (!window.confirm("Arrêter le chiffrement ? Les prochaines copies Gmail seront lisibles par qui ouvre ta boîte. Celles déjà chiffrées le restent.")) return;

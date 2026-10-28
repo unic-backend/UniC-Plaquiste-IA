@@ -20,6 +20,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -441,6 +442,83 @@ def _prune_remote(box: imaplib.IMAP4_SSL) -> None:
     if old:
         box.expunge()
     box.close()
+
+
+# ---------- nettoyage des anciennes copies NON chiffrées (clic du patron) ----------
+
+_OUR_ATTACHMENT = re.compile(rb'"(UniC_Sauvegarde_[^"]+)"')
+_LIST_LINE = re.compile(r'\((?P<flags>[^)]*)\) (?:"[^"]*"|NIL) (?P<name>.+)$')
+
+
+def _special_folders(box: imaplib.IMAP4_SSL) -> dict:
+    """Dossiers spéciaux (RFC 6154) quelle que soit la langue : « \\All » (Tous les messages) et « \\Trash » (Corbeille)."""
+    typ, rows = box.list()
+    out: dict = {}
+    for raw in (rows or []) if typ == "OK" else []:
+        m = _LIST_LINE.match(raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw))
+        if m:
+            for flag in ("\\All", "\\Trash"):
+                if flag in m.group("flags").split():
+                    out[flag] = m.group("name").strip()
+    return out
+
+
+def _attachment_names(rows) -> list[tuple[bytes, list[str]]]:
+    """(uid, noms des pièces jointes UniC) d'une réponse FETCH BODYSTRUCTURE."""
+    out = []
+    for item in rows or []:
+        raw = b"".join(x for x in item if isinstance(x, bytes)) if isinstance(item, tuple) else (item or b"")
+        m = re.search(rb"UID (\d+)", raw)
+        if m:
+            out.append((m.group(1), sorted({n.decode(errors="replace") for n in _OUR_ATTACHMENT.findall(raw)})))
+    return out
+
+
+def purge_plain_remote() -> dict:
+    """Clic du patron, chiffrement en place. Dans cet ordre, et on s'arrête à la première erreur :
+    1) une sauvegarde chiffrée part maintenant ; 2) TOUS les fichiers repartent chiffrés (sinon les supprimer les perdrait) ;
+    3) les anciennes copies NON chiffrées vont à la corbeille. Seulement NOS messages : envoyés par la boîte elle-même, avec
+    notre objet et une pièce jointe UniC_Sauvegarde_….zip. Une copie chiffrée (.enc) n'est jamais touchée."""
+    if not encryption_on():
+        raise BackupError("Active d'abord le chiffrement des copies Gmail.")
+    host, port, user, pwd = mailbox._imap()
+    if not (host and user and pwd):
+        raise BackupError("Boîte mail non connectée : rien n'a été supprimé.")
+    push_offsite(create("avant nettoyage")["name"])            # une copie chiffrée existe AVANT toute suppression
+    _index_file().unlink(missing_ok=True)
+    files = push_files_offsite()                               # tous les fichiers, chiffrés
+    trashed = 0
+    try:
+        with imaplib.IMAP4_SSL(host, port, timeout=120) as box:
+            box.login(user, pwd)
+            special = _special_folders(box)
+            trash = special.get("\\Trash")
+            for folder in ([special["\\All"]] if "\\All" in special else [REMOTE_FOLDER, FILES_FOLDER]):
+                typ, _ = box.select(folder)
+                if typ != "OK":
+                    continue
+                plain: list[bytes] = []
+                for subject in ("Sauvegarde UniC AI", "Fichiers UniC AI"):
+                    typ, data = box.uid("SEARCH", None, "FROM", f'"{user}"', "SUBJECT", f'"{subject}"')
+                    uids = (data[0] or b"").split() if typ == "OK" and data else []
+                    for i in range(0, len(uids), 100):
+                        typ, rows = box.uid("FETCH", b",".join(uids[i:i + 100]), "(UID BODYSTRUCTURE)")
+                        for uid, names in _attachment_names(rows if typ == "OK" else []):
+                            if names and not any(n.endswith(ENC_SUFFIX) for n in names):
+                                plain.append(uid)
+                for i in range(0, len(plain), 100):
+                    ids = b",".join(plain[i:i + 100])
+                    if trash:
+                        box.uid("COPY", ids, trash)
+                    box.uid("STORE", ids, "+FLAGS", "(\\Deleted)")
+                box.expunge()
+                box.close()
+                trashed += len(plain)
+    except (imaplib.IMAP4.error, OSError) as exc:
+        raise BackupError(f"Boîte mail injoignable : {type(exc).__name__}. Copies chiffrées bien déposées ; relance le nettoyage.") from exc
+    when = datetime.now(timezone.utc).isoformat()
+    _save_status(last_purge=when, last_purge_count=trashed)
+    return {"ok": True, "trashed": trashed, "to_trash": bool(trash), "files_resent": files["files"], "at": when}
 
 
 # ---------- restauration ----------
