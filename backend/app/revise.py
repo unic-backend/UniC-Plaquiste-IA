@@ -187,7 +187,7 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
             if kind == "quote":
                 doc.client_label = ""
         elif kind == "quote":
-            doc.client_label = client_name.strip()
+            doc.client_label = svc.nom_propre(client_name)
         changes.append(f"client : {client_name.strip()}")
     _recompute(kind, doc, items)
     if kind != "dn":
