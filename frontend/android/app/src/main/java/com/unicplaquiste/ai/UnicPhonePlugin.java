@@ -372,6 +372,22 @@ public class UnicPhonePlugin extends Plugin {
         call.resolve();
     }
 
+    /** Code de l'appli actif : l'aperçu d'UniC dans les applis récentes est masqué (Android 13+). Les captures restent permises. */
+    @PluginMethod
+    public void hideInRecents(PluginCall call) {
+        final boolean hide = Boolean.TRUE.equals(call.getBoolean("hide", false));
+        final boolean supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+        final Activity act = getActivity();
+        if (act != null && supported) {
+            act.runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) act.setRecentsScreenshotEnabled(!hide);
+            });
+        }
+        JSObject res = new JSObject();
+        res.put("supported", supported);
+        call.resolve(res);
+    }
+
     @PluginMethod
     public void openOverlaySettings(PluginCall call) {
         openSettings(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getContext().getPackageName())), call);

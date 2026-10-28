@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import * as lock from "./codeLock";
 import { signOut } from "./api";
 import { notify } from "./feedback";
+import { hideInRecents } from "./phone";
 
 const secs = (ms: number) => (ms >= 60_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
 
@@ -61,6 +62,7 @@ function LockScreen({ onOpen }: { onOpen: () => void }) {
 export function AppLockGate() {
   const [locked, setLocked] = useState(() => lock.enabled());
   const hiddenAt = useRef<number | null>(null);
+  useEffect(() => { hideInRecents(lock.enabled()); }, []);   // code actif : pas d'aperçu des clients et factures dans les applis récentes
   useEffect(() => {
     const onVisibility = () => {
       const c = lock.config();
@@ -91,7 +93,7 @@ export function AppLockCard() {
   const activate = async () => {
     if (pin !== again) { notify("Les deux codes ne sont pas pareils."); return; }
     setBusy(true);
-    try { await lock.setPin(pin, idle); setOn(true); setPin(""); setAgain(""); notify("✓ Code activé sur cet appareil"); }
+    try { await lock.setPin(pin, idle); setOn(true); setPin(""); setAgain(""); hideInRecents(true); notify("✓ Code activé sur cet appareil"); }
     catch (e: any) { notify(e?.message || "Erreur"); }
     finally { setBusy(false); }
   };
@@ -103,13 +105,15 @@ export function AppLockCard() {
     if (!r.ok) { notify(r.waitMs ? `Trop d'essais. Réessaie dans ${secs(r.waitMs)}.` : "Code incorrect."); return; }
     lock.clear();
     setOn(false);
+    hideInRecents(false);
     notify("✓ Code retiré");
   };
   return (
     <section className="card-box account-card">
       <h2>Code de l'appli</h2>
       <p className="hint">Facultatif. Demandé à l'ouverture d'UniC sur cet appareil : quelqu'un qui prend ton téléphone déverrouillé ne voit
-        ni tes clients ni tes factures. Code oublié : tu te reconnectes avec ton mot de passe.</p>
+        ni tes clients ni tes factures. Sur Android 13 et plus, l'aperçu d'UniC dans les applis récentes est aussi masqué.
+        Code oublié : tu te reconnectes avec ton mot de passe.</p>
       {!lock.supported() ? <p className="hint">Indisponible sur cet appareil.</p> : (
         <div className="form-grid">
           <label>Redemander le code
