@@ -897,16 +897,19 @@ def _openings(text: str) -> list[Opening]:
     t = text.lower()
     openings: list[Opening] = []
     size = r"(\d+(?:[.,]\d+)?)\s*(?:m\b)?\s*(?:x|×|sur|par)\s*(\d+(?:[.,]\d+)?)"
-    for kind, word in (("door", r"(?:portes?|doors?)"), ("window", r"(?:fen[eê]tres?|windows?)")):
+    door_w = r"(?:portes?|doors?)(?:\s+(?:standard|simple|double|pleine|isoplane|int[ée]rieure|vitr[ée]e))?"
+    window_w = r"(?:fen[eê]tres?|windows?|baies?(?:\s+vitr[ée]es?)?)"   # baie vitrée : une ouverture sans renfort de porte
+    for kind, word in (("door", door_w), ("window", window_w)):
         for m in re.finditer(rf"(?:\b{_COUNT}\s+)?{word}\s+(?:de\s+|d'|d’)?{size}", t):
             n = _count(m.group(1)) if m.group(1) else 1
             openings.append(Opening(kind, _size(m.group(2)), _size(m.group(3)), n))
-    door_q = re.search(rf"\b{_COUNT}\s*(?:portes?|doors?)\b", t)
-    win_q = re.search(rf"\b{_COUNT}\s*(?:fen[eê]tres?|windows?)\b", t)
+    # « 2 portes » ; « avec porte », « et fenêtre » sans nombre = une
+    door_q = re.search(rf"\b{_COUNT}\s*(?:portes?|doors?)\b|\b(?P<one>avec|et|plus)\s+(?:la\s+)?portes?\b", t)
+    win_q = re.search(rf"\b{_COUNT}\s*(?:fen[eê]tres?|windows?|baies?)\b|\b(?P<one>avec|et|plus)\s+(?:la\s+|une\s+)?(?:fen[eê]tres?|baies?)\b", t)
     if door_q and not any(o.kind == "door" for o in openings):
-        openings.append(Opening("door", 0.90, 2.04, _count(door_q.group(1)), assumed_size=True))
+        openings.append(Opening("door", 0.90, 2.04, 1 if door_q.group("one") else _count(door_q.group(1)), assumed_size=True))
     if win_q and not any(o.kind == "window" for o in openings):
-        openings.append(Opening("window", 1.20, 1.20, _count(win_q.group(1)), assumed_size=True))
+        openings.append(Opening("window", 1.20, 1.20, 1 if win_q.group("one") else _count(win_q.group(1)), assumed_size=True))
     return openings
 
 
@@ -951,15 +954,24 @@ def _zones(t: str) -> list[tuple[str, Any, int]]:
     return [z for z in out if not (z[0] == "area" and any(abs(z[1] - p) <= 0.01 * p for p in pairs))]
 
 
+def _no_openings(text: str) -> bool | None:
+    """« sans ouverture », « ni porte ni fenêtre », « aucune ouverture » : rien à déduire, et c'est su (plus « à renseigner »)."""
+    t = text.lower()
+    if re.search(r"sans\s+(?:aucune\s+)?ouvertures?|aucune\s+(?:ouverture|porte\s+ni\s+fen[eê]tre)|pas\s+d['’]\s*ouvertures?|"
+                 r"(?:sans|ni)\s+portes?\s+ni\s+fen[eê]tres?", t):
+        return True
+    return None
+
+
 def detect_calc_kind(text: str) -> str | None:
     t = normalize_dimensions(text)   # « 100 mètres carrés » = « 100 m² » : même ouvrage à préciser
     if re.search(r"faux[\s-]?plafond|suspended ceiling|plafond suspendu", t):
         return "ceiling"
-    if re.search(r"peinture|paint|peintur", t):
+    if re.search(r"peinture|paint|peintur|\b(?:re)?peind|\bpeins\b", t):   # « peindre 60 m² » : de la peinture, pas « plafond ou cloison ? »
         return "paint"
     if re.search(r"plafond", t) and not re.search(r"cloison|doublage", t):
         return "ceiling"
-    if re.search(r"enduit|pl[aâ]tre(?!rie)|plaster(?!board)", t) and not re.search(
+    if re.search(r"enduit|pl[aâ]tre(?!rie)|plaster(?!board)|ratissage|lissage", t) and not re.search(
         r"plaque|placo|ba13|cloison", t
     ):
         return "plaster"
@@ -1060,7 +1072,7 @@ def _calculate_zones(kind: str, zones: list[tuple[str, Any, int]], t: str, cfg: 
                                         "je préfère ne pas calculer.",
                           missing=["Longueur et hauteur de chaque cloison en mètres."],
                           next_step="Indiquez par exemple : 2 cloisons de 4 x 2,5 m.")
-    res = calculate_partition(*walls[0], sides=_sides(t), openings=_openings(t), walls=walls, waste=waste,
+    res = calculate_partition(*walls[0], sides=_sides(t), openings=_openings(t), openings_known=_no_openings(t), walls=walls, waste=waste,
                               board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
                               stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"))
     if assumed_h:
@@ -1124,7 +1136,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 return calculate_partition_from_area(area_m, sides, sides_known=sides_known, waste=waste, board_width=cfg["board_width_m"],
                                                      board_height=cfg["board_height_m"], fixing_values=cfg.get("fixings"))
             H = parse_number(height.group(1))
-            res = calculate_partition(round_qty(area_m / H, 3), H, sides=sides, openings=_openings(t), waste=waste,
+            res = calculate_partition(round_qty(area_m / H, 3), H, sides=sides, openings=_openings(t), openings_known=_no_openings(t), waste=waste,
                                       board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
                                       stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"), sides_known=sides_known)
             res.assumptions.insert(0, f"Longueur déduite : {area_m:g} m² (une face) / {H:g} m de haut = {area_m / H:.2f} m, "
@@ -1160,7 +1172,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 next_step="Indiquez par exemple : cloison 12 x 2,5 m.",
             )
         res = calculate_partition(
-            L, H, sides=_sides(t), openings=_openings(t), waste=waste,
+            L, H, sides=_sides(t), openings=_openings(t), openings_known=_no_openings(t), waste=waste,
             board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
             stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"),
         )
@@ -1217,9 +1229,22 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         if cm:
             coats = int(cm.group(1)) if cm.group(1).isdigit() else words[cm.group(1)]
         note = None
+        rooms = re.search(r"\bmurs?\b|pi[eè]ce|salon|chambre|cuisine|bureau|couloir", t)
+        several = [z for z in _zones(t) if z[0] != "length"]
+        if sum(n for *_, n in several) > 1:   # « 20 m² et 15 m² », « 3 murs de 4 x 2,7 », « salon 5x4 et chambre 4x3 hauteur 2,7 »
+            h = parse_number(height.group(1)) if height and rooms else None
+            terms = []
+            for k, v, n in several:
+                one = 2 * (v[0] + v[1]) * h if k == "pair" and h else v[0] * v[1] if k == "pair" else v
+                what = f"2 × ({v[0]:g} + {v[1]:g}) × {h:g}" if k == "pair" and h else f"{v[0]:g} × {v[1]:g}" if k == "pair" else f"{v:g}"
+                terms.append((n, one, what))
+            area_m = round_qty(sum(n * one for n, one, _ in terms), 2)
+            from_pair = False
+            note = ("Surface = " + " + ".join(f"{n} × {what}" if n > 1 else what for n, _, what in terms) + f" = {area_m:g} m²"
+                    + (" (murs des pièces ; portes et fenêtres non déduites)." if h else "."))
         if from_pair:
             a, b = pair
-            if height and re.search(r"\bmurs?\b|pi[eè]ce|salon|chambre|cuisine|bureau|couloir", t):
+            if height and rooms:
                 h = parse_number(height.group(1))
                 area_m = round_qty(2 * (a + b) * h, 2)
                 note = (f"Surface = murs de la pièce : 2 × ({a:g} + {b:g}) × {h:g} = {area_m:g} m². "
@@ -1247,9 +1272,18 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 )
         th = 10.0
         tm = re.search(rf"(?:[ée]paisseur)\s*[:=]?\s*({_NUM})", t)
+        skim = re.search(r"lissage|ratissage|finition|skim", t) and not tm
+        passes = re.search(r"(\d+|une|un|deux|trois|quatre)\s*(?:passes?|couches?)", t)
+        n_pass = _count(passes.group(1)) if passes else 2
         if tm:
             th = parse_number(tm.group(1))
-        return calculate_plaster(area_m, th, waste=max(waste, 0.10))
+        elif skim:   # lissage : une pellicule par passe, pas 10 mm d'enduit (avant : 330 kg pour 30 m²)
+            th = float(n_pass)
+        result = calculate_plaster(area_m, th, waste=max(waste, 0.10))
+        if skim:
+            result.assumptions.insert(0, f"Lissage : ≈ 1 mm par passe, {n_pass} passe(s)" + ("" if passes else " (non précisé)")
+                                         + " — ordre de grandeur, à confirmer avec la fiche du produit.")
+        return result
 
     if kind == "a_preciser":
         what = f"{area_m:g} m²" if area_m is not None else (f"{pair[0]:g} × {pair[1]:g} m" if pair else "la surface")
