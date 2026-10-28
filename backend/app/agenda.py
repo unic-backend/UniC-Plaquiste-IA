@@ -1,6 +1,8 @@
 """Agenda des chantiers : visites, métrés, poses, livraisons, rendez-vous. Conflits d'horaires signalés, jamais cachés."""
 from __future__ import annotations
 
+import re
+
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -26,8 +28,12 @@ def _aware(d: datetime | None) -> datetime | None:
 
 
 def parse_dt(value: str) -> datetime:
-    """« 2026-10-06 09:30 », « 2026-10-06T09:30 » ou ISO complet."""
-    v = (value or "").strip().replace(" ", "T", 1)
+    """« 2026-10-06 09:30 », « 2026-10-06T09:30 » ou ISO complet ; tolère aussi « 06/10/2026 », « 9h30 », « 10h » (écritures
+    courantes au Sénégal) pour qu'un rendez-vous ne soit jamais refusé pour une question de format."""
+    v = re.sub(r"\s+", " ", (value or "").strip())
+    v = re.sub(r"^(\d{1,2})/(\d{1,2})/(\d{4})", lambda m: f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}", v)
+    v = re.sub(r"(?<=[ T])(\d{1,2})\s*h\s*(\d{2})?\b", lambda m: f"{int(m.group(1)):02d}:{m.group(2) or '00'}", v)
+    v = v.replace(" ", "T", 1)
     try:
         d = datetime.fromisoformat(v)
     except ValueError as exc:

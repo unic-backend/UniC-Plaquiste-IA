@@ -1119,6 +1119,8 @@ def handle_turn(
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT          # texte fixe : dans la partie en cache
                     msgs[1]["content"] += agent.availability_note(db)   # varie (connecteurs branchés) : hors cache
+                else:   # téléphone verrouillé, moteur de secours : la date n'est pas une donnée de l'entreprise, l'IA la reçoit toujours
+                    msgs[1]["content"] += "\n" + agent.today_line()
                 voice_kw: dict = {}
                 if voice and not deep:   # vitesse : réponses courtes, modèle rapide pour la conversation, effort réduit pour le reste
                     if settings.anthropic_voice_model and not VOICE_HEAVY_RE.search(topic):

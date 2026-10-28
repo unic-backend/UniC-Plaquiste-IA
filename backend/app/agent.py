@@ -2001,17 +2001,22 @@ class AgentSession:
                          f"Les {min(len(found), SHOW_CARDS)} premiers s'affichent en cartes cliquables dans la conversation.")}
 
 
-def availability_note(db=None) -> str:
-    """État RÉEL des connecteurs (pour que l'IA ne promette rien d'impossible ni ne nie ce qui marche)."""
+def today_line() -> str:
+    """Jour et heure de Dakar (= UTC, pas d'heure d'été) en toutes lettres. Le modèle ne connaît pas la date : sans cette ligne il
+    devine « demain », « jeudi prochain », « quel jour sommes-nous ? »."""
     from datetime import datetime, timezone
-    from app.capabilities import _connectors
-    c = _connectors(db)
-    now = datetime.now(timezone.utc)   # Dakar = UTC
+    now = datetime.now(timezone.utc)
     jours = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
     mois = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
-    today = f"{jours[now.weekday()]} {now.day} {mois[now.month - 1]} {now.year}, {now:%H:%M} (heure de Dakar), soit {now:%Y-%m-%d}"
+    return f"AUJOURD'HUI : {jours[now.weekday()]} {now.day} {mois[now.month - 1]} {now.year}, {now:%H:%M} (heure de Dakar), soit {now:%Y-%m-%d}."
+
+
+def availability_note(db=None) -> str:
+    """État RÉEL des connecteurs (pour que l'IA ne promette rien d'impossible ni ne nie ce qui marche)."""
+    from app.capabilities import _connectors
+    c = _connectors(db)
     on = lambda k: "ACTIF" if c.get(k) else "NON CONNECTÉ"
-    return (f"\nAUJOURD'HUI : {today}. "
+    return (f"\n{today_line()} "
             f"\nÉTAT RÉEL DES CONNECTEURS : courrier {on('email')} ; fiche Google {on('gbp')} ; site web {on('website')} ; "
             f"LinkedIn {on('linkedin')} ; Instagram {on('instagram')} ; voix ElevenLabs {on('voice')} ; OCR {on('ocr')} ; vision (photos, plans) {on('vision')}. "
             "Publication : jamais sans le clic d'approbation du patron (LinkedIn publie seulement après son accord) ; TikTok, WhatsApp et les autres réseaux : "
