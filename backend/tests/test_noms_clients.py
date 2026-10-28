@@ -1,6 +1,7 @@
 """Noms de clients écrits comme le patron le veut : « Moussa Ba », jamais « moussa ba ». Un nom tapé ou dicté en minuscules est
-repris (avant : le devis sortait sans client, numéro en « XXX ») et mis en forme sur le devis, la fiche client et le bon ; un nom
-déjà écrit en majuscules (« FAST GROUP ») reste tel quel ; un mot courant (« pour le salon », « pour demain ») n'est jamais un client."""
+repris (avant : le devis sortait sans client, numéro en « XXX ») et mis en forme sur le devis, la fiche client et le bon ;
+« PAPE DIOP » devient « Pape Diop » ; une société (« FAST GROUP ») ou un sigle (« CSE ») garde ses majuscules ; un mot courant
+(« pour le salon », « pour demain ») n'est jamais un client."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,12 +22,22 @@ from app.services import nom_propre
     ("el hadji malick sy", "El Hadji Malick Sy"),
     ("jean de la fontaine", "Jean de la Fontaine"),
     ("Ousmane Diop", "Ousmane Diop"),
-    ("FAST GROUP", "FAST GROUP"),             # écrit en majuscules par le patron : gardé
+    ("PAPE DIOP", "Pape Diop"),               # une personne écrite en majuscules : « Pape Diop » (choix du patron)
+    ("IBRAHIM-SALIF-SIDY-OMAR DIOP", "Ibrahim-Salif-Sidy-Omar Diop"),
+    ("Awa NDIAYE", "Awa Ndiaye"),
+    ("FAST GROUP", "FAST GROUP"),             # société : majuscules gardées
+    ("SARL BTP plus", "SARL BTP Plus"),
+    ("CSE", "CSE"),                           # sigle seul : gardé
     ("McDonald", "McDonald"),
     ("", ""),
 ])
 def test_nom_propre(raw, nice):
     assert nom_propre(raw) == nice
+
+
+def test_un_fournisseur_garde_son_sigle():
+    assert nom_propre("SOCOCIM CIMENTS", person=False) == "SOCOCIM CIMENTS"
+    assert nom_propre("quincaillerie ndiaye", person=False) == "Quincaillerie Ndiaye"
 
 
 @pytest.mark.parametrize("text, name", [
@@ -38,6 +49,7 @@ def test_nom_propre(raw, nice):
     ("devis pour Ousmane Diop", "Ousmane Diop"),
     ("fais le devis cloison 4x2,5 pour ibrahim-salif-sidy-omar diop", "Ibrahim-Salif-Sidy-Omar Diop"),
     ("devis pour pape diop", "Pape Diop"),
+    ("devis pour PAPE DIOP", "Pape Diop"),
     ("devis pour le salon de moussa", None),   # jamais un mot courant
     ("fais le devis pour demain", None),
     ("devis pour la villa", None),
