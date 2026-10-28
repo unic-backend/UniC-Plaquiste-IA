@@ -1772,3 +1772,43 @@ input[type="range"] { accent-color: var(--green); }
   .tr-charge { grid-template-columns: 1fr auto auto; }
   .tr-charge > input:first-child { grid-column: 1 / -1; }
 }
+
+/* ============================================================
+   Finition « App Store » (28/10/2026) : plus net et plus cohérent, sans changer l'identité (verre, gras, vert/cuivre).
+   Règles de faible poids (:where) placées en dernier : les styles propres à un écran (conversation, menu) gardent la main.
+   ============================================================ */
+/* 1. Pas de carte dans la carte : un formulaire posé dans une carte en verre perd son propre cadre. */
+.card-box .form-grid { background: transparent; border: 0; padding: 0; margin: 12px 0 0; box-shadow: none; }
+
+/* 2. Libellés lisibles : phrase normale (fini les longues phrases en MAJUSCULES espacées), même style dans toutes les cartes. */
+.card-box label { text-transform: none; letter-spacing: 0; font-size: 13px; opacity: .8; }
+label:has(> input[type=checkbox]), label:has(> input[type=radio]) {
+  flex-direction: row; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--ink); opacity: 1;
+}
+input[type=checkbox], input[type=radio] { accent-color: var(--green-2); width: 18px; height: 18px; flex: none; margin: 1px 0 0; }
+
+/* 3. Champs : plus grands, coins arrondis comme les cartes, bien visibles en mode nuit, anneau cuivre au focus. */
+input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color])), textarea, select {
+  border-radius: 12px; padding: 10px 12px; font-size: 15px; min-height: 42px; transition: border-color .15s, box-shadow .15s;
+}
+:where(:root[data-theme="dark"]) input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color])),
+:where(:root[data-theme="dark"]) textarea, :where(:root[data-theme="dark"]) select {
+  background: rgba(0, 0, 0, .22); border-color: rgba(255, 255, 255, .14);
+}
+.page :where(input, textarea, select):focus-visible {
+  outline: none; border-color: var(--copper); box-shadow: 0 0 0 3px color-mix(in srgb, var(--copper) 26%, transparent);
+}
+.page :where(input, textarea, select)::placeholder { color: var(--muted); opacity: .75; }
+
+/* 4. Au doigt : boutons d'au moins 44 px (38 px pour les petits), comme les applis du Play Store et de l'App Store. */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .btn.btn-small, .btn-small { min-height: 38px; padding: 8px 14px; font-size: 13px; }
+}
+/* Clavier (ordinateur) : on voit toujours où l'on est. */
+:where(button, a, summary, [role=button]):focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; }
+
+/* 5. Aides dans les cartes : voile léger au lieu d'un trou sombre, texte aéré. */
+.card-box p.hint, .card-box div.hint {
+  background: color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 12px; padding: 10px 12px; line-height: 1.45;
+}
