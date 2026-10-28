@@ -3273,6 +3273,16 @@ def test_locked_phone_gets_no_business_data_and_no_tools(client, claude):
     assert "TÉLÉPHONE VERROUILLÉ" not in _sysstr(fake.calls[-1][1])       # déverrouillé : comportement normal
 
 
+def test_the_ai_always_knows_today_even_on_a_locked_phone(client, claude):
+    """« Hey UniC, on est quel jour ? » téléphone verrouillé (sans outils) : sans la date, le modèle la devinait."""
+    import re as _re
+    fake = claude(lambda kind, kw: _resp("Nous sommes mercredi."))
+    for body in ({"message": "on est quel jour ?", "voice": True, "locked": True}, {"message": "on est quel jour ?"}):
+        client.post("/api/chat", json=body)
+        system = _sysstr(fake.calls[-1][1])
+        assert system.count("AUJOURD'HUI :") == 1 and _re.search(r"AUJOURD'HUI : \w+ \d+ \w+ 20\d\d, \d\d:\d\d \(heure de Dakar\)", system)
+
+
 def test_voice_mode_is_fast_light_chat_uses_the_fast_model_business_keeps_the_regular_one(client, claude):
     from app.config import settings
     fake = claude(lambda kind, kw: _resp("Ça va très bien, merci."))
