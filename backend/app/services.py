@@ -206,14 +206,23 @@ def add_with_unique_number(db: Session, obj, next_number) -> None:
 
 
 _PARTICLES = {"de", "du", "des", "la", "le", "van", "von", "da", "di", "dos", "das"}
+# une société garde ses majuscules (« FAST GROUP », « SARL BTP ») : seule une personne passe de « PAPE DIOP » à « Pape Diop »
+_COMPANY = re.compile(r"\b(?:sarl|sa|sas|sasu|suarl|gie|ets|éts|ste|sté|soci[eé]t[eé]|entreprises?|group|groupe|btp|constructions?|"
+                      r"services?|immobili[eè]re?|immo|holding|agence|cabinet|company|co|international|industries?|trading|"
+                      r"consulting|s[eé]n[eé]gal|afrique|africa|corp|ltd|inc)\b|&", re.I)
 
 
-def nom_propre(name: str | None) -> str:
-    """Nom écrit comme sur une pièce d'identité : « moussa ba » → « Moussa Ba », « mame diarra n'diaye » → « Mame Diarra N'Diaye »,
-    « abdou-karim fall » → « Abdou-Karim Fall ». Seules les initiales en minuscule changent : « FAST GROUP », « SARL BTP » ou
-    « McDonald » restent comme le patron les a écrits."""
+def nom_propre(name: str | None, *, person: bool = True) -> str:
+    """Nom écrit comme sur une pièce d'identité : chaque prénom et le nom commencent par une majuscule. « moussa ba » et « PAPE DIOP »
+    → « Moussa Ba », « Pape Diop » ; « ibrahim-salif-sidy-omar diop » → « Ibrahim-Salif-Sidy-Omar Diop » ; « mame diarra n'diaye »
+    → « Mame Diarra N'Diaye ». Une société (« FAST GROUP », « SARL BTP »), un sigle seul (« CSE ») ou un fournisseur
+    (`person=False`) garde ses majuscules ; « McDonald » reste tel quel."""
+    words = (name or "").split()
+    shout = person and len(words) >= 2 and not _COMPANY.search(name or "")   # « PAPE DIOP » : une personne écrite en majuscules
     out = []
-    for i, w in enumerate((name or "").split()):
+    for i, w in enumerate(words):
+        if shout and w.isupper():
+            w = w.lower()
         if i and w.lower() in _PARTICLES:   # « Jean de la Fontaine »
             out.append(w)
         else:
