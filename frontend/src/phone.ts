@@ -25,6 +25,7 @@ const Native = registerPlugin<{
   pauseWake(): Promise<void>;
   resumeWake(): Promise<void>;
   keepScreenOn(o: { on: boolean }): Promise<void>;
+  hideInRecents(o: { hide: boolean }): Promise<{ supported: boolean }>;
   endCall(): Promise<{ ended: boolean }>;
   audioRoute(o: { on: boolean }): Promise<{ bluetooth: boolean }>;
   listen(o: { language: string }): Promise<void>;
@@ -118,6 +119,11 @@ export const wakeApi = {
   pause: async (): Promise<void> => { await Native.pauseWake(); },
   resume: async (): Promise<void> => { await Native.resumeWake(); },
   keepScreenOn: async (on: boolean): Promise<void> => { await Native.keepScreenOn({ on }); },
+};
+
+/** Masque l'aperçu d'UniC dans les applis récentes (Android 13+). Rend false ailleurs (web, ordinateur, Android plus ancien). */
+export const hideInRecents = async (hide: boolean): Promise<boolean> => {
+  try { return (await Native.hideInRecents({ hide })).supported; } catch { return false; }
 };
 
 /** Écran ouvert par « Hey UniC », souvent par-dessus l'écran verrouillé (drapeau posé par main.tsx avant le premier affichage). */
