@@ -16,6 +16,9 @@ from app.services import nom_propre
     ("  awa   ndiaye ", "Awa Ndiaye"),
     ("mame diarra n'diaye", "Mame Diarra N'Diaye"),
     ("abdou-karim fall", "Abdou-Karim Fall"),
+    ("ibrahim-salif-sidy-omar diop", "Ibrahim-Salif-Sidy-Omar Diop"),   # chaque prénom et le nom : une majuscule
+    ("pape diop", "Pape Diop"),
+    ("el hadji malick sy", "El Hadji Malick Sy"),
     ("jean de la fontaine", "Jean de la Fontaine"),
     ("Ousmane Diop", "Ousmane Diop"),
     ("FAST GROUP", "FAST GROUP"),             # écrit en majuscules par le patron : gardé
@@ -33,6 +36,8 @@ def test_nom_propre(raw, nice):
     ("devis pour madame awa fall", "Awa Fall"),
     ("devis client abdou-karim fall", "Abdou-Karim Fall"),
     ("devis pour Ousmane Diop", "Ousmane Diop"),
+    ("fais le devis cloison 4x2,5 pour ibrahim-salif-sidy-omar diop", "Ibrahim-Salif-Sidy-Omar Diop"),
+    ("devis pour pape diop", "Pape Diop"),
     ("devis pour le salon de moussa", None),   # jamais un mot courant
     ("fais le devis pour demain", None),
     ("devis pour la villa", None),
