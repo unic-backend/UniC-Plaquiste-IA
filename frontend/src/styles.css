@@ -1812,3 +1812,23 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .card-box p.hint, .card-box div.hint {
   background: color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 12px; padding: 10px 12px; line-height: 1.45;
 }
+
+/* Conversation sur téléphone : les actions sous une réponse ne se coupent plus au milieu d'un mot (« Copie / r ») :
+   elles passent à la ligne entières. Les tableaux d'une réponse sont plus serrés pour tenir dans l'écran
+   (ils défilent toujours de côté s'ils restent trop larges). */
+.msg-actions { flex-wrap: wrap; row-gap: 2px; }
+.msg-actions button { white-space: nowrap; }
+@media (max-width: 480px) {
+  .md-table table { font-size: 13.5px; }
+  .md th, .md td { padding: 8px 9px; }
+  .md th { letter-spacing: .04em; }
+}
+
+/* Lignes d'un devis ou d'une facture sur téléphone : chaque valeur a son intitulé (Qté, Unité, P.U., Total) au lieu de
+   « 9 · u · 4500 · 40500 » sans explication ; la désignation passe en titre de la fiche. */
+@media (max-width: 700px) {
+  .table-wrap td[data-label="Désignation"] { order: 3; flex: 1 1 80%; font-size: 16px; font-weight: 800; color: var(--ink); }
+  .table-wrap td[data-label="Désignation"]::before { display: none; }
+  .table-wrap td[data-label="Désignation"] code { font-size: 12px; opacity: .75; }
+  .table-wrap td[data-label="Total"] { font-weight: 800; }
+}

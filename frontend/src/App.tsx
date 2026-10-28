@@ -1566,8 +1566,8 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
             <tbody>
               {(d.items || []).map((it: any) => (
                 <tr key={it.id || it.position}>
-                  <td>{it.position}</td>
-                  <td>
+                  <td data-label="#">{it.position}</td>
+                  <td data-label="Désignation">
                     {it.description}
                     {it.formula ? (
                       <div>
@@ -1575,10 +1575,10 @@ function DocDetail({ kind }: { kind: "quote" | "invoice" | "po" | "dn" }) {
                       </div>
                     ) : null}
                   </td>
-                  <td>{it.quantity}</td>
-                  <td>{it.unit}</td>
-                  {kind !== "dn" && <td>{it.unit_price ?? "non renseigné"}</td>}
-                  {kind !== "dn" && <td>{it.total ?? "—"}</td>}
+                  <td data-label="Qté">{it.quantity}</td>
+                  <td data-label="Unité">{it.unit}</td>
+                  {kind !== "dn" && <td data-label="P.U.">{it.unit_price != null ? fmt(it.unit_price, d.currency || "FCFA") : "non renseigné"}</td>}
+                  {kind !== "dn" && <td data-label="Total">{it.total != null ? fmt(it.total, d.currency || "FCFA") : "—"}</td>}
                 </tr>
               ))}
             </tbody>
