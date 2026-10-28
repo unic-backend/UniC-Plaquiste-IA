@@ -37,3 +37,28 @@ def test_le_chat_route_ces_mesures_vers_le_bon_calcul():
     assert orchestrator._intent("faux plafond de cinq mètres sur quatre", {}) == "calculate"
     assert calc.detect_calc_kind("j'ai une surface de 100 mètres carrés") == "a_preciser"   # jamais supposé cloison
     assert orchestrator._intent("c'est quoi un faux plafond ?", {}) == "chat"
+
+
+@pytest.mark.parametrize("text, sides", [
+    ("cloison 6 m sur 2,5 m simple face", 1),
+    ("cloison 6 m sur 2,5 m une seule face", 1),
+    ("cloison 6 m sur 2,5 m sur un côté", 1),
+    ("doublage 6 m sur 2,5 m", 1),                      # un doublage habille un mur : une face
+    ("doublage 6 m sur 2,5 m des deux côtés", 2),
+    ("cloison 6 m sur 2,5 m double face", 2),
+    ("cloison 6 m sur 2,5 m", 2),
+])
+def test_faces_dites_autrement_ne_doublent_plus_les_plaques(text, sides):
+    assert calc.calculate_from_text(text).inputs["sides"] == sides
+
+
+@pytest.mark.parametrize("text, openings", [
+    ("cloison 8 m sur 2,6 m avec deux portes de 0,90 sur 2,10", [("door", 0.9, 2.1, 2, False)]),
+    ("cloison 4m50 sur 2m60 avec une porte 0m90 x 2m10", [("door", 0.9, 2.1, 1, False)]),
+    ("cloison 8 m sur 2,6 m avec une porte de 90 sur 210", [("door", 0.9, 2.1, 1, False)]),     # centimètres
+    ("cloison 8 m sur 2,6 m avec 3 fenêtres de 120 par 100", [("window", 1.2, 1.0, 3, False)]),
+    ("cloison 8 m sur 2,6 m avec 1 porte et 2 fenêtres", [("door", 0.9, 2.04, 1, True), ("window", 1.2, 1.2, 2, True)]),
+])
+def test_portes_et_fenetres_gardent_taille_et_nombre(text, openings):
+    got = calc.calculate_from_text(text).inputs["openings"]
+    assert [(o["kind"], o["width"], o["height"], o["quantity"], o["assumed_size"]) for o in got] == openings
