@@ -1960,7 +1960,7 @@ class AgentSession:
     def _t_create_contact(self, kind: str, name: str, customer_name: str = "") -> dict:
         name = (name or "").strip()
         if kind in ("customer", "supplier"):
-            name = svc.nom_propre(name)   # « moussa ba » → « Moussa Ba »
+            name = svc.nom_propre(name, person=kind == "customer")   # « moussa ba » → « Moussa Ba » ; fournisseur : sigle gardé
         if len(name) < 2:
             raise ConnectorError("Nom manquant : demande-le au patron.", 400)
         if kind == "customer":

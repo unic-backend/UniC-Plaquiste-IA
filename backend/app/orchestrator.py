@@ -534,7 +534,7 @@ def _party_details(text: str) -> dict:
 def _create_named_party(db: Session, kind: str, text: str, user_id: str | None) -> str:
     d = _party_details(text)
     from app.services import nom_propre
-    name = nom_propre(d["name"])   # « moussa ba » → « Moussa Ba »
+    name = nom_propre(d["name"], person=kind == "customer")   # « moussa ba » → « Moussa Ba » ; fournisseur : sigle gardé
     if not name or len(name) < 2:
         return "Indiquez le nom, par exemple : « crée un client FAST GROUP »."
     from app.services import next_number
