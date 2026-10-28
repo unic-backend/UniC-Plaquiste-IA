@@ -340,7 +340,7 @@ def _intent(text: str, state: dict) -> str:
     t = text.lower().strip()
     has_doc_number = bool(re.search(DOC_NUMBER_RE, text, re.I))
     if state.get("pending") and not re.search(r"annule|cancel|stop", t):
-        if len(t) < 80 and calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(t) and not re.search(
+        if len(t) < 80 and calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(calc.normalize_dimensions(t)) and not re.search(
             r"devis|facture|commande|livraison|calcule|analyse|rapport", t
         ):
             return "continue_pending"
@@ -403,7 +403,7 @@ def _intent(text: str, state: dict) -> str:
         return "prices"
     if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
         return "search_doc"
-    if calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(t):
+    if calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(calc.normalize_dimensions(t)):
         return "calculate"   # plafond ou cloison non dit : l'IA répond (les deux calculs + une question), pas le calcul seul
     if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
         return "analyze_doc"
