@@ -323,6 +323,28 @@ def _last_quantities(state: dict) -> list[dict]:
     return calc_d.get("quantities") or state.get("quantities") or []
 
 
+def _doc_quantities(db: Session, text: str, state: dict) -> tuple[list[dict], str]:
+    """Métré d'un devis ou d'un bon (sans IA cloud) : celui dit dans CETTE phrase s'il y en a un, sinon le dernier calcul
+    (avant : « fais le devis cloison 3 x 2,5 pour Awa » reprenait le calcul précédent, celui d'un autre chantier). Mêmes
+    garde-fous que l'IA : aucun document sur un calcul partiel (sauf demande explicite) ni sur un calcul refusé par le contrôle."""
+    if _DIMENSION.search(calc.normalize_dimensions(text)) or not _last_quantities(state):
+        try:
+            fresh = _calc_for(db, text)
+        except ValueError as exc:
+            return [], f"{exc} Aucun document n'est créé."
+        if fresh is not None and fresh.quantities:
+            state["last_calc"] = fresh.to_dict()
+    last = state.get("last_calc") or {}
+    if (last.get("inputs") or {}).get("partial") and not agent.PARTIAL_OK.search(text):
+        return [], ("Calcul **partiel** (surface seule) : montants et rails ne sont pas calculés, je ne fais pas de document dessus. "
+                    "Donne la longueur et la hauteur (ex. « cloison 8 x 2,5 »), ou dis « fais le devis partiel quand même ».")
+    check = last.get("verification") or {}
+    if check and not check.get("ok", True):
+        return [], ("Le contrôle indépendant du calcul a trouvé un écart (" + "; ".join(check.get("problems") or [])
+                    + ") : aucun document n'est créé. Refais le calcul.")
+    return _last_quantities(state), ""
+
+
 # Verbes d'ordre : un document n'est créé que si le patron le DEMANDE (jamais sur une simple mention).
 _ACTION = r"cr[eé]e|cr[eé]er|pr[eé]pare|fais|fait-moi|make|g[eé]n[eè]re|[eé]tabli|[eé]mets|r[eé]dige|chiffre"
 # Questions de culture / « comment » : réponse de l'IA, jamais une action.
@@ -725,12 +747,7 @@ def handle_turn(
             db.commit()
             caps.append("calculate_materials")
     elif intent in ("create_quote", "continue_pending") and (intent == "create_quote" or state.get("pending") == "create_quote"):
-        qtys = _last_quantities(state)
-        if not qtys:
-            fresh = _calc_for(db, text)
-            if fresh is not None and fresh.quantities:
-                state["last_calc"] = fresh.to_dict()
-                qtys = _last_quantities(state)
+        qtys, refusal = _doc_quantities(db, text, state)
         customer = _match_customer(db, text)
         project = _match_project(db, text)
         if customer:
@@ -739,7 +756,7 @@ def handle_turn(
             state["project_id"] = project.id
         if not qtys:
             state["pending"] = "create_quote"
-            reply_text = (
+            reply_text = refusal or (
                 "Pour un devis, j'ai besoin d'un métré. "
                 "Donnez-moi par exemple : « cloison 12 m × 2,50 m deux faces » "
                 "puis « fais le devis »."
@@ -812,9 +829,9 @@ def handle_turn(
             structured = {"document": {"kind": "invoice", "id": inv.id}}
             caps += ["create_invoice", "generate_invoice_pdf"]
     elif intent == "create_po":
-        qtys = _last_quantities(state)
+        qtys, refusal = _doc_quantities(db, text, state)
         if not qtys:
-            reply_text = "Aucun métré en mémoire. Calculez d'abord les quantités, puis « crée le bon de commande »."
+            reply_text = refusal or "Aucun métré en mémoire. Calculez d'abord les quantités, puis « crée le bon de commande »."
         else:
             supplier = _match_supplier(db, text)
             linked, who = _linked_quote(db, text, state)
@@ -833,9 +850,9 @@ def handle_turn(
             structured = {"document": {"kind": "po", "id": po.id}}
             caps.append("create_purchase_order")
     elif intent == "create_dn":
-        qtys = _last_quantities(state)
+        qtys, refusal = _doc_quantities(db, text, state)
         if not qtys:
-            reply_text = "Aucun métré en mémoire. Calculez d'abord, puis « crée le bon de livraison »."
+            reply_text = refusal or "Aucun métré en mémoire. Calculez d'abord, puis « crée le bon de livraison »."
         else:
             customer = _match_customer(db, text)
             linked, who = _linked_quote(db, text, state)
