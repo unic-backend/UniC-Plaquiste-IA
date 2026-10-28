@@ -191,7 +191,14 @@ TOOLS: list[dict] = [
             "board_length_m": {"type": "number", "description": "Longueur d'une plaque : 2 par défaut ; 2.5 seulement si le patron dit « 2,50 »."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
-                "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}}},
+                "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
+            "zones": {"type": "array", "description": (
+                "Plusieurs pièces (plafond), plusieurs cloisons, ou un plafond en L découpé en rectangles : une ligne par rectangle "
+                "(count pour les identiques : « 3 chambres de 4x4 » = une ligne count 3). UN SEUL appel pour tout l'ouvrage : "
+                "deux appels séparés = le devis ne garde que le dernier."),
+                "items": {"type": "object", "properties": {
+                    "length_m": {"type": "number"}, "width_m": {"type": "number"}, "height_m": {"type": "number"},
+                    "area_m2": {"type": "number"}, "count": {"type": "integer", "minimum": 1}}}}},
             "required": ["kind"], "additionalProperties": False},
     },
     {
@@ -1594,7 +1601,23 @@ class AgentSession:
                                height_m: float | None = None, width_m: float | None = None,
                                area_m2: float | None = None, sides: int | None = None, parois: int | None = None,
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
-                               board_length_m: float | None = None, no_openings: bool = False) -> dict:
+                               board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None) -> dict:
+        rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
+        for z in zones or []:
+            n, a = int(z.get("count") or 1), z.get("length_m")
+            b = (z.get("height_m") or height_m) if kind == "partition" else (z.get("width_m") or z.get("height_m"))
+            if a and b:
+                rects += [(float(a), float(b), True)] * n
+            elif kind == "ceiling" and z.get("area_m2"):   # pièce donnée par sa surface : supposée carrée (signalé)
+                rects += [(float(z["area_m2"]) ** 0.5, float(z["area_m2"]) ** 0.5, False)] * n
+            else:
+                raise ConnectorError("Chaque zone : longueur et " + ("hauteur" if kind == "partition" else "largeur (ou surface)") + ".", 400)
+        if len(rects) == 1:   # une seule zone : le calcul habituel
+            a, b, known = rects.pop()
+            if known:
+                length_m, width_m, height_m = a, b, b
+            else:
+                area_m2, length_m, width_m = a * b, None, None
         if kind == "a_preciser":   # surface sans dire plafond ou cloison : les deux calculs, puis UNE question
             dims = {"length_m": length_m, "width_m": width_m or height_m} if length_m and (width_m or height_m) else {"area_m2": area_m2}
             if not any(dims.values()):
@@ -1618,12 +1641,24 @@ class AgentSession:
                "fixings": calc_fixings(co)}
         try:
             if method == "unic":
-                surface = area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None
+                surface = (sum(a * b for a, b, _ in rects) if rects else None) or area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None
                 if not surface:
                     raise ConnectorError("Surface manquante (area_m2, ou longueur × hauteur).", 400)
                 res = metier.calculate_unic(surface, faces=sides, parois=parois, already_developed=already_developed)
                 if not sides_known:
                     res.assumptions.append("Nombre de faces = 2 (non précisé : à confirmer, la surface en dépend directement).")
+            elif kind == "partition" and rects:
+                ops = [calc.Opening(o.get("kind", "door"), float(o.get("width_m") or (0.9 if o.get("kind") != "window" else 1.2)),
+                                    float(o.get("height_m") or (2.04 if o.get("kind") != "window" else 1.2)), int(o.get("count") or 1),
+                                    assumed_size=not (o.get("width_m") and o.get("height_m")))
+                       for o in (openings or [])]
+                res = calc.calculate_partition(rects[0][0], rects[0][1], sides, ops, walls=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
+                                               board_width=cfg["board_width"], board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"],
+                                               fixing_values=cfg["fixings"], sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
+            elif kind == "ceiling" and rects:
+                res = calc.calculate_ceiling(rects[0][0], rects[0][1], zones=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
+                                             board_width=cfg["board_width"], board_height=cfg["board_height"], fixing_values=cfg["fixings"],
+                                             dims_known=all(k for *_, k in rects))
             elif kind == "partition" and not (length_m and height_m) and area_m2:
                 res = calc.calculate_partition_from_area(area_m2, sides, sides_known=sides_known, waste=cfg["waste"], fixing_values=cfg["fixings"],
                                                          board_width=cfg["board_width"], board_height=cfg["board_height"])
