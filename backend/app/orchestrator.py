@@ -354,7 +354,8 @@ def _intent(text: str, state: dict) -> str:
         return "cancel_pending"
     if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t):
         return "help"
-    if re.fullmatch(r"\s*(bonjour|salut|bonsoir|coucou|hello|hi|salam|salaam|salam aleykum|salam maleekum|nanga def|nanga def\s*\?)[\s!.?]*", t):
+    if re.fullmatch(r"\s*(bonjour|salut|bonsoir|coucou|hello|hi|salam|salaam|salam aleykum|salam maleekum|nanga def|nanga def\s*\?)"
+                    r"(?:\s+unic(?:\s+ai)?)?[\s!.?]*", t):
         return "greeting"
     if _QUESTION.match(t) and not has_doc_number:
         return "chat"
@@ -362,7 +363,9 @@ def _intent(text: str, state: dict) -> str:
         return "health"
     if re.search(r"base de connaissance|knowledge base|proc[eé]dure unic|services unic", t):
         return "knowledge"
-    if re.search(r"liste des clients|mes clients|show customers", t):
+    # « mes factures impayées », « mes clients qui n'ont pas payé » : une question sur l'argent dû, pas la liste complète
+    unpaid = re.search(r"impay|non pay|pas (?:encore )?pay|n'ont pas pay|en retard|reste [àa] payer|me doivent|\bdettes?\b", t)
+    if re.search(r"liste des clients|mes clients|show customers", t) and not unpaid:
         return "list_customers"
     if re.search(r"liste des fournisseurs|mes fournisseurs", t):
         return "list_suppliers"
@@ -370,7 +373,7 @@ def _intent(text: str, state: dict) -> str:
         return "list_projects"
     if re.search(r"liste des devis|mes devis|montre.{0,12}devis", t):
         return "list_quotes"
-    if re.search(r"liste des factures|mes factures|montre.{0,12}factures", t):
+    if re.search(r"liste des factures|mes factures|montre.{0,12}factures", t) and not unpaid:
         return "list_invoices"
     if re.search(r"nouveau client|cr[eé]e?r? un client|add customer", t):
         return "create_customer"
@@ -399,11 +402,13 @@ def _intent(text: str, state: dict) -> str:
         return "site_report"
     if re.search(r"\bpublie\b|\bpublier\b|google business", t) and re.search(r"r[eé]seaux|instagram|facebook|tiktok|linkedin|fiche google|google business", t):
         return "connector_na"
-    if re.search(r"\bprix\b|\btarif", t) and (_MATERIAL.search(t) or re.search(r"base unic|grille", t)):
+    if re.search(r"\bprix\b|\btarif", t) and (_MATERIAL.search(t) or re.search(r"base unic|grille", t)) \
+            and not _DIMENSION.search(calc.normalize_dimensions(t)):   # « le prix d'un plafond de 30 m² » = une estimation
         return "prices"
     if re.search(r"trouve|find|cherche|pages?|portes?|cloisons?|dimensions?|quantit", t) and state.get("last_file_id"):
         return "search_doc"
-    if calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(calc.normalize_dimensions(t)):
+    if calc.detect_calc_kind(t) not in (None, "a_preciser") and _DIMENSION.search(calc.normalize_dimensions(t)) \
+            and not re.search(r"\bprix\b|\btarif|\bco[uû]te?\b|\bco[uû]ts?\b|\bbudget\b", t):   # un prix = l'IA chiffre (quantités + prix)
         return "calculate"   # plafond ou cloison non dit : l'IA répond (les deux calculs + une question), pas le calcul seul
     if re.search(r"analyse (ce |le )?plan|lis (ce |le )?(pdf|plan|document)|read this", t):
         return "analyze_doc"
@@ -456,26 +461,54 @@ def _render_missing_prices(db: Session, text: str = "") -> str:
     return "\n".join(lines)
 
 
+_PARTY_PHONE = re.compile(r"(?:\+|00)?(?:221[\s.-]*)?(?:7[05-8]|3[03])(?:[\s.-]*\d){7}(?!\d)")
+_PARTY_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _party_details(text: str) -> dict:
+    """« Nouveau client : Awa Ndiaye, 77 000 00 00, Almadies » → nom, téléphone, lieu, e-mail rangés chacun à sa place
+    (avant : tout finissait dans le nom). Rien n'est deviné : ce qui n'est pas dit reste vide."""
+    m = re.search(r"(?i)(?:nouveau|nouvelle|cr[eé]e(?:r|z)?(?:\s+(?:un|une|le|la))?|ajoute(?:r|z)?(?:\s+(?:un|une|le|la))?|add)"
+                  r"\s+(?:client|cliente|fournisseur|customer|supplier)\b", text)
+    body = text[m.end():] if m else text
+    email = (_PARTY_EMAIL.search(body) or [""])[0]
+    body = body.replace(email, " ") if email else body
+    phone_m = _PARTY_PHONE.search(body)
+    phone = re.sub(r"\s+", " ", phone_m.group(0)).strip() if phone_m else ""
+    body = body.replace(phone_m.group(0), ",") if phone_m else body
+    parts = [x.strip(" :;-.") for x in body.split(",")]
+    parts = [x for x in parts if x]
+    name = parts[0] if parts else ""
+    place = ", ".join(re.sub(r"(?i)^(?:à|a|au|aux)\s+", "", x) for x in parts[1:])
+    at = re.search(r"\s+(?:à|a|au)\s+(?=[A-ZÀ-Ý])(.+)$", name)   # « Awa Diop à Pikine »
+    if at:
+        place = ", ".join(x for x in (at.group(1).strip(), place) if x)
+        name = name[:at.start()].strip()
+    return {"name": name.strip(" :,-"), "phone": phone, "email": email, "place": place}
+
+
 def _create_named_party(db: Session, kind: str, text: str, user_id: str | None) -> str:
-    # "crée un client FAST GROUP"
-    name = text
-    name = re.sub(r"(?i)nouveau client|cr[eé]e(r)? un client|add customer|client", "", name)
-    name = re.sub(r"(?i)nouveau fournisseur|cr[eé]e(r)? un fournisseur|fournisseur", "", name)
-    name = name.strip(" :,-")
+    d = _party_details(text)
+    name = d["name"]
     if not name or len(name) < 2:
         return "Indiquez le nom, par exemple : « crée un client FAST GROUP »."
     from app.services import next_number
+    saved = [f"téléphone {d['phone']}" if d["phone"] else "", f"e-mail {d['email']}" if d["email"] else "",
+             f"lieu {d['place']}" if d["place"] else ""]
+    saved = [x for x in saved if x]
+    missing = [label for label, key in (("téléphone", "phone"), ("e-mail", "email"), ("adresse", "place")) if not d[key]]
+    tail = (" : " + ", ".join(saved) if saved else "") + "." + (f" Non donnés (rien d'inventé) : {', '.join(missing)}." if missing else "")
     if kind == "customer":
         code = next_number(db, "customer")
-        c = Customer(code=code, name=name, created_by=user_id)
+        c = Customer(code=code, name=name, phone=d["phone"], email=d["email"], city=d["place"], created_by=user_id)
         db.add(c)
         db.commit()
-        return f"Client **{c.name}** créé sous le code `{c.code}`. Aucune autre information n'a été inventée (adresse, e-mail, téléphone : manquants)."
+        return f"Client **{c.name}** créé sous le code `{c.code}`{tail}"
     code = next_number(db, "supplier")
-    s = Supplier(code=code, name=name)
+    s = Supplier(code=code, name=name, phone=d["phone"], email=d["email"], address=d["place"])
     db.add(s)
     db.commit()
-    return f"Fournisseur **{s.name}** créé sous le code `{s.code}`."
+    return f"Fournisseur **{s.name}** créé sous le code `{s.code}`{tail}"
 
 
 def _create_project(db: Session, text: str, user_id: str | None) -> str:
