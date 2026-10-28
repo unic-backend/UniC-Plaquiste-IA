@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.6"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.7"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -252,28 +252,39 @@ def calculate_partition(
     sides_known: bool = True,
     openings_known: bool | None = None,
     fixing_values: dict | None = None,
+    walls: list[tuple[float, float]] | None = None,
 ) -> CalcResult:
+    """`walls` : plusieurs cloisons (longueur, hauteur) de mêmes faces. Montants, rails et chevilles sont comptés cloison par
+    cloison (chaque cloison a ses montants d'about) ; plaques et paquets une seule fois, sur le total ; ouvertures sur le total."""
+    walls = [(float(w), float(h)) for w, h in walls] if walls else [(length_m, height_m)]
+    multi = len(walls) > 1
     openings = openings or []
     if openings_known is None:
         openings_known = bool(openings)   # aucune ouverture citée ≠ « aucune ouverture » : à demander
     open_status = (STATUS_MISSING if not openings_known
                    else STATUS_ASSUMED if any(o.assumed_size for o in openings) else STATUS_CONFIRMED)
-    check_inputs(positive={"longueur": length_m, "hauteur": height_m, "largeur de plaque": board_width,
+    one_face = sum(w * h for w, h in walls)
+    check_inputs(positive={"longueur": min(w for w, _ in walls), "hauteur": min(h for _, h in walls), "largeur de plaque": board_width,
                            "hauteur de plaque": board_height, "entraxe": stud_spacing},
-                 surface_m2=length_m * height_m * sides, waste=waste, confirmed_large=confirmed_large)
+                 surface_m2=one_face * sides, waste=waste, confirmed_large=confirmed_large)
     b_area = board_area(board_width, board_height)
-    areas = partition_area(length_m, height_m, sides, openings)
+    # plusieurs cloisons : surface d'une face de toutes les cloisons (longueur × hauteur additionnées)
+    areas = partition_area(one_face, 1.0, sides, openings) if multi else partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
-    n_studs = studs_needed(length_m, stud_spacing, board_width)
+    wall_studs = [studs_needed(w, stud_spacing, board_width) for w, _ in walls]
+    n_studs = sum(wall_studs)
     n_doors = sum(o.quantity for o in openings if o.kind == "door")
     door_studs = DOOR_STUDS * n_doors   # règle UniC : 3 montants de renfort par porte
-    n_stud_bars = stud_bars(n_studs, height_m) + door_studs
-    tracks = tracks_length(length_m, 2)
+    n_stud_bars = sum(stud_bars(n, h) for n, (_, h) in zip(wall_studs, walls)) + door_studs
+    total_length = sum(w for w, _ in walls)
+    tracks = tracks_length(total_length, 2)
     fx = fixings(fixing_values)
-    anchors = anchor_points(tracks, 2, fx["anchor_spacing_m"])   # rail haut + rail bas
+    anchors = sum(anchor_points(tracks_length(w, 2), 2, fx["anchor_spacing_m"]) for w, _ in walls)   # rail haut + rail bas
     screws9 = (n_studs + door_studs) * fx["screws9_per_stud"]
     # montants : un par montant, hauteur = hauteur cloison
-    stud_ml = round_qty(n_studs * height_m, 3)
+    stud_ml = round_qty(sum(n * h for n, (_, h) in zip(wall_studs, walls)), 3)
+    sizes = " + ".join(f"{w:g} × {h:g}" for w, h in walls)
+    top = max(h for _, h in walls)
     screws = ceil_int(areas["net"] * DEFAULTS["screws_per_m2"])
     tape = round_qty(areas["net"] * DEFAULTS["tape_m_per_m2"], 2)
     compound = round_qty(
@@ -285,14 +296,13 @@ def calculate_partition(
         kind="partition",
         title="Calcul de cloison / plaquisterie",
         understanding=(
-            f"Cloison de {length_m:g} m de long × {height_m:g} m de haut, "
-            f"{sides} face(s)"
+            (f"{len(walls)} cloisons ({sizes} m), " if multi else f"Cloison de {length_m:g} m de long × {height_m:g} m de haut, ")
+            + f"{sides} face(s)"
             + (f", {len(openings)} ouverture(s)" if openings else "")
             + "."
         ),
         inputs={
-            "length_m": length_m,
-            "height_m": height_m,
+            **({"walls": [[w, h] for w, h in walls]} if multi else {"length_m": length_m, "height_m": height_m}),
             "sides": sides,
             "openings": [asdict(o) for o in openings],
             "waste": waste,
@@ -304,9 +314,11 @@ def calculate_partition(
         next_step="Je peux transformer ces quantités en devis, bon de commande ou rapport.",
     )
 
-    result.data_used = [
+    result.data_used = ([{"label": f"Cloison {i}", "value": f"{w:g} × {h:g}", "unit": "m", "status": STATUS_CONFIRMED}
+                         for i, (w, h) in enumerate(walls, 1)] if multi else [
         {"label": "Longueur", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED},
         {"label": "Hauteur", "value": height_m, "unit": "m", "status": STATUS_CONFIRMED},
+    ]) + [
         {"label": "Faces", "value": sides, "unit": "", "status": STATUS_CONFIRMED if sides_known else STATUS_ASSUMED},
         {"label": "Ouvertures", "value": (f"{len(openings)} ({areas['openings']:g} m²)" if openings_known else "inconnues — à renseigner"),
          "unit": "", "status": open_status},
@@ -323,8 +335,8 @@ def calculate_partition(
     result.steps = [
         CalcStep(
             "Surface brute",
-            "longueur × hauteur × faces",
-            {"longueur": length_m, "hauteur": height_m, "faces": sides},
+            "Σ longueur × hauteur des cloisons × faces" if multi else "longueur × hauteur × faces",
+            {"cloisons": sizes, "faces": sides} if multi else {"longueur": length_m, "hauteur": height_m, "faces": sides},
             areas["gross"],
             "m²",
             STATUS_CALCULATED if sides_known else STATUS_ESTIMATED,
@@ -363,16 +375,16 @@ def calculate_partition(
         ),
         CalcStep(
             "Nombre de montants",
-            "3 montants par plaque, jonctions partagées : ⌈ longueur / largeur plaque ⌉ × 2 + 1",
-            {"longueur": length_m, "largeur plaque": board_width, "entraxe": stud_spacing},
+            ("par cloison, " if multi else "") + "3 montants par plaque, jonctions partagées : ⌈ longueur / largeur plaque ⌉ × 2 + 1",
+            {"longueur": [w for w, _ in walls] if multi else length_m, "largeur plaque": board_width, "entraxe": stud_spacing},
             n_studs,
             "u",
             STATUS_ESTIMATED,
         ),
         CalcStep(
             "Longueur de montants",
-            "nombre de montants × hauteur",
-            {"nombre": n_studs, "hauteur": height_m},
+            "Σ montants × hauteur de leur cloison" if multi else "nombre de montants × hauteur",
+            {"nombre": wall_studs, "hauteur": [h for _, h in walls]} if multi else {"nombre": n_studs, "hauteur": height_m},
             stud_ml,
             "ml",
             STATUS_ESTIMATED,
@@ -380,7 +392,7 @@ def calculate_partition(
         CalcStep(
             "Rails (haut + bas)",
             "longueur × 2",
-            {"longueur": length_m},
+            {"longueur": round_qty(total_length, 3) if multi else length_m},
             tracks,
             "ml",
             STATUS_ESTIMATED,
@@ -393,7 +405,7 @@ def calculate_partition(
         QuantityLine("MONTANT-M48", "Montant M48 (barre de 2,90 m)", n_stud_bars, "u",
                      "⌈L/largeur plaque⌉×2+1" + (" + rallonges" if n_stud_bars - door_studs != n_studs else "")
                      + (f" + 3 × {n_doors} porte(s)" if n_doors else ""), STATUS_ESTIMATED,
-                     notes=f"{n_studs} montants, soit {stud_ml} ml à la hauteur {height_m:g} m"
+                     notes=f"{n_studs} montants, soit {stud_ml} ml " + ("à la hauteur de chaque cloison" if multi else f"à la hauteur {height_m:g} m")
                      + (f" ; hauteur > {BAR_LENGTH_M:g} m : rallonges (recouvrement d'éclissage non compté)"
                         if n_stud_bars - door_studs != n_studs else "")
                      + (f" ; + {door_studs} montants de renfort ({n_doors} porte(s) × 3)" if n_doors else "")),
@@ -445,8 +457,11 @@ def calculate_partition(
     result.notes = [
         "Les quantités de plaques et d'ossature sont des ESTIMATIONS arrondies à l'unité supérieure.",
     ]
-    if height_m > board_height + 1e-9:
-        result.notes.append(f"Hauteur {height_m:g} m > plaque {board_height:g} m : raccords horizontaux et chutes à prévoir "
+    if multi:
+        result.assumptions.insert(0, f"{len(walls)} cloisons ({sizes} m) : montants, rails et chevilles comptés cloison par cloison ; "
+                                     "plaques et paquets sur le total ; ouvertures déduites du total.")
+    if top > board_height + 1e-9:
+        result.notes.append(f"Hauteur {top:g} m > plaque {board_height:g} m : raccords horizontaux et chutes à prévoir "
                             "(ou plaques plus longues).")
     else:
         result.notes.append("Vérifier la hauteur réelle des locaux : si H > hauteur de plaque, prévoir chutes / bandes de rive.")
@@ -548,11 +563,16 @@ def calculate_ceiling(
     dims_known: bool = True,
     include_finish: bool = True,
     fixing_values: dict | None = None,
+    zones: list[tuple[float, float]] | None = None,
 ) -> CalcResult:
-    check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
-                           "hauteur de plaque": board_height},
-                 surface_m2=length_m * width_m, waste=waste, confirmed_large=confirmed_large)
-    area = round_qty(length_m * width_m, 3)
+    """`zones` : plusieurs pièces, ou un plafond en L découpé en rectangles (longueur, largeur). Ossature, tiges et cornière sont
+    comptées zone par zone (elles dépendent des côtés) ; plaques et paquets une seule fois, sur le total."""
+    zones = [(float(a), float(b)) for a, b in zones] if zones else [(length_m, width_m)]
+    multi = len(zones) > 1
+    check_inputs(positive={"longueur": min(a for a, _ in zones), "largeur": min(b for _, b in zones),
+                           "largeur de plaque": board_width, "hauteur de plaque": board_height},
+                 surface_m2=sum(a * b for a, b in zones), waste=waste, confirmed_large=confirmed_large)
+    area = round_qty(sum(a * b for a, b in zones), 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
     # Fourrures parallèles à la longueur, espacées de 0,50 m sur la largeur ; tiges tous les 0,90 m sur chaque fourrure.
@@ -563,10 +583,16 @@ def calculate_ceiling(
         rows_ = ceil_int(across / f_sp) + 1
         return rows_, rows_ * (ceil_int(run / h_sp) + 1), round_qty(run * rows_, 2)
 
-    rows, hangers, furring_ml = min(layout(length_m, width_m), layout(width_m, length_m), key=lambda t: (t[1], t[2]))
-    perimeter = round_qty(2 * (length_m + width_m), 2)
     fx = fixings(fixing_values)
-    anchors = anchor_points(perimeter, 4, fx["anchor_spacing_m"])   # cornière de rive : une longueur par mur
+    rows = hangers = anchors = 0
+    furring_ml = perimeter = 0.0
+    for a, b in zones:
+        z_rows, z_hangers, z_furring = min(layout(a, b), layout(b, a), key=lambda t: (t[1], t[2]))
+        z_perimeter = round_qty(2 * (a + b), 2)
+        rows, hangers, furring_ml, perimeter = rows + z_rows, hangers + z_hangers, furring_ml + z_furring, perimeter + z_perimeter
+        anchors += anchor_points(z_perimeter, 4, fx["anchor_spacing_m"])   # cornière de rive : une longueur par mur
+    furring_ml, perimeter = round_qty(furring_ml, 2), round_qty(perimeter, 2)
+    sizes = " + ".join(f"{a:g} × {b:g}" for a, b in zones)
     screws = ceil_int(area * DEFAULTS["screws_per_m2"])
     tape = round_qty(area * DEFAULTS["tape_m_per_m2"], 2)
     compound = round_qty(area * DEFAULTS["compound_kg_per_m2_per_coat"] * DEFAULTS["compound_coats"], 2)
@@ -574,30 +600,35 @@ def calculate_ceiling(
     result = CalcResult(
         kind="ceiling",
         title="Calcul de faux plafond",
-        understanding=f"Faux plafond {length_m:g} × {width_m:g} m, système {system}.",
+        understanding=(f"Faux plafond en {len(zones)} zones ({sizes} m), {area:g} m², système {system}." if multi
+                       else f"Faux plafond {length_m:g} × {width_m:g} m, système {system}."),
         inputs={
-            "length_m": length_m,
-            "width_m": width_m,
+            **({"zones": [[a, b] for a, b in zones]} if multi else {"length_m": length_m, "width_m": width_m}),
             "waste": waste,
             "system": system,
             "fixings": fx,
         },
         next_step="Je peux préparer un devis quantité ou un bon de commande matériaux.",
     )
-    result.data_used = [
-        {"label": "Longueur", "value": length_m, "unit": "m", "status": STATUS_CONFIRMED if dims_known else STATUS_ASSUMED},
-        {"label": "Largeur", "value": width_m, "unit": "m", "status": STATUS_CONFIRMED if dims_known else STATUS_ASSUMED},
+    dims_status = STATUS_CONFIRMED if dims_known else STATUS_ASSUMED
+    result.data_used = ([{"label": f"Zone {i}", "value": f"{a:g} × {b:g}", "unit": "m", "status": dims_status}
+                         for i, (a, b) in enumerate(zones, 1)] if multi else [
+        {"label": "Longueur", "value": length_m, "unit": "m", "status": dims_status},
+        {"label": "Largeur", "value": width_m, "unit": "m", "status": dims_status},
+    ]) + [
         {"label": "Système", "value": system, "unit": "", "status": STATUS_ASSUMED},
         {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
     ]
+    each = "par zone, " if multi else ""
     result.steps = [
-        CalcStep("Surface", "longueur × largeur",
-                 {"longueur": length_m, "largeur": width_m}, area, "m²", STATUS_CALCULATED if dims_known else STATUS_ESTIMATED),
+        CalcStep("Surface", "Σ longueur × largeur des zones" if multi else "longueur × largeur",
+                 {"zones": sizes} if multi else {"longueur": length_m, "largeur": width_m}, area, "m²",
+                 STATUS_CALCULATED if dims_known else STATUS_ESTIMATED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
-        CalcStep("Lignes de fourrure (entraxe 0,50 m)", "⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
+        CalcStep("Lignes de fourrure (entraxe 0,50 m)", f"{each}⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
         CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
-                 "lignes × (⌈ longueur de fourrure / 0,90 ⌉ + 1)",
+                 f"{each}lignes × (⌈ longueur de fourrure / 0,90 ⌉ + 1)",
                  {"lignes": rows, "e": h_sp}, hangers, "u", STATUS_ESTIMATED),
     ]
     result.quantities = [
@@ -645,9 +676,15 @@ def calculate_ceiling(
         "Hauteur de plénum (longueur des tiges).",
         "Prix UniC non renseignés.",
     ]
+    if multi:
+        result.assumptions.insert(0, f"{len(zones)} zones ({sizes} m) : fourrures, tiges et cornière comptées zone par zone ; "
+                                     "plaques et paquets sur le total. Zones qui se touchent (plafond en L) : la cornière du côté "
+                                     "commun est comptée en trop.")
     if not dims_known:
-        result.assumptions.insert(0, f"Pièce supposée carrée ({length_m:.2f} × {width_m:.2f} m) faute de longueur et largeur : "
-                                     "fourrures et tiges sont approximatives. Donne les deux côtés pour un calcul exact.")
+        result.assumptions.insert(0, ("Zone(s) dont seule la surface est connue, supposée(s) carrée(s)" if multi else
+                                      f"Pièce supposée carrée ({length_m:.2f} × {width_m:.2f} m)")
+                                  + " faute de longueur et largeur : fourrures et tiges sont approximatives. "
+                                    "Donne les deux côtés pour un calcul exact.")
         result.missing.insert(0, "Longueur et largeur réelles du plafond (seule la surface est connue).")
     return result
 
@@ -873,6 +910,47 @@ def _openings(text: str) -> list[Opening]:
     return openings
 
 
+_ROOM = (r"(?:pi[eè]ces?|chambres?|salles?|salons?|s[ée]jours?|cuisines?|bureaux?|couloirs?|halls?|magasins?|boutiques?|"
+         r"toilettes?|wc|douches?|garages?|zones?|parties?|cloisons?|murs?|plafonds?|appartements?|villas?|rooms?|walls?)")
+_ZONE = re.compile(rf"(?P<a>{_NUM})\s*(?:m|ml|mètres?|metres?)?\s*(?:[x/]|sur|par)\s*(?P<b>{_NUM})(?:\s*(?:m|ml)\b)?"
+                   rf"|(?P<s>{_NUM})\s*(?:m²|m2)|(?P<l>{_NUM})\s*m\b(?!\s*(?:de\s+)?haut(?:eur)?\b(?![\s:=]*\d))")
+_PART_WORD = re.compile(r"(?:(?P<open>portes?|fen[eê]tres?|baies?|trappes?|ouvertures?|spots?|doors?|windows?)|(?P<mat>dalles?|plaques?))"
+                        r"\b[^\d]{0,15}$")
+
+
+def _is_part(before: str, a: float, b: float) -> bool:
+    """Taille d'une porte, d'une fenêtre, d'une trappe, d'une dalle ou d'une plaque : pas une pièce ni une cloison. Après « dalles » ou
+    « plaques », seulement une taille de plaque (« plaques 1200 x 2500 », « dalles 60x60 ») : « en plaques 5x4 » reste la pièce."""
+    m = _PART_WORD.search(before)
+    if not m or re.search(rf"\b{_ROOM}\b", m.group(0)):   # « plaques salon 5x4 » : la mesure est celle du salon
+        return False
+    return bool(m.group("open")) or (a <= 2.6 and b <= 2.6) or (a >= 30 and b >= 30)
+
+
+def _zones(t: str) -> list[tuple[str, Any, int]]:
+    """Mesures de la phrase dans l'ordre, chacune avec son nombre : (« pair », (a, b), n), (« area », m², n), (« length », m, n).
+    « 3 chambres de 4x4 » = 3 × (4, 4) ; « salon 5x4 et chambre 4x3 » = deux zones. Une longueur seule ne compte que comptée
+    (« 2 cloisons de 4 m ») ou additionnée (« 3 m + 4 m », « 3 m et 4 m »). Les tailles de porte, fenêtre, trappe, dalle ou plaque ne sont pas
+    des zones ; « 5x4 soit 20 m² » ne compte qu'une fois."""
+    out: list[tuple[str, Any, int]] = []
+    for m in _ZONE.finditer(t):
+        before = t[max(0, m.start() - 40):m.start()]
+        if m.group("a") and _is_part(before, parse_number(m.group("a")), parse_number(m.group("b"))):
+            continue
+        cm = re.search(rf"\b{_COUNT}\s+{_ROOM}\b(?:(?!\bet\b)[^\d,;+]){{0,25}}$", before)
+        n = _count(cm.group(1)) if cm else 1
+        if m.group("a"):
+            out.append(("pair", (parse_number(m.group("a")), parse_number(m.group("b"))), n))
+        elif m.group("s"):
+            out.append(("area", parse_number(m.group("s")), n))
+        elif re.search(r"haut(?:eur)?\s*(?:de\s*|:\s*)?$", before):
+            continue   # « hauteur 2,5 m » : pas une cloison de plus
+        elif cm or re.search(r"(?:\+|\bet)\s*$", before) or re.match(rf"\s*(?:\+|et\s+{_NUM}\s*m\b)", t[m.end():]):
+            out.append(("length", parse_number(m.group("l")), n))
+    pairs = [v[0] * v[1] for k, v, _ in out if k == "pair"]
+    return [z for z in out if not (z[0] == "area" and any(abs(z[1] - p) <= 0.01 * p for p in pairs))]
+
+
 def detect_calc_kind(text: str) -> str | None:
     t = normalize_dimensions(text)   # « 100 mètres carrés » = « 100 m² » : même ouvrage à préciser
     if re.search(r"faux[\s-]?plafond|suspended ceiling|plafond suspendu", t):
@@ -897,19 +975,101 @@ def detect_calc_kind(text: str) -> str | None:
     return None
 
 
+_UNITLESS = re.compile(r"(?<![\d.,])(\d{3}|\d{4})\s*(x|×|sur|par)\s*(\d{3}|\d{4})(?![\d.,]|\s*(?:m|cm|mm|ml|m²|m2)\b)", re.I)
+
+
+def _unitless_to_m(text: str) -> tuple[str, list[str]]:
+    """« 450 x 350 » sans unité : en mètres ce serait 157 500 m² (impossible) ; un plaquiste parle en centimètres (3 chiffres)
+    ou en millimètres (4 chiffres). Converti et signalé ; les tailles de porte, dalle ou plaque ne sont pas touchées."""
+    seen: list[str] = []
+
+    def conv(m: re.Match) -> str:
+        a, b = m.group(1), m.group(3)
+        if len(a) != len(b) or _is_part(text[max(0, m.start() - 40):m.start()].lower(), int(a), int(b)):
+            return m.group(0)
+        div = 100 if len(a) == 3 else 1000
+        seen.append(f"{a} × {b} lu en {'centimètres' if div == 100 else 'millimètres'} : {int(a) / div:g} × {int(b) / div:g} m")
+        return f"{int(a) / div:g} x {int(b) / div:g} m"
+    return _UNITLESS.sub(conv, text), seen
+
+
+def _plenum(t: str) -> float | None:
+    """Hauteur de suspente (plénum), en m : « plénum de 40 cm », « à 30 cm sous la dalle », « descente 0,5 m »."""
+    m = re.search(rf"(?:pl[ée]num|descente|suspentes?|retomb[ée]e)\s*(?:de\s*|:\s*)?({_NUM})\s*(cm|mm|m)\b"
+                  rf"|({_NUM})\s*(cm|mm|m)\s*sous\s*(?:la\s*)?dalle", t.lower())
+    if not m:
+        return None
+    v = parse_number(m.group(1) or m.group(3)) / {"cm": 100, "mm": 1000, "m": 1}[m.group(2) or m.group(4)]
+    return v if 0 < v <= 3 else None
+
+
 def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult | None:
     """Calcul à partir d'une phrase. Refuse les dimensions négatives ; signale les valeurs en trop au lieu de les ignorer."""
-    text = normalize_dimensions(text)
+    text, unitless = _unitless_to_m(normalize_dimensions(text))
     t = text.lower().replace("×", "x")
     if re.search(r"(?<![\w.,])-\d", t):
         raise ValueError("Dimension négative détectée : donnez des longueurs positives.")
     result = _calculate_from_text(text, defaults)
+    if result is not None and unitless:
+        result.assumptions.insert(0, "Cotes sans unité : " + " ; ".join(unitless) + " (à confirmer).")
+    plenum = _plenum(text) if result is not None and result.kind == "ceiling" and result.quantities else None
+    if plenum:   # donné par le patron : plus « manquant » ; les tiges doivent couvrir cette hauteur
+        result.inputs["plenum_m"] = plenum
+        result.data_used.insert(-2, {"label": "Plénum (hauteur de suspente)", "value": plenum, "unit": "m", "status": STATUS_CONFIRMED})
+        result.missing = [m for m in result.missing if not m.startswith("Hauteur de plénum")]
+        result.assumptions.append(f"Tiges d'au moins {plenum:g} m (plénum donné) + la marge de réglage du pivot.")
     extra = re.search(rf"({_NUM})\s*m?\s*x\s*({_NUM})\s*m?\s*x\s*({_NUM})", t)
     if result is not None and extra:
         result.missing.append(
             f"Trois valeurs reçues ({extra.group(1)} × {extra.group(2)} × {extra.group(3)}) : seules les deux premières sont utilisées. "
             "Précisez ce que représente la troisième (hauteur, nombre, épaisseur).")
     return result
+
+
+def _calculate_zones(kind: str, zones: list[tuple[str, Any, int]], t: str, cfg: dict, waste: float,
+                     height: float | None) -> CalcResult | None:
+    """Plusieurs pièces ou cloisons dans la même phrase (« salon 5x4 et chambre 4x3 », « 2 cloisons de 3 x 2,5 », plafond en L) :
+    un seul calcul pour le tout. Avant, seule la première mesure était comptée et le reste disparaissait du devis."""
+    if kind == "ceiling":
+        rects, guessed = [], False
+        for k, v, n in zones:
+            if k == "pair":
+                rects += [v] * n
+            elif k == "area":   # pièce donnée par sa surface : supposée carrée (signalé)
+                rects += [(math.sqrt(v), math.sqrt(v))] * n
+                guessed = True
+        return calculate_ceiling(*rects[0], zones=rects, waste=waste, board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
+                                 dims_known=not guessed, fixing_values=cfg.get("fixings")) if rects else None
+    walls, areas, assumed_h = [], [], False
+    for k, v, n in zones:
+        if k == "pair":
+            L, H = v
+            if (H > 6 and L <= 6) or (L < H and L <= 4.5 and H > 6):
+                L, H = H, L   # « 2,5 x 4 » : hauteur et longueur inversées
+            walls += [(L, H)] * n
+        elif k == "length":
+            walls += [(v, height or 2.5)] * n
+            assumed_h = assumed_h or height is None
+        else:
+            areas += [v] * n
+    if not walls:
+        return None
+    if any(H > 8 or L > 2000 for L, H in walls):
+        return CalcResult(kind="partition", title="Calcul de cloison",
+                          understanding="Dimensions peu crédibles (" + " + ".join(f"{L:g} x {H:g}" for L, H in walls) + " m) : "
+                                        "je préfère ne pas calculer.",
+                          missing=["Longueur et hauteur de chaque cloison en mètres."],
+                          next_step="Indiquez par exemple : 2 cloisons de 4 x 2,5 m.")
+    res = calculate_partition(*walls[0], sides=_sides(t), openings=_openings(t), walls=walls, waste=waste,
+                              board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
+                              stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"))
+    if assumed_h:
+        res.assumptions.insert(0, "Hauteur non donnée : 2,50 m supposée (à confirmer, plaques et montants en dépendent).")
+        res.missing.insert(0, "Hauteur des cloisons.")
+    if areas:
+        res.missing.insert(0, "Surface(s) " + " + ".join(f"{a:g} m²" for a in areas) + " NON comptée(s) : donne la longueur et la "
+                              "hauteur de ces cloisons.")
+    return res
 
 
 def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult | None:
@@ -921,11 +1081,21 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
     if re.search(r"plaques?\s*(?:de\s*)?(?:2[.,]50?|2500)\b", t):
         cfg["board_height_m"] = 2.5   # seulement si le patron le précise : la plaque par défaut fait 2 m
     t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
+    def to_m(raw: str, unit: str, first: bool = False) -> str:
+        v, div = parse_number(raw), (1000 if unit == "mm" else 100)
+        return f"{v:g}" if first and v / div < 0.1 else f"{v / div:g}"   # « 4,5 x 350 cm » : 4,5 est déjà en mètres
+    t = re.sub(rf"({_NUM})\s*(?:x|sur|par)\s*({_NUM})\s*(mm|cm)\b",
+               lambda m: f"{to_m(m.group(1), m.group(3), True)} x {to_m(m.group(2), m.group(3))} m", t)   # 400 x 350 cm : les DEUX cotes
     t = re.sub(rf"({_NUM})\s*(mm|cm)\b",
                lambda m: f"{parse_number(m.group(1)) / (1000 if m.group(2) == 'mm' else 100):g} m", t)   # 3500 mm → 3.5 m
 
-    pair = _extract_dimension_pair(t)
-    nums = _find_numbers(t)
+    zones = _zones(t) if kind in ("ceiling", "partition") else []
+    # plafond / cloison : la première vraie mesure (pas « plaques 1200 x 2500 » ni « porte de 0,9 x 2,1 », qui ne sont pas l'ouvrage)
+    pair = next((v for k, v, _ in zones if k == "pair"), None) if kind in ("ceiling", "partition") else _extract_dimension_pair(t)
+    # « 2 portes », « 3 chambres », « 2 couches » : des nombres d'objets, pas des cotes (avant : « cloison 12 m, 2 portes » = 2 m de haut)
+    parts = lambda m: " " if _is_part(t[max(0, m.start() - 40):m.start()], parse_number(m.group(1)), parse_number(m.group(2))) else m.group(0)   # noqa: E731
+    nums = _find_numbers(re.sub(rf"\b\d+\s+(?:{_ROOM}|portes?|fen[eê]tres?|faces?|c[oô]t[eé]s?|couches?|spots?|trappes?)\b", " ",
+                                re.sub(rf"({_NUM})\s*(?:m\b)?\s*(?:x|sur|par)\s*({_NUM})", parts, t)))
     area_m = None
     m_area = re.search(rf"({_NUM})\s*(?:m²|m2)", t)
     if m_area:
@@ -941,8 +1111,25 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         w = parse_number(wm.group(1))
         waste = w / 100.0 if w > 1 else w
 
+    if sum(n for k, _, n in zones if kind == "partition" or k != "length") > 1:
+        several = _calculate_zones(kind, zones, t, cfg, waste, parse_number(height.group(1)) if height else None)
+        if several is not None:
+            return several
+
     if kind == "partition":
         L = H = None
+        if area_m is not None and not pair and not length:   # « cloison de 20 m² » : une surface, pas 20 m × 2 m (le 2 de « m2 »)
+            sides, sides_known = _sides(t), bool(re.search(r"faces?|c[oô]t[eé]s?|peau|doublage|sides?", t))
+            if not height:
+                return calculate_partition_from_area(area_m, sides, sides_known=sides_known, waste=waste, board_width=cfg["board_width_m"],
+                                                     board_height=cfg["board_height_m"], fixing_values=cfg.get("fixings"))
+            H = parse_number(height.group(1))
+            res = calculate_partition(round_qty(area_m / H, 3), H, sides=sides, openings=_openings(t), waste=waste,
+                                      board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
+                                      stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"), sides_known=sides_known)
+            res.assumptions.insert(0, f"Longueur déduite : {area_m:g} m² (une face) / {H:g} m de haut = {area_m / H:.2f} m, "
+                                      "en une seule cloison (plusieurs cloisons : donne leurs longueurs).")
+            return res
         if pair:
             L, H = pair
             if H > 6 and L <= 6:
@@ -955,6 +1142,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
             H = parse_number(height.group(1))
         if L is None and nums:
             L = nums[0]
+        h_assumed = H is None and len(nums) < 2
         if H is None:
             H = nums[1] if len(nums) > 1 else 2.50
         if L is not None and (H > 8 or L > 2000):
@@ -971,11 +1159,18 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
                 missing=["Longueur de la cloison."],
                 next_step="Indiquez par exemple : cloison 12 x 2,5 m.",
             )
-        return calculate_partition(
+        res = calculate_partition(
             L, H, sides=_sides(t), openings=_openings(t), waste=waste,
             board_width=cfg["board_width_m"], board_height=cfg["board_height_m"],
             stud_spacing=cfg["stud_spacing_m"], fixing_values=cfg.get("fixings"),
         )
+        if h_assumed:   # hauteur non dite : supposée, et dite comme telle (avant : affichée « confirmée »)
+            for d in res.data_used:
+                if d["label"] == "Hauteur":
+                    d["status"] = STATUS_ASSUMED
+            res.assumptions.insert(0, "Hauteur non donnée : 2,50 m supposée (à confirmer, plaques et montants en dépendent).")
+            res.missing.insert(0, "Hauteur de la cloison.")
+        return res
 
     if kind == "ceiling":
         square_from_area = None
@@ -1115,9 +1310,10 @@ def verify(result: "CalcResult") -> dict[str, Any]:
     step = {st.label.split(" (")[0]: st.result for st in result.steps}
     try:
         if result.kind == "partition" and inp:
-            L, H, sides = _F(inp["length_m"]), _F(inp["height_m"]), int(inp["sides"])
+            walls = [(_F(w), _F(h)) for w, h in inp.get("walls") or [(inp["length_m"], inp["height_m"])]]
+            sides = int(inp["sides"])
             ops = sum((_F(o["width"]) * _F(o["height"]) * int(o["quantity"]) for o in inp.get("openings") or []), Fraction(0))
-            gross = L * H * sides
+            gross = sum((L * H for L, H in walls), Fraction(0)) * sides
             net = max(gross - ops * sides, Fraction(0))
             if abs(_F(step.get("Surface brute", -1)) - gross) > Fraction(1, 1000):
                 problems.append(f"Surface brute : moteur {step.get('Surface brute')} ≠ contrôle {float(gross):g} m².")
@@ -1129,19 +1325,22 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
             bw, e = _F(inp["board_width"]), _F(inp["stud_spacing"])
             gaps = bw / e
-            n = (_min_count(L, bw) * int(gaps) + 1) if gaps >= 1 and gaps.denominator == 1 else _min_count(L, e) + 1
             bar = _F(BAR_LENGTH_M)
-            full = int(H // bar)
-            rest = H - full * bar
-            studs = n if full == 0 else n * full if rest == 0 else n * full + _min_count(Fraction(n), Fraction(int(bar // rest)))
+            fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
+            n = studs = pts = 0
+            for L, H in walls:   # chaque cloison a ses montants, ses barres et ses chevilles
+                n_w = (_min_count(L, bw) * int(gaps) + 1) if gaps >= 1 and gaps.denominator == 1 else _min_count(L, e) + 1
+                full = int(H // bar)
+                rest = H - full * bar
+                studs += n_w if full == 0 else n_w * full if rest == 0 else n_w * full + _min_count(Fraction(n_w), Fraction(int(bar // rest)))
+                pts += _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
+                n += n_w
             studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
-            bars = _min_count(2 * L, _F(BAR_LENGTH_M))
+            bars = _min_count(2 * sum((L for L, _ in walls), Fraction(0)), _F(BAR_LENGTH_M))
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
-            fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
-            pts = _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
             packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
             if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != packs:
                 problems.append(f"Chevilles à frapper : moteur {qty['UC-PAQUET-CHEVILLES-A-FRAPPER']} ≠ contrôle {packs} paquet(s).")
@@ -1158,15 +1357,17 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             if "MONTANT-M48" in qty or "UC-RAILS-48-MM" in qty:
                 problems.append("Ossature présente alors que la longueur est inconnue : quantité inventée.")
         elif result.kind == "ceiling" and inp:
-            area = _F(inp["length_m"]) * _F(inp["width_m"])
+            zones = [(_F(a), _F(b)) for a, b in inp.get("zones") or [(inp["length_m"], inp["width_m"])]]
+            area = sum((a * b for a, b in zones), Fraction(0))
             if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):
                 problems.append(f"Surface : moteur {step.get('Surface')} ≠ contrôle {float(area):g} m².")
-            rive = _min_count(2 * (_F(inp["length_m"]) + _F(inp["width_m"])), _F(BAR_LENGTH_M))
+            pers = [2 * (a + b) for a, b in zones]   # cornière de rive : chaque zone a ses 4 côtés
+            rive = _min_count(sum(pers, Fraction(0)), _F(BAR_LENGTH_M))
             if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
                 problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
             fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
-            per = 2 * (_F(inp["length_m"]) + _F(inp["width_m"]))
-            packs = _min_count(Fraction(_min_count(per, _F(fx["anchor_spacing_m"])) + 4), Fraction(int(fx["anchors_per_pack"])))
+            pts = sum(_min_count(per, _F(fx["anchor_spacing_m"])) + 4 for per in pers)
+            packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
             if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != packs:
                 problems.append(f"Chevilles à frapper : moteur {qty['UC-PAQUET-CHEVILLES-A-FRAPPER']} ≠ contrôle {packs} paquet(s).")
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
