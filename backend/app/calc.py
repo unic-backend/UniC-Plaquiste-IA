@@ -830,10 +830,13 @@ def _extract_dimension_pair(text: str) -> tuple[float, float] | None:
 
 
 def _sides(text: str) -> int:
+    """Faces habillées. « simple face », « une seule face », « d'un côté » et un DOUBLAGE (contre un mur) = 1 face ; sinon 2
+    (avant, seuls « une face » / « simple peau » donnaient 1 : les autres phrases doublaient les plaques du devis)."""
     t = text.lower()
-    if re.search(r"deux\s+faces|2\s+faces|both\s+sides|double\s+peau|des deux", t):
+    if re.search(r"deux\s+faces|2\s+faces|double\s+face|both\s+sides|double\s+peau|des\s+deux\s+c[oô]t[eé]s|2\s+c[oô]t[eé]s|des deux", t):
         return 2
-    if re.search(r"une\s+face|1\s+face|one\s+side|simple\s+peau", t):
+    if re.search(r"une\s+(?:seule\s+)?face|1\s+face|simple\s+face|simple\s+peau|one\s+side|"
+                 r"(?:sur\s+|d'|d’)?un\s+(?:seul\s+)?c[oô]t[eé]|1\s+c[oô]t[eé]|doublage", t):
         return 1
     return 2
 
@@ -846,18 +849,23 @@ def _count(raw: str) -> int:
     return int(raw) if raw.isdigit() else _COUNT_WORDS[raw]
 
 
+def _size(raw: str) -> float:
+    v = parse_number(raw)
+    return v / 100 if v > 10 else v   # « porte de 90 sur 210 » : centimètres
+
+
 def _openings(text: str) -> list[Opening]:
+    """Portes et fenêtres : « 2 portes », « deux portes de 0,90 sur 2,10 », « porte 0.90 m x 2.10 m », « fenêtre de 120 par 100 ».
+    Une taille donnée est gardée avec son nombre (avant : « deux portes de 0,90 sur 2,10 » = 1 porte de taille supposée)."""
     t = text.lower()
     openings: list[Opening] = []
+    size = r"(\d+(?:[.,]\d+)?)\s*(?:m\b)?\s*(?:x|×|sur|par)\s*(\d+(?:[.,]\d+)?)"
+    for kind, word in (("door", r"(?:portes?|doors?)"), ("window", r"(?:fen[eê]tres?|windows?)")):
+        for m in re.finditer(rf"(?:\b{_COUNT}\s+)?{word}\s+(?:de\s+|d'|d’)?{size}", t):
+            n = _count(m.group(1)) if m.group(1) else 1
+            openings.append(Opening(kind, _size(m.group(2)), _size(m.group(3)), n))
     door_q = re.search(rf"\b{_COUNT}\s*(?:portes?|doors?)\b", t)
     win_q = re.search(rf"\b{_COUNT}\s*(?:fen[eê]tres?|windows?)\b", t)
-    # door size e.g. porte 0.90 x 2.04
-    for kind, default_w, default_h, patt in (
-        ("door", 0.90, 2.04, r"porte[s]?\s+(\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)"),
-        ("window", 1.20, 1.20, r"fen[eê]tre[s]?\s+(\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)"),
-    ):
-        for m in re.finditer(patt, t):
-            openings.append(Opening(kind, parse_number(m.group(1)), parse_number(m.group(2)), 1))
     if door_q and not any(o.kind == "door" for o in openings):
         openings.append(Opening("door", 0.90, 2.04, _count(door_q.group(1)), assumed_size=True))
     if win_q and not any(o.kind == "window" for o in openings):
