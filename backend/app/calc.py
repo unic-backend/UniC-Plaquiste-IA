@@ -785,6 +785,33 @@ def parse_number(raw: str) -> float:
     return float(s)
 
 
+_WORD_NUMBERS = {
+    "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5, "six": 6, "sept": 7, "huit": 8, "neuf": 9, "dix": 10,
+    "onze": 11, "douze": 12, "treize": 13, "quatorze": 14, "quinze": 15, "seize": 16, "vingt": 20, "trente": 30,
+    "quarante": 40, "cinquante": 50, "soixante": 60, "cent": 100,
+}
+_WORD_NUM = "|".join(sorted(_WORD_NUMBERS, key=len, reverse=True))
+
+
+def normalize_dimensions(text: str) -> str:
+    """Écritures françaises des mesures ramenées à une forme simple AVANT tout calcul (sinon « 4m50 sur 2m60 » se lisait
+    50 × 2 m) : « 4m50 » → 4.50 m ; « 3 mètres 20 » → 3.20 m ; « 2 mètres et demi » → 2.5 m ; « mètres carrés » → m² ;
+    nombres en lettres collés à une mesure (« cinq mètres sur quatre ») → chiffres. « 6 mètres 2 portes » reste 6 m + 2 portes."""
+    t = text.lower().replace("\u00a0", " ")
+    t = re.sub(r"\bm[eè]tres?\s+carr[eé]s?\b|\bm\s+carr[eé]s?\b", "m²", t)
+    # nombres en lettres, seulement près d'une mesure (« un plafond » reste tel quel)
+    t = re.sub(rf"\b({_WORD_NUM})\b(?=\s*(?:m\b|m²|m[eè]tres?\b|virgule\b|et\s+demi|sur\b|par\b|x\b))",
+               lambda m: str(_WORD_NUMBERS[m.group(1)]), t)
+    t = re.sub(rf"(?:(?<=\bsur\s)|(?<=\bpar\s)|(?<=\bx\s))({_WORD_NUM})\b", lambda m: str(_WORD_NUMBERS[m.group(1)]), t)
+    t = re.sub(r"\b(\d+)\s+virgule\s+(\d+)\b", r"\1.\2", t)                                   # « deux virgule cinq »
+    t = re.sub(r"\b(\d+)\s?m(\d{2})\b(?![.,]?\d)", r"\1.\2 m", t)                                 # 4m50, 2m05 (« 20 m2 » = m²)
+    t = re.sub(r"\b(\d+)\s*m[eè]tres?\s+(\d{1,2})\b(?!\s*(?:portes?|fen[eê]tres?|faces?|plaques?|cm|mm|m\b|m[eè]tres?|[.,]\d))",
+               r"\1.\2 m", t)                                                                      # 3 mètres 20
+    t = re.sub(r"\b(\d+(?:[.,]\d+)?)\s*(m\b|m[eè]tres?)?\s*et\s+demi\b",
+               lambda m: f"{parse_number(m.group(1)) + 0.5:g}" + (" m" if m.group(2) else ""), t)      # 2 mètres et demi
+    return t
+
+
 def _find_numbers(text: str) -> list[float]:
     return [parse_number(m.group(0)) for m in re.finditer(_NUM, text)]
 
@@ -839,7 +866,7 @@ def _openings(text: str) -> list[Opening]:
 
 
 def detect_calc_kind(text: str) -> str | None:
-    t = text.lower()
+    t = normalize_dimensions(text)   # « 100 mètres carrés » = « 100 m² » : même ouvrage à préciser
     if re.search(r"faux[\s-]?plafond|suspended ceiling|plafond suspendu", t):
         return "ceiling"
     if re.search(r"peinture|paint|peintur", t):
@@ -864,6 +891,7 @@ def detect_calc_kind(text: str) -> str | None:
 
 def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult | None:
     """Calcul à partir d'une phrase. Refuse les dimensions négatives ; signale les valeurs en trop au lieu de les ignorer."""
+    text = normalize_dimensions(text)
     t = text.lower().replace("×", "x")
     if re.search(r"(?<![\w.,])-\d", t):
         raise ValueError("Dimension négative détectée : donnez des longueurs positives.")
