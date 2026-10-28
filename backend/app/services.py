@@ -205,6 +205,22 @@ def add_with_unique_number(db: Session, obj, next_number) -> None:
             obj.number = next_number()
 
 
+_PARTICLES = {"de", "du", "des", "la", "le", "van", "von", "da", "di", "dos", "das"}
+
+
+def nom_propre(name: str | None) -> str:
+    """Nom écrit comme sur une pièce d'identité : « moussa ba » → « Moussa Ba », « mame diarra n'diaye » → « Mame Diarra N'Diaye »,
+    « abdou-karim fall » → « Abdou-Karim Fall ». Seules les initiales en minuscule changent : « FAST GROUP », « SARL BTP » ou
+    « McDonald » restent comme le patron les a écrits."""
+    out = []
+    for i, w in enumerate((name or "").split()):
+        if i and w.lower() in _PARTICLES:   # « Jean de la Fontaine »
+            out.append(w)
+        else:
+            out.append(re.sub(r"(^|[-'’])([^\W\d_])", lambda m: m.group(1) + m.group(2).upper(), w))
+    return " ".join(out)
+
+
 def client_name_of(db: Session, doc) -> str:
     """Client d'un document : sa fiche, son nom saisi, ou celui du devis dont il découle (facture, bon)."""
     if isinstance(doc, Quotation):
@@ -444,7 +460,7 @@ def quotation_from_quantities(
 ) -> Quotation:
     company = company_dict(db)
     known = db.get(Customer, customer_id) if customer_id else None
-    label = (known.name if known else (client_name or "")).strip()
+    label = known.name.strip() if known else nom_propre(client_name)
     number = document_number(db, label, lieu=lieu)
     q = Quotation(
         number=number,

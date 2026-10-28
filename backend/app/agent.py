@@ -1808,7 +1808,7 @@ class AgentSession:
         if anomalies:   # un devis faux n'entre pas dans la bibliothèque
             revise.discard(self.db, "quote", q, self.user_id)
             raise ConnectorError(f"Contrôle des prix échoué, devis NON créé : {anomalies[:5]}", 500)
-        label = cust.name if cust else client_name
+        label = cust.name if cust else svc.nom_propre(client_name)
         sig = svc.quote_signature(q)
         twin = next((o for o in self.db.query(Quotation).filter(Quotation.id != q.id).all()
                      if svc.same_party(label, lieu, o.customer.name if o.customer else o.client_label, o.site_location)
@@ -1959,6 +1959,8 @@ class AgentSession:
 
     def _t_create_contact(self, kind: str, name: str, customer_name: str = "") -> dict:
         name = (name or "").strip()
+        if kind in ("customer", "supplier"):
+            name = svc.nom_propre(name)   # « moussa ba » → « Moussa Ba »
         if len(name) < 2:
             raise ConnectorError("Nom manquant : demande-le au patron.", 400)
         if kind == "customer":

@@ -292,12 +292,34 @@ def _match_any(db: Session, text: str):
 _CLIENT_NAME_RE = re.compile(
     r"\b(?:pour|client|cliente|au nom de|chez)\s+(?:(?:M\.|Mme|Mr|Monsieur|Madame)\s+)?"
     r"([A-ZÀ-Ý][\wÀ-ÿ'’\-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’\-]+){0,3})")
+# « devis pour moussa ba » (écrit vite ou dicté) : prénom ET nom en minuscules, jamais un mot courant (« pour le chantier »)
+_CLIENT_NAME_LOW = re.compile(r"\b(?:pour|client|cliente|au nom de|chez)\s+(?:(?:m\.|mme|mr|monsieur|madame)\s+)?"
+                              r"([a-zà-ÿ][\wà-ÿ'’\-]*(?:\s+[a-zà-ÿ][\wà-ÿ'’\-]*){1,3})", re.I)
+_NOT_A_NAME = set((
+    "le la les l un une des du de d ce cet cette ces mon ma mes ton ta tes son sa ses notre nos votre vos leur leurs moi toi lui elle "
+    "nous vous eux elles demain aujourd hier ce soir matin quand combien quoi qui info tout tous toute avoir faire voir finir "
+    "chantier chantiers client clients cliente projet devis facture bon bons cloison cloisons plafond plafonds faux peinture enduit "
+    "salon chambre chambres cuisine bureau bureaux villa maison appartement immeuble magasin boutique mur murs plaque plaques ba13 "
+    "et ou avec sans sur par en à a au aux m mètres metres mois semaine jour jours lundi mardi mercredi jeudi vendredi samedi dimanche"
+).split())
 
 
 def _client_name_in(text: str) -> str | None:
-    """Nom de client cité (« devis pour Ousmane Diop »). Majuscules obligatoires : jamais deviné."""
+    """Nom de client cité (« devis pour Ousmane Diop », « devis pour moussa ba » → « Moussa Ba »). Jamais deviné : en minuscules,
+    il faut le prénom et le nom, et aucun mot courant (« pour le salon », « pour demain » ne sont pas des clients)."""
+    from app.services import nom_propre
     m = _CLIENT_NAME_RE.search(text)
-    return m.group(1).strip() if m else None
+    if m:
+        return nom_propre(m.group(1).strip())
+    m = _CLIENT_NAME_LOW.search(text)
+    if not m:
+        return None
+    words = []
+    for w in m.group(1).split():
+        if w.lower().strip("'’") in _NOT_A_NAME or re.search(r"\d", w):
+            break
+        words.append(w)
+    return nom_propre(" ".join(words)) if len(words) >= 2 else None
 
 
 def _match_quote(db: Session, text: str) -> Quotation | None:
@@ -511,7 +533,8 @@ def _party_details(text: str) -> dict:
 
 def _create_named_party(db: Session, kind: str, text: str, user_id: str | None) -> str:
     d = _party_details(text)
-    name = d["name"]
+    from app.services import nom_propre
+    name = nom_propre(d["name"])   # « moussa ba » → « Moussa Ba »
     if not name or len(name) < 2:
         return "Indiquez le nom, par exemple : « crée un client FAST GROUP »."
     from app.services import next_number

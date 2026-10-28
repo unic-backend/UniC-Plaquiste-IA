@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
@@ -901,6 +901,11 @@ class CustomerIn(BaseModel):
     city: OptionalText = ""
     notes: str = ""
 
+    @field_validator("name", "contact_name")
+    @classmethod
+    def _nom_propre(cls, v: str) -> str:   # « moussa ba » → « Moussa Ba »
+        from app.services import nom_propre
+        return nom_propre(v)
 
 
 class Page:
