@@ -1832,3 +1832,11 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
   .table-wrap td[data-label="Désignation"] code { font-size: 12px; opacity: .75; }
   .table-wrap td[data-label="Total"] { font-weight: 800; }
 }
+
+/* Accueil sur ordinateur : les raccourcis ont la même largeur que la zone de message (avant : plus larges, et « Outils PDF »
+   seul sur sa ligne) ; les lignes restent pleines (3 puis 2). */
+.quick-chips { max-width: 760px; margin-left: auto; margin-right: auto; }
+@media (min-width: 861px) {
+  .quick-chips { display: flex; flex-wrap: wrap; }
+  .quick-chip { flex: 1 1 calc(33.333% - 10px); min-width: 0; }
+}
