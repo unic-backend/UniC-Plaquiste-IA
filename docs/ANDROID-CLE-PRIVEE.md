@@ -5,6 +5,15 @@
 - `build.gradle` l'utilise **seulement si** aucune clé privée n'est fournie : si les secrets GitHub `UNIC_KEYSTORE_B64` et `UNIC_KEYSTORE_PASSWORD` existent, l'APK est signé avec TA clé privée (mécanisme déjà en place, `.github/workflows/android.yml`).
 - **Je ne peux pas savoir si tes secrets sont posés** (GitHub ne me les montre pas). Pour le savoir : GitHub › Settings › Secrets and variables › Actions › vérifie la présence de `UNIC_KEYSTORE_B64`.
 
+## État vérifié le 28/10/2026 : clé privée EN PLACE
+APK de `main` (Android APK, run 358) lu avec `keytool -printcert -jarfile` :
+- signataire : `CN=UniC Plaquiste, O=UniC Plaquiste, L=Dakar, C=SN`, SHA-256 `F3:67:AA:1B:F2:12:DC:0B:48:70:AD:76:59:C5:F3:BA:74:16:68:58:10:B5:F2:41:13:4B:86:70:CA:22:ED:C4` ;
+- clé publique du dépôt (`unic-debug.keystore`) : `CN=UniC AI Debug`, SHA-256 `98:98:4E:BD:…:3B:EE:71` → **non utilisée**.
+
+Les secrets `UNIC_KEYSTORE_*` sont donc posés : rien à faire. La clé du dépôt ne sert qu'aux constructions sans secrets.
+Pour revérifier : télécharger l'APK (Actions › Android APK › artefact) puis `keytool -printcert -jarfile app-debug.apk`.
+Les étapes plus bas ne servent que si la clé privée devait être recréée.
+
 ## Le risque réel (honnête)
 Quelqu'un qui possède la clé publique peut fabriquer un faux APK **de même signature** que le tien. Pour qu'il compte, **tu dois l'installer toi-même** (hors Play Store) : il faut donc te tromper. Risque : **faible à modéré**, pas une faille à distance. Mais une clé publique ne protège rien : mieux vaut une clé privée.
 
