@@ -1450,7 +1450,9 @@ def test_quote_from_lines_given_by_the_boss(client):
                   {"article": "sac enduit", "quantity": 1}, {"article": "article inconnu xyz", "quantity": 3}]})
     assert out.get("numero", "").endswith("PD"), out
     q = db.query(Quotation).filter(Quotation.number == out["numero"]).first()
-    assert len(q.items) == 4 and [i.quantity for i in sorted(q.items, key=lambda x: x.position)] == [15, 20, 1, 3]
+    items = sorted(q.items, key=lambda x: x.position)
+    assert [i.quantity for i in items] == [15, 20, 1, 3, 1]   # + la livraison, toujours au tableau (règle du patron)
+    assert items[-1].description == "Livraison : à la charge du client" and items[-1].total == 0
     assert "article inconnu xyz" in out["lignes_sans_prix"]            # jamais de prix inventé
     assert any(i.unit_price for i in q.items)                           # les articles de la grille sont chiffrés
     # le même devis ne se recrée pas, mais de nouvelles lignes donnent un nouveau devis
