@@ -179,9 +179,10 @@ TOOLS: list[dict] = [
                         "method='unic' = ratios réels du patron (surface en m², cloisons fermées) ; 'generic' = formules standard. "
                         "Le résultat est gardé pour create_quote / create_purchase_order / create_delivery_note."),
         "input_schema": {"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["partition", "ceiling", "paint", "plaster", "surface", "a_preciser"],
-                     "description": ("ceiling = faux plafond BA13 ; partition = cloison sèche. « a_preciser » quand le patron donne une "
-                                     "surface ou des plaques SANS dire plafond ou cloison : les deux calculs sont faits.")},
+            "kind": {"type": "string", "enum": ["partition", "ceiling", "paint", "plaster", "surface", "a_preciser", "moulure"],
+                     "description": ("ceiling = faux plafond BA13 ; partition = cloison sèche ; moulure = moulures de plafond (barres de 3 m "
+                                     "et colles, règles du patron : length_m seul = mètres linéaires, length_m + width_m ou zones = tour des pièces). "
+                                     "« a_preciser » quand le patron donne une surface ou des plaques SANS dire plafond ou cloison : les deux calculs sont faits.")},
             "method": {"type": "string", "enum": ["generic", "unic"]},
             "length_m": {"type": "number"}, "height_m": {"type": "number"}, "width_m": {"type": "number"},
             "area_m2": {"type": "number"},
@@ -189,6 +190,9 @@ TOOLS: list[dict] = [
             "no_openings": {"type": "boolean", "description": "true seulement si le patron a confirmé qu'il n'y a AUCUNE porte ni fenêtre."},
             "parois": {"type": "integer"}, "already_developed": {"type": "boolean"}, "coats": {"type": "integer"},
             "board_length_m": {"type": "number", "description": "Longueur d'une plaque : 2 par défaut ; 2.5 seulement si le patron dit « 2,50 »."},
+            "with_moulure": {"type": "boolean", "description": "Faux plafond : true seulement si le patron demande aussi la moulure (barres et colles sur le tour)."},
+            "moulure_taille": {"type": "integer", "enum": [2, 4], "description": "Taille de moulure dite par le patron (omise : 4 supposée et signalée)."},
+            "colle": {"type": "string", "enum": ["silicone", "pompe"], "description": "Colle des moulures : silicone par défaut, pompe si le patron la demande."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -1607,14 +1611,15 @@ class AgentSession:
                                height_m: float | None = None, width_m: float | None = None,
                                area_m2: float | None = None, sides: int | None = None, parois: int | None = None,
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
-                               board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None) -> dict:
+                               board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
+                               with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone") -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
             b = (z.get("height_m") or height_m) if kind == "partition" else (z.get("width_m") or z.get("height_m"))
             if a and b:
                 rects += [(float(a), float(b), True)] * n
-            elif kind == "ceiling" and z.get("area_m2"):   # pièce donnée par sa surface : supposée carrée (signalé)
+            elif kind in ("ceiling", "moulure") and z.get("area_m2"):   # pièce donnée par sa surface : supposée carrée (signalé)
                 rects += [(float(z["area_m2"]) ** 0.5, float(z["area_m2"]) ** 0.5, False)] * n
             else:
                 raise ConnectorError("Chaque zone : longueur et " + ("hauteur" if kind == "partition" else "largeur (ou surface)") + ".", 400)
@@ -1691,6 +1696,14 @@ class AgentSession:
                 res = calc.calculate_ceiling(a, b, waste=cfg["waste"], board_width=cfg["board_width"], board_height=cfg["board_height"],
                                              fixing_values=cfg["fixings"],
                                              dims_known=not square)
+            elif kind == "moulure":
+                rooms = [(a, b) for a, b, _ in rects] or ([(length_m, width_m or height_m)] if length_m and (width_m or height_m) else [])
+                if not rooms and area_m2:
+                    rooms = [(area_m2 ** 0.5, area_m2 ** 0.5)]
+                if not rooms and not length_m:
+                    raise ConnectorError("Longueur de moulure (length_m, en ml) ou dimensions des pièces requises.", 400)
+                res = calc.calculate_moulure(None if rooms else length_m, rooms=rooms or None, taille=moulure_taille, colle=colle,
+                                             rooms_known=not (area_m2 and not length_m) and all(k for *_, k in rects))
             elif kind == "paint":
                 if not area_m2:
                     raise ConnectorError("Surface à peindre (area_m2) requise.", 400)
@@ -1705,6 +1718,9 @@ class AgentSession:
                 res = calc.calculate_surface(length_m, height_m or width_m)
         except ValueError as exc:
             raise ConnectorError(str(exc), 400)
+        if with_moulure and res.kind == "ceiling" and res.quantities:   # moulure demandée avec le plafond : sur le tour du plafond
+            zs = res.inputs.get("zones") or [[res.inputs["length_m"], res.inputs["width_m"]]]
+            calc.add_moulure(res, sum(2 * (a + b) for a, b in zs), moulure_taille, colle)
         data = res.to_dict()
         self.state["last_calc"] = data   # utilisé par create_quote / bons
         self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible
