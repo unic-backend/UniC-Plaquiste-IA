@@ -621,7 +621,12 @@ TOOLS: list[dict] = [
             "partitions": {"type": "array", "items": {"type": "object", "properties": {
                 "label": {"type": "string"}, "length_m": {"type": "number"}, "height_m": {"type": "number"},
                 "sides": {"type": "integer", "enum": [1, 2]}}, "required": ["length_m", "height_m"]}},
-            "board_length_m": {"type": "number", "description": "2 par défaut ; 2.5 seulement si le patron le dit."}},
+            "board_length_m": {"type": "number", "description": "2 par défaut ; 2.5 seulement si le patron le dit."},
+            "cloisons_du_plan": {"type": "boolean", "description": (
+                "true = ajoute les cloisons MESURÉES sur le plan (metre_cloisons de read_plan) avec leurs matériaux, mur par "
+                "mur : montants, rails, éclisses, plaques (hydrofuges, 2 par face selon la légende), laine, chevilles, vis, "
+                "bande, enduit. Seulement si le patron veut les cloisons.")},
+            "plafonds": {"type": "boolean", "description": "false = seulement les cloisons, sans les faux plafonds (défaut : true)."}},
             "additionalProperties": False},
     },
     {
@@ -1422,7 +1427,7 @@ class AgentSession:
 
     def _t_calculate_from_plan(self, file_id: str = "", rooms: list | None = None, include_to_confirm: bool = False,
                                hydrofuge_rooms: list | None = None, partitions: list | None = None,
-                               board_length_m: float | None = None) -> dict:
+                               board_length_m: float | None = None, cloisons_du_plan: bool = False, plafonds: bool = True) -> dict:
         from app import plan_quote, plans
         fid = file_id or self.state.get("last_file_id")
         if not fid:
@@ -1439,7 +1444,8 @@ class AgentSession:
                                     hydrofuge_rooms=hydrofuge_rooms, partitions=partitions,
                                     waste=co.get("default_waste") or 0.0, board_width=co.get("board_width_m") or 1.2,
                                     board_length=board_length_m or co.get("board_height_m") or 2.0,
-                                    stud_spacing=co.get("stud_spacing_m") or 0.6, fixings=calc_fixings(co))
+                                    stud_spacing=co.get("stud_spacing_m") or 0.6, fixings=calc_fixings(co),
+                                    cloisons_du_plan=bool(cloisons_du_plan), plafonds=plafonds is not False)
         except plan_quote.PlanQuoteError as exc:
             raise ConnectorError(str(exc), 400)
         except ValueError as exc:

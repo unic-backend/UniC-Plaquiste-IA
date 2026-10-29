@@ -494,6 +494,10 @@ def _analyze_pages(db: Session, rec: StoredFile, refresh: bool, budget_s: float)
 
 def compact(out: dict, max_rooms: int = 80) -> dict:
     """Gros dossier : ce que l'IA du chat reçoit (la liste complète reste en cache pour le métré). Pièces réduites à l'essentiel."""
+    if out.get("metre_cloisons"):   # les tronçons servent au calcul des matériaux, pas à la conversation
+        mc = out["metre_cloisons"]
+        out = {**out, "metre_cloisons": {**mc, "par_niveau": [{**lv, "types": [{k: v for k, v in t.items() if k != "troncons_m"}
+                                                                                for t in lv["types"]]} for lv in mc["par_niveau"]]}}
     rooms = out.get("pieces") or []
     if len(rooms) <= max_rooms:
         return out
@@ -657,7 +661,8 @@ def _metre_cloisons(pages: list[dict]) -> dict:
         for c in p["types"]:
             ml = round(c["longueur_m"] * n, 2)
             m2 = round(ml * h, 2) if h else None
-            types.append({"libelle": c["libelle"], "ml_par_niveau": c["longueur_m"], "ml": ml, "m2": m2})
+            types.append({"libelle": c["libelle"], "ml_par_niveau": c["longueur_m"], "ml": ml, "m2": m2,
+                          "troncons_m": c.get("troncons_m") or []})   # murs un par un : montants et plaques au métré
             t = totals.setdefault(c["libelle"], {"libelle": c["libelle"], "ml": 0.0, "m2": 0.0, "hauteur_inconnue": False})
             t["ml"] = round(t["ml"] + ml, 2)
             t["m2"] = round(t["m2"] + (m2 or 0), 2)

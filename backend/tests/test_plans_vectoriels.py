@@ -128,3 +128,50 @@ def test_legende_echelle_et_recouvrements(tmp_path):
     assert "cloisons" not in m and m["echelle"]["m_par_point"] is None           # sans échelle : rien de mesuré, rien d'inventé
     p.write_bytes(_pdf(legend=False))
     assert "cloisons" not in pdfjob.run("page", timeout=60, path=str(p), index=0)["mesures"]   # sans légende : idem
+
+
+# ---------- matériaux des cloisons mesurées ----------
+
+def test_systeme_lu_dans_la_legende():
+    assert plan_quote.systeme(STD) == {"couches": 1, "ossature_mm": 48, "hydro": False, "laine_mm": 0, "faces": 2}
+    assert plan_quote.systeme(HYDRO)["hydro"] is True
+    assert plan_quote.systeme(DOUBLE) == {"couches": 2, "ossature_mm": 48, "hydro": False, "laine_mm": 45, "faces": 2}
+    assert plan_quote.systeme("Cloison 120/70 - BA13 + isolant")["ossature_mm"] == 70
+    assert plan_quote.systeme("Cloison 120/70 - BA13 + isolant")["laine_mm"] is None          # isolant sans épaisseur écrite
+    assert plan_quote.systeme("Doublage 1 BA13 sur rails")["faces"] == 1
+
+
+def test_materiaux_des_cloisons_mur_par_mur(mesures):
+    from app import calc
+    out = _lecture(mesures)
+    types = {t["libelle"]: t for t in plan_quote.cloisons_mesurees(out["metre_cloisons"])}
+    assert {k: (t["ml"], t["m2"]) for k, t in types.items()} == {
+        STD: (758.25, 2173.4), HYDRO: (4505.5, 12779.3), DOUBLE: (1666.25, 4775.5)}   # mêmes nombres que le corrigé
+    assert {k: t["murs"] for k, t in types.items()} == {STD: 247, HYDRO: 1293, DOUBLE: 386}   # tronçons × niveaux
+    for label, t in types.items():
+        q = {x.sku: x for x in t["result"].quantities}
+        walls = [(r, lv["hauteur_m"]) for lv in out["metre_cloisons"]["par_niveau"] for ty in lv["types"] if ty["libelle"] == label
+                 for r in ty["troncons_m"] for _ in range(lv["niveaux"])]
+        # montants : règle du patron recomptée mur par mur (60 cm, jonctions doublées, rallonges au-dessus de 2,80 m)
+        assert q["MONTANT-M48"].quantity == sum(calc.stud_bars(calc.studs_needed(a, 0.6, 1.2, 2.0), h) for a, h in walls)
+        layers = t["systeme"]["couches"]
+        board = next(x for x in t["result"].quantities if x.sku.startswith("BA13-"))
+        assert board.quantity >= calc.ceil_int(2 * layers * t["m2"] / 2.4)            # jamais moins que la surface à couvrir
+        assert q["UC-RAILS-48-MM"].quantity >= calc.ceil_int(2 * t["ml"] / 2.8)
+    assert next(x for x in types[HYDRO]["result"].quantities if x.sku.startswith("BA13-")).sku == "BA13-2000x1200-H"
+    laine = {x.sku: x for x in types[DOUBLE]["result"].quantities}["UC-LAINE-DE-VERRE-PAQUET"]
+    assert laine.quantity == 354 and laine.status == calc.STATUS_ASSUMED and "45 mm" in laine.name   # 4 775,5 m² / 13,5
+    assert "UC-LAINE-DE-VERRE-PAQUET" not in {x.sku for x in types[STD]["result"].quantities}
+
+
+def test_devis_cloisons_seules_ou_avec_plafonds(mesures):
+    out = _lecture(mesures)
+    only = plan_quote.build(out, cloisons_du_plan=True, plafonds=False)
+    q = {x["sku"]: x["quantity"] for x in only["quantities"]}
+    assert "UC-TIGES-A-L-UNITE" not in q and "BA13-2000x1200-H" in q and "UC-LAINE-DE-VERRE-PAQUET" in q
+    assert sum(1 for s in only["steps"] if s["label"].startswith("Cloisons mesurées")) == 3
+    both = plan_quote.build(out, include_to_confirm=True, cloisons_du_plan=True)
+    qb = {x["sku"]: x["quantity"] for x in both["quantities"]}
+    assert qb["UC-TIGES-A-L-UNITE"] > 0 and qb["MONTANT-M48"] == q["MONTANT-M48"]
+    with pytest.raises(plan_quote.PlanQuoteError, match="Aucune cloison mesurée"):
+        plan_quote.build({"pieces": [{"nom": "Salon", "surface_m2": 20, "plafond": "oui"}]}, cloisons_du_plan=True)

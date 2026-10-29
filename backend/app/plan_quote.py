@@ -9,6 +9,7 @@ Chaque pièce retenue, sa surface et sa source (plan) sont écrites dans les hyp
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 from dataclasses import asdict
 
@@ -49,18 +50,90 @@ def _pose(p: dict, rects: list[list[float]], board_width: float, board_length: f
             "tiges": tiges, "plaques": f"{entieres} entières + {morceaux} pour les morceaux = {entieres + morceaux}"}
 
 
+# Laine : couverture d'un paquet supposée d'après le devis de référence du patron (1 paquet par paroi de 5,40 × 2,50 m) ; à confirmer
+LAINE_M2_PAR_PAQUET = 13.5
+
+
+def systeme(libelle: str) -> dict:
+    """Système de cloison lu dans la légende : « Cloison 98/48 - 2 BA13 chaque face + laine 45 mm » → montants de 48, 2 plaques
+    par face, laine de 45 mm ; « … BA13 hydro H1 (pièces humides) » → plaques hydrofuges ; « doublage » ou « 1 face » → une face."""
+    low = libelle.lower()
+    layers = re.search(r"(\d)\s*(?:x\s*)?ba\s?1[38]", low)
+    frame = re.search(r"\b\d{2,3}\s*/\s*(\d{2,3})\b", low)
+    wool = re.search(r"(?:laine|isolant)\D{0,25}?(\d{2,3})\s*mm", low)
+    return {"couches": max(1, min(3, int(layers.group(1)))) if layers else 1,
+            "ossature_mm": int(frame.group(1)) if frame else 48,
+            "hydro": bool(re.search(r"hydro|\bh1\b|pi[eè]ces?\s+humides", low)),
+            "laine_mm": int(wool.group(1)) if wool else (0 if not re.search(r"laine|isolant", low) else None),
+            "faces": 1 if re.search(r"doublage|une\s+(?:seule\s+)?face|\b1\s*face\b", low) else 2}
+
+
+def cloisons_mesurees(metre: dict, *, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
+                      fixings: dict | None = None) -> list[dict]:
+    """Matériaux des cloisons MESURÉES sur le plan (metre_cloisons) : chaque tronçon est un mur (montants à chaque bout, plaques
+    au plan de pose, rallonges et éclisses au-dessus de 2,80 m), répété sur ses niveaux à la hauteur du cartouche ; puis le
+    système de la légende : plaques hydrofuges, 2 plaques par face, laine, ossature de 70. Pas de marge (règle du patron)."""
+    walls: dict[str, list[tuple[float, float]]] = {}
+    missing: list[str] = []
+    for lv in metre.get("par_niveau") or []:
+        h = lv.get("hauteur_m")
+        if not h:
+            missing.append(f"{lv.get('niveau') or 'page ' + str(lv.get('page'))} : hauteur des cloisons inconnue, non chiffrées.")
+            continue
+        for t in lv["types"]:
+            runs = t.get("troncons_m") or ([t["ml_par_niveau"]] if t.get("ml_par_niveau") else [])
+            walls.setdefault(t["libelle"], []).extend([(float(r), float(h)) for r in runs if r > 0] * int(lv.get("niveaux") or 1))
+    out = []
+    fx = calc.fixings(fixings)
+    for label, ws in walls.items():
+        if not ws:
+            continue
+        sy = systeme(label)
+        res = calc.calculate_partition(ws[0][0], ws[0][1], sy["faces"], [], walls=ws, board_width=board_width,
+                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings,
+                                       confirmed_large=True, openings_known=True)
+        if sy["hydro"]:
+            calc.make_hydrofuge(res, "Plaques hydrofuges : système de la légende (pièces humides).")
+        for q in res.quantities:
+            if q.sku.startswith("BA13-") and sy["couches"] > 1:
+                q.quantity *= sy["couches"]
+                q.formula += f" ; × {sy['couches']} plaques par face (légende)"
+            elif q.sku == "VIS-PLAQUE" and sy["couches"] > 1:
+                q.quantity *= sy["couches"]
+                q.formula += f" ; × {sy['couches']} couches"
+            elif q.sku == "MONTANT-M48" and sy["ossature_mm"] == 70:
+                q.sku, q.name = "MONTANT-M70", q.name.replace("M48", "M70")
+            elif q.sku == "UC-RAILS-48-MM" and sy["ossature_mm"] == 70:
+                q.sku, q.name = "UC-RAILS-7-CM-70-MM", q.name.replace("48 mm", "70 mm")
+        surface = round(sum(a * b for a, b in ws), 2)
+        mm = sy["laine_mm"]
+        if mm is None or mm:   # laine citée dans la légende (épaisseur lue si elle est écrite)
+            res.quantities.append(calc.QuantityLine(
+                "UC-LAINE-DE-VERRE-PAQUET", f"Laine de verre{f' {mm} mm' if mm else ''} (paquet)",
+                calc.ceil_int(surface / LAINE_M2_PAR_PAQUET), "paquet",
+                f"⌈ {surface:g} m² de cloison / {LAINE_M2_PAR_PAQUET:g} m² par paquet ⌉", calc.STATUS_ASSUMED,
+                notes="couverture d'un paquet supposée (devis de référence : 1 paquet par paroi de 5,40 × 2,50 m) : à confirmer"))
+        anchors = sum(calc.anchor_points(2 * a, 2, fx["anchor_spacing_m"]) for a, _ in ws)
+        studs = int(next(st.result for st in res.steps if st.label.startswith("Nombre de montants")))
+        out.append({"libelle": label, "systeme": sy, "result": res, "murs": len(ws), "ml": round(sum(a for a, _ in ws), 2),
+                    "m2": surface, "chevilles": anchors, "vis9": studs * fx["screws9_per_stud"]})
+    if missing:
+        out.append({"manquant": missing})
+    return out
+
+
 def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm: bool = False,
           hydrofuge_rooms: list[str] | None = None, partitions: list[dict] | None = None,
           waste: float = 0.0, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
-          fixings: dict | None = None) -> dict:
+          fixings: dict | None = None, cloisons_du_plan: bool = False, plafonds: bool = True) -> dict:
     """Métré (format de CalcResult.to_dict) à partir de l'analyse du plan. Chaque pièce est comptée juste (plaques au plan de
     pose) ; la marge du patron (en pièces) est ajoutée UNE fois par article du faux plafond, selon la surface de plafond qu'il
     couvre sur tout le plan (plaques hydrofuges : les pièces humides). Cloisons : aucune marge (règle du patron)."""
-    pieces = analysis.get("pieces") or []
-    if not pieces and not partitions:
+    pieces = (analysis.get("pieces") or []) if plafonds else []   # plafonds=False : seulement les cloisons
+    if not pieces and not partitions and not cloisons_du_plan:
         raise PlanQuoteError("Aucune pièce lue sur ce plan : relis le plan (read_plan) ou donne les dimensions.")
     hydro = hydrofuge_rooms or []
-    if rooms:
+    if rooms and plafonds:
         chosen = [p for p in pieces if _match(room_label(p), rooms)]
         unknown = [r for r in rooms if not any(_match(room_label(p), [r]) for p in pieces)]
         if unknown:
@@ -69,7 +142,7 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     else:
         flags = {"oui", "a_confirmer"} if include_to_confirm else {"oui"}
         chosen = [p for p in pieces if p.get("plafond") in flags]
-        if pieces and not chosen and not partitions:
+        if pieces and not chosen and not partitions and not cloisons_du_plan:
             raise PlanQuoteError("Le plan ne confirme aucun plafond : demande au patron quelles pièces ont un faux plafond "
                                  "(ou include_to_confirm=true s'il dit « toutes »).")
 
@@ -171,6 +244,28 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         steps.append(calc.CalcStep(label, "longueur × hauteur", {"L": length, "h": height, "faces": sides},
                                    round(length * height, 2), "m²", calc.STATUS_CALCULATED))
         assumptions.append(f"{label} : {length:g} m × {height:g} m, {sides} face(s).")
+
+    if cloisons_du_plan:   # cloisons mesurées sur le plan (traits de la légende), matériaux mur par mur
+        if not analysis.get("metre_cloisons"):
+            raise PlanQuoteError("Aucune cloison mesurée sur ce plan (pas de légende de cloisons ou pas d'échelle) : "
+                                 "donne les longueurs et la hauteur des cloisons.")
+        for t in cloisons_mesurees(analysis["metre_cloisons"], board_width=board_width, board_length=board_length,
+                                   stud_spacing=stud_spacing, fixings=fixings):
+            if "manquant" in t:
+                missing += t["manquant"]
+                continue
+            count("UC-PAQUET-CHEVILLES-A-FRAPPER", t["chevilles"])
+            count("UC-VIS-9-MM", t["vis9"])
+            for q in t["result"].quantities:
+                add(q)
+            partition_m2 += t["m2"]
+            sy = t["systeme"]
+            steps.append(calc.CalcStep(f"Cloisons mesurées : {t['libelle']}", "Σ tronçons × hauteur × niveaux concernés",
+                                       {"ml": t["ml"], "murs": t["murs"]}, t["m2"], "m²", calc.STATUS_CALCULATED))
+            assumptions.append(f"{t['libelle']} : {t['ml']:g} ml, {t['m2']:g} m² ({t['murs']} murs, niveaux compris) ; "
+                               f"{sy['faces']} face(s), {sy['couches']} plaque(s) par face"
+                               + (", plaques hydrofuges" if sy["hydro"] else "") + (f", laine {sy['laine_mm']} mm" if sy["laine_mm"] else "")
+                               + f", montants de {sy['ossature_mm']} ; pas de marge sur les cloisons.")
 
     for sku, n in pieces.items():   # paquets recalculés sur le total des pièces
         if sku in others:
