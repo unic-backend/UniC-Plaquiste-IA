@@ -205,6 +205,7 @@ def add_with_unique_number(db: Session, obj, next_number) -> None:
             obj.number = next_number()
 
 
+DELIVERY_LINE = "Livraison : à la charge du client"
 _PARTICLES = {"de", "du", "des", "la", "le", "van", "von", "da", "di", "dos", "das"}
 # une société garde ses majuscules (« FAST GROUP », « SARL BTP ») : seule une personne passe de « PAPE DIOP » à « Pape Diop »
 _COMPANY = re.compile(r"\b(?:sarl|sa|sas|sasu|suarl|gie|ets|éts|ste|sté|soci[eé]t[eé]|entreprises?|group|groupe|btp|constructions?|"
@@ -497,12 +498,17 @@ def quotation_from_quantities(
     subtotal = 0.0
     complete = True
     any_price = False
+    if not any(re.match(r"\s*livraison", str(ln.get("name") or ln.get("description") or ""), re.I) for ln in quantities):
+        # règle du patron : la livraison fait partie du tableau des matériaux, « à la charge du client » (0, 1 forfait) sauf prix donné
+        quantities = [*quantities, {"name": DELIVERY_LINE, "quantity": 1, "unit": "forfait", "status": "confirmed", "fixed_price": 0.0}]
     for i, line in enumerate(quantities, start=1):
         sku = line.get("sku") or ""
         mat = material_by_sku(db, sku) if sku else None
         unit_price, _reason = (None, "")
         if mat:
             unit_price, _reason = selling_price_for_sku(db, sku)
+        elif line.get("fixed_price") is not None:
+            unit_price = float(line["fixed_price"])
         qty = float(line.get("quantity") or 0)
         total = None
         if unit_price is None:
