@@ -226,3 +226,152 @@ def _svg(run_cm: int, across_cm: int, lines: list[int], ties: list[int], tiles: 
           f'<text x="598" y="{ly:.0f}" font-size="15" fill="{WALL}">plaque coupée (cm)</text>',
           '</svg>']
     return "".join(p)
+
+
+def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm: int = 60,
+                 board_width: float = calc.DEFAULTS["board_width_m"], board_height: float = calc.DEFAULTS["board_height_m"],
+                 waste: float = calc.DEFAULTS["waste"]) -> dict:
+    """Plan de pose d'une cloison droite (vue de face), règles du patron : montants tous les 60 cm (plaque DEBOUT, 60 × 2 =
+    1,20 m) ou 50 cm (plaque COUCHÉE, 50 × 4 = 2 m), le premier et le dernier contre le mur, 2 montants côte à côte à chaque
+    jonction de plaques ; plaques entières depuis le mur et depuis le sol, le morceau en haut et au dernier mur ; morceaux
+    comptés en plaques entières. Mêmes nombres que le devis (calc.calculate_partition)."""
+    if entraxe_cm not in (50, 60):
+        raise PlanError("Montants tous les 50 ou 60 cm seulement.")
+    calc.check_inputs(positive={"longueur": length_m, "hauteur": height_m, "largeur de plaque": board_width,
+                                "hauteur de plaque": board_height})
+    if length_m > 30:
+        raise PlanError("Cloison de plus de 30 m : fais un plan par mur (plus lisible pour les ouvriers).")
+    sides = 2 if sides not in (1, 2) else sides
+    s = entraxe_cm / 100
+    L_cm, H_cm = round(length_m * 100), round(height_m * 100)
+    pw, ph = round(min(board_width, board_height) * 100), round(max(board_width, board_height) * 100)
+    along = calc.board_along(s, min(board_width, board_height), max(board_width, board_height))
+    debout = along is None or round(along * 100) == pw
+    along_cm = round(along * 100) if along else None
+    grid = [k * entraxe_cm for k in range(calc.ceil_int(length_m / s))] + [L_cm]   # premier et dernier contre le mur
+    joints = [k * along_cm for k in range(1, calc.ceil_int(length_m / along))] if along else []
+    n_studs = calc.studs_needed(length_m, s, min(board_width, board_height), max(board_width, board_height))
+    assert len(grid) + len(joints) == n_studs, (grid, joints, n_studs)   # même compte que le devis
+
+    sx, sy = (pw, ph) if debout else (ph, pw)   # debout : 1,20 m le long du mur ; couchée : 2 m le long du mur
+    xs, ys = _cuts(L_cm, sx), _cuts(H_cm, sy)
+    tiles = []
+    for x, x1 in zip(xs, xs[1:]):
+        for y, y1 in zip(ys, ys[1:]):
+            ln, wd = (y1 - y, x1 - x) if debout else (x1 - x, y1 - y)   # morceau : longueur (sens des 2 m) × largeur
+            tiles.append((x, y, x1 - x, y1 - y, ln == ph and wd == pw, f"{ln}×{wd}"))
+    l2, l12 = (H_cm, L_cm) if debout else (L_cm, H_cm)
+    n2, r2 = divmod(l2, ph)
+    n12, r12 = divmod(l12, pw)
+    full_face = n2 * n12
+    groups = [(a, b, n * sides) for a, b, n in ((r2, pw, n12), (ph, r12, n2), (r2, r12, 1)) if a and b and n]
+    decoupe = _decoupe(groups, pw, ph)
+    full = full_face * sides
+    for_pieces = sum(d["plaques"] for d in decoupe)
+    used = full + for_pieces
+    res = calc.calculate_partition(length_m, height_m, sides, waste=waste, board_width=min(board_width, board_height),
+                                   board_height=max(board_width, board_height), stud_spacing=s)
+    qty = {q.sku: q.quantity for q in res.quantities}
+    quote = qty.get(calc.board_sku(min(board_width, board_height), max(board_width, board_height))[0], 0)
+    rails = qty.get("UC-RAILS-48-MM", 0)
+    bars = qty.get("MONTANT-M48", n_studs)
+    bar = calc.BAR_TXT
+    faces = f"{sides} face{'s' if sides > 1 else ''}"
+    pose = (f"Plaques DEBOUT ({entraxe_cm} cm × {pw // entraxe_cm} = {_len(pw / 100)} m : chaque bord sur un montant), entières "
+            f"depuis le mur et depuis le sol ; le morceau en haut." if debout else
+            f"Plaques COUCHÉES ({entraxe_cm} cm × {ph // entraxe_cm} = {_len(ph / 100)} m : chaque bout sur un montant), "
+            f"entières depuis le mur et depuis le sol ; la dernière rangée coupée en haut.")
+    out = {
+        "cloison": [length_m, height_m], "faces": sides, "entraxe_cm": entraxe_cm, "pose": "debout" if debout else "couchée",
+        "montants": n_studs, "jonctions_doublees": len(joints), "barres_montant": bars, "barres_rail": rails,
+        "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "decoupe": decoupe,
+        "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote,
+        "consignes": [
+            f"Montants : un tous les {entraxe_cm} cm, le premier et le dernier contre le mur ; 2 côte à côte à chaque jonction "
+            f"de plaques ({len(joints)} jonction{'s' if len(joints) > 1 else ''}). {len(grid)} + {len(joints)} = {n_studs} montants"
+            + (f" de {_len(height_m)} m" if height_m <= calc.BAR_LENGTH_M else f" ; hauteur {_len(height_m)} m > {bar} m : rallonges")
+            + f" ({bars} barres de {bar} m).",
+            f"Rails haut et bas : 2 × {_fmt(length_m)} m = {_fmt(2 * length_m)} ml = {rails} barres de {bar} m.",
+            pose,
+            f"Plaques entières par face : sens des {_len(l2 / 100)} m → {n2} plaque{'s' if n2 > 1 else ''} de {_len(ph / 100)} m"
+            + (f" + un morceau de {r2} cm" if r2 else "") + f" ; sens des {_len(l12 / 100)} m → {n12} plaque{'s' if n12 > 1 else ''} "
+            f"de {_len(pw / 100)} m" + (f" + un morceau de {r12} cm" if r12 else "")
+            + f" ; {n2} × {n12} = {full_face} par face × {sides} = {full} plaques entières.",
+            f"Morceaux ({faces}, comptés en plaques entières) : "
+            + (" ; ".join(_decoupe_txt(d) for d in decoupe) if decoupe else "aucun") + ".",
+            f"Total à acheter : {full} entières + {for_pieces} pour les morceaux = {used} plaques (devis : {quote}).",
+        ],
+    }
+    if used > quote:
+        out["alerte"] = f"Ce plan consomme {used} plaques, le devis en prévoit {quote} : ajoute {used - quote} plaque(s)."
+    out["svg"] = _svg_cloison(L_cm, H_cm, grid, joints, tiles, entraxe_cm, [
+        f"Plan de pose — cloison {_len(length_m)} × {_len(height_m)} m ({faces})",
+        f"Montants tous les {entraxe_cm} cm · 2 montants à chaque jonction · plaques {'debout' if debout else 'couchées'}",
+        f"{n_studs} montants ({bars} barres de {bar} m) · rails : {rails} barres de {bar} m",
+        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} plaques à acheter (devis : {quote})",
+        "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → "
+                                    + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} ({d['par_plaque']} par plaque)"
+                                       if d["plaques"] else "chutes") for d in decoupe) if decoupe else "aucun")])
+    return out
+
+
+def _svg_cloison(L_cm: int, H_cm: int, grid: list[int], joints: list[int], tiles: list, sp_cm: int, texts: list[str]) -> str:
+    """Vue de face d'une face de la cloison (l'autre face est identique) : plaques en vert, montants en bleu (doublés aux
+    jonctions), rails haut et bas en orange, cotes en cm."""
+    scale = min(760 / L_cm, 520 / H_cm)
+    rw, rh = L_cm * scale, H_cm * scale
+    x0, y0 = (900 - rw) / 2, 120
+    H = round(y0 + rh + 205)
+    yb = y0 + rh   # le sol
+    p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 {H}" font-family="Arial">',
+         f'<rect x="0" y="0" width="900" height="{H}" fill="#ffffff"/>',
+         f'<text x="450" y="42" font-size="28" font-weight="bold" fill="{BOARD_STROKE}" text-anchor="middle">{texts[0]}</text>',
+         f'<text x="450" y="74" font-size="17" fill="{DIM}" text-anchor="middle">{texts[1]}</text>']
+    labels = []
+    for x, y, w, h, whole, name in tiles:   # y depuis le sol
+        rx, ry = x0 + x * scale, yb - (y + h) * scale
+        p.append(f'<rect x="{rx:.1f}" y="{ry:.1f}" width="{w * scale:.1f}" height="{h * scale:.1f}" '
+                 f'fill="{BOARD_FULL if whole else BOARD_CUT}" stroke="{BOARD_STROKE}" stroke-width="1.5"/>')
+        if not whole and h * scale >= 18:
+            txt = name if w * scale >= 58 else (str(w) if w * scale >= 26 else "")
+            if txt:
+                cx, cy, tw = rx + w * scale / 2, ry + h * scale / 2, len(txt) * 8.6 + 8
+                labels += [f'<rect x="{cx - tw / 2:.1f}" y="{cy - 11:.1f}" width="{tw:.1f}" height="21" rx="4" fill="#ffffff" '
+                           f'stroke="{BOARD_STROKE}" stroke-width="1"/>',
+                           f'<text x="{cx:.1f}" y="{cy + 5:.1f}" font-size="14" font-weight="bold" fill="{BOARD_STROKE}" '
+                           f'text-anchor="middle">{txt}</text>']
+    p += [f'<line x1="{x0 + x * scale:.1f}" y1="{y0:.1f}" x2="{x0 + x * scale:.1f}" y2="{yb:.1f}" stroke="{FURRING}" '
+          f'stroke-width="3"/>' for x in grid]
+    p += [f'<line x1="{x0 + x * scale + 5:.1f}" y1="{y0:.1f}" x2="{x0 + x * scale + 5:.1f}" y2="{yb:.1f}" stroke="{FURRING}" '
+          f'stroke-width="3"/>' for x in joints]   # 2e montant collé au premier : jonction de plaques
+    p += labels + [
+        f'<line x1="{x0:.1f}" y1="{y0:.1f}" x2="{x0 + rw:.1f}" y2="{y0:.1f}" stroke="{ANGLE}" stroke-width="6"/>',
+        f'<line x1="{x0:.1f}" y1="{yb:.1f}" x2="{x0 + rw:.1f}" y2="{yb:.1f}" stroke="{ANGLE}" stroke-width="6"/>',
+        f'<text x="{x0 + rw / 2:.1f}" y="{y0 - 14:.1f}" font-size="20" font-weight="bold" fill="{WALL}" text-anchor="middle">'
+        f'{_fmt(L_cm / 100)} m</text>',
+        f'<text x="{x0 - 14:.1f}" y="{y0 + rh / 2:.1f}" font-size="20" font-weight="bold" fill="{WALL}" text-anchor="end">'
+        f'{_len(H_cm / 100)} m</text>']
+    yd = yb + 18
+    xa = x0 + min(sp_cm, L_cm) * scale
+    p += [f'<path d="M{x0:.1f},{yd:.1f} H{xa:.1f} M{x0:.1f},{yd - 6:.1f} v12 M{xa:.1f},{yd - 6:.1f} v12" stroke="{DIM}" stroke-width="2"/>',
+          f'<text x="{(x0 + xa) / 2:.1f}" y="{yd + 22:.1f}" font-size="15" font-weight="bold" fill="{FURRING}" '
+          f'text-anchor="middle">{sp_cm} cm</text>']
+    ty = yb + 78
+    p += [f'<text x="450" y="{ty:.0f}" font-size="18" fill="{WALL}" text-anchor="middle">{texts[2]}</text>',
+          f'<text x="450" y="{ty + 30:.0f}" font-size="19" font-weight="bold" fill="{WALL}" text-anchor="middle">{texts[3]}</text>',
+          f'<text x="450" y="{ty + 56:.0f}" font-size="{15 if len(texts[4]) <= 105 else 13}" fill="{BOARD_STROKE}" '
+          f'text-anchor="middle">{texts[4]}</text>']
+    ly = ty + 96
+    p += [f'<line x1="60" y1="{ly - 5:.0f}" x2="90" y2="{ly - 5:.0f}" stroke="{FURRING}" stroke-width="4"/>',
+          f'<text x="98" y="{ly:.0f}" font-size="15" fill="{WALL}">montant</text>',
+          f'<line x1="180" y1="{ly - 14:.0f}" x2="180" y2="{ly + 4:.0f}" stroke="{FURRING}" stroke-width="3"/>',
+          f'<line x1="186" y1="{ly - 14:.0f}" x2="186" y2="{ly + 4:.0f}" stroke="{FURRING}" stroke-width="3"/>',
+          f'<text x="196" y="{ly:.0f}" font-size="15" fill="{WALL}">2 montants (jonction)</text>',
+          f'<line x1="365" y1="{ly - 5:.0f}" x2="400" y2="{ly - 5:.0f}" stroke="{ANGLE}" stroke-width="5"/>',
+          f'<text x="408" y="{ly:.0f}" font-size="15" fill="{WALL}">rail</text>',
+          f'<rect x="460" y="{ly - 16:.0f}" width="30" height="20" fill="{BOARD_FULL}" stroke="{BOARD_STROKE}"/>',
+          f'<text x="498" y="{ly:.0f}" font-size="15" fill="{WALL}">plaque entière</text>',
+          f'<rect x="630" y="{ly - 16:.0f}" width="30" height="20" fill="{BOARD_CUT}" stroke="{BOARD_STROKE}"/>',
+          f'<text x="668" y="{ly:.0f}" font-size="15" fill="{WALL}">coupée (cm)</text>',
+          '</svg>']
+    return "".join(p)

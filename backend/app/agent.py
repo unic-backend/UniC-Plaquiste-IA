@@ -706,16 +706,23 @@ TOOLS: list[dict] = [
     },
     {
         "name": "pose_plan",
-        "description": ("PLAN DE POSE dessiné d'un faux plafond (calepinage) pour les OUVRIERS : fourrures (sens et entraxe 0,50 m), tiges, "
-                        "plaques entières et coupées à joints décalés, vue de dessus cotée (PNG partageable). Mêmes règles et mêmes nombres "
-                        "que le calcul du devis ; dit si le plan consomme plus de plaques que le devis. Pour « plan de pose », « calepinage », "
-                        "« comment poser les plaques », « montre aux ouvriers ». Un plafond rectangulaire par appel (une pièce)."),
+        "description": ("PLAN DE POSE dessiné pour les OUVRIERS (calepinage), avec les règles du patron et les mêmes nombres que le devis. "
+                        "PLAFOND (vue de dessus) : fourrures, tiges, plaques entières et coupées. CLOISON (ouvrage=\"cloison\", vue de face) : "
+                        "montants tous les 60 cm (plaque debout) ou 50 cm (plaque couchée), 2 montants à chaque jonction, rails, plaques "
+                        "entières depuis le mur et le sol, morceau en haut. Plaques comptées en entières par sens, morceaux en plaques "
+                        "entières ; dit si le plan consomme plus de plaques que le devis. Pour « plan de pose », « calepinage », « comment "
+                        "poser les plaques », « montre aux ouvriers ». Une pièce ou un mur droit par appel."),
         "input_schema": {"type": "object", "properties": {
-            "length_m": {"type": "number"}, "width_m": {"type": "number"},
+            "ouvrage": {"type": "string", "enum": ["plafond", "cloison"], "description": "plafond par défaut."},
+            "length_m": {"type": "number", "description": "Plafond : longueur ; cloison : longueur du mur."},
+            "width_m": {"type": "number", "description": "Plafond : largeur."},
+            "height_m": {"type": "number", "description": "Cloison : hauteur."},
+            "sides": {"type": "integer", "enum": [1, 2], "description": "Cloison : faces (2 par défaut)."},
             "plaque_m": {"type": "number", "enum": [2.0, 2.5, 3.0],
                          "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."},
-            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures)."}},
-            "required": ["length_m", "width_m"], "additionalProperties": False},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Plafond : 50 par défaut (fourrures) ; cloison : 60 par "
+                           "défaut (montants). L'autre valeur SEULEMENT si le patron la dit."}},
+            "required": ["length_m"], "additionalProperties": False},
     },
     {
         "name": "round_table",
@@ -1112,19 +1119,29 @@ class AgentSession:
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "l'ossature des retombées et le prix du LED se demandent au patron.")}
 
-    def _t_pose_plan(self, length_m: float, width_m: float, plaque_m: float | None = None, entraxe_cm: int = 50) -> dict:
+    def _t_pose_plan(self, length_m: float, width_m: float | None = None, plaque_m: float | None = None,
+                     entraxe_cm: int | None = None, ouvrage: str = "plafond", height_m: float | None = None,
+                     sides: int = 2) -> dict:
         from app import diagrams, plan_pose
         co = company_dict(self.db)
+        board = {"board_width": co.get("board_width_m") or 1.2, "board_height": plaque_m or co.get("board_height_m") or 2.0,
+                 "waste": co.get("default_waste") or 0.08}
         try:
-            out = plan_pose.plan(length_m, width_m, board_width=co.get("board_width_m") or 1.2,
-                                 board_height=plaque_m or co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08,
-                                 entraxe_cm=entraxe_cm or 50)
+            if ouvrage == "cloison":
+                if not height_m:
+                    return {"error": "Hauteur de la cloison manquante : demande-la au patron."}
+                out = plan_pose.plan_cloison(length_m, height_m, sides=sides or 2, entraxe_cm=entraxe_cm or 60, **board)
+            else:
+                if not width_m:
+                    return {"error": "Largeur du plafond manquante : demande-la au patron."}
+                out = plan_pose.plan(length_m, width_m, entraxe_cm=entraxe_cm or 50, **board)
         except ValueError as exc:
             return {"error": str(exc)}
         svg = out.pop("svg")
         try:
             art = diagrams.render(self.db, "Plan de pose", svg, self.user_id)
-            self.images.append({"id": art.id, "filename": art.filename, "title": f"Plan de pose — {length_m:g} × {width_m:g} m"})
+            dims = f"{length_m:g} × {(height_m if ouvrage == 'cloison' else width_m):g} m"
+            self.images.append({"id": art.id, "filename": art.filename, "title": f"Plan de pose — {dims}"})
         except diagrams.DiagramError as exc:
             out["dessin"] = f"non dessiné : {exc}"
         out["note"] = ("Plan affiché dans la conversation (bouton Partager pour l'équipe). Donne les consignes en quelques lignes, "
