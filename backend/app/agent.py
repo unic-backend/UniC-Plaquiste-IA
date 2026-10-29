@@ -198,7 +198,8 @@ TOOLS: list[dict] = [
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
-            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures)."},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures). Cloison : montants tous les 60 cm par défaut (plaque debout) ; 50 SEULEMENT si le patron le dit (plaque couchée)."},
+            "angles": {"type": "integer", "description": "Cloison donnée en UNE seule longueur avec des angles droits (en L : 1, en U : 2) : 2 montants par angle. Inutile si les murs sont donnés séparément (chacun a son montant d'about)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -1692,7 +1693,7 @@ class AgentSession:
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
                                with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
                                decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15,
-                               hydrofuge: bool = False, entraxe_cm: int | None = None) -> dict:
+                               hydrofuge: bool = False, entraxe_cm: int | None = None, angles: int = 0) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1730,6 +1731,8 @@ class AgentSession:
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
                "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6,
                "fixings": calc_fixings(co)}
+        if entraxe_cm in (50, 60) and kind == "partition":   # cloison : montants tous les 60 cm (debout) ou 50 cm (couchée)
+            cfg["stud_spacing"] = entraxe_cm / 100
         try:
             if method == "unic":
                 surface = (sum(a * b for a, b, _ in rects) if rects else None) or area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None
@@ -1745,7 +1748,8 @@ class AgentSession:
                        for o in (openings or [])]
                 res = calc.calculate_partition(rects[0][0], rects[0][1], sides, ops, walls=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
                                                board_width=cfg["board_width"], board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"],
-                                               fixing_values=cfg["fixings"], sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
+                                               fixing_values=cfg["fixings"], sides_known=sides_known, openings_known=bool(ops) or bool(no_openings),
+                                               angles=angles)
             elif kind == "ceiling" and rects:
                 res = calc.calculate_ceiling(rects[0][0], rects[0][1], zones=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
                                              board_width=cfg["board_width"], board_height=cfg["board_height"], fixing_values=cfg["fixings"],
@@ -1762,7 +1766,7 @@ class AgentSession:
                        for o in (openings or [])]
                 res = calc.calculate_partition(length_m, height_m, sides, ops, waste=cfg["waste"], board_width=cfg["board_width"],
                                                board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"], fixing_values=cfg["fixings"],
-                                               sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
+                                               sides_known=sides_known, openings_known=bool(ops) or bool(no_openings), angles=angles)
             elif kind == "ceiling":
                 a = length_m or None
                 b = width_m or None

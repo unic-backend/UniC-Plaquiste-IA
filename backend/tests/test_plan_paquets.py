@@ -21,4 +21,4 @@ def test_paquets_comptes_sur_tout_le_plan():
 def test_paquets_du_patron_respectes():
     d = plan_quote.build(PLAN, partitions=[{"length_m": 4, "height_m": 2.5}], fixings={"anchors_per_pack": 50, "screws9_per_pack": 20})
     assert _packs(d)["UC-PAQUET-CHEVILLES-A-FRAPPER"] == 4      # ⌈(160 + 18) / 50⌉
-    assert _packs(d)["UC-VIS-9-MM"] == 2                         # ⌈36 / 20⌉
+    assert _packs(d)["UC-VIS-9-MM"] == 3                         # 11 montants (8 + 3 jonctions doublées) × 4 = 44 → ⌈44 / 20⌉

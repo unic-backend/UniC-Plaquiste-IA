@@ -118,8 +118,9 @@ Ces valeurs ne sont pas des tarifs UniC.""",
         "methode-ossature",
         "Méthode de calcul ossature métallique",
         "method",
-        """Montants (méthode UniC) : chaque plaque de 1,20 m prend 3 montants (bords + milieu), le montant de jonction est
-partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
+        """Montants (méthode UniC) : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou 50 cm (plaque couchée,
+50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques et à chaque angle
+droit (6 m en 60 cm : 11 + 4 = 15). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
 Rails : longueur × 2 (haut + bas).
 Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus.
 Vis : 15 / m² (hypothèse professionnelle).
@@ -359,6 +360,33 @@ def apply_owner_bars_v8(db: Session) -> int:
     if art is not None and _OLD_RAISE_LINE in (art.body or ""):
         art.body = art.body.replace(_OLD_RAISE_LINE, _NEW_RAISE_LINE)
         n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+_OLD_STUDS_TEXT = (
+    "Montants (méthode UniC) : chaque plaque de 1,20 m prend 3 montants (bords + milieu), le montant de jonction est\n"
+    "partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11).")
+_NEW_STUDS_TEXT = (
+    "Montants (méthode UniC) : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou 50 cm (plaque couchée,\n"
+    "50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques et à chaque angle\n"
+    "droit (6 m en 60 cm : 11 + 4 = 15).")
+
+
+def apply_owner_studs_v9(db: Session) -> int:
+    """Règle du patron : 2 montants côte à côte à chaque jonction de plaques et à chaque angle droit. Fiche ossature mise à jour
+    si elle porte encore le texte d'origine (une fiche retouchée par le patron n'est pas écrasée). Une seule fois."""
+    from app.models import AppSetting, KnowledgeArticle
+
+    flag = "seed_owner_studs_v9"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    if art is not None and _OLD_STUDS_TEXT in (art.body or ""):
+        art.body = art.body.replace(_OLD_STUDS_TEXT, _NEW_STUDS_TEXT)
+        n = 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

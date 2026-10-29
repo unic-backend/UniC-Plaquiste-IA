@@ -656,10 +656,16 @@ OWNER_RULES_V13 = (
     "Fourrures tous les 60 cm : la plaque se pose dans le sens des fourrures (60 × 2 = 1,20 m).",
 )
 
+OWNER_RULES_V14 = (
+    "Cloison : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou tous les 50 cm si je le dis (plaque couchée, "
+    "50 × 4 = 2 m), le premier et le dernier contre le mur. À chaque jonction de plaques, 2 montants côte à côte (un par plaque), "
+    "en 50 comme en 60 cm. À chaque angle droit, 2 montants. Cloison de 6 m en 60 cm : 11 + 4 = 15 montants.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
               "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12,
-              "v13": OWNER_RULES_V13}
+              "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14}
 
 
 def seed_owner_rules(db: Session) -> int:
@@ -677,6 +683,9 @@ def seed_owner_rules(db: Session) -> int:
             rules = rules + (
                 "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000 FCFA ; standard 2,50 m = 6 500 FCFA ; "
                 "hydrofuge 2,50 m = 8 000 FCFA. Chaque taille a son prix : ne jamais appliquer le prix de l'une à l'autre.",)
+        if version == "v14":   # l'ancienne règle « jonction partagée » (V10) est archivée : 2 montants à chaque jonction
+            for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Cloison : chaque plaque (1,20 m de large) prend 3 montants%")):
+                m.state = "archived"
         if version == "v12":   # barres de 2,80 m : l'ancienne règle « 2,90 m » est archivée (rien à remplacer sur une base neuve)
             old = db.query(Memory).filter(Memory.state == "active", Memory.text.like("%barre%2,90 m%")).all()
             for m in old:
