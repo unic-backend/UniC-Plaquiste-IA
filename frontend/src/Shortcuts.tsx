@@ -21,7 +21,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "agenda", label: "Agenda", icon: B.Calendar, prompt: "Qu'est-ce que j'ai à l'agenda cette semaine ?" },
   { id: "unpaid", label: "Impayés", icon: I.Receipt, prompt: "Quelles factures sont impayées ?" },
   { id: "plafonds", label: "Idées plafond", icon: I.Palette, prompt: "Je veux des idées de plafond dessinées à montrer à un client. Demande-moi d'abord la pièce et ses dimensions." },
-  { id: "pose", label: "Plan de pose", icon: I.Grid, prompt: "Je veux le plan de pose d'un faux plafond pour mes ouvriers. Demande-moi d'abord les dimensions de la pièce." },
+  { id: "pose", label: "Plan de pose", icon: I.Grid, prompt: "Je veux un plan de pose pour mes ouvriers. Demande-moi d'abord : plafond ou cloison, puis les dimensions." },
   { id: "notes", label: "Notes", icon: I.Note, prompt: "Montre-moi mes notes : ce que tu as retenu et mes consignes." },
   { id: "table", label: "Table ronde", icon: I.Chat, prompt: "Table ronde : aide-moi à trouver la meilleure solution à un problème. Demande-moi d'abord quel est le problème, en une question." },
   { id: "google", label: "Avis Google", icon: B.GoogleG, prompt: "Montre les derniers avis Google.", need: "gbp", setup: "/google" },

@@ -171,3 +171,53 @@ def test_l_ia_dessine_le_plan_de_pose():
         calc_out = s("calculate_materials", {"kind": "ceiling", "length_m": 5, "width_m": 4, "entraxe_cm": 60})
         assert "entraxe 0,60 m" in str(calc_out) and "48" in str(calc_out)
         assert "error" in s("pose_plan", {"length_m": 30, "width_m": 20})
+
+
+@pytest.mark.parametrize("L, H, sp, debout", [(6, 2.5, 60, True), (6, 2.5, 50, False), (5, 3.2, 60, True), (7.3, 2.7, 60, True),
+                                              (4.6, 2.6, 50, False)])
+def test_cloison_regles_du_patron(L, H, sp, debout, monkeypatch):
+    seen = {}
+    real = pp._svg_cloison
+
+    def spy(L_cm, H_cm, grid, joints, tiles, *rest):
+        seen.update(L=L_cm, H=H_cm, grid=grid, joints=joints, tiles=tiles)
+        return real(L_cm, H_cm, grid, joints, tiles, *rest)
+    monkeypatch.setattr(pp, "_svg_cloison", spy)
+    d = pp.plan_cloison(L, H, entraxe_cm=sp)
+    r = calc.calculate_partition(L, H, 2, stud_spacing=sp / 100)
+    assert d["montants"] == calc.studs_needed(L, sp / 100, 1.2, 2.0) and d["barres_montant"] == _qty(r, "MONTANT-M48")
+    assert d["barres_rail"] == _qty(r, "UC-RAILS-48-MM") and d["plaques_devis"] == _qty(r, "BA13-2000x1200")
+    assert d["pose"] == ("debout" if debout else "couchée")
+    grid, joints, tiles = seen["grid"], seen["joints"], seen["tiles"]
+    assert grid[0] == 0 and grid[-1] == seen["L"] and all(b - a == sp for a, b in zip(grid, grid[1:-1]))
+    edges = {x for x, *_ in tiles} - {0}
+    assert set(joints) == edges                                                   # 2 montants à chaque jonction de plaques
+    sx, sy = (120, 200) if debout else (200, 120)
+    assert all((w == sx or x + w == seen["L"]) and (h == sy or y + h == seen["H"]) for x, y, w, h, *_ in tiles)   # morceau en haut
+    assert sum(w * h for _, _, w, h, *_ in tiles) == seen["L"] * seen["H"]
+
+
+def test_cloison_exemple_du_patron():
+    d = pp.plan_cloison(6, 2.5)
+    assert d["montants"] == 15 and d["jonctions_doublees"] == 4 and "11 + 4 = 15 montants de 2,50 m" in d["consignes"][0]
+    assert "Plaques DEBOUT" in d["consignes"][2] and "le morceau en haut" in d["consignes"][2]
+    assert "sens des 2,50 m → 1 plaque de 2 m + un morceau de 50 cm" in d["consignes"][3]
+    assert "5 par face × 2 = 10 plaques entières" in d["consignes"][3]
+    assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 10, "par_plaque": 4, "plaques": 3, "pris_dans_les_chutes": 0}]
+    assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 14 and "alerte" not in d
+    assert "cloison 6 × 2,50 m (2 faces)" in diagrams.sanitize(d["svg"])
+    with pytest.raises(pp.PlanError):
+        pp.plan_cloison(6, 2.5, entraxe_cm=40)
+
+
+def test_l_ia_dessine_le_plan_de_cloison():
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    with TestClient(app), SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        out = s("pose_plan", {"ouvrage": "cloison", "length_m": 6, "height_m": 2.5})
+        assert out["montants"] == 15 and out["pose"] == "debout" and "svg" not in out
+        assert s.images[-1]["title"] == "Plan de pose — 6 × 2.5 m"
+        assert s("pose_plan", {"ouvrage": "cloison", "length_m": 6, "height_m": 2.5, "entraxe_cm": 50})["pose"] == "couchée"
+        assert "error" in s("pose_plan", {"ouvrage": "cloison", "length_m": 6})
+        assert "error" in s("pose_plan", {"length_m": 6})
