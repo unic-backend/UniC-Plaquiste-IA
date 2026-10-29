@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.9"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.10"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -174,12 +174,24 @@ def partition_area(
 
 HANGER_FIRST_M = 0.30   # règle du patron : la première tige à 30 cm du mur, puis tous les 90 cm
 HANGER_END_MAX_M = 0.50  # la dernière tige reste près de l'autre mur : au-delà de 50 cm, une tige de plus à 30 cm du mur
+# trames du patron : entraxe des fourrures (cm) → (entraxe des fourrures, pas des tiges) en m. 50 par défaut ; 60 seulement s'il le
+# dit : seul l'écart des fourrures change (les tiges restent tous les 90 cm), la plaque se pose dans le sens des fourrures et
+# touche 3 fourrures (un bord, le milieu, l'autre bord : 60 × 2 = 1,20 m)
+GRIDS = {50: (0.50, 0.90), 60: (0.60, 0.90)}
 
 
-def hanger_positions(run: float) -> list[float]:
+def grid(entraxe_cm: int | None = None) -> tuple[float, float]:
+    if entraxe_cm in (None, 50):
+        return DEFAULTS["furring_spacing_m"], DEFAULTS["hanger_spacing_m"]
+    if entraxe_cm not in GRIDS:
+        raise ValueError(f"Entraxe des fourrures : {', '.join(map(str, GRIDS))} cm seulement.")
+    return GRIDS[entraxe_cm]
+
+
+def hanger_positions(run: float, step: float | None = None) -> list[float]:
     """Tiges le long d'une fourrure de `run` m (règle du patron) : la première à 30 cm du mur, puis une tous les 90 cm ;
     toujours une tige près de l'autre mur (ajoutée à 30 cm du mur si la dernière en est à plus de 50 cm)."""
-    first, step = HANGER_FIRST_M, DEFAULTS["hanger_spacing_m"]
+    first, step = HANGER_FIRST_M, step or DEFAULTS["hanger_spacing_m"]
     if run <= 2 * first:
         return [round_qty(run / 2, 3)]   # fourrure très courte : une tige au milieu
     pos = [first]
@@ -190,16 +202,17 @@ def hanger_positions(run: float) -> list[float]:
     return pos
 
 
-def ceiling_layout(run: float, across: float) -> tuple[int, int, float]:
-    """Fourrures parallèles à `run`, espacées de 0,50 m sur `across` (la première et la dernière contre le mur) ; tiges selon
-    hanger_positions sur chaque fourrure. Rend (lignes de fourrure, tiges, mètres de fourrure)."""
-    rows = ceil_int(across / DEFAULTS["furring_spacing_m"]) + 1
-    return rows, rows * len(hanger_positions(run)), round_qty(run * rows, 2)
+def ceiling_layout(run: float, across: float, entraxe_cm: int | None = None) -> tuple[int, int, float]:
+    """Fourrures parallèles à `run`, espacées de 0,50 m (ou 0,60) sur `across` (la première et la dernière contre le mur) ; tiges
+    selon hanger_positions sur chaque fourrure. Rend (lignes de fourrure, tiges, mètres de fourrure)."""
+    spacing, step = grid(entraxe_cm)
+    rows = ceil_int(across / spacing) + 1
+    return rows, rows * len(hanger_positions(run, step)), round_qty(run * rows, 2)
 
 
-def ceiling_run(a: float, b: float) -> tuple[float, float]:
+def ceiling_run(a: float, b: float, entraxe_cm: int | None = None) -> tuple[float, float]:
     """Sens de pose (run, across) d'une zone a × b : celui qui demande le moins de tiges, puis le moins de fourrure."""
-    return min(((a, b), (b, a)), key=lambda d: ceiling_layout(*d)[1:])
+    return min(((a, b), (b, a)), key=lambda d: ceiling_layout(*d, entraxe_cm)[1:])
 
 
 def boards_needed(net_area: float, waste: float, board_m2: float) -> int:
@@ -595,8 +608,10 @@ def calculate_ceiling(
     include_finish: bool = True,
     fixing_values: dict | None = None,
     zones: list[tuple[float, float]] | None = None,
+    entraxe_cm: int | None = None,
 ) -> CalcResult:
-    """`zones` : plusieurs pièces, ou un plafond en L découpé en rectangles (longueur, largeur). Ossature, tiges et cornière sont
+    """`entraxe_cm` : 50 par défaut (règle du patron) ; 60 seulement s'il le dit (fourrures tous les 60 cm, tiges toujours à 90 cm).
+    `zones` : plusieurs pièces, ou un plafond en L découpé en rectangles (longueur, largeur). Ossature, tiges et cornière sont
     comptées zone par zone (elles dépendent des côtés) ; plaques et paquets une seule fois, sur le total."""
     zones = [(float(a), float(b)) for a, b in zones] if zones else [(length_m, width_m)]
     multi = len(zones) > 1
@@ -606,12 +621,13 @@ def calculate_ceiling(
     area = round_qty(sum(a * b for a, b in zones), 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
-    f_sp, h_sp = DEFAULTS["furring_spacing_m"], DEFAULTS["hanger_spacing_m"]
+    f_sp, h_sp = grid(entraxe_cm)
+    sp_txt, h_txt = f"{f_sp:.2f}".replace(".", ","), f"{round(h_sp * 100)} cm"
     fx = fixings(fixing_values)
     rows = hangers = anchors = 0
     furring_ml = perimeter = 0.0
     for a, b in zones:
-        z_rows, z_hangers, z_furring = ceiling_layout(*ceiling_run(a, b))
+        z_rows, z_hangers, z_furring = ceiling_layout(*ceiling_run(a, b, entraxe_cm), entraxe_cm)
         z_perimeter = round_qty(2 * (a + b), 2)
         rows, hangers, furring_ml, perimeter = rows + z_rows, hangers + z_hangers, furring_ml + z_furring, perimeter + z_perimeter
         anchors += anchor_points(z_perimeter, 4, fx["anchor_spacing_m"])   # cornière de rive : une longueur par mur
@@ -631,6 +647,7 @@ def calculate_ceiling(
             "waste": waste,
             "system": system,
             "fixings": fx,
+            **({"entraxe_cm": entraxe_cm} if entraxe_cm not in (None, 50) else {}),
         },
         next_step="Je peux préparer un devis quantité ou un bon de commande matériaux.",
     )
@@ -650,9 +667,10 @@ def calculate_ceiling(
                  STATUS_CALCULATED if dims_known else STATUS_ESTIMATED),
         CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
-        CalcStep("Lignes de fourrure (entraxe 0,50 m)", f"{each}⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
+        CalcStep(f"Lignes de fourrure (entraxe {sp_txt} m)", f"{each}⌈ côté / {sp_txt} ⌉ + 1", {"entraxe": f_sp}, rows, "u",
+                 STATUS_ESTIMATED),
         CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
-                 f"{each}lignes × tiges par fourrure (1re à 30 cm du mur, puis tous les 90 cm, une près de l'autre mur)",
+                 f"{each}lignes × tiges par fourrure (1re à 30 cm du mur, puis tous les {h_txt}, une près de l'autre mur)",
                  {"lignes": rows, "e": h_sp}, hangers, "u", STATUS_ESTIMATED),
     ]
     result.quantities = [
@@ -660,14 +678,14 @@ def calculate_ceiling(
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
         QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
-                     "sur chaque fourrure : 1re tige à 30 cm du mur, puis 1 tous les 90 cm", STATUS_ESTIMATED),
+                     f"sur chaque fourrure : 1re tige à 30 cm du mur, puis 1 tous les {h_txt}", STATUS_ESTIMATED),
         QuantityLine("UC-PIVOT", "Pivot (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         # identifiant historique « 2-90 » gardé : il porte le prix du patron (la barre mesure 2,80 m)
         QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", f"Barre de fourrure ({BAR_TXT} m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
-                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / {BAR_TXT} ⌉", STATUS_ESTIMATED),
+                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe {sp_txt} m) / {BAR_TXT} ⌉", STATUS_ESTIMATED),
         # cornière de rive sur tout le périmètre : elle porte les bords des plaques contre les murs
         QuantityLine("UC-CORNIERES", f"Cornière de rive (barre de {BAR_TXT} m)", ceil_int(perimeter / BAR_LENGTH_M), "barre",
                      f"⌈ périmètre {perimeter:g} ml / {BAR_TXT} ⌉", STATUS_ESTIMATED if dims_known else STATUS_ASSUMED),
@@ -687,8 +705,10 @@ def calculate_ceiling(
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
-        "Méthode UniC : fourrures tous les 0,50 m ; tiges (tige + pivot + cheville à laiton) à 30 cm du mur puis tous les 0,90 m ; "
-        "plaques de 2 m posées en travers des fourrures (50 × 4 = 2 m : chaque bout sur une fourrure).",
+        (f"Méthode UniC : fourrures tous les {sp_txt} m ; tiges (tige + pivot + cheville à laiton) à 30 cm du mur puis tous les {h_txt} ; "
+         + ("plaques de 2 m posées en travers des fourrures (50 × 4 = 2 m : chaque bout sur une fourrure)." if f_sp == 0.5 else
+            "plaques posées dans le sens des fourrures : chaque plaque touche 3 fourrures, un bord, le milieu, l'autre bord "
+            "(60 × 2 = 1,20 m).")),
         "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)), fixée aux murs par chevilles à frapper ; "
         "entretoises non comptées.",
         _fx_text(fx, "cornière"),
