@@ -1,4 +1,4 @@
-"""Travail lourd sur PDF dans un PROCESSUS SÉPARÉ, à mémoire bornée.
+"""Travail lourd sur PDF et photos de plans dans un PROCESSUS SÉPARÉ, à mémoire bornée.
 
 Un plan d'architecte de 2 Mo peut contenir des centaines de milliers de traits : le dessiner coûte des centaines de Mo.
 Fait ici, la mémoire est rendue au système dès la fin, et un plan trop lourd tue ce processus, jamais le serveur.
@@ -274,9 +274,56 @@ def _measure(page, boxes):
     return out if (rooms or cloisons or cartouche or "echelle" in out) else {}
 
 
+def _b64(im, quality):
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=quality)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _views(img, max_side, quality):
+    """Vue d'ensemble + tuiles en haute définition d'une image rendue UNE fois (un grand format ou une photo de 12 Mpx réduits à
+    1 568 px rendent les cotes illisibles) : tuiles qui se chevauchent un peu (une pièce coupée reste lisible)."""
+    W, H = img.size
+    tiles = []
+    if max(W, H) > max_side * 1.3:
+        cols, rows = -(-W // int(max_side * 0.95)), -(-H // int(max_side * 0.95))
+        tw, th = -(-W // cols), -(-H // rows)
+        mx, my = int(tw * 0.06), int(th * 0.06)
+        for r in range(rows):
+            for c in range(cols):
+                box = (max(0, c * tw - mx), max(0, r * th - my), min(W, (c + 1) * tw + mx), min(H, (r + 1) * th + my))
+                tile = img.crop(box)
+                tile.thumbnail((max_side, max_side))
+                tiles.append({"b64": _b64(tile, quality), "box": [round(box[0] / W, 3), round(box[1] / H, 3), round(box[2] / W, 3),
+                                                                  round(box[3] / H, 3)]})
+                del tile
+    img.thumbnail((max_side, max_side))
+    return _b64(img, quality), tiles
+
+
+def _scan_scale(page):
+    """Page scannée ou photo collée dans le PDF : résolution d'origine de la plus grande image (pixels par point), pour la rendre
+    à SA définition au lieu de 144 ppp. None sur un plan vectoriel (aucune image couvrant au moins 1/5 de la page)."""
+    import pypdfium2.raw as raw
+    w, h = page.get_size()
+    best = None
+    for obj in page.get_objects(filter=(raw.FPDF_PAGEOBJ_IMAGE,), max_depth=3):
+        try:
+            left, bottom, right, top = obj.get_bounds()
+            px = obj.get_px_size()
+        except Exception:   # noqa: BLE001 — image illisible : la page est rendue comme avant
+            continue
+        bw, bh = right - left, top - bottom
+        if bw <= 0 or bh <= 0 or bw * bh < 0.2 * w * h:
+            continue
+        ppp = max(px) / max(bw, bh)
+        best = ppp if best is None else max(best, ppp)
+    return best
+
+
 def op_page(path, index, max_side=1568, big_side=4000, quality=75, max_items=1500):
-    """Une page de plan pour la lecture IA : vue d'ensemble + tuiles en haute définition (un grand format A1/A0 réduit à 1 568 px
-    rend les cotes illisibles), et les textes positionnés. Rendu UNE fois, découpé ensuite : mémoire bornée."""
+    """Une page de plan pour la lecture IA : vue d'ensemble + tuiles en haute définition, et les textes positionnés. Une page
+    scannée (ou une photo de plan dans le PDF) est rendue à sa résolution d'origine. Rendu UNE fois, découpé ensuite : mémoire bornée."""
     doc = _open(path)
     try:
         page = doc[index]
@@ -287,35 +334,92 @@ def op_page(path, index, max_side=1568, big_side=4000, quality=75, max_items=150
                 mesures = _measure(page, boxes)
             except Exception:   # noqa: BLE001 — une mesure impossible ne bloque jamais la lecture de la page
                 mesures = {}
-            img = page.render(scale=max(0.2, min(2.0, big_side / max(w, h, 1)))).to_pil().convert("RGB")
+            try:
+                scan = _scan_scale(page)
+            except Exception:   # noqa: BLE001
+                scan = None
+            img = page.render(scale=max(0.2, min(max(2.0, scan or 0), big_side / max(w, h, 1)))).to_pil().convert("RGB")
         finally:
             page.close()
     finally:
         doc.close()
-
-    def b64(im):
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=quality)
-        return base64.b64encode(buf.getvalue()).decode()
-    W, H = img.size
-    tiles = []
-    if max(W, H) > max_side * 1.3:   # grand format : tuiles qui se chevauchent un peu (une pièce coupée reste lisible)
-        cols, rows = -(-W // int(max_side * 0.95)), -(-H // int(max_side * 0.95))
-        tw, th = -(-W // cols), -(-H // rows)
-        mx, my = int(tw * 0.06), int(th * 0.06)
-        for r in range(rows):
-            for c in range(cols):
-                box = (max(0, c * tw - mx), max(0, r * th - my), min(W, (c + 1) * tw + mx), min(H, (r + 1) * th + my))
-                tile = img.crop(box)
-                tile.thumbnail((max_side, max_side))
-                tiles.append({"b64": b64(tile), "box": [round(box[0] / W, 3), round(box[1] / H, 3), round(box[2] / W, 3),
-                                                        round(box[3] / H, 3)]})
-                del tile
-    img.thumbnail((max_side, max_side))
-    overview = b64(img)
+    overview, tiles = _views(img, max_side, quality)
     del img
     gc.collect()
-    return {"overview": overview, "tiles": tiles, "words": items, "w": float(w), "h": float(h), "mesures": mesures}
+    return {"overview": overview, "tiles": tiles, "words": items, "w": float(w), "h": float(h), "mesures": mesures,
+            "scan": scan is not None}
+
+
+def _photo(path, big_side):
+    """Photo ou capture d'un plan, remise à l'endroit (orientation du téléphone), décodée au plus à `big_side` px."""
+    from PIL import Image, ImageOps
+    img = Image.open(path)
+    img.draft("RGB", (big_side, big_side))   # JPEG : décodage directement réduit, mémoire bornée
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    img.thumbnail((big_side, big_side))
+    return img
+
+
+def op_photo(path, max_side=1568, big_side=4000, quality=80):
+    """Photo, scan ou capture d'écran d'un plan : vue d'ensemble + tuiles à pleine résolution, comme une page de PDF."""
+    img = _photo(path, big_side)
+    w, h = img.size
+    overview, tiles = _views(img, max_side, quality)
+    del img
+    gc.collect()
+    return {"overview": overview, "tiles": tiles, "w": w, "h": h}
+
+
+def _zone(box):
+    """Zone demandée (x0, y0, x1, y1), fractions de la page, origine en haut à gauche ; au moins 2 % de côté."""
+    v = [float(x) for x in box][:4]
+    if len(v) != 4:
+        raise ValueError("zone")
+    if max(v) > 1 and max(v) <= 100:   # donnée en pourcentages
+        v = [x / 100 for x in v]
+    x0, x1 = sorted(min(1.0, max(0.0, x)) for x in (v[0], v[2]))
+    y0, y1 = sorted(min(1.0, max(0.0, y)) for y in (v[1], v[3]))
+    if x1 - x0 < 0.02:
+        x0, x1 = max(0.0, (x0 + x1) / 2 - 0.01), min(1.0, (x0 + x1) / 2 + 0.01)
+    if y1 - y0 < 0.02:
+        y0, y1 = max(0.0, (y0 + y1) / 2 - 0.01), min(1.0, (y0 + y1) / 2 + 0.01)
+    return x0, y0, x1, y1
+
+
+def op_zoom(path, index=0, box=(0, 0, 1, 1), max_side=1568, quality=85, max_scale=8.0, big_side=4096):
+    """CAPTURE D'ÉCRAN AGRANDIE d'une zone de la page (ou de la photo) : la zone seule est rendue à haute définition (jusqu'à
+    576 ppp sur un plan vectoriel, la résolution d'origine sur une photo ou un scan), avec les textes exacts qu'elle contient."""
+    x0, y0, x1, y1 = _zone(box)
+    if not str(path).lower().endswith(".pdf"):
+        img = _photo(path, big_side)
+        W, H = img.size
+        crop = img.crop((int(x0 * W), int(y0 * H), max(int(x0 * W) + 1, round(x1 * W)), max(int(y0 * H) + 1, round(y1 * H))))
+        del img
+        k = min(2.0, max_side / max(crop.size))   # agrandie au plus × 2 : au-delà, la photo n'a rien de plus à montrer
+        if k > 1:
+            crop = crop.resize((round(crop.width * k), round(crop.height * k)))
+        crop.thumbnail((max_side, max_side))
+        zoom = round(crop.width / (W * (x1 - x0)) / min(1.0, max_side / max(W, H)), 1)   # par rapport à la vue d'ensemble
+        return {"b64": _b64(crop, quality), "zone": [round(x, 3) for x in (x0, y0, x1, y1)], "agrandissement": zoom, "words": []}
+    doc = _open(path)
+    try:
+        page = doc[index]
+        try:
+            w, h = page.get_size()   # taille telle qu'affichée (rotation de la page appliquée)
+            zw, zh = (x1 - x0) * w, (y1 - y0) * h
+            scale = max(0.2, min(max_scale, max_side / max(zw, zh, 1)))
+            img = page.render(scale=scale, crop=(x0 * w, (1 - y1) * h, (1 - x1) * w, y0 * h)).to_pil().convert("RGB")
+            words = []
+            if not page.get_rotation():   # textes en coordonnées de la page : seulement si elle n'est pas pivotée
+                items, _ = _words(page, 4000)
+                words = [it for it in items if x0 <= it["x"] <= x1 and y0 <= it["y"] <= y1][:300]
+        finally:
+            page.close()
+    finally:
+        doc.close()
+    img.thumbnail((max_side, max_side))
+    zoom = round(scale / (max_side / max(w, h, 1)), 1)
+    return {"b64": _b64(img, quality), "zone": [round(x, 3) for x in (x0, y0, x1, y1)], "agrandissement": zoom, "words": words}
 
 
 def op_ocr(path, index, max_side=3000, lang="fra+eng"):
@@ -332,7 +436,7 @@ def op_ocr(path, index, max_side=3000, lang="fra+eng"):
     return {"text": pytesseract.image_to_string(img, lang=lang).strip()}
 
 
-OPS = {"text": op_text, "images": op_images, "ocr": op_ocr, "page": op_page}
+OPS = {"text": op_text, "images": op_images, "ocr": op_ocr, "page": op_page, "photo": op_photo, "zoom": op_zoom}
 
 if __name__ == "__main__":
     req = json.loads(sys.argv[1])
