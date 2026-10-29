@@ -296,7 +296,9 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
             f"Plaques entières par face : sens des {_len(l2 / 100)} m → {n2} plaque{'s' if n2 > 1 else ''} de {_len(ph / 100)} m"
             + (f" + un morceau de {r2} cm" if r2 else "") + f" ; sens des {_len(l12 / 100)} m → {n12} plaque{'s' if n12 > 1 else ''} "
             f"de {_len(pw / 100)} m" + (f" + un morceau de {r12} cm" if r12 else "")
-            + f" ; {n2} × {n12} = {full_face} par face × {sides} = {full} plaques entières.",
+            + (f" ; {n2} × {n12} = {full_face} par face × 2 faces = {full} plaques entières." if sides == 2 else
+               f" ; {n2} × {n12} = {full} plaque{'s' if full > 1 else ''} entière{'s' if full > 1 else ''} (une seule face : "
+               f"l'autre côté des montants reste nu)."),
             f"Morceaux ({faces}, comptés en plaques entières) : "
             + (" ; ".join(_decoupe_txt(d) for d in decoupe) if decoupe else "aucun") + ".",
             f"Total à acheter : {full} entières + {for_pieces} pour les morceaux = {used} plaques (devis : {quote}).",
