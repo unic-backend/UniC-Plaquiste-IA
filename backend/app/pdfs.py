@@ -556,6 +556,8 @@ def _render(
             excl = []
         if not labour:
             excl.insert(0, "La main-d'œuvre et l'exécution des travaux.")
+        if any(re.search(r"\bled\b", _strip(r[1]), re.I) for r in rows if len(r) > 1):   # ruban LED au devis (plafond à gorge, îlot…)
+            excl = [("Luminaires (le ruban LED listé au tableau est compris)." if re.search(r"\bLED\b", x) else x) for x in excl]
         story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, P(2)),
                   Paragraph("Conditions importantes :", _st("ci", textColor=BLUE, leading=12))]
         story += [Paragraph(f"• {b}", txt) for b in important]
