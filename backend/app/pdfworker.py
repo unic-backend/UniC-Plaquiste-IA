@@ -64,6 +64,63 @@ def op_images(path, pages, max_side=1568, quality=85):
         doc.close()
 
 
+def _words(page, max_items):
+    """Textes de la page avec leur position (fractions de la page, origine en haut à gauche) : sur un PDF exporté par un logiciel
+    de dessin (AutoCAD, Revit, ArchiCAD…), ce sont les noms de pièces, surfaces et cotes EXACTS, plus fiables que l'image."""
+    w, h = page.get_size()
+    tp = page.get_textpage()
+    out = []
+    try:
+        for i in range(min(tp.count_rects(), max_items)):
+            left, bottom, right, top = tp.get_rect(i)
+            text = " ".join((tp.get_text_bounded(left, bottom, right, top) or "").replace("\x00", " ").split())
+            if text:
+                out.append({"t": text[:120], "x": round(left / w, 3), "y": round(1 - top / h, 3)})
+    finally:
+        tp.close()
+    return out
+
+
+def op_page(path, index, max_side=1568, big_side=4000, quality=75, max_items=1500):
+    """Une page de plan pour la lecture IA : vue d'ensemble + tuiles en haute définition (un grand format A1/A0 réduit à 1 568 px
+    rend les cotes illisibles), et les textes positionnés. Rendu UNE fois, découpé ensuite : mémoire bornée."""
+    doc = _open(path)
+    try:
+        page = doc[index]
+        try:
+            w, h = page.get_size()
+            items = _words(page, max_items)
+            img = page.render(scale=max(0.2, min(2.0, big_side / max(w, h, 1)))).to_pil().convert("RGB")
+        finally:
+            page.close()
+    finally:
+        doc.close()
+
+    def b64(im):
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=quality)
+        return base64.b64encode(buf.getvalue()).decode()
+    W, H = img.size
+    tiles = []
+    if max(W, H) > max_side * 1.3:   # grand format : tuiles qui se chevauchent un peu (une pièce coupée reste lisible)
+        cols, rows = -(-W // int(max_side * 0.95)), -(-H // int(max_side * 0.95))
+        tw, th = -(-W // cols), -(-H // rows)
+        mx, my = int(tw * 0.06), int(th * 0.06)
+        for r in range(rows):
+            for c in range(cols):
+                box = (max(0, c * tw - mx), max(0, r * th - my), min(W, (c + 1) * tw + mx), min(H, (r + 1) * th + my))
+                tile = img.crop(box)
+                tile.thumbnail((max_side, max_side))
+                tiles.append({"b64": b64(tile), "box": [round(box[0] / W, 3), round(box[1] / H, 3), round(box[2] / W, 3),
+                                                        round(box[3] / H, 3)]})
+                del tile
+    img.thumbnail((max_side, max_side))
+    overview = b64(img)
+    del img
+    gc.collect()
+    return {"overview": overview, "tiles": tiles, "words": items, "w": float(w), "h": float(h)}
+
+
 def op_ocr(path, index, max_side=3000, lang="fra+eng"):
     import pytesseract
     doc = _open(path)
@@ -78,7 +135,7 @@ def op_ocr(path, index, max_side=3000, lang="fra+eng"):
     return {"text": pytesseract.image_to_string(img, lang=lang).strip()}
 
 
-OPS = {"text": op_text, "images": op_images, "ocr": op_ocr}
+OPS = {"text": op_text, "images": op_images, "ocr": op_ocr, "page": op_page}
 
 if __name__ == "__main__":
     req = json.loads(sys.argv[1])
