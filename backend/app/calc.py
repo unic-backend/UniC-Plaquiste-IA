@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.13"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.14"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -44,19 +44,23 @@ DEFAULTS = {
 BAR_LENGTH_M = 2.80   # longueur des barres au Sénégal (fourrure, montant, rail, cornière) : règle du patron
 BAR_TXT = f"{BAR_LENGTH_M:.2f}".replace(".", ",")   # « 2,80 » dans les libellés
 DOOR_STUDS = 3        # règle UniC : chaque porte prend 3 montants de renfort
-# Fixations (pratique au Sénégal, valeurs supposées tant que le patron ne les a pas données : signalées « supposé ») :
-ANCHOR_SPACING_M = 0.50   # une cheville à frapper tous les 0,50 m de rail (cloison) ou de cornière (plafond)
-SCREWS9_PER_STUD = 4      # vis de 9 mm : 2 en tête + 2 en pied pour tenir chaque montant dans les rails
+# Fixations (Sénégal) : écart des chevilles et vis par montant validés par le patron ; tailles de paquet supposées (« supposé »)
+# tant qu'il ne les a pas données dans Réglages :
+ANCHOR_SPACING_M = 0.30   # règle du patron : une cheville à frapper tous les 30 cm de rail (cloison) ou de cornière (plafond)
+SCREWS9_PER_STUD = 4      # vis de 9 mm : 2 en tête + 2 en pied pour tenir chaque montant dans les rails (validé par le patron)
 PACK = 100                # chevilles et vis vendues par paquet de 100 (comme les pivots et chevilles à laiton)
+OWNER_FIXINGS = ("anchor_spacing_m", "screws9_per_stud")   # valeurs par défaut validées par le patron
 FIXINGS_DEFAULT = {"anchor_spacing_m": ANCHOR_SPACING_M, "anchors_per_pack": PACK, "screws9_per_stud": SCREWS9_PER_STUD,
                    "screws9_per_pack": PACK}
 
 
 def fixings(given: dict | None = None) -> dict:
     """Valeurs de fixation : celles du patron (Réglages) quand il les a données, sinon les suppositions par défaut.
-    `donne` dit lesquelles viennent du patron (statut confirmé) ; les autres restent « supposé »."""
+    `donne` dit lesquelles viennent du patron (Réglages, ou valeur par défaut qu'il a validée : statut confirmé) ; les autres
+    restent « supposé »."""
     given = {k: v for k, v in (given or {}).items() if k in FIXINGS_DEFAULT and v not in (None, "", 0)}
-    return {**FIXINGS_DEFAULT, **{k: float(v) if k == "anchor_spacing_m" else int(v) for k, v in given.items()}, "donne": sorted(given)}
+    return {**FIXINGS_DEFAULT, **{k: float(v) if k == "anchor_spacing_m" else int(v) for k, v in given.items()},
+            "donne": sorted(set(given) | set(OWNER_FIXINGS))}
 
 
 def anchor_points(run_ml: float, runs: int = 1, spacing: float = ANCHOR_SPACING_M) -> int:
@@ -427,9 +431,11 @@ def _fx_status(fx: dict, *keys: str) -> str:
 
 
 def _fx_text(fx: dict, support: str) -> str:
-    told = "données par le patron" if len(fx["donne"]) == len(FIXINGS_DEFAULT) else \
-        "supposées, à régler dans Réglages › Paramètres de calcul" if not fx["donne"] else "en partie supposées (Réglages)"
-    return (f"Fixations ({told}) : 1 cheville à frapper tous les {fx['anchor_spacing_m']:g} m de {support}, paquets de "
+    missing = [k for k in FIXINGS_DEFAULT if k not in fx["donne"]]
+    told = "données par le patron" if not missing else \
+        "tailles de paquet supposées, à régler dans Réglages › Paramètres de calcul" if all(k.endswith("_per_pack") for k in missing) \
+        else "en partie supposées (Réglages)"
+    return (f"Fixations ({told}) : 1 cheville à frapper tous les {round(fx['anchor_spacing_m'] * 100)} cm de {support}, paquets de "
             f"{fx['anchors_per_pack']}" + (f" ; {fx['screws9_per_stud']} vis de 9 mm par montant, paquets de {fx['screws9_per_pack']}"
                                            if support == "rail" else "") + ".")
 
@@ -626,11 +632,11 @@ def calculate_partition(
                                                  f"{math.floor(BAR_LENGTH_M / ECLISSE_M + 1e-9)} par barre → {n_eclisse_bars}"
                                                  if splices else ""), STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
-                     f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
+                     f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_CONFIRMED),
         # rails fixés au sol et au plafond par chevilles à frapper ; montants tenus dans les rails par vis de 9 mm
         QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", f"Chevilles à frapper (paquet de {fx['anchors_per_pack']})",
                      ceil_int(anchors / fx["anchors_per_pack"]), "paquet",
-                     f"⌈ {anchors} chevilles (1 tous les {fx['anchor_spacing_m']:g} m de rail, {tracks:g} ml) / {fx['anchors_per_pack']} ⌉",
+                     f"⌈ {anchors} chevilles (1 tous les {round(fx['anchor_spacing_m'] * 100)} cm de rail, {tracks:g} ml) / {fx['anchors_per_pack']} ⌉",
                      _fx_status(fx, "anchor_spacing_m", "anchors_per_pack")),
         QuantityLine("UC-VIS-9-MM", f"Vis 9 mm (paquet de {fx['screws9_per_pack']})", ceil_int(screws9 / fx["screws9_per_pack"]), "paquet",
                      f"⌈ {screws9} vis ({n_studs + door_studs} montants × {fx['screws9_per_stud']}) / {fx['screws9_per_pack']} ⌉",
@@ -639,10 +645,10 @@ def calculate_partition(
     if include_finish:
         result.quantities += [
             QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml",
-                         f"Snette×{DEFAULTS['tape_m_per_m2']:g}", STATUS_ASSUMED),
+                         f"Snette×{DEFAULTS['tape_m_per_m2']:g}", STATUS_CONFIRMED),
             QuantityLine("ENDUIT-JOINT", "Enduit à joint", compound, "kg",
                          f"Snette×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}",
-                         STATUS_ASSUMED),
+                         STATUS_CONFIRMED),
         ]
 
     result.assumptions = [
@@ -651,7 +657,7 @@ def calculate_partition(
         "chaque morceau compté en plaques entières (plan de pose)." + (f" Chute en plus : {waste * 100:.0f} %." if waste else ""),
         f"Entraxe des montants = {stud_spacing:g} m : méthode UniC, chaque bord de plaque sur un montant ; 2 montants côte à côte "
         "à chaque jonction de plaques.",
-        f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (règle professionnelle par défaut).",
+        f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (validé par le patron).",
         "Portes : 3 montants de renfort par porte (règle UniC). Fenêtres : renforts non ajoutés automatiquement.",
         _fx_text(fx, "rail"),
         "Aucun prix n'est appliqué : les tarifs UniC ne sont pas inventés.",
@@ -730,13 +736,13 @@ def calculate_partition_from_area(
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      f"⌈ {total:g} m²" + (f" × (1 + {waste:g})" if waste else "") + f" / {b_area:g} ⌉", STATUS_ESTIMATED),
-        QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
+        QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_CONFIRMED),
     ]
     if include_finish:
         result.quantities += [
-            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_ASSUMED),
+            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_CONFIRMED),
             QuantityLine("ENDUIT-JOINT", "Enduit à joint", compound, "kg",
-                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_ASSUMED),
+                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_CONFIRMED),
         ]
     result.assumptions = [
         f"Plaque standard BA13 {board_width:g} × {board_height:g} m = {b_area:.2f} m² (catalogue par défaut).",
@@ -872,15 +878,15 @@ def calculate_ceiling(
         # la cornière de rive est fixée aux murs par des chevilles à frapper
         QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", f"Chevilles à frapper (paquet de {fx['anchors_per_pack']})",
                      ceil_int(anchors / fx["anchors_per_pack"]), "paquet",
-                     f"⌈ {anchors} chevilles (1 tous les {fx['anchor_spacing_m']:g} m de cornière, {perimeter:g} ml) / {fx['anchors_per_pack']} ⌉",
+                     f"⌈ {anchors} chevilles (1 tous les {round(fx['anchor_spacing_m'] * 100)} cm de cornière, {perimeter:g} ml) / {fx['anchors_per_pack']} ⌉",
                      _fx_status(fx, "anchor_spacing_m", "anchors_per_pack")),
     ]
     if include_finish:   # plaques vissées sous les fourrures, joints bandés et enduits : de quoi finir le plafond
         result.quantities += [
-            QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
-            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_ASSUMED),
+            QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_CONFIRMED),
+            QuantityLine("BANDE-JOINT", "Bande à joint", tape, "ml", f"S×{DEFAULTS['tape_m_per_m2']:g}", STATUS_CONFIRMED),
             QuantityLine("ENDUIT-JOINT", "Enduit à joint", compound, "kg",
-                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_ASSUMED),
+                         f"S×{DEFAULTS['compound_kg_per_m2_per_coat']:g}×{DEFAULTS['compound_coats']}", STATUS_CONFIRMED),
         ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
@@ -894,7 +900,7 @@ def calculate_ceiling(
         "entretoises non comptées.",
         _fx_text(fx, "cornière"),
         f"Finitions : {DEFAULTS['screws_per_m2']:g} vis à plaque / m², {DEFAULTS['tape_m_per_m2']:g} ml de bande / m², enduit "
-        f"{DEFAULTS['compound_kg_per_m2_per_coat']:g} kg / m² × {DEFAULTS['compound_coats']} couches (règles par défaut).",
+        f"{DEFAULTS['compound_kg_per_m2_per_coat']:g} kg / m² × {DEFAULTS['compound_coats']} couches (validées par le patron).",
         "Aucun prix n'est appliqué.",
     ]
     result.missing = [

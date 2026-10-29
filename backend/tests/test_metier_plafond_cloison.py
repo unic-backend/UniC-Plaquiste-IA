@@ -32,7 +32,7 @@ def test_la_cloison_a_rails_montants_chevilles_a_frapper_et_vis_9():
     assert calc.verify(small)["ok"]
     big = calc.calculate_partition(30, 2.5, 2)
     q = _q(big)
-    assert q["UC-PAQUET-CHEVILLES-A-FRAPPER"] == 2                             # ⌈ (⌈60 / 0,5⌉ + 2) / 100 ⌉ = ⌈122 / 100⌉
+    assert q["UC-PAQUET-CHEVILLES-A-FRAPPER"] == 3                             # ⌈ (⌈60 / 0,30⌉ + 2) / 100 ⌉ = ⌈202 / 100⌉
     assert q["UC-VIS-9-MM"] == 3                                               # (⌈30 / 1,2⌉ × 2 + 1) × 4 = 204 vis
     assert calc.verify(big)["ok"]
     next(x for x in big.quantities if x.sku == "UC-VIS-9-MM").quantity = 1     # chiffre faussé : le contrôle indépendant le voit

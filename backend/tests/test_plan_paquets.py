@@ -13,12 +13,13 @@ def _packs(d: dict) -> dict:
 def test_paquets_comptes_sur_tout_le_plan():
     d = plan_quote.build(PLAN, partitions=[{"length_m": 4, "height_m": 2.5}, {"length_m": 3, "height_m": 2.5}])
     # 5 plafonds 4 × 3 m : 7 lignes de fourrure × 5 tiges (30 cm du mur puis 90 cm) = 35 points chacun → 175 ; avant : 5 paquets
-    # chevilles à frapper : 5 × (⌈14 / 0,5⌉ + 4) + (⌈8 / 0,5⌉ + 2) + (⌈6 / 0,5⌉ + 2) = 160 + 18 + 14 = 192 ; vis 9 : (9 + 7) × 4 = 64
-    assert _packs(d) == {"UC-PIVOT": 2, "UC-CHEVILLES-A-LETON": 2, "UC-PAQUET-CHEVILLES-A-FRAPPER": 2, "UC-VIS-9-MM": 1}
+    # chevilles à frapper (1 tous les 30 cm) : 5 × (⌈14 / 0,30⌉ + 4) + (⌈8 / 0,30⌉ + 2) + (⌈6 / 0,30⌉ + 2) = 255 + 29 + 22 = 306 ;
+    # vis 9 : (9 + 7) × 4 = 64
+    assert _packs(d) == {"UC-PIVOT": 2, "UC-CHEVILLES-A-LETON": 2, "UC-PAQUET-CHEVILLES-A-FRAPPER": 4, "UC-VIS-9-MM": 1}
     assert any("175 pièces" in q["formula"] for q in d["quantities"] if q["sku"] == "UC-PIVOT")
 
 
 def test_paquets_du_patron_respectes():
     d = plan_quote.build(PLAN, partitions=[{"length_m": 4, "height_m": 2.5}], fixings={"anchors_per_pack": 50, "screws9_per_pack": 20})
-    assert _packs(d)["UC-PAQUET-CHEVILLES-A-FRAPPER"] == 4      # ⌈(160 + 18) / 50⌉
+    assert _packs(d)["UC-PAQUET-CHEVILLES-A-FRAPPER"] == 6      # ⌈(255 + 29) / 50⌉
     assert _packs(d)["UC-VIS-9-MM"] == 3                         # 11 montants (8 + 3 jonctions doublées) × 4 = 44 → ⌈44 / 20⌉
