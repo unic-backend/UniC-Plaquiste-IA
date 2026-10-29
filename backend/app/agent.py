@@ -1123,8 +1123,9 @@ class AgentSession:
             self.images.append({"id": art.id, "filename": art.filename, "title": f"Plan de pose — {length_m:g} × {width_m:g} m"})
         except diagrams.DiagramError as exc:
             out["dessin"] = f"non dessiné : {exc}"
-        out["note"] = ("Plan affiché dans la conversation (bouton Partager pour l'équipe). Donne les consignes en quelques lignes ; "
-                       "si `alerte` est présente, dis-la au patron avant de commander les plaques.")
+        out["note"] = ("Plan affiché dans la conversation (bouton Partager pour l'équipe). Donne les consignes en quelques lignes, "
+                       "avec les nombres de plaques TELS QUELS (entières dans chaque sens, morceaux comptés en plaques entières, "
+                       "total à acheter) : ne recalcule jamais. Si `alerte` est présente, dis-la au patron avant de commander.")
         return out
 
     def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
