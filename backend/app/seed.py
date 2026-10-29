@@ -119,8 +119,8 @@ Ces valeurs ne sont pas des tarifs UniC.""",
         "Méthode de calcul ossature métallique",
         "method",
         """Montants (méthode UniC) : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou 50 cm (plaque couchée,
-50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques et à chaque angle
-droit (6 m en 60 cm : 11 + 4 = 15). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
+50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques ; cloison en L :
+un mur par côté, chaque bout a son montant (6 m en 60 cm : 11 + 4 = 15). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
 Rails : longueur × 2 (haut + bas).
 Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus.
 Vis : 15 / m² (hypothèse professionnelle).
@@ -370,12 +370,12 @@ _OLD_STUDS_TEXT = (
     "partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11).")
 _NEW_STUDS_TEXT = (
     "Montants (méthode UniC) : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou 50 cm (plaque couchée,\n"
-    "50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques et à chaque angle\n"
-    "droit (6 m en 60 cm : 11 + 4 = 15).")
+    "50 × 4 = 2 m), le premier et le dernier contre le mur ; 2 montants côte à côte à chaque jonction de plaques ; cloison en L :\n"
+    "un mur par côté, chaque bout a son montant (6 m en 60 cm : 11 + 4 = 15).")
 
 
 def apply_owner_studs_v9(db: Session) -> int:
-    """Règle du patron : 2 montants côte à côte à chaque jonction de plaques et à chaque angle droit. Fiche ossature mise à jour
+    """Règle du patron : 2 montants côte à côte à chaque jonction de plaques. Fiche ossature mise à jour
     si elle porte encore le texte d'origine (une fiche retouchée par le patron n'est pas écrasée). Une seule fois."""
     from app.models import AppSetting, KnowledgeArticle
 

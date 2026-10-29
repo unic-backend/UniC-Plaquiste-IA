@@ -221,12 +221,10 @@ def test_montants_du_patron_deux_montants_a_chaque_jonction():
     assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 15 and calc.verify(r)["ok"]
 
 
-def test_deux_montants_a_chaque_angle_droit():
-    r = calc.calculate_partition(7, 2.5, 2, angles=1)      # cloison en L donnée en une longueur : 13 + 5 jonctions + 2 à l'angle
-    q = {x.sku: x for x in r.quantities}["MONTANT-M48"]
-    assert q.quantity == 20 and "2 par angle droit (1)" in q.formula and calc.verify(r)["ok"]
-    r = calc.calculate_partition(6, 3.2, 2, angles=2)      # angles sur toute la hauteur : rallonges comptées aussi
-    assert calc.verify(r)["ok"] and r.inputs["angles"] == 2
+def test_cloison_en_l_chaque_cote_a_ses_montants_d_about():
+    # règle du patron : cloison en L = un mur par côté ; l'angle a déjà 2 montants (le bout de chaque mur), rien à ajouter
+    r = calc.calculate_partition(4, 2.5, 2, walls=[(4, 2.5), (3, 2.5)])
+    assert {x.sku: x.quantity for x in r.quantities}["MONTANT-M48"] == 11 + 8 and calc.verify(r)["ok"]   # (8 + 3) + (6 + 2)
 
 
 def test_montants_plus_hauts_qu_une_barre():

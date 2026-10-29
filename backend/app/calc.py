@@ -44,7 +44,6 @@ DEFAULTS = {
 BAR_LENGTH_M = 2.80   # longueur des barres au Sénégal (fourrure, montant, rail, cornière) : règle du patron
 BAR_TXT = f"{BAR_LENGTH_M:.2f}".replace(".", ",")   # « 2,80 » dans les libellés
 DOOR_STUDS = 3        # règle UniC : chaque porte prend 3 montants de renfort
-ANGLE_STUDS = 2       # règle du patron : 2 montants à chaque angle droit d'une cloison
 # Fixations (pratique au Sénégal, valeurs supposées tant que le patron ne les a pas données : signalées « supposé ») :
 ANCHOR_SPACING_M = 0.50   # une cheville à frapper tous les 0,50 m de rail (cloison) ou de cornière (plafond)
 SCREWS9_PER_STUD = 4      # vis de 9 mm : 2 en tête + 2 en pied pour tenir chaque montant dans les rails
@@ -309,12 +308,10 @@ def calculate_partition(
     openings_known: bool | None = None,
     fixing_values: dict | None = None,
     walls: list[tuple[float, float]] | None = None,
-    angles: int = 0,
 ) -> CalcResult:
-    """`angles` : angles droits d'une cloison donnée en UNE longueur (en L : 1, en U : 2) → 2 montants par angle (règle du
-    patron) ; des murs donnés séparément ont déjà chacun leur montant d'about à l'angle.
-    `walls` : plusieurs cloisons (longueur, hauteur) de mêmes faces. Montants, rails et chevilles sont comptés cloison par
-    cloison (chaque cloison a ses montants d'about) ; plaques et paquets une seule fois, sur le total ; ouvertures sur le total."""
+    """`walls` : plusieurs cloisons (longueur, hauteur) de mêmes faces ; cloison en L ou en U = un mur par côté : chaque mur a
+    son montant à chaque bout, l'angle en a donc déjà 2 (règle du patron, rien à ajouter). Montants, rails et chevilles sont
+    comptés cloison par cloison ; plaques et paquets une seule fois, sur le total ; ouvertures sur le total."""
     walls = [(float(w), float(h)) for w, h in walls] if walls else [(length_m, height_m)]
     multi = len(walls) > 1
     openings = openings or []
@@ -331,12 +328,10 @@ def calculate_partition(
     areas = partition_area(one_face, 1.0, sides, openings) if multi else partition_area(length_m, height_m, sides, openings)
     n_boards = boards_needed(areas["net"], waste, b_area)
     wall_studs = [studs_needed(w, stud_spacing, board_width, board_height) for w, _ in walls]
-    angle_studs = ANGLE_STUDS * max(0, int(angles or 0))   # 2 montants par angle droit, sur toute la hauteur
-    n_studs = sum(wall_studs) + angle_studs
+    n_studs = sum(wall_studs)
     n_doors = sum(o.quantity for o in openings if o.kind == "door")
     door_studs = DOOR_STUDS * n_doors   # règle UniC : 3 montants de renfort par porte
-    n_stud_bars = (sum(stud_bars(n, h) for n, (_, h) in zip(wall_studs, walls)) + stud_bars(angle_studs, max(h for _, h in walls))
-                   + door_studs)
+    n_stud_bars = sum(stud_bars(n, h) for n, (_, h) in zip(wall_studs, walls)) + door_studs
     along = board_along(stud_spacing, board_width, board_height)
     total_length = sum(w for w, _ in walls)
     tracks = tracks_length(total_length, 2)
@@ -344,12 +339,11 @@ def calculate_partition(
     anchors = sum(anchor_points(tracks_length(w, 2), 2, fx["anchor_spacing_m"]) for w, _ in walls)   # rail haut + rail bas
     screws9 = (n_studs + door_studs) * fx["screws9_per_stud"]
     # montants : un par montant, hauteur = hauteur cloison
-    stud_ml = round_qty(sum(n * h for n, (_, h) in zip(wall_studs, walls)) + angle_studs * max(h for _, h in walls), 3)
+    stud_ml = round_qty(sum(n * h for n, (_, h) in zip(wall_studs, walls)), 3)
     sp_cm = round(stud_spacing * 100)
     pose = ("plaque debout" if along == board_width else "plaque couchée") if along else ""
     stud_rule = (f"1 montant tous les {sp_cm} cm (premier et dernier contre le mur)"
-                 + (f" + 1 de plus à chaque jonction de plaques (tous les {along:g} m, {pose}) : 2 côte à côte".replace(".", ",") if along else "")
-                 + (f" + {ANGLE_STUDS} par angle droit ({int(angles)})" if angle_studs else ""))
+                 + (f" + 1 de plus à chaque jonction de plaques (tous les {along:g} m, {pose}) : 2 côte à côte".replace(".", ",") if along else ""))
     sizes = " + ".join(f"{w:g} × {h:g}" for w, h in walls)
     top = max(h for _, h in walls)
     screws = ceil_int(areas["net"] * DEFAULTS["screws_per_m2"])
@@ -377,7 +371,6 @@ def calculate_partition(
             "board_height": board_height,
             "stud_spacing": stud_spacing,
             "fixings": fixings(fixing_values),
-            **({"angles": int(angles)} if angle_studs else {}),
         },
         next_step="Je peux transformer ces quantités en devis, bon de commande ou rapport.",
     )
@@ -1691,12 +1684,6 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 pts += _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
                 n += n_w
             studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
-            n_angle = ANGLE_STUDS * int(inp.get("angles") or 0)
-            if n_angle:
-                H = max(H for _, H in walls)
-                full, rest = int(H // bar), H - int(H // bar) * bar
-                studs += n_angle if full == 0 else n_angle * full if rest == 0 else n_angle * full + _min_count(Fraction(n_angle), Fraction(int(bar // rest)))
-                n += n_angle
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * sum((L for L, _ in walls), Fraction(0)), _F(BAR_LENGTH_M))

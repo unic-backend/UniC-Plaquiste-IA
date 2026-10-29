@@ -659,7 +659,8 @@ OWNER_RULES_V13 = (
 OWNER_RULES_V14 = (
     "Cloison : un montant tous les 60 cm (plaque debout, 60 × 2 = 1,20 m) ou tous les 50 cm si je le dis (plaque couchée, "
     "50 × 4 = 2 m), le premier et le dernier contre le mur. À chaque jonction de plaques, 2 montants côte à côte (un par plaque), "
-    "en 50 comme en 60 cm. À chaque angle droit, 2 montants. Cloison de 6 m en 60 cm : 11 + 4 = 15 montants.",
+    "en 50 comme en 60 cm. Cloison en L ou en U : chaque côté a son montant à chaque bout, l'angle en a donc déjà 2 (rien à "
+    "ajouter). Cloison de 6 m en 60 cm : 11 + 4 = 15 montants.",
 )
 
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,

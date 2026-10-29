@@ -199,12 +199,12 @@ TOOLS: list[dict] = [
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
             "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures). Cloison : montants tous les 60 cm par défaut (plaque debout) ; 50 SEULEMENT si le patron le dit (plaque couchée)."},
-            "angles": {"type": "integer", "description": "Cloison donnée en UNE seule longueur avec des angles droits (en L : 1, en U : 2) : 2 montants par angle. Inutile si les murs sont donnés séparément (chacun a son montant d'about)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
             "zones": {"type": "array", "description": (
-                "Plusieurs pièces (plafond), plusieurs cloisons, ou un plafond en L découpé en rectangles : une ligne par rectangle "
+                "Plusieurs pièces (plafond), plusieurs cloisons, ou un plafond en L découpé en rectangles : une ligne par rectangle ; "
+                "cloison en L ou en U = une ligne par côté (chaque côté a son montant à chaque bout, rien à ajouter à l'angle) "
                 "(count pour les identiques : « 3 chambres de 4x4 » = une ligne count 3). UN SEUL appel pour tout l'ouvrage : "
                 "deux appels séparés = le devis ne garde que le dernier."),
                 "items": {"type": "object", "properties": {
@@ -1693,7 +1693,7 @@ class AgentSession:
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
                                with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
                                decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15,
-                               hydrofuge: bool = False, entraxe_cm: int | None = None, angles: int = 0) -> dict:
+                               hydrofuge: bool = False, entraxe_cm: int | None = None) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1748,8 +1748,7 @@ class AgentSession:
                        for o in (openings or [])]
                 res = calc.calculate_partition(rects[0][0], rects[0][1], sides, ops, walls=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
                                                board_width=cfg["board_width"], board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"],
-                                               fixing_values=cfg["fixings"], sides_known=sides_known, openings_known=bool(ops) or bool(no_openings),
-                                               angles=angles)
+                                               fixing_values=cfg["fixings"], sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
             elif kind == "ceiling" and rects:
                 res = calc.calculate_ceiling(rects[0][0], rects[0][1], zones=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
                                              board_width=cfg["board_width"], board_height=cfg["board_height"], fixing_values=cfg["fixings"],
@@ -1766,7 +1765,7 @@ class AgentSession:
                        for o in (openings or [])]
                 res = calc.calculate_partition(length_m, height_m, sides, ops, waste=cfg["waste"], board_width=cfg["board_width"],
                                                board_height=cfg["board_height"], stud_spacing=cfg["stud_spacing"], fixing_values=cfg["fixings"],
-                                               sides_known=sides_known, openings_known=bool(ops) or bool(no_openings), angles=angles)
+                                               sides_known=sides_known, openings_known=bool(ops) or bool(no_openings))
             elif kind == "ceiling":
                 a = length_m or None
                 b = width_m or None
