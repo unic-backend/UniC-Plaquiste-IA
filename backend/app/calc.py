@@ -689,6 +689,76 @@ def calculate_ceiling(
     return result
 
 
+MOULURE_BAR_M = 3.0          # règle du patron : moulures en barres de 3 m
+MOULURE_BARS_PER_GLUE = 5    # règle du patron : 1 colle pour 5 barres, arrondi au-dessus
+
+
+def moulure_lines(total_ml: float, taille: int = 4, colle: str = "silicone", *,
+                  taille_known: bool = True) -> tuple[list[QuantityLine], list[CalcStep]]:
+    """Barres et colles pour `total_ml` de moulure (règles du patron) : ⌈ longueur / 3 ⌉ barres, ⌈ barres / 5 ⌉ colles."""
+    bars = ceil_int(total_ml / MOULURE_BAR_M)
+    glue = ceil_int(bars / MOULURE_BARS_PER_GLUE)
+    glue_sku, glue_name = ("UC-COLLE-A-POMPE", "Colle à pompe") if colle == "pompe" else ("UC-COLLE-SILICONE", "Colle silicone")
+    lines = [QuantityLine(f"UC-MOULURE-TAILLE-{taille}-BARRE-DE-3-M", f"Moulure taille {taille} (barre de 3 m)", bars, "u",
+                          f"⌈ {total_ml:g} ml / 3 ⌉", STATUS_ESTIMATED if taille_known else STATUS_ASSUMED),
+             QuantityLine(glue_sku, glue_name, glue, "u", f"⌈ {bars} barres / 5 ⌉", STATUS_ESTIMATED)]
+    steps = [CalcStep("Longueur de moulure", "tour des pièces (2 × (longueur + largeur)) ou longueur donnée", {"ml": total_ml},
+                      round_qty(total_ml, 2), "ml", STATUS_CALCULATED),
+             CalcStep("Barres de moulure (3 m)", "⌈ longueur / 3 ⌉", {"ml": total_ml}, bars, "u", STATUS_ESTIMATED),
+             CalcStep("Colles", "⌈ barres / 5 ⌉", {"barres": bars}, glue, "u", STATUS_ESTIMATED)]
+    return lines, steps
+
+
+_MOULURE_RULE = ("Règle du patron : moulure en barres de 3 m, ⌈ longueur / 3 ⌉ barres ; 1 colle pour 5 barres "
+                 "(silicone par défaut, à pompe si demandée).")
+
+
+def add_moulure(result: CalcResult, total_ml: float, taille: int | None = None, colle: str = "silicone") -> CalcResult:
+    """« faux plafond 5x4 avec moulure » : barres et colles ajoutées au calcul (le patron l'a demandé), sur le tour du plafond."""
+    lines, steps = moulure_lines(total_ml, int(taille or 4), colle, taille_known=taille is not None)
+    result.quantities += lines
+    result.steps += steps
+    result.inputs["moulure"] = {"length_ml": round_qty(total_ml, 3), "taille": int(taille or 4), "colle": colle}
+    result.assumptions.append(_MOULURE_RULE + f" Moulure sur tout le tour : {total_ml:g} ml.")
+    if taille is None:
+        result.assumptions.append("Taille de moulure non précisée : taille 4 supposée (dis « taille 2 » sinon).")
+    return result
+
+
+def calculate_moulure(length_ml: float | None = None, *, rooms: list[tuple[float, float]] | None = None,
+                      taille: int | None = None, colle: str = "silicone", rooms_known: bool = True) -> CalcResult:
+    """Moulures de plafond, règles du patron : barres de 3 m (⌈ longueur / 3 ⌉), 1 colle pour 5 barres. Longueur donnée en ml,
+    ou tour des pièces (2 × (longueur + largeur) chacune) : la moulure de plafond passe au-dessus des portes, rien n'est déduit."""
+    rooms = [(float(a), float(b)) for a, b in rooms or []]
+    total = round_qty(sum(2 * (a + b) for a, b in rooms) if rooms else float(length_ml or 0), 3)
+    check_inputs(positive={"longueur de moulure": total})
+    taille_known, taille = taille is not None, int(taille or 4)
+    lines, steps = moulure_lines(total, taille, colle, taille_known=taille_known)
+    sizes = " + ".join(f"{a:g} × {b:g}" for a, b in rooms)
+    result = CalcResult(
+        kind="moulure", title="Calcul de moulures",
+        understanding=(f"Moulure taille {taille} autour de {len(rooms)} pièce(s) ({sizes} m) : {total:g} ml." if rooms
+                       else f"Moulure taille {taille} sur {total:g} ml."),
+        inputs={"length_ml": total, **({"rooms": [[a, b] for a, b in rooms]} if rooms else {}), "taille": taille, "colle": colle},
+        next_step="Je peux l'ajouter à un devis si tu le demandes.")
+    result.data_used = [
+        {"label": "Longueur à couvrir", "value": total, "unit": "ml", "status": STATUS_CALCULATED if rooms else STATUS_CONFIRMED},
+        {"label": "Taille de moulure", "value": taille, "unit": "", "status": STATUS_CONFIRMED if taille_known else STATUS_ASSUMED},
+        {"label": "Colle", "value": "à pompe" if colle == "pompe" else "silicone", "unit": "", "status": STATUS_CONFIRMED},
+    ]
+    result.steps, result.quantities = steps, lines
+    result.assumptions = [_MOULURE_RULE]
+    if rooms:
+        result.assumptions.append("Longueur = tour de chaque pièce, 2 × (longueur + largeur) ; la moulure passe au-dessus des portes : rien n'est déduit.")
+    if not rooms_known:
+        result.assumptions.append("Pièce(s) données par leur surface : supposées carrées pour le tour (donne les côtés pour un calcul exact).")
+    if not taille_known:
+        result.assumptions.append("Taille de moulure non précisée : taille 4 supposée (dis « taille 2 » sinon).")
+        result.missing.append("Taille de moulure (2 ou 4).")
+    result.notes = ["Coupes d'onglet dans les angles : prises dans l'arrondi des barres."]
+    return result
+
+
 def calculate_paint(
     area_m2: float,
     coats: int = 2,
@@ -992,7 +1062,8 @@ def _no_openings(text: str) -> bool | None:
 
 def detect_calc_kind(text: str) -> str | None:
     t = normalize_dimensions(text)   # « 100 mètres carrés » = « 100 m² » : même ouvrage à préciser
-    if re.search(r"faux[\s-]?plafond|suspended ceiling|plafond suspendu", t):
+    if re.search(r"moulures?|corniches?", t) and not re.search(r"faux[\s-]?plafond|plafond suspendu|cloison|doublage|ba ?13|placo|plaques?", t):
+        return "moulure"   # « moulure salon 5x4 » : des barres et de la colle, pas un faux plafond    if re.search(r"faux[\s-]?plafond|suspended ceiling|plafond suspendu", t):
         return "ceiling"
     if re.search(r"peinture|paint|peintur|\b(?:re)?peind|\bpeins\b", t):   # « peindre 60 m² » : de la peinture, pas « plafond ou cloison ? »
         return "paint"
@@ -1051,6 +1122,9 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     result = _calculate_from_text(text, defaults)
     if result is not None and unitless:
         result.assumptions.insert(0, "Cotes sans unité : " + " ; ".join(unitless) + " (à confirmer).")
+    if result is not None and result.kind == "ceiling" and result.quantities and re.search(r"moulures?|corniches?", t):
+        zs = result.inputs.get("zones") or [[result.inputs["length_m"], result.inputs["width_m"]]]
+        add_moulure(result, sum(2 * (a + b) for a, b in zs), _moulure_size(t), _glue(t))
     plenum = _plenum(text) if result is not None and result.kind == "ceiling" and result.quantities else None
     if plenum:   # donné par le patron : plus « manquant » ; les tiges doivent couvrir cette hauteur
         result.inputs["plenum_m"] = plenum
@@ -1063,6 +1137,15 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
             f"Trois valeurs reçues ({extra.group(1)} × {extra.group(2)} × {extra.group(3)}) : seules les deux premières sont utilisées. "
             "Précisez ce que représente la troisième (hauteur, nombre, épaisseur).")
     return result
+
+
+def _moulure_size(t: str) -> int | None:
+    m = re.search(r"taille\s*(\d)\b", t)
+    return int(m.group(1)) if m else None
+
+
+def _glue(t: str) -> str:
+    return "pompe" if re.search(r"colle\s+(?:[àa]\s+)?pompe|\bpompe\b", t) else "silicone"
 
 
 def _calculate_zones(kind: str, zones: list[tuple[str, Any, int]], t: str, cfg: dict, waste: float,
@@ -1128,9 +1211,9 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
     t = re.sub(rf"({_NUM})\s*(mm|cm)\b",
                lambda m: f"{parse_number(m.group(1)) / (1000 if m.group(2) == 'mm' else 100):g} m", t)   # 3500 mm → 3.5 m
 
-    zones = _zones(t) if kind in ("ceiling", "partition") else []
+    zones = _zones(t) if kind in ("ceiling", "partition", "moulure") else []
     # plafond / cloison : la première vraie mesure (pas « plaques 1200 x 2500 » ni « porte de 0,9 x 2,1 », qui ne sont pas l'ouvrage)
-    pair = next((v for k, v, _ in zones if k == "pair"), None) if kind in ("ceiling", "partition") else _extract_dimension_pair(t)
+    pair = next((v for k, v, _ in zones if k == "pair"), None) if kind in ("ceiling", "partition", "moulure") else _extract_dimension_pair(t)
     # « 2 portes », « 3 chambres », « 2 couches » : des nombres d'objets, pas des cotes (avant : « cloison 12 m, 2 portes » = 2 m de haut)
     parts = lambda m: " " if _is_part(t[max(0, m.start() - 40):m.start()], parse_number(m.group(1)), parse_number(m.group(2))) else m.group(0)   # noqa: E731
     nums = _find_numbers(re.sub(rf"\b\d+\s+(?:{_ROOM}|portes?|fen[eê]tres?|faces?|c[oô]t[eé]s?|couches?|spots?|trappes?)\b", " ",
@@ -1150,7 +1233,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         w = parse_number(wm.group(1))
         waste = w / 100.0 if w > 1 else w
 
-    if sum(n for k, _, n in zones if kind == "partition" or k != "length") > 1:
+    if kind in ("ceiling", "partition") and sum(n for k, _, n in zones if kind == "partition" or k != "length") > 1:
         several = _calculate_zones(kind, zones, t, cfg, waste, parse_number(height.group(1)) if height else None)
         if several is not None:
             return several
@@ -1234,6 +1317,22 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
         return calculate_ceiling(a, b, waste=waste, board_width=cfg["board_width_m"],
                                  board_height=cfg["board_height_m"], dims_known=square_from_area is None,
                                  fixing_values=cfg.get("fixings"))
+
+    if kind == "moulure":
+        rooms, guessed = [], False
+        for k, v, n in zones:
+            if k == "pair":
+                rooms += [v] * n
+            elif k == "area":   # pièce donnée par sa surface : supposée carrée
+                rooms += [(math.sqrt(v), math.sqrt(v))] * n
+                guessed = True
+        ml = re.search(rf"({_NUM})\s*(?:ml\b|m(?:[eè]tres?)?\s+lin[ée]aires?)", t) or (None if rooms else re.search(rf"({_NUM})\s*m\b", t))
+        if not rooms and not ml:
+            return CalcResult(kind="moulure", title="Calcul de moulures", understanding="Moulure demandée, longueur manquante.",
+                              missing=["Longueur à couvrir en ml, ou les dimensions de la pièce."],
+                              next_step="Indiquez par exemple : moulure salon 5 x 4, ou moulure 18 ml taille 2.")
+        return calculate_moulure(None if rooms else parse_number(ml.group(1)), rooms=rooms or None, taille=_moulure_size(t),
+                                 colle=_glue(t), rooms_known=not guessed)
 
     if kind == "paint":
         from_pair = False
@@ -1417,7 +1516,16 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
             if "MONTANT-M48" in qty or "UC-RAILS-48-MM" in qty:
                 problems.append("Ossature présente alors que la longueur est inconnue : quantité inventée.")
-        elif result.kind == "ceiling" and inp:
+        if inp and (result.kind == "moulure" or inp.get("moulure")):   # règles du patron : ⌈ ml / 3 ⌉ barres, ⌈ barres / 5 ⌉ colles
+            mo = inp if result.kind == "moulure" else inp["moulure"]
+            bars = _min_count(_F(mo["length_ml"]), _F(MOULURE_BAR_M))
+            bar_sku = f"UC-MOULURE-TAILLE-{int(mo['taille'])}-BARRE-DE-3-M"
+            glue_sku = "UC-COLLE-A-POMPE" if mo.get("colle") == "pompe" else "UC-COLLE-SILICONE"
+            if qty.get(bar_sku) != bars:
+                problems.append(f"Moulures : moteur {qty.get(bar_sku)} ≠ contrôle {bars} barres.")
+            if qty.get(glue_sku) != _min_count(Fraction(bars), Fraction(MOULURE_BARS_PER_GLUE)):
+                problems.append(f"Colles : moteur {qty.get(glue_sku)} ≠ contrôle {_min_count(Fraction(bars), Fraction(MOULURE_BARS_PER_GLUE))}.")
+        if result.kind == "ceiling" and inp:
             zones = [(_F(a), _F(b)) for a, b in inp.get("zones") or [(inp["length_m"], inp["width_m"])]]
             area = sum((a * b for a, b in zones), Fraction(0))
             if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):
