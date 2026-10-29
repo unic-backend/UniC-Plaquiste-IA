@@ -369,6 +369,10 @@ TOOLS: list[dict] = [
         "name": "read_plan",
         "description": ("Analyse le PLAN joint (PDF, scan ou photo) : liste les pièces avec surfaces et cotes, dit lesquelles ont un plafond, "
                         "relève les références placo/cloisons écrites sur le plan, et totalise les surfaces (calcul fait en code). "
+                        "GROS DOSSIER (maison, immeuble, 40 pages et plus, plans de logiciels) : chaque page est lue pour elle-même "
+                        "(en général un niveau par page, étages de formes différentes) ; chaque pièce porte sa page et son niveau, "
+                        "`niveaux` donne les totaux par étage. Si `lecture.en_cours` : dis au patron combien de pages sont lues et "
+                        "rappelle read_plan un peu plus tard (rien n'est perdu, la lecture continue). "
                         "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture. "
                         "QUESTION PRÉCISE sur l'image ou le plan (angles, jonctions en T, équerres, nombre de cloisons, cotes, orientation…) : "
                         "passe question=« … » : l'image est REGARDÉE de nouveau (pas le résumé) et tu réponds d'après elle. "
@@ -598,6 +602,10 @@ TOOLS: list[dict] = [
                         "suspentes), sans redemander les dimensions. rooms = pièces retenues (noms du plan) ; vide = pièces dont le plan "
                         "confirme le plafond ; include_to_confirm=true si le patron dit « toutes les pièces ». hydrofuge_rooms = pièces "
                         "humides en plaque hydrofuge. partitions = cloisons à poser (longueur du plan, hauteur donnée par le patron). "
+                        "Gros dossier : chaque pièce garde son niveau (rooms=[\"Chambre 1 (R+1)\"] pour un étage précis, "
+                        "[\"Chambre 1\"] = à tous les étages) ; un étage courant compte autant de fois que le plan le dit ; "
+                        "`niveaux` = totaux par étage ; `pose` = la consigne de pose de CHAQUE pièce (sens et nombre des fourrures, "
+                        "tiges, plaques entières et morceaux) : présente-la par niveau, nombres tels quels, sans recalcul. "
                         "Ensuite create_quote (sans `lines`) crée le devis à partir de ce métré."),
         "input_schema": {"type": "object", "properties": {
             "file_id": {"type": "string"},
@@ -1416,6 +1424,9 @@ class AgentSession:
         analysis = plans.analyze(self.db, fid)
         if analysis.get("error"):
             raise ConnectorError(analysis["error"], 400)
+        if (analysis.get("lecture") or {}).get("en_cours"):
+            raise ConnectorError(f"Lecture du plan en cours : {analysis['lecture']['note']} Le métré se fera quand toutes les pages "
+                                 "seront lues.", 409)
         co = company_dict(self.db)
         try:
             data = plan_quote.build(analysis, rooms=rooms, include_to_confirm=include_to_confirm,
@@ -1429,8 +1440,11 @@ class AgentSession:
             raise ConnectorError(str(exc), 400)
         self.state["last_calc"] = data   # create_quote / bons partent de ce métré
         self.state.pop("calc_quote_id", None)
+        pose = data.get("pose") or []
         return {"titre": data["title"], "compris": data["understanding"], "quantites": data["quantities"],
-                "hypotheses": data["assumptions"], "manquant": data["missing"],
+                "niveaux": data.get("niveaux") or [],
+                "pose": pose[:60], **({"pose_non_listee": len(pose) - 60} if len(pose) > 60 else {}),
+                "hypotheses": data["assumptions"][:80], "manquant": data["missing"],
                 "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
 
     def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "") -> dict:
@@ -1440,7 +1454,7 @@ class AgentSession:
             return {"error": "Aucun plan joint à la conversation."}
         if (question or "").strip():   # question précise (angles, jonctions…) : on REGARDE l'image, le résumé en cache ne répond pas à cela
             return plans.ask(self.db, fid, question)
-        return plans.analyze(self.db, fid, refresh=bool(refresh))
+        return plans.compact(plans.analyze(self.db, fid, refresh=bool(refresh)))
 
     # --- mémoire
     def _t_remember(self, text: str, kind: str = "", client: str = "") -> dict:

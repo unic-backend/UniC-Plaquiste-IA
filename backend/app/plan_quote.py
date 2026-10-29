@@ -1,4 +1,6 @@
-"""Du plan au devis : les pièces lues sur le plan deviennent un métré, sans rien redemander au patron.
+"""Du plan au devis : les pièces lues sur le plan deviennent un métré, sans rien redemander au patron. Gros dossiers : chaque
+pièce garde son niveau (une page par étage), un étage courant compte autant de fois que le plan le dit, une pièce en L est
+calculée rectangle par rectangle, et chaque pièce reçoit sa consigne de pose (fourrures, tiges, plaques).
 
 Plafonds : plaques calculées sur la surface TOTALE de chaque type (standard / hydrofuge) pour ne pas arrondir pièce par
 pièce ; ossature et suspentes calculées pièce par pièce (elles dépendent des dimensions). Cloisons : longueur × hauteur.
@@ -27,6 +29,26 @@ def _match(name: str, wanted: list[str]) -> bool:
     return any(w and (_norm(w) == n or _norm(w) in n or n in _norm(w)) for w in wanted)
 
 
+def room_label(p: dict) -> str:
+    """Nom d'une pièce dans un dossier de plusieurs niveaux : « Chambre 1 — Appartement A (R+1) » (un même nom revient à chaque étage)."""
+    return p["nom"] + (f" — {p['logement']}" if p.get("logement") else "") + (f" ({p['niveau']})" if p.get("niveau") else "")
+
+
+def _pose(p: dict, rects: list[list[float]], board_width: float, board_length: float) -> dict:
+    """Consigne de pose d'une pièce (règles du patron) : sens et nombre des fourrures, tiges, plaques entières et morceaux."""
+    fourrures, tiges, entieres, morceaux = [], 0, 0, 0
+    for a, b in rects:
+        run, across = calc.ceiling_run(a, b)
+        rows, hangers, _ = calc.ceiling_layout(run, across)
+        laid = calc.ceiling_boards(a, b, None, board_width, board_length)
+        fourrures.append(f"{rows} lignes dans le sens des {run:g} m".replace(".", ","))
+        tiges, entieres, morceaux = tiges + hangers, entieres + laid["entieres"], morceaux + laid["pour_morceaux"]
+    return {"piece": room_label(p), "page": p.get("page"), "niveau": p.get("niveau"), "surface_m2": p.get("surface_m2"),
+            "repetition": int(p.get("repetition") or 1), "zones": len(rects),
+            "fourrures": " + ".join(fourrures) + " (tous les 50 cm, la première et la dernière contre le mur)",
+            "tiges": tiges, "plaques": f"{entieres} entières + {morceaux} pour les morceaux = {entieres + morceaux}"}
+
+
 def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm: bool = False,
           hydrofuge_rooms: list[str] | None = None, partitions: list[dict] | None = None,
           waste: float = 0.0, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
@@ -39,11 +61,11 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         raise PlanQuoteError("Aucune pièce lue sur ce plan : relis le plan (read_plan) ou donne les dimensions.")
     hydro = hydrofuge_rooms or []
     if rooms:
-        chosen = [p for p in pieces if _match(p["nom"], rooms)]
-        unknown = [r for r in rooms if not any(_match(p["nom"], [r]) for p in pieces)]
+        chosen = [p for p in pieces if _match(room_label(p), rooms)]
+        unknown = [r for r in rooms if not any(_match(room_label(p), [r]) for p in pieces)]
         if unknown:
             raise PlanQuoteError(f"Pièce(s) absente(s) du plan : {', '.join(unknown)}. Pièces lues : "
-                                 + ", ".join(p["nom"] for p in pieces))
+                                 + ", ".join(room_label(p) for p in pieces[:80]))
     else:
         flags = {"oui", "a_confirmer"} if include_to_confirm else {"oui"}
         chosen = [p for p in pieces if p.get("plafond") in flags]
@@ -52,10 +74,15 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
                                  "(ou include_to_confirm=true s'il dit « toutes »).")
 
     steps, assumptions, missing = [], [], []
+    unread = (analysis.get("lecture") or {}).get("non_lues") or []
+    if unread:
+        missing.append(f"Pages du plan non lues : {', '.join(map(str, unread))} (relis le plan) : leurs pièces ne sont pas comptées.")
     others: dict[str, dict] = {}
     area_by_type = {"": 0.0, "-H": 0.0}
     boards_by_type = {"": 0, "-H": 0}   # plaques au plan de pose, pièce par pièce
     partition_m2 = 0.0
+    pose: list[dict] = []          # consigne de pose de chaque pièce, pour les ouvriers
+    levels: dict[str, dict] = {}   # totaux par niveau (étage), répétitions comprises
     fx = calc.fixings(fixings)
     # articles vendus au paquet : les pièces de TOUTES les pièces du plan sont additionnées, puis arrondies au paquet une seule
     # fois (sinon 5 pièces à 30 chevilles = 5 paquets au lieu de 2)
@@ -77,29 +104,41 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             cur["quantity"] = calc.round_qty(cur["quantity"] + line.quantity, 2)
 
     for p in chosen:
+        name = room_label(p)
         area = p.get("surface_m2")
         if not area:
-            missing.append(f"{p['nom']} : surface non lisible sur le plan, non comptée.")
+            missing.append(f"{name} : surface non lisible sur le plan, non comptée.")
             continue
+        rep = max(1, int(p.get("repetition") or 1))   # « étage courant R+1 à R+4 » : le même plan compte 4 fois
         L, l = p.get("longueur_m"), p.get("largeur_m")
-        if not (L and l):
-            L = l = math.sqrt(area)
-            assumptions.append(f"{p['nom']} : dimensions non cotées, ossature estimée sur un carré de {area:g} m².")
-        suffix = "-H" if _match(p["nom"], hydro) else ""
-        area_by_type[suffix] += area
-        res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length, fixing_values=fixings,
-                                     margin=False)
-        boards_by_type[suffix] += int(next(q.quantity for q in res.quantities if q.sku.startswith("BA13-")))
+        rects = [list(r) for r in p.get("rectangles") or []]   # pièce en L ou couloir coudé : découpée en rectangles
+        if not rects:
+            if not (L and l):
+                L = l = math.sqrt(area)
+                assumptions.append(f"{name} : dimensions non cotées, ossature estimée sur un carré de {area:g} m².")
+            rects = [[L, l]]
+        suffix = "-H" if _match(name, hydro) else ""
+        area_by_type[suffix] += area * rep
+        res = calc.calculate_ceiling(rects[0][0], rects[0][1], zones=rects if len(rects) > 1 else None, waste=waste,
+                                     board_width=board_width, board_height=board_length, fixing_values=fixings, margin=False)
+        boards_by_type[suffix] += int(next(q.quantity for q in res.quantities if q.sku.startswith("BA13-"))) * rep
         hangers = step_result(res, "Points d'accroche")
-        count("UC-PIVOT", hangers)
-        count("UC-CHEVILLES-A-LETON", hangers)
-        count("UC-PAQUET-CHEVILLES-A-FRAPPER", calc.anchor_points(2 * (L + l), 4, fx["anchor_spacing_m"]))
+        count("UC-PIVOT", hangers * rep)
+        count("UC-CHEVILLES-A-LETON", hangers * rep)
+        count("UC-PAQUET-CHEVILLES-A-FRAPPER", sum(calc.anchor_points(2 * (a + b), 4, fx["anchor_spacing_m"]) for a, b in rects) * rep)
         for q in res.quantities:
             if not q.sku.startswith("BA13-"):   # plaques comptées plus bas, sur le total
-                add(q)
-        steps.append(calc.CalcStep(f"Plafond {p['nom']}" + (" (hydrofuge)" if suffix else ""), "surface lue sur le plan",
-                                   {"page": p.get("page") or 1}, area, "m²", calc.STATUS_CONFIRMED))
-        assumptions.append(f"{p['nom']} : {area:g} m² (plan" + (", hydrofuge" if suffix else "") + ").")
+                add(calc.QuantityLine(**{**asdict(q), "quantity": q.quantity * rep}))
+        steps.append(calc.CalcStep(f"Plafond {name}" + (f" × {rep} étages identiques" if rep > 1 else "") + (" (hydrofuge)" if suffix else ""),
+                                   "surface lue sur le plan", {"page": p.get("page") or 1, **({"niveau": p["niveau"]} if p.get("niveau") else {})},
+                                   area, "m²", calc.STATUS_CONFIRMED))
+        assumptions.append(f"{name} : {area:g} m² (plan" + (f", p. {p['page']}" if p.get("page") else "")
+                           + (f", × {rep} étages" if rep > 1 else "") + (", hydrofuge" if suffix else "") + ").")
+        pose.append(_pose(p, rects, board_width, board_length))
+        lv = levels.setdefault(p.get("niveau") or f"page {p.get('page') or 1}", {"niveau": p.get("niveau") or f"page {p.get('page') or 1}",
+                                                                                "pieces": 0, "surface_m2": 0.0, "repetition": rep})
+        lv["pieces"] += 1
+        lv["surface_m2"] = round(lv["surface_m2"] + area * rep, 2)
 
     boards = []
     for suffix, total in area_by_type.items():
@@ -171,12 +210,14 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     return {
         "kind": "plan", "title": title,
         "understanding": f"{len([s for s in steps if s.label.startswith('Plafond')])} pièce(s) en faux plafond, "
-                         f"{total_ceiling:g} m²" + (f", {len(partitions or [])} cloison(s)" if partitions else "") + ".",
+                         f"{total_ceiling:g} m²" + (f" sur {len(levels)} niveaux" if len(levels) > 1 else "")
+                         + (f", {len(partitions or [])} cloison(s)" if partitions else "") + ".",
         "steps": [asdict(s) for s in steps], "quantities": quantities,
         "assumptions": assumptions + [f"Plaques {board_width:g} × {board_length:g} m comptées au plan de pose, pièce par pièce"
                                       + (f", + {waste * 100:.0f} % de chute" if waste else "")
                                       + f". Marge du patron sur les plaques, fourrures et cornières du faux plafond ({calc.MARGIN_RULE}, "
                                       "selon la surface de plafond couverte) ; cloisons, pivots, chevilles et vis au compte exact."],
         "missing": missing, "notes": [], "data_used": [], "inputs": {"surface_plafond_m2": total_ceiling},
+        "pose": pose, "niveaux": list(levels.values()),
         "next_step": "Prêt pour le devis.",
     }
