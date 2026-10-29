@@ -198,7 +198,7 @@ TOOLS: list[dict] = [
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
-            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (tiges en 60 × 60, plaque dans le sens des fourrures)."},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -713,7 +713,7 @@ TOOLS: list[dict] = [
             "length_m": {"type": "number"}, "width_m": {"type": "number"},
             "plaque_m": {"type": "number", "enum": [2.0, 2.5, 3.0],
                          "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."},
-            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (tiges en 60 × 60, plaque dans le sens des fourrures)."}},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures)."}},
             "required": ["length_m", "width_m"], "additionalProperties": False},
     },
     {

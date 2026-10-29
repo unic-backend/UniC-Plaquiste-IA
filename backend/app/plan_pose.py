@@ -79,7 +79,8 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
          board_height: float = calc.DEFAULTS["board_height_m"], waste: float = calc.DEFAULTS["waste"],
          entraxe_cm: int = 50) -> dict:
     """Plan de pose d'un plafond rectangulaire L × l (m) : fourrures, tiges, plaques entières et coupées, et le dessin.
-    `entraxe_cm` : 50 (défaut, plaque en travers des fourrures) ou 60 (tiges 60 × 60, plaque dans le sens des fourrures)."""
+    `entraxe_cm` : 50 (défaut, plaque en travers des fourrures) ou 60 (fourrures tous les 60 cm, tiges toujours à 90 cm ; plaque
+    dans le sens des fourrures, posée sur 3 fourrures : un bord, le milieu, l'autre bord)."""
     calc.check_inputs(positive={"longueur": length_m, "largeur": width_m, "largeur de plaque": board_width,
                                 "hauteur de plaque": board_height})
     if length_m * width_m > MAX_AREA_M2:
@@ -120,8 +121,8 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     perimeter = round(2 * (run + across), 2)
     angle_bars = calc.ceil_int(perimeter / calc.BAR_LENGTH_M)
     if parallel:
-        pose = (f"Plaques de {_len(ph / 100)} m dans le sens des fourrures ({sp_cm} cm × {pw // sp_cm} = {_len(pw / 100)} m : "
-                f"chaque bord tombe sur une fourrure)")
+        pose = (f"Plaques de {_len(ph / 100)} m dans le sens des fourrures : chaque plaque touche {pw // sp_cm + 1} fourrures, "
+                f"un bord, le milieu, l'autre bord ({sp_cm} cm × {pw // sp_cm} = {_len(pw / 100)} m)")
     else:
         pose = (f"Plaques de {_len(ph / 100)} m en travers des fourrures "
                 + (f"({sp_cm} cm × {ph // sp_cm} = {_len(ph / 100)} m : chaque bout tombe sur une fourrure)" if ph % sp_cm == 0

@@ -175,8 +175,9 @@ def partition_area(
 HANGER_FIRST_M = 0.30   # règle du patron : la première tige à 30 cm du mur, puis tous les 90 cm
 HANGER_END_MAX_M = 0.50  # la dernière tige reste près de l'autre mur : au-delà de 50 cm, une tige de plus à 30 cm du mur
 # trames du patron : entraxe des fourrures (cm) → (entraxe des fourrures, pas des tiges) en m. 50 par défaut ; 60 seulement s'il le
-# dit (tiges 60 × 60, plaque posée dans le sens des fourrures : 60 × 2 = 1,20 m)
-GRIDS = {50: (0.50, 0.90), 60: (0.60, 0.60)}
+# dit : seul l'écart des fourrures change (les tiges restent tous les 90 cm), la plaque se pose dans le sens des fourrures et
+# touche 3 fourrures (un bord, le milieu, l'autre bord : 60 × 2 = 1,20 m)
+GRIDS = {50: (0.50, 0.90), 60: (0.60, 0.90)}
 
 
 def grid(entraxe_cm: int | None = None) -> tuple[float, float]:
@@ -188,8 +189,8 @@ def grid(entraxe_cm: int | None = None) -> tuple[float, float]:
 
 
 def hanger_positions(run: float, step: float | None = None) -> list[float]:
-    """Tiges le long d'une fourrure de `run` m (règle du patron) : la première à 30 cm du mur, puis une tous les 90 cm (60 cm en
-    trame 60 × 60) ; toujours une tige près de l'autre mur (ajoutée à 30 cm du mur si la dernière en est à plus de 50 cm)."""
+    """Tiges le long d'une fourrure de `run` m (règle du patron) : la première à 30 cm du mur, puis une tous les 90 cm ;
+    toujours une tige près de l'autre mur (ajoutée à 30 cm du mur si la dernière en est à plus de 50 cm)."""
     first, step = HANGER_FIRST_M, step or DEFAULTS["hanger_spacing_m"]
     if run <= 2 * first:
         return [round_qty(run / 2, 3)]   # fourrure très courte : une tige au milieu
@@ -609,7 +610,7 @@ def calculate_ceiling(
     zones: list[tuple[float, float]] | None = None,
     entraxe_cm: int | None = None,
 ) -> CalcResult:
-    """`entraxe_cm` : 50 par défaut (règle du patron) ; 60 seulement s'il le dit (tiges en 60 × 60).
+    """`entraxe_cm` : 50 par défaut (règle du patron) ; 60 seulement s'il le dit (fourrures tous les 60 cm, tiges toujours à 90 cm).
     `zones` : plusieurs pièces, ou un plafond en L découpé en rectangles (longueur, largeur). Ossature, tiges et cornière sont
     comptées zone par zone (elles dépendent des côtés) ; plaques et paquets une seule fois, sur le total."""
     zones = [(float(a), float(b)) for a, b in zones] if zones else [(length_m, width_m)]
@@ -706,7 +707,8 @@ def calculate_ceiling(
         f"Déchet {waste*100:.0f} %.",
         (f"Méthode UniC : fourrures tous les {sp_txt} m ; tiges (tige + pivot + cheville à laiton) à 30 cm du mur puis tous les {h_txt} ; "
          + ("plaques de 2 m posées en travers des fourrures (50 × 4 = 2 m : chaque bout sur une fourrure)." if f_sp == 0.5 else
-            "plaques posées dans le sens des fourrures (60 × 2 = 1,20 m : chaque bord sur une fourrure).")),
+            "plaques posées dans le sens des fourrures : chaque plaque touche 3 fourrures, un bord, le milieu, l'autre bord "
+            "(60 × 2 = 1,20 m).")),
         "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)), fixée aux murs par chevilles à frapper ; "
         "entretoises non comptées.",
         _fx_text(fx, "cornière"),
