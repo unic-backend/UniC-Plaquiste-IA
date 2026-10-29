@@ -898,6 +898,26 @@ _WORD_NUMBERS = {
     "quarante": 40, "cinquante": 50, "soixante": 60, "cent": 100,
 }
 _WORD_NUM = "|".join(sorted(_WORD_NUMBERS, key=len, reverse=True))
+# nombres composés dits à voix haute : « dix-huit », « soixante-dix », « quatre-vingt-quinze », « vingt et un », « deux cent cinquante »
+_S = r"[\s-]+"
+_U = r"(?:un|une|deux|trois|quatre|cinq|six|sept|huit|neuf)"
+_TEEN = rf"(?:dix{_S}(?:sept|huit|neuf)|onze|douze|treize|quatorze|quinze|seize|dix)"
+_TENS = (rf"(?:quatre{_S}vingts?(?:{_S}(?:{_TEEN}|{_U}))?|soixante(?:{_S}et{_S}onze|{_S}(?:{_TEEN}|{_U}))?"
+         rf"|(?:vingt|trente|quarante|cinquante)(?:{_S}et{_S}(?:un|une)|{_S}(?:deux|trois|quatre|cinq|six|sept|huit|neuf))?)")
+_SPOKEN = rf"(?:(?:(?:deux|trois|quatre|cinq|six|sept|huit|neuf){_S})?cents?(?:{_S}(?:{_TENS}|{_TEEN}|{_U}))?|{_TENS}|{_TEEN}|{_U})"
+
+
+def spoken_number(phrase: str) -> int:
+    """« soixante-dix-huit » → 78 ; « quatre-vingt-dix » → 90 ; « deux cent cinquante » → 250 (phrase déjà reconnue par _SPOKEN)."""
+    total = 0
+    for tok in (w for w in re.split(r"[\s-]+", phrase.strip()) if w and w != "et"):
+        if tok in ("cent", "cents"):
+            total = (total or 1) * 100 if total < 100 else total + 100
+        elif tok in ("vingt", "vingts") and total % 100 == 4:
+            total += 76   # quatre-vingt : 4 → 80
+        else:
+            total += _WORD_NUMBERS[tok] if tok in _WORD_NUMBERS else {"dix": 10}[tok]
+    return total
 
 
 # Mots du métier tapés vite ou dictés : fautes, abréviations SMS. Seuls les mots ci-dessous sont touchés (jamais un mot juste).
@@ -933,10 +953,12 @@ def normalize_dimensions(text: str) -> str:
     Fautes courantes d'abord (fix_typos) : « cloisson », « plafon », « 4 mettre »."""
     t = fix_typos(text.lower().replace("\u00a0", " "))
     t = re.sub(r"\bm[eè]tres?\s+carr[eé]s?\b|\bm\s+carr[eé]s?\b", "m²", t)
-    # nombres en lettres, seulement près d'une mesure (« un plafond » reste tel quel)
-    t = re.sub(rf"\b({_WORD_NUM})\b(?=\s*(?:m\b|m²|m[eè]tres?\b|virgule\b|et\s+demi|sur\b|par\b|x\b))",
-               lambda m: str(_WORD_NUMBERS[m.group(1)]), t)
-    t = re.sub(rf"(?:(?<=\bsur\s)|(?<=\bpar\s)|(?<=\bx\s))({_WORD_NUM})\b", lambda m: str(_WORD_NUMBERS[m.group(1)]), t)
+    # nombres en lettres (composés compris : « dix-huit », « soixante-dix »), seulement près d'une mesure (« un plafond » reste tel quel)
+    spoken = lambda m: str(spoken_number(m.group(1)))   # noqa: E731
+    t = re.sub(rf"\b({_SPOKEN})\b(?=\s*(?:m\b|m²|ml\b|cm\b|m[eè]tres?\b|virgule\b|et\s+demi|sur\b|par\b|x\b))", spoken, t)
+    t = re.sub(rf"(?:(?<=\bsur\s)|(?<=\bpar\s)|(?<=\bx\s))({_SPOKEN})\b", spoken, t)
+    # après « mètres » ou « virgule » : la suite de la mesure (« deux mètres soixante » = 2,60 m ; avant : 2 m, « soixante » perdu)
+    t = re.sub(rf"(?:(?<=m[eè]tres\s)|(?<=m[eè]tre\s)|(?<=virgule\s))({_SPOKEN})\b", spoken, t)
     t = re.sub(r"\b(\d+)\s+virgule\s+(\d+)\b", r"\1.\2", t)                                   # « deux virgule cinq »
     t = re.sub(r"\b(\d+)\s?m(\d{2})\b(?![.,]?\d)", r"\1.\2 m", t)                                 # 4m50, 2m05 (« 20 m2 » = m²)
     t = re.sub(r"\b(\d+)\s*m[eè]tres?\s+(\d{1,2})\b(?!\s*(?:portes?|fen[eê]tres?|faces?|plaques?|cm|mm|m\b|m[eè]tres?|[.,]\d))",
@@ -1326,7 +1348,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
             elif k == "area":   # pièce donnée par sa surface : supposée carrée
                 rooms += [(math.sqrt(v), math.sqrt(v))] * n
                 guessed = True
-        ml = re.search(rf"({_NUM})\s*(?:ml\b|m(?:[eè]tres?)?\s+lin[ée]aires?)", t) or (None if rooms else re.search(rf"({_NUM})\s*m\b", t))
+        ml = re.search(rf"({_NUM})\s*(?:ml\b|m(?:[eè]tres?)?\s+lin[ée]aires?)", t) or (None if rooms else re.search(rf"({_NUM})\s*(?:m|m[eè]tres?)\b", t))
         if not rooms and not ml:
             return CalcResult(kind="moulure", title="Calcul de moulures", understanding="Moulure demandée, longueur manquante.",
                               missing=["Longueur à couvrir en ml, ou les dimensions de la pièce."],
