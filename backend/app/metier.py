@@ -31,6 +31,7 @@ EXISTING_SKU = {
     "Plaque BA13 hydrofuge 2 m": "BA13-2000x1200-H",
     "Montant 48 mm": "MONTANT-M48",
     "Montant 7 cm (70 mm)": "MONTANT-M70",
+    "Barre de fourrure (2,80 m)": "UC-BARRE-DE-FOURRURE-2-90-M",   # identifiant historique gardé (prix du patron) ; barre de 2,80 m
 }
 LABOR_SKU = "UC-MAIN-OEUVRE-M2"
 

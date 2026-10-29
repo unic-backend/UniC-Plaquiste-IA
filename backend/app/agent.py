@@ -708,8 +708,11 @@ TOOLS: list[dict] = [
                         "plaques entières et coupées à joints décalés, vue de dessus cotée (PNG partageable). Mêmes règles et mêmes nombres "
                         "que le calcul du devis ; dit si le plan consomme plus de plaques que le devis. Pour « plan de pose », « calepinage », "
                         "« comment poser les plaques », « montre aux ouvriers ». Un plafond rectangulaire par appel (une pièce)."),
-        "input_schema": {"type": "object", "properties": {"length_m": {"type": "number"}, "width_m": {"type": "number"}},
-                         "required": ["length_m", "width_m"], "additionalProperties": False},
+        "input_schema": {"type": "object", "properties": {
+            "length_m": {"type": "number"}, "width_m": {"type": "number"},
+            "plaque_m": {"type": "number", "enum": [2.0, 2.5, 3.0],
+                         "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."}},
+            "required": ["length_m", "width_m"], "additionalProperties": False},
     },
     {
         "name": "round_table",
@@ -1106,12 +1109,12 @@ class AgentSession:
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "l'ossature des retombées et le prix du LED se demandent au patron.")}
 
-    def _t_pose_plan(self, length_m: float, width_m: float) -> dict:
+    def _t_pose_plan(self, length_m: float, width_m: float, plaque_m: float | None = None) -> dict:
         from app import diagrams, plan_pose
         co = company_dict(self.db)
         try:
             out = plan_pose.plan(length_m, width_m, board_width=co.get("board_width_m") or 1.2,
-                                 board_height=co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08)
+                                 board_height=plaque_m or co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08)
         except ValueError as exc:
             return {"error": str(exc)}
         svg = out.pop("svg")

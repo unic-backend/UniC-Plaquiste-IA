@@ -34,7 +34,7 @@ def _qty(res, sku):
 def test_case_320m_two_faces_openings_unknown():
     # 320 × 2,50 × 2 = 1 600 m² brut ; ouvertures inconnues → nette = 1 600 « estimée », jamais « confirmée »
     # plaques 1,20 × 2,00 = 2,40 m² : ⌈1 600 × 1,08 / 2,40⌉ = ⌈720⌉ = 720
-    # montants (3 par plaque, jonctions partagées) : ⌈320 / 1,20⌉ × 2 + 1 = 267 × 2 + 1 = 535 ; rails : ⌈640 / 2,90⌉ = ⌈220,69⌉ = 221 barres
+    # montants (3 par plaque, jonctions partagées) : ⌈320 / 1,20⌉ × 2 + 1 = 267 × 2 + 1 = 535 ; rails : ⌈640 / 2,80⌉ = ⌈228,57⌉ = 229 barres
     r = calc.calculate_partition(320, 2.5, 2, **STD)
     d = r.to_dict()
     assert _step(r, "Surface brute")["result"] == 1600 and _step(r, "Surface brute")["status"] == calc.STATUS_CALCULATED
@@ -42,7 +42,7 @@ def test_case_320m_two_faces_openings_unknown():
     nette = _step(r, "Surface nette")
     assert nette["result"] == 1600 and nette["status"] == calc.STATUS_ESTIMATED and "sans déduction" in nette["label"]
     assert _status(r, "Ouvertures") == calc.STATUS_MISSING
-    assert _qty(r, "BA13-2000x1200") == 720 and _qty(r, "MONTANT-M48") == 535 and _qty(r, "UC-RAILS-48-MM") == 221
+    assert _qty(r, "BA13-2000x1200") == 720 and _qty(r, "MONTANT-M48") == 535 and _qty(r, "UC-RAILS-48-MM") == 229
     assert any("Ouvertures" in m for m in d["missing"])
     assert any("2.5 m > plaque 2 m" in n for n in d["notes"])
     assert d["verification"]["ok"]

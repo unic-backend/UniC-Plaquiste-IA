@@ -119,7 +119,7 @@ Ces valeurs ne sont pas des tarifs UniC.""",
         "Méthode de calcul ossature métallique",
         "method",
         """Montants (méthode UniC) : chaque plaque de 1,20 m prend 3 montants (bords + milieu), le montant de jonction est
-partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11). Au-delà de 2,90 m de haut : rallonges.
+partagé entre deux plaques → n = ⌈ longueur / 1,20 ⌉ × 2 + 1 (5 m → 11). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
 Rails : longueur × 2 (haut + bas).
 Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus.
 Vis : 15 / m² (hypothèse professionnelle).
@@ -185,7 +185,7 @@ def _set_price(db: Session, mat, amount: float, source: str, note: str) -> None:
 
 
 def apply_owner_prices_v1(db: Session) -> int:
-    """« 1 200 » est le prix d'UNE BARRE de fourrure (2,90 m), pas d'un paquet. Une seule fois."""
+    """« 1 200 » est le prix d'UNE BARRE de fourrure (2,80 m), pas d'un paquet. Une seule fois."""
     from app.models import AppSetting
 
     flag = "seed_owner_prices_v1"
@@ -194,8 +194,8 @@ def apply_owner_prices_v1(db: Session) -> int:
     n = 0
     fourrure = db.query(Material).filter(Material.sku == "UC-PAQUET-DE-FOURRURES").first()
     if fourrure is not None:
-        fourrure.name, fourrure.unit = "Barre de fourrure (2,90 m)", "barre"
-        fourrure.notes = "Prix d'une barre de 2,90 m (pas d'un paquet), donné par le patron."
+        fourrure.name, fourrure.unit = "Barre de fourrure (2,80 m)", "barre"
+        fourrure.notes = "Prix d'une barre de 2,80 m (pas d'un paquet), donné par le patron."
         n += 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
@@ -333,6 +333,32 @@ def apply_owner_doors_v7(db: Session) -> int:
     if art is not None and _OLD_OPENINGS_LINE in (art.body or ""):
         art.body = art.body.replace(_OLD_OPENINGS_LINE, _NEW_OPENINGS_LINE)
         n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+_OLD_RAISE_LINE = "Au-delà de 2,90 m de haut : rallonges."
+_NEW_RAISE_LINE = "Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges."
+
+
+def apply_owner_bars_v8(db: Session) -> int:
+    """Au Sénégal les barres d'ossature mesurent 2,80 m (règle du patron) : libellés des barres de fourrure et fiche ossature
+    corrigés. Identifiants et prix gardés ; seul le texte d'origine est remplacé (une fiche retouchée n'est pas écrasée). Une fois."""
+    from app.models import AppSetting, KnowledgeArticle
+
+    flag = "seed_owner_bars_v8"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for mat in db.query(Material).filter(Material.sku.in_(("UC-BARRE-DE-FOURRURE-2-90-M", "UC-PAQUET-DE-FOURRURES"))):
+        if "2,90" in (mat.name or "") or "2,90" in (mat.notes or ""):
+            mat.name, mat.notes = (mat.name or "").replace("2,90", "2,80"), (mat.notes or "").replace("2,90", "2,80")
+            n += 1
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    if art is not None and _OLD_RAISE_LINE in (art.body or ""):
+        art.body = art.body.replace(_OLD_RAISE_LINE, _NEW_RAISE_LINE)
+        n += 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

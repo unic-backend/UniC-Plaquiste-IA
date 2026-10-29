@@ -333,7 +333,7 @@ def conflicts(db: Session, only: set[str] | None = None) -> list[dict]:
             if nsa == nsb:
                 continue
             common = sa & sb
-            # même CHOSE, pas seulement deux mots communs : sinon « barre mesure 2,90 m » contredirait « barre coûte 1 200 FCFA »
+            # même CHOSE, pas seulement deux mots communs : sinon « barre mesure 2,80 m » contredirait « barre coûte 1 200 FCFA »
             if len(common) < 2 or len(common) / len(sa | sb) < 0.5:
                 continue
             newer = a if (a.created_at or now) >= (b.created_at or now) else b
@@ -585,7 +585,7 @@ def state_report(db: Session) -> dict:
 # ---------- règles du patron enregistrées une fois pour toutes ----------
 
 OWNER_RULES_V1 = (
-    "Une barre (fourrure, montant, rail, cornière) mesure 2,90 m. Une barre n'est pas un paquet : ne jamais confondre ni convertir l'un en l'autre.",
+    "Une barre (fourrure, montant, rail, cornière) mesure 2,80 m. Une barre n'est pas un paquet : ne jamais confondre ni convertir l'un en l'autre.",
     "Une barre de fourrure coûte 1 200 FCFA (c'est le prix d'une barre, pas d'un paquet).",
     "Plaques de plâtre : par défaut 2 m de long sur 1,20 m de large. Seulement si le patron précise « 2,50 » : 2,50 m de long sur 1,20 m de large.",
     "Vis : 25 mm par défaut ; 35 mm uniquement si le patron le dit.",
@@ -643,9 +643,14 @@ OWNER_RULES_V11 = (
     "dès qu'une porte est citée.",
 )
 
+OWNER_RULES_V12 = (
+    "Au Sénégal, toutes les barres d'ossature (fourrure, cornière, montant, rail) mesurent 2,80 m. Une barre n'est pas "
+    "un paquet : ne jamais confondre ni convertir l'un en l'autre.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
-              "v11": OWNER_RULES_V11}
+              "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12}
 
 
 def seed_owner_rules(db: Session) -> int:
@@ -663,6 +668,11 @@ def seed_owner_rules(db: Session) -> int:
             rules = rules + (
                 "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000 FCFA ; standard 2,50 m = 6 500 FCFA ; "
                 "hydrofuge 2,50 m = 8 000 FCFA. Chaque taille a son prix : ne jamais appliquer le prix de l'une à l'autre.",)
+        if version == "v12":   # barres de 2,80 m : l'ancienne règle « 2,90 m » est archivée (rien à remplacer sur une base neuve)
+            old = db.query(Memory).filter(Memory.state == "active", Memory.text.like("%barre%2,90 m%")).all()
+            for m in old:
+                m.state = "archived"
+            rules = rules if old else ()
         if version == "v3":   # la règle de prix erronée de la version précédente est archivée
             for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Prix d'une plaque BA13 standard : 6 500%")):
                 m.state = "archived"

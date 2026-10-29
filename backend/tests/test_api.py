@@ -150,7 +150,7 @@ def test_price_not_invented_in_quote_when_missing(client, token):
         # vis de 9 mm et chevilles à frapper comptées au paquet : prix du paquet dans la grille du patron
         if it["description"].startswith(("Vis 9 mm", "Chevilles à frapper")):
             assert it["unit"] == "paquet" and it["unit_price"] == 5000, it
-        # rails comptés en barres de 2,90 m : prix de la grille du patron
+        # rails comptés en barres de 2,80 m : prix de la grille du patron
         if it["description"].startswith(("Plaque", "Montant", "Rails")):
             assert it["unit_price"] is not None, it
 
@@ -1901,7 +1901,7 @@ def test_owner_rules_are_seeded_once_and_stay_deleted(client):
     db.commit()
     assert mem.seed_owner_rules(db) == len(mem.OWNER_RULES_V1)
     texts = " ".join(m.text for m in db.query(Memory).all())
-    assert "2,90 m" in texts and "1 200 FCFA" in texts and "25 mm" in texts and "Médina" in texts
+    assert "2,80 m" in texts and "1 200 FCFA" in texts and "25 mm" in texts and "Médina" in texts
     db.query(Memory).delete()
     db.commit()
     assert mem.seed_owner_rules(db) == 0 and db.query(Memory).count() == 0   # supprimées : elles ne reviennent pas

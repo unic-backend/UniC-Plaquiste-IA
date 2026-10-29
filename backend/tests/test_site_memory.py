@@ -117,7 +117,7 @@ def test_general_rule_without_client_is_unchanged(db):
 
 def test_unrelated_price_lines_are_not_reported_as_conflicts(db):
     memory.add(db, "Une barre de fourrure coûte 1 200 FCFA (prix d'une barre, pas d'un paquet).", source="user", pinned=True)
-    memory.add(db, "Une barre (fourrure, montant, rail) mesure 2,90 m.", source="user", pinned=True)
+    memory.add(db, "Une barre (fourrure, montant, rail) mesure 2,80 m.", source="user", pinned=True)
     memory.add(db, "Pivot = 6 500 FCFA le paquet de 100 ; chevilles à laiton = 6 000 FCFA le paquet de 100.", source="user", pinned=True)
     db.commit()
     mine = [c for c in memory.conflicts(db) if any(w in c["a"]["text"] + c["b"]["text"] for w in ("barre", "Pivot"))]

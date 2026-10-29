@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.7"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.8"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -37,11 +37,12 @@ DEFAULTS = {
     "ceiling_tile_side_m": 0.60,
     "hanger_spacing_m": 0.90,    # méthode UniC : une tige tous les 0,90 m le long de chaque fourrure
     "furring_spacing_m": 0.50,
-    "bar_length_m": 2.90,        # fourrures, montants, rails, cornières : barres de 2,90 m   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
+    "bar_length_m": 2.80,        # fourrures, montants, rails, cornières : barres de 2,80 m (Sénégal, règle du patron)   # méthode UniC : fourrures tous les 0,50 m (plaque de 2 m posée en travers : 4 appuis, joints sur fourrure)
 }
 
 
-BAR_LENGTH_M = 2.90   # longueur des barres UniC (fourrure, montant, rail, cornière)
+BAR_LENGTH_M = 2.80   # longueur des barres au Sénégal (fourrure, montant, rail, cornière) : règle du patron
+BAR_TXT = f"{BAR_LENGTH_M:.2f}".replace(".", ",")   # « 2,80 » dans les libellés
 DOOR_STUDS = 3        # règle UniC : chaque porte prend 3 montants de renfort
 # Fixations (pratique au Sénégal, valeurs supposées tant que le patron ne les a pas données : signalées « supposé ») :
 ANCHOR_SPACING_M = 0.50   # une cheville à frapper tous les 0,50 m de rail (cloison) ou de cornière (plafond)
@@ -203,7 +204,7 @@ def studs_needed(length_m: float, spacing_m: float, board_width_m: float | None 
 
 
 def stud_bars(n_studs: int, height_m: float, bar_m: float = BAR_LENGTH_M) -> int:
-    """Barres de montant (2,90 m) : une par montant jusqu'à 2,90 m de haut ; au-delà, des rallonges taillées dans
+    """Barres de montant (2,80 m) : une par montant jusqu'à 2,80 m de haut ; au-delà, des rallonges taillées dans
     d'autres barres (chutes réutilisées). Recouvrement d'éclissage non compté."""
     if n_studs <= 0:
         return 0
@@ -414,15 +415,15 @@ def calculate_partition(
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
                      "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
-        QuantityLine("MONTANT-M48", "Montant M48 (barre de 2,90 m)", n_stud_bars, "u",
+        QuantityLine("MONTANT-M48", f"Montant M48 (barre de {BAR_TXT} m)", n_stud_bars, "u",
                      "⌈L/largeur plaque⌉×2+1" + (" + rallonges" if n_stud_bars - door_studs != n_studs else "")
                      + (f" + 3 × {n_doors} porte(s)" if n_doors else ""), STATUS_ESTIMATED,
                      notes=f"{n_studs} montants, soit {stud_ml} ml " + ("à la hauteur de chaque cloison" if multi else f"à la hauteur {height_m:g} m")
-                     + (f" ; hauteur > {BAR_LENGTH_M:g} m : rallonges (recouvrement d'éclissage non compté)"
+                     + (f" ; hauteur > {BAR_TXT} m : rallonges (recouvrement d'éclissage non compté)"
                         if n_stud_bars - door_studs != n_studs else "")
                      + (f" ; + {door_studs} montants de renfort ({n_doors} porte(s) × 3)" if n_doors else "")),
-        QuantityLine("UC-RAILS-48-MM", "Rails 48 mm (barre de 2,90 m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
-                     "⌈ L × 2 / 2,90 ⌉", STATUS_ESTIMATED),
+        QuantityLine("UC-RAILS-48-MM", f"Rails 48 mm (barre de {BAR_TXT} m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
+                     f"⌈ L × 2 / {BAR_TXT} ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
                      f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
         # rails fixés au sol et au plafond par chevilles à frapper ; montants tenus dans les rails par vis de 9 mm
@@ -646,11 +647,12 @@ def calculate_ceiling(
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
-        QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", "Barre de fourrure (2,90 m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
-                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / 2,90 ⌉", STATUS_ESTIMATED),
+        # identifiant historique « 2-90 » gardé : il porte le prix du patron (la barre mesure 2,80 m)
+        QuantityLine("UC-BARRE-DE-FOURRURE-2-90-M", f"Barre de fourrure ({BAR_TXT} m)", ceil_int(furring_ml / BAR_LENGTH_M), "barre",
+                     f"⌈ {furring_ml:g} ml ({rows} lignes, entraxe 0,50 m) / {BAR_TXT} ⌉", STATUS_ESTIMATED),
         # cornière de rive sur tout le périmètre : elle porte les bords des plaques contre les murs
-        QuantityLine("UC-CORNIERES", "Cornière de rive (barre de 2,90 m)", ceil_int(perimeter / BAR_LENGTH_M), "barre",
-                     f"⌈ périmètre {perimeter:g} ml / 2,90 ⌉", STATUS_ESTIMATED if dims_known else STATUS_ASSUMED),
+        QuantityLine("UC-CORNIERES", f"Cornière de rive (barre de {BAR_TXT} m)", ceil_int(perimeter / BAR_LENGTH_M), "barre",
+                     f"⌈ périmètre {perimeter:g} ml / {BAR_TXT} ⌉", STATUS_ESTIMATED if dims_known else STATUS_ASSUMED),
         # la cornière de rive est fixée aux murs par des chevilles à frapper
         QuantityLine("UC-PAQUET-CHEVILLES-A-FRAPPER", f"Chevilles à frapper (paquet de {fx['anchors_per_pack']})",
                      ceil_int(anchors / fx["anchors_per_pack"]), "paquet",

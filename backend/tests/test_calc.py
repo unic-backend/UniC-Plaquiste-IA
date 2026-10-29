@@ -77,11 +77,11 @@ def _q(res):
 
 
 def test_real_case_cloison_30m2_one_face():
-    # 12 m × 2,5 m = 30 m² ; plaque 2,40 m² ; chute 8 % ; entraxe 0,60 m ; barres de 2,90 m
+    # 12 m × 2,5 m = 30 m² ; plaque 2,40 m² ; chute 8 % ; entraxe 0,60 m ; barres de 2,80 m
     q = _q(calc.calculate_partition(12, 2.5, 1, []))
     assert q["BA13-2000x1200"] == 14      # ⌈30 × 1,08 / 2,4⌉ = ⌈13,5⌉
     assert q["MONTANT-M48"] == 21         # ⌈12 / 1,2⌉ × 2 + 1
-    assert q["UC-RAILS-48-MM"] == 9       # ⌈24 / 2,9⌉
+    assert q["UC-RAILS-48-MM"] == 9       # ⌈24 / 2,8⌉
     assert q["VIS-PLAQUE"] == 450         # 30 × 15
     assert q["BANDE-JOINT"] == 42.0       # 30 × 1,4
     assert q["ENDUIT-JOINT"] == 21.0      # 30 × 0,35 × 2
@@ -216,15 +216,16 @@ def test_methode_unic_trois_montants_par_plaque_jonctions_partagees():
 
 
 def test_montants_plus_hauts_qu_une_barre():
-    # 3,20 m : une barre de 2,90 m par montant + rallonges de 0,30 m (9 par barre) → 11 + ⌈11/9⌉ = 13
+    # 3,20 m : une barre de 2,80 m par montant + rallonges de 0,40 m (7 par barre) → 11 + ⌈11/7⌉ = 13
+    # 5,80 m : deux barres par montant + rallonges de 0,20 m (14 par barre) → 22 + ⌈11/14⌉ = 23
     assert calc.stud_bars(11, 3.2) == 13
-    assert calc.stud_bars(11, 2.5) == 11 and calc.stud_bars(11, 5.8) == 22
+    assert calc.stud_bars(11, 2.5) == 11 and calc.stud_bars(11, 5.8) == 23 and calc.stud_bars(11, 2.8) == 11
     r = calc.calculate_partition(5, 3.2, 2)
     assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 13 and calc.verify(r)["ok"]
 
 
 def test_plafond_compte_la_corniere_de_rive():
-    # 4 × 5 m : périmètre 18 ml → ⌈18 / 2,90⌉ = 7 barres de cornière
+    # 4 × 5 m : périmètre 18 ml → ⌈18 / 2,80⌉ = 7 barres de cornière
     r = calc.calculate_ceiling(4, 5)
     q = {x.sku: x.quantity for x in r.quantities}
     assert q["UC-CORNIERES"] == 7 and calc.verify(r)["ok"]

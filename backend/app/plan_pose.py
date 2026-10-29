@@ -2,7 +2,8 @@
 poser les plaques.
 
 Mêmes règles que le moteur de calcul (calc.ceiling_run / ceiling_layout) : fourrures dans le sens qui demande le moins de tiges,
-tous les 0,50 m (la dernière contre le mur), tiges tous les 0,90 m au plus ; les nombres du plan sont ceux du devis.
+tous les 50 cm (la dernière contre le mur), tiges tous les 90 cm depuis le mur (la dernière contre l'autre mur), barres de
+2,80 m (règle du patron au Sénégal) ; les nombres du plan sont ceux du devis.
 Plaques posées en travers des fourrures, bouts sur une fourrure (la longueur de plaque est un multiple de 0,50 m), joints décalés
 d'une demi-plaque d'une rangée à l'autre. Les morceaux coupés sont pris dans le moins de plaques possible (les chutes servent),
 en gardant le sens de la plaque : le plan dit combien de plaques il consomme, à comparer au nombre du devis.
@@ -22,6 +23,11 @@ class PlanError(ValueError):
 
 def _fmt(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _len(v: float) -> str:
+    """Longueur de plaque comme le patron la dit : « 2 m », « 2,50 m »."""
+    return _fmt(v) if v == int(v) else f"{v:.2f}".replace(".", ",")
 
 
 def _cuts(total: int, step: int, offset: int) -> list[int]:
@@ -87,36 +93,49 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     used = full + _pack(cut, pw, ph)
     area = round(length_m * width_m, 3)
     quote = calc.boards_needed(area, waste, board_width * board_height)
-    sens = "dans le sens de la longueur" if run >= across else "dans le sens de la largeur"
+    bar = calc.BAR_TXT
+    furring_bars = calc.ceil_int(furring_ml / calc.BAR_LENGTH_M)
+    perimeter = round(2 * (run + across), 2)
+    angle_bars = calc.ceil_int(perimeter / calc.BAR_LENGTH_M)
+    h_cm = round(calc.DEFAULTS["hanger_spacing_m"] * 100)
+    ties = [k * h_cm for k in range(per_line - 1)] + [run_cm]   # tiges : tous les 90 cm depuis le mur, la dernière contre l'autre mur
+    ends = "bouts sur une fourrure" if ph % sp_cm == 0 else "bouts à reprendre sur une fourrure ajoutée"
     out = {
-        "piece": [run, across], "fourrures": rows, "fourrures_sens": sens, "fourrure_ml": furring_ml, "tiges": hangers,
-        "tiges_par_fourrure": per_line, "plaques_entieres": full, "morceaux_coupes": len(cut), "plaques_utilisees": used,
-        "plaques_devis": quote,
+        "piece": [run, across], "fourrures": rows, "fourrures_sens": f"dans le sens des {_fmt(run)} m", "fourrure_ml": furring_ml,
+        "barres_fourrure": furring_bars, "tiges": hangers, "tiges_par_fourrure": per_line, "cornieres": angle_bars,
+        "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "morceaux_coupes": len(cut),
+        "plaques_utilisees": used, "plaques_devis": quote,
         "consignes": [
-            f"Fourrures {sens}, tous les {f'{sp_cm / 100:.2f}'.replace('.', ',')} m ({rows} lignes, la dernière contre le mur).",
-            f"{per_line} tiges par fourrure, une tous les {_fmt(run / (per_line - 1))} m ({hangers} tiges).",
-            f"Plaques en travers des fourrures, bouts {'sur une fourrure' if ph % sp_cm == 0 else 'à reprendre sur une fourrure ajoutée'} ; "
-            f"joints décalés de {_fmt(pw / 200)} m d'une rangée à l'autre.",
-            f"{full} plaques entières, {len(cut)} morceaux coupés : {used} plaques consommées (devis : {quote}).",
+            f"Fourrures dans le sens des {_fmt(run)} m : une tous les {sp_cm} cm, la dernière contre le mur. "
+            f"{rows} fourrures = {_fmt(furring_ml)} ml = {furring_bars} barres de {bar} m.",
+            f"Tiges : une tous les {h_cm} cm sur chaque fourrure, la dernière contre le mur. {per_line} par fourrure = {hangers} tiges.",
+            f"Plaques de {_len(ph / 100)} m en travers des fourrures, {ends}, joints décalés de {pw // 2} cm.",
+            f"Plaques : {full} entières + {len(cut)} coupées = {used} plaques (devis : {quote}).",
+            f"Cornières : périmètre {_fmt(perimeter)} ml = {angle_bars} barres de {bar} m.",
         ],
     }
     if used > quote:
         out["alerte"] = f"Ce plan consomme {used} plaques, le devis en prévoit {quote} : ajoute {used - quote} plaque(s)."
-    out["svg"] = _svg(run_cm, across_cm, lines, per_line, tiles, out)
+    out["svg"] = _svg(run_cm, across_cm, lines, ties, tiles, sp_cm, h_cm, [
+        f"Fourrures tous les {sp_cm} cm · tiges tous les {h_cm} cm · plaques de {_len(ph / 100)} m en travers",
+        f"{rows} fourrures ({furring_bars} barres de {bar} m) · {hangers} tiges · {angle_bars} cornières de {bar} m",
+        f"{full} plaques entières + {len(cut)} coupées = {used} plaques (devis : {quote})"])
     return out
 
 
-def _svg(run_cm: int, across_cm: int, lines: list[int], per_line: int, tiles: list, info: dict) -> str:
-    """Vue de dessus 900 × 680 : plaques entières en vert clair, coupées en cuivre clair, fourrures vertes, tiges en points."""
-    scale = min(760 / run_cm, 440 / across_cm)
+def _svg(run_cm: int, across_cm: int, lines: list[int], ties: list[int], tiles: list, sp_cm: int, h_cm: int,
+         texts: list[str]) -> str:
+    """Vue de dessus 900 × 680 : plaques entières en vert clair, coupées en cuivre clair, fourrures vertes, tiges en points,
+    cotes 50 cm (fourrures) et 90 cm (tiges) au bord du plafond."""
+    scale = min(760 / run_cm, 430 / across_cm)
     rw, rh = run_cm * scale, across_cm * scale
-    x0, y0 = (900 - rw) / 2, 110 + (440 - rh) / 2
+    x0, y0 = (900 - rw) / 2, 105 + (430 - rh) / 2
     run, across = run_cm / 100, across_cm / 100
     p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 680" font-family="Arial">',
          '<rect x="0" y="0" width="900" height="680" fill="#ffffff"/>',
          f'<text x="450" y="40" font-size="26" font-weight="bold" fill="{GREEN}" text-anchor="middle">'
          f'Plan de pose — plafond {_fmt(run)} × {_fmt(across)} m</text>',
-         f'<text x="450" y="70" font-size="15" fill="{GREY}" text-anchor="middle">{info["consignes"][0]}</text>']
+         f'<text x="450" y="70" font-size="16" fill="{GREY}" text-anchor="middle">{texts[0]}</text>']
     labels = []
     for x, y, w, h, whole in tiles:
         p.append(f'<rect x="{x0 + x * scale:.1f}" y="{y0 + y * scale:.1f}" width="{w * scale:.1f}" height="{h * scale:.1f}" '
@@ -130,15 +149,22 @@ def _svg(run_cm: int, across_cm: int, lines: list[int], per_line: int, tiles: li
         yy = y0 + y * scale
         p.append(f'<line x1="{x0:.1f}" y1="{yy:.1f}" x2="{x0 + rw:.1f}" y2="{yy:.1f}" stroke="{GREEN}" stroke-width="2" '
                  f'stroke-dasharray="8 4"/>')
-        for k in range(per_line):
-            p.append(f'<circle cx="{x0 + rw * k / (per_line - 1):.1f}" cy="{yy:.1f}" r="3.5" fill="{INK}"/>')
-    p += labels + [
+        p += [f'<circle cx="{x0 + x * scale:.1f}" cy="{yy:.1f}" r="3.5" fill="{INK}"/>' for x in ties]
+    # cotes d'entraxe : 50 cm entre deux fourrures (à droite), 90 cm entre deux tiges (en bas)
+    xr, yb = x0 + rw + 10, y0 + rh + 14
+    y1 = y0 + min(sp_cm, across_cm) * scale
+    x1 = x0 + min(h_cm, run_cm) * scale
+    dims = [f'<path d="M{xr:.1f},{y0:.1f} V{y1:.1f} M{xr - 5:.1f},{y0:.1f} h10 M{xr - 5:.1f},{y1:.1f} h10" stroke="{COPPER}" stroke-width="2"/>',
+            f'<text x="{xr + 8:.1f}" y="{(y0 + y1) / 2 + 5:.1f}" font-size="14" font-weight="bold" fill="{COPPER}">{sp_cm} cm</text>',
+            f'<path d="M{x0:.1f},{yb:.1f} H{x1:.1f} M{x0:.1f},{yb - 5:.1f} v10 M{x1:.1f},{yb - 5:.1f} v10" stroke="{COPPER}" stroke-width="2"/>',
+            f'<text x="{(x0 + x1) / 2:.1f}" y="{yb + 20:.1f}" font-size="14" font-weight="bold" fill="{COPPER}" text-anchor="middle">{h_cm} cm</text>']
+    p += labels + dims + [
           f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{rw:.1f}" height="{rh:.1f}" fill="none" stroke="{INK}" stroke-width="5"/>',
           f'<text x="{x0 + rw / 2:.1f}" y="{y0 - 12:.1f}" font-size="18" fill="{INK}" text-anchor="middle">{_fmt(run)} m</text>',
           f'<text x="{x0 - 12:.1f}" y="{y0 + rh / 2:.1f}" font-size="18" fill="{INK}" text-anchor="end">{_fmt(across)} m</text>',
-          f'<text x="450" y="600" font-size="15" fill="{INK}" text-anchor="middle">{info["consignes"][1]}</text>',
-          f'<text x="450" y="624" font-size="15" fill="{INK}" text-anchor="middle">{info["consignes"][3]}</text>',
-          f'<text x="450" y="652" font-size="13" fill="{GREY}" text-anchor="middle">Tirets verts : fourrures · points : tiges · '
+          f'<text x="450" y="605" font-size="16" fill="{INK}" text-anchor="middle">{texts[1]}</text>',
+          f'<text x="450" y="630" font-size="16" font-weight="bold" fill="{INK}" text-anchor="middle">{texts[2]}</text>',
+          f'<text x="450" y="660" font-size="13" fill="{GREY}" text-anchor="middle">Tirets verts : fourrures · points : tiges · '
           f'vert clair : plaque entière · cuivre : coupe (cm) — UniC Plaquiste</text>',
           '</svg>']
     return "".join(p)
