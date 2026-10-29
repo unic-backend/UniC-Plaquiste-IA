@@ -27,6 +27,17 @@ export const HANGUP_RE = /\b(raccroch\w*|(?:coupe|coupez|couper|termine|terminez
  *  Avant, « Merci, et maintenant fais le devis » fermait UniC au lieu de faire le devis. */
 export const END_RE = /^(?:(?:ok|bon|bien|alors)[\s,]+)?(?:stop|arr[êe]te(?:[\s-]+(?:toi|tout|l[àa]))?|merci(?:\s+(?:beaucoup|bien))?|c['’]?\s?est bon|au revoir|[àa] plus(?: tard)?|[çc]a suffit|fini|termin[ée]|bye|on arr[êe]te)(?:[\s,]+(?:unic|merci|beaucoup|patron))*[\s.!]*$/i;
 
+/** Suite de phrase (idée reprise de ming-voice, version sûre) : pendant que UniC réfléchit, le patron continue de parler.
+ *  Un bruit ou un « euh » ne compte pas ; un vrai mot (4 lettres et plus) ou deux mots, si. */
+const FILLER_RE = /^(?:euh+|heu+|hum+|hmm+|ah|oh|bah|ben|bon|ok|okay|voil[àa]|oui|non|d['’]accord)[\s.,!?]*$/i;
+export function isContinuation(text: string): boolean {
+  const t = (text || "").trim();
+  return !!t && !FILLER_RE.test(t) && (t.split(/\s+/).length >= 2 || t.length >= 4);
+}
+/** Phrase entière renvoyée à l'IA : sa réponse au début de phrase n'a pas été lue, elle répond à tout (rien n'est fait deux fois). */
+export const wholeSentence = (first: string, rest: string): string =>
+  `Je reprends ma phrase en entier (ta réponse précédente n'a pas été lue) : ${first.trim()} ${rest.trim()}`;
+
 export const cleanName = (s: string): string => s.replace(/^(?:\s*(?:c['’ ]est|appelle|appeler|à|a|au|pour|le|la|ecris|écris|dis|envoie|madame\s+la)\s+)+/i, "").replace(/[.!?]+$/, "").trim();
 
 export async function runPhoneIntent(it: Intent, d: Deps): Promise<void> {

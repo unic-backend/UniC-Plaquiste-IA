@@ -8,7 +8,7 @@ const WAKE_STATE: Record<string, string> = {
   loading: "Préparation du moteur d'écoute…", listening: "UniC écoute le mot d'appel.", busy: "UniC est ouvert.",
   missing: "Moteur d'écoute absent de cette version.", error: "L'écoute s'est arrêtée (micro occupé ?). Réactive-la.", off: "Écoute arrêtée.",
 };
-import { canSpeakOnDevice, clearCache, deviceVoices, getPref, getVocalRate, setPref, setVocalRate, speakDevice, stop, type VoicePref } from "./speech";
+import { canSpeakOnDevice, clearCache, deviceVoices, getPref, getVocalRate, getVoiceOption, setPref, setVocalRate, setVoiceOption, speakDevice, stop, type VoiceOption, type VoicePref } from "./speech";
 
 const SAMPLE = "Bonjour patron, voici ma voix. Le devis est prêt, je te lis les détails.";
 type EVoice = Awaited<ReturnType<typeof net.voiceList>>[number];
@@ -30,6 +30,8 @@ export function Voix() {
   const [crash, setCrash] = useState<{ text: string; time: number } | null>(null);
   const [phoneLock, setPhoneLock] = useState(getPhoneWhenLocked());
   const [vocal, setVocal] = useState(getVocalRate());
+  const [opts, setOpts] = useState(() => ({ continue: getVoiceOption("continue"), resume: getVoiceOption("resume"), timers: getVoiceOption("timers") }));
+  const toggle = (o: VoiceOption, on: boolean) => { setVoiceOption(o, on); setOpts((x) => ({ ...x, [o]: on })); };
   useEffect(() => {
     if (!isNative) return;
     const check = () => {
@@ -109,6 +111,14 @@ export function Voix() {
           <label>Vitesse de UniC vocal</label>
           <input type="range" min={0.8} max={1.6} step={0.05} value={vocal} onChange={(e) => { const v = Number(e.target.value); setVocal(v); setVocalRate(v); }} aria-label="Vitesse de UniC vocal" />
           <p className="hint">{vocal.toFixed(2).replace(/0$/, "")} fois la vitesse normale{vocal === 1.25 ? " (réglage conseillé)" : ""}</p>
+        </section>
+
+        <section className="card-box">
+          <label>Conversation avec UniC vocal</label>
+          <label className="check-row"><input type="checkbox" checked={opts.continue} onChange={(e) => toggle("continue", e.target.checked)} /> Attendre la fin de ma phrase : si je continue de parler pendant qu'il réfléchit, il attend et reprend la phrase entière</label>
+          <label className="check-row"><input type="checkbox" checked={opts.resume} onChange={(e) => toggle("resume", e.target.checked)} /> Reprendre la conversation si je reviens dans les 30 minutes</label>
+          <label className="check-row"><input type="checkbox" checked={opts.timers} onChange={(e) => toggle("timers", e.target.checked)} /> Minuteurs à la voix (« minuteur 20 minutes », « rappelle-moi dans 10 minutes de… », « annule le minuteur »)</label>
+          <p className="hint">Les minuteurs restent sur le téléphone : une notification sonne à la fin, même appli fermée.</p>
         </section>
 
         <section className="card-box">

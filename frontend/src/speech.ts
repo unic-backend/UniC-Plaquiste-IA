@@ -127,6 +127,25 @@ const VOCAL_KEY = "unic.vocalRate";
 export function getVocalRate(): number { try { const v = Number(localStorage.getItem(VOCAL_KEY)); return v >= 0.8 && v <= 1.6 ? v : 1.25; } catch { return 1.25; } }
 export function setVocalRate(v: number): void { try { localStorage.setItem(VOCAL_KEY, String(Math.min(1.6, Math.max(0.8, v)))); } catch { /* ignoré */ } }
 
+/** Options de UniC vocal (chacune se coupe dans Réglages › Voix) : minuteurs à la voix, reprise de la conversation dans les 30 min,
+ *  attente de la fin de la phrase (on continue de parler pendant qu'il réfléchit : il attend et reprend la phrase entière). */
+export type VoiceOption = "timers" | "resume" | "continue";
+const OPT_KEY = "unic.voiceOpt.";
+export function getVoiceOption(o: VoiceOption): boolean { try { return localStorage.getItem(OPT_KEY + o) !== "0"; } catch { return true; } }
+export function setVoiceOption(o: VoiceOption, on: boolean): void { try { localStorage.setItem(OPT_KEY + o, on ? "1" : "0"); } catch { /* ignoré */ } }
+
+/** Reprise : rouvert dans les 30 min, UniC vocal continue la MÊME conversation (il se souvient de ce qui vient d'être dit). */
+const CONV_KEY = "unic.voice.conv";
+export const RESUME_MS = 30 * 60_000;
+export function lastVoiceConv(now = Date.now()): string | undefined {
+  if (!getVoiceOption("resume")) return undefined;
+  try { const v = JSON.parse(localStorage.getItem(CONV_KEY) || "{}"); return v.id && now - Number(v.at) < RESUME_MS ? String(v.id) : undefined; } catch { return undefined; }
+}
+export function keepVoiceConv(id: string | undefined, now = Date.now()): void {
+  if (!id) return;
+  try { localStorage.setItem(CONV_KEY, JSON.stringify({ id, at: now })); } catch { /* ignoré */ }
+}
+
 let elevenChain: Promise<void> = Promise.resolve();   // ElevenLabs : une voix après l'autre, mais le téléchargement de la phrase suivante démarre tout de suite
 
 /** Une phrase dans la file : ne coupe pas ce qui est déjà en train d'être dit (parole au fil de l'eau). */
