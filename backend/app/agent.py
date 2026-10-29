@@ -198,12 +198,13 @@ TOOLS: list[dict] = [
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
-            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures)."},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures). Cloison : montants tous les 60 cm par défaut (plaque debout) ; 50 SEULEMENT si le patron le dit (plaque couchée)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
             "zones": {"type": "array", "description": (
-                "Plusieurs pièces (plafond), plusieurs cloisons, ou un plafond en L découpé en rectangles : une ligne par rectangle "
+                "Plusieurs pièces (plafond), plusieurs cloisons, ou un plafond en L découpé en rectangles : une ligne par rectangle ; "
+                "cloison en L ou en U = une ligne par côté (chaque côté a son montant à chaque bout, rien à ajouter à l'angle) "
                 "(count pour les identiques : « 3 chambres de 4x4 » = une ligne count 3). UN SEUL appel pour tout l'ouvrage : "
                 "deux appels séparés = le devis ne garde que le dernier."),
                 "items": {"type": "object", "properties": {
@@ -1730,6 +1731,8 @@ class AgentSession:
         cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
                "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6,
                "fixings": calc_fixings(co)}
+        if entraxe_cm in (50, 60) and kind == "partition":   # cloison : montants tous les 60 cm (debout) ou 50 cm (couchée)
+            cfg["stud_spacing"] = entraxe_cm / 100
         try:
             if method == "unic":
                 surface = (sum(a * b for a, b, _ in rects) if rects else None) or area_m2 or ((length_m or 0) * (height_m or width_m or 0)) or None
