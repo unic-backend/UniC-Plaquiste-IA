@@ -234,8 +234,9 @@ UNIC_METHOD_RE = re.compile(r"m[ée]thode unic|ratios? unic|chiffrage unic|calcu
 
 
 def calculate_unic_from_text(text: str) -> calc.CalcResult | None:
-    """Lit surface / faces / parois dans la phrase. None si la surface est introuvable."""
-    t = text.lower().replace("×", "x")
+    """Lit surface / faces / parois dans la phrase. None si la surface est introuvable. La phrase est lue comme par le calcul
+    (avant : « 400 x 250 cm » donnait 100 000 m², « 2 mètres cinquante » 2 m, « cinq mètres sur quatre » rien)."""
+    t = calc.metric_text(text)
     surface = None
     am = re.search(rf"({calc._NUM})\s*(?:m²|m2)", t)
     if am:
