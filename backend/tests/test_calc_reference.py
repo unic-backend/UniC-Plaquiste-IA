@@ -161,6 +161,26 @@ def test_ai_eval_scoring_is_deterministic_and_catches_invented_data():
     assert not evals.score_case(case["plafond-surface"], [])["ok"]
 
 
+def test_ai_eval_cas_du_metier():
+    """Moulure et hydrofuge demandés = drapeau passé ; idées : la pièce transmise, aucun style imposé à la place du conseil."""
+    from app import evals
+    case = {c["id"]: c for c in evals.CASES}
+    ceil = {"kind": "ceiling", "length_m": 5, "width_m": 4}
+    assert evals.score_case(case["moulure"], [("calculate_materials", {**ceil, "with_moulure": True})])["ok"]
+    assert not evals.score_case(case["moulure"], [("calculate_materials", ceil)])["ok"]
+    wet = {"kind": "ceiling", "length_m": 2.5, "width_m": 3}
+    assert evals.score_case(case["hydrofuge-sdb"], [("calculate_materials", {**wet, "hydrofuge": True})])["ok"]
+    assert not evals.score_case(case["hydrofuge-sdb"], [("calculate_materials", {**wet, "hydrofuge": False})])["ok"]
+    room = {"length_m": 4, "width_m": 3.5}
+    assert evals.score_case(case["idees-chambre"], [("ceiling_designs", {**room, "piece": "Chambre"})])["ok"]
+    missing = evals.score_case(case["idees-chambre"], [("ceiling_designs", room)])
+    assert not missing["ok"] and "chambre" in missing["problems"][0]
+    assert not evals.score_case(case["idees-chambre"], [("ceiling_designs", {**room, "piece": "chambre", "styles": ["ilot"]})])["ok"]
+    assert evals.score_case(case["plan-de-pose"], [("pose_plan", {"length_m": 3.7, "width_m": 6})])["ok"]
+    assert not evals.score_case(case["plan-de-pose"], [("ceiling_designs", {"length_m": 6, "width_m": 3.7})])["ok"]
+    assert evals.score_case(case["table-ronde"], [("round_table", {"topic": "camion", "context": "prêt ou location"})])["ok"]
+
+
 def test_ai_eval_run_stores_a_report_without_executing_tools(client=None):
     from fastapi.testclient import TestClient
     from app.main import app

@@ -27,6 +27,7 @@ WEEK_S = 7 * 86400
 MIN_INTERVAL_S = 600   # un essai coûte des jetons : pas plus d'une fois toutes les 10 minutes
 
 # expect : arguments attendus (nombres comparés à 1 % près) ; absent : arguments qui ne doivent PAS être inventés ;
+# contains : texte attendu dans un argument (sans tenir compte des majuscules) ;
 # tool : premier outil de calcul attendu ; not_before : outil interdit avant le calcul.
 CASES: list[dict[str, Any]] = [
     {"id": "cloison-320", "message": "Calcule une cloison de 320 m de long sur 2,50 m de haut, deux faces.",
@@ -86,6 +87,17 @@ CASES: list[dict[str, Any]] = [
      "tool": "cash_forecast", "expect": {}},
     {"id": "solde-donne", "message": "Aujourd'hui j'ai 2 500 000 FCFA en caisse et en banque, note-le pour la trésorerie.",
      "tool": "set_cash_balance", "expect": {"montant": 2500000}},
+    # métier du patron : moulures, pièces humides, idées dessinées, décisions à plusieurs
+    {"id": "moulure", "message": "Faux plafond de 5 m sur 4 m avec la moulure tout autour, calcule le matériel.",
+     "tool": "calculate_materials", "expect": {"kind": "ceiling", "with_moulure": True}, "dims": [5, 4]},
+    {"id": "hydrofuge-sdb", "message": "Faux plafond de la salle de bain, 3 m sur 2,50 m, calcule le matériel.",
+     "tool": "calculate_materials", "expect": {"kind": "ceiling", "hydrofuge": True}, "dims": [3, 2.5]},
+    {"id": "idees-chambre", "message": "Montre-moi des idées de plafond pour une chambre de 4 m sur 3,50 m.",
+     "tool": "ceiling_designs", "expect": {}, "dims": [4, 3.5], "contains": {"piece": "chambre"}, "absent": ["styles"]},
+    {"id": "plan-de-pose", "message": "Fais le plan de pose du plafond de 6 m sur 3,70 m pour mes ouvriers.",
+     "tool": "pose_plan", "expect": {}, "dims": [6, 3.7]},
+    {"id": "table-ronde", "message": "Table ronde : pour mon camion, je prends un prêt bancaire ou je continue à louer ?",
+     "tool": "round_table", "expect": {}},
 ]
 
 
@@ -116,6 +128,9 @@ def score_case(case: dict, calls: list[tuple[str, dict]]) -> dict:
     for k in case.get("absent", []):
         if k in args and args[k] not in (None, "", [], False):
             problems.append(f"{k} inventé ({args[k]}) alors que le patron ne l'a pas donné.")
+    for k, v in case.get("contains", {}).items():
+        if v.lower() not in str(args.get(k) or "").lower():
+            problems.append(f"{k} = {args.get(k)!r} (doit contenir « {v} »).")
     if case.get("dims"):
         got = sorted(float(args.get(k) or 0) for k in ("length_m", "width_m"))
         if not all(_close(g, e) for g, e in zip(got, sorted(case["dims"]))):
