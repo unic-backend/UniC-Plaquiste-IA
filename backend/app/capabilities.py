@@ -92,6 +92,8 @@ def registry_snapshot(db=None) -> list[dict]:
         Capability("read_email", "Lire la boîte mail (IMAP) et la fouiller en entier (reçus, envoyés, archivés : search_inbox), résumer des discussions, rédiger des brouillons de réponse",
                    {}, {}, ["user"], conn["email"],
                    "" if conn["email"] else "NON DISPONIBLE — Gmail non connecté (Paramètres › Courrier)."),
+        Capability("method", "Méthodes métier suivies pas à pas : plan marketing, prix, croissance, décision, concurrence, projet, finances, appel d'offres",
+                   {"nom": "str"}, {"result": "object"}, ["user"], True),
         Capability("weather", "Météo réelle d'un chantier (Open-Meteo) : maintenant et 7 jours, pluie, humidité, vent, chaleur, conseils de chantier calculés",
                    {"lieu": "str"}, {"result": "object"}, ["user"], True),
         Capability("business_calc", "Calculs d'affaires exacts : échéancier (acompte/avancement/solde), délai tenable, marge, « et si… », niveaux de risque, poids de chaque client dans le CA",

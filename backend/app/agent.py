@@ -14,7 +14,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app import calc, connectors, pricecheck, provenance, revise, tracking, trust, google_business as gbp, metier
+from app import calc, connectors, pricecheck, provenance, revise, tracking, trust, google_business as gbp, metier, methodes
 from app import services as svc
 from app.connectors import ConnectorError
 from app.models import ConstructionSite, Customer, Project, Supplier, Invoice, InboxMessage, Material, Quotation, SocialPost
@@ -461,6 +461,13 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"montant": {"type": "number"}}, "required": ["montant"], "additionalProperties": False},
     },
     {
+        "name": "method",
+        "description": ("MÉTHODES MÉTIER : quand le patron demande une stratégie, un plan ou une décision, charge la méthode et suis-la "
+                        "étape par étape avec les vrais chiffres (jamais d'improvisation). Méthodes : " + methodes.liste() + "."),
+        "input_schema": {"type": "object", "properties": {"nom": {"type": "string", "description": "nom de la méthode (ex. plan_marketing)"}},
+                         "required": ["nom"], "additionalProperties": False},
+    },
+    {
         "name": "weather",
         "description": ("MÉTÉO RÉELLE (Open-Meteo, données du jour) : maintenant et jusqu'à 7 jours pour une ville ou un chantier (lieu vide : ville de "
                         "l'entreprise, sinon Dakar). Rend le ciel, la température, la pluie (mm et %), l'humidité, le vent, et des CONSEILS DE CHANTIER "
@@ -840,7 +847,7 @@ TOOL_LABELS = {
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
-    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "weather": "Météo consultée", "visit_report": "Compte rendu préparé",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "weather": "Météo consultée", "method": "Méthode suivie", "visit_report": "Compte rendu préparé",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -1285,6 +1292,9 @@ class AgentSession:
         from app import margin
         m = margin.analyze(q)
         return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"]}
+
+    def _t_method(self, nom: str) -> dict:
+        return methodes.get(nom)
 
     def _t_weather(self, lieu: str = "", jours: int = 3) -> dict:
         from app import meteo
