@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import threading
+import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from pathlib import Path
 
@@ -52,8 +53,9 @@ Tu reçois le texte extrait du fichier et, si possible, les pages en image. Rép
 # Gros dossiers (maison, immeuble, 40 pages et plus) : chaque page est lue POUR ELLE-MÊME (un niveau par page en général, des
 # étages de formes différentes), en haute définition et avec les textes exacts du logiciel de dessin.
 PAGE_PROMPT = ("""Tu lis UNE PAGE d'un dossier de plans (maison, immeuble, grand projet) pour un plaquiste à Dakar (faux plafonds, cloisons BA13).
-Une page est en général le plan d'UN niveau (sous-sol, RDC, R+1, R+2…) : les étages d'un immeuble peuvent avoir des formes et des
-appartements différents, lis CETTE page pour elle-même, sans rien reprendre d'une autre.
+Une page est souvent le plan d'UN niveau (sous-sol, RDC, R+1…) ; les étages d'un immeuble peuvent avoir des formes et des appartements
+différents. Un dossier peut aussi contenir un plan d'étage courant (répété), le détail d'un logement TYPE (Type A, Type B…), des
+tableaux de surfaces, un programme (niveaux → logements), un carnet de cloisons. Lis CETTE page pour elle-même et dis ce qu'elle est.
 Tu reçois : la page entière (vue d'ensemble), puis des TUILES en haute définition de la même page (elles se chevauchent : une pièce vue
 sur deux tuiles ne compte qu'UNE fois), et les TEXTES de la page avec leur position (« x;y texte », fractions de la page, 0;0 = en haut
 à gauche). Sur un plan exporté d'un logiciel (AutoCAD, Revit, ArchiCAD…), ces textes sont exacts : prends-y les noms, les surfaces
@@ -62,16 +64,29 @@ les mêmes murs).
 """ + _LANG + """
 Réponds par UN SEUL objet JSON, sans autre texte :
 {
- "type_page": "plan|coupe|facade|detail|cartouche|autre", "niveau": "niveau écrit sur la page (RDC, R+1, 2e étage, sous-sol…) ou null",
+ "type_page": "plan|coupe|facade|detail|cartouche|autre",
+ "role_page": "plan_niveau|plan_type|logement_type|tableau|programme|cloisons|autre",
+ "niveau": "niveau écrit sur la page (RDC, R+1, 2e étage, sous-sol…) ou null", "niveaux_couverts": "« R+2 à R+35 » si écrit, sinon null",
  "repetition": 1, "unite_plan": "m|cm|mm|inconnue", "echelle": "texte ou null",
- "pieces": [{"nom": "...", "logement": "appartement, lot ou villa (Appartement A, Lot 3…) ou null", "longueur_m": nombre|null,
+ "pieces": [{"nom": "...", "logement": "Type A, Appartement 3, Lot 2… ou null", "longueur_m": nombre|null,
              "largeur_m": nombre|null, "surface_m2": nombre|null, "rectangles": [[longueur_m, largeur_m], …] ou null,
              "hauteur_m": nombre|null, "plafond": "oui|non|a_confirmer", "raison": "courte, tirée du plan"}],
+ "logements": [{"type": "A", "description": "3 chambres", "surface_interieure_m2": nombre|null, "exterieur_m2": nombre|null,
+                "nombre_sur_la_page": nombre|null, "nombre_total": nombre|null}],
+ "programme": [{"niveaux": "R+2 à R+35", "nombre_niveaux": 34, "affectation": "...", "logements": {"A": 2, "B": 2}}],
 """ + _JSON_TAIL + """
+« role_page » : plan_niveau = plan d'un niveau réel ; plan_type = plan d'un étage courant répété ; logement_type = plan ou fiche d'UN
+logement type ; tableau = tableau de surfaces par pièce ; programme = répartition des niveaux et des logements ; cloisons = carnet ou
+légende de cloisons ; autre = couverture, notes, scénarios de test.
 « repetition » = nombre d'étages IDENTIQUES que ce plan représente, seulement s'il l'écrit (« étage courant R+1 à R+4 » = 4) ; sinon 1.
+Logement TYPE : « logement » = « Type A » (le même libellé sur le plan, la fiche et le tableau) ; « logements » donne pour chaque type
+sa surface intérieure (SANS balcon ni terrasse : un total « privatif » avec balcon n'est pas la surface intérieure), son extérieur
+(balcon, terrasse), le nombre dessiné sur cette page et le nombre total s'il est écrit. Tableau de surfaces : une pièce par ligne, avec
+sa surface ; jamais les lignes TOTAL. Balcon, loggia, terrasse : « plafond » = non. « programme » : seulement si la page donne la
+répartition niveau → logements (« R+2 à R+35 : 34 niveaux × 2 Type A + 2 Type B »).
 Pièce en L, en T ou couloir coudé : « rectangles » = la pièce découpée en rectangles d'après ses cotes (la surface reste celle écrite) ;
-pièce rectangulaire : null. Couloir, dégagement, hall, palier = une pièce à part entière. Coupe, façade, détail, nomenclature ou
-cartouche seul : le « type_page » correspondant et "pieces": [].
+pièce rectangulaire : null. Couloir, dégagement, hall, palier = une pièce à part entière. Coupe, façade, détail, couverture, notes,
+scénarios ou cartouche seul : "pieces": [].
 """ + _RULES)
 
 
@@ -288,7 +303,7 @@ def _clean(data: dict) -> dict:
 MAX_PAGES = 80          # pages de plan lues dans un fichier (un dossier d'immeuble fait souvent 40 pages et plus)
 WORKERS = 4             # pages lues par l'IA en même temps (le rendu, lui, se fait une page à la fois : mémoire du serveur)
 BUDGET_S = 60.0         # au-delà, la lecture continue en arrière-plan : le patron a déjà les pages lues
-PAGE_CACHE = "v2"       # version du cache par page (prompt changé = pages relues)
+PAGE_CACHE = "v3"       # version du cache par page (prompt changé = pages relues)
 PAGE_TEXT = 12000       # textes positionnés envoyés par page
 READ_KINDS = {"plan", "schedule", "scanned_or_empty"}   # pages de dessin ; les pages de texte (notice, CCTP) ne sont pas regardées
 # page de dessin sans le mot « plan » (export de logiciel) : échelle, niveau, plusieurs noms de pièces ou surfaces
@@ -482,6 +497,123 @@ def compact(out: dict, max_rooms: int = 80) -> dict:
             "note_liste": f"{len(rooms)} pièces lues : les {max_rooms} premières listées ici ; calculate_from_plan les utilise TOUTES."}
 
 
+_TYPE_RE = re.compile(r"\btype\s*([a-z0-9]{1,3})\b", re.I)
+
+
+def _type_key(v) -> str | None:
+    """Logement TYPE : « Type A », « appartement type a », « A » → « A ». « Appartement 3 » (un logement précis) → None."""
+    s = str(v or "").strip()
+    m = _TYPE_RE.search(s)
+    return m.group(1).upper() if m else (s.upper() if 0 < len(s) <= 2 else None)
+
+
+def _vote(values: list):
+    """Valeur la plus souvent lue sur les pages (une page mal lue ne l'emporte pas) ; True si les pages se contredisent."""
+    vals = [v for v in values if v not in (None, "", 0)]
+    return (max(set(vals), key=vals.count), len(set(vals)) > 1) if vals else (None, False)
+
+
+def _key(name: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()).split())
+
+
+def _dossier(results: dict[int, dict], rooms: list[dict]) -> tuple[list[dict], dict]:
+    """Dossier à logements TYPES (fiche, tableau de surfaces, plan d'étage courant, programme) : chaque type est compté UNE fois
+    (tableau de surfaces d'abord, sinon la fiche), puis multiplié par son nombre de logements (programme, sinon plans d'étage,
+    sinon nombre écrit) ; les parties communes d'un étage courant comptent autant de fois que d'étages. Contrôles en code : somme
+    des pièces = surface intérieure déclarée, nombres d'une page à l'autre. Sans logement type : pièces inchangées."""
+    roles = {n: str(d.get("role_page") or "").lower() for n, d in results.items()}
+    declared: dict[str, dict] = {}
+    for n, d in results.items():
+        for lg in d.get("logements") or []:
+            k = _type_key(lg.get("type")) if isinstance(lg, dict) else None
+            if not k:
+                continue
+            e = declared.setdefault(k, {"description": [], "surface_interieure_m2": [], "exterieur_m2": [], "nombre_total": [], "dessines": []})
+            e["description"].append(str(lg.get("description") or "")[:60])
+            for f in ("surface_interieure_m2", "exterieur_m2", "nombre_total"):
+                e[f].append(_num(lg.get(f)))
+            if _num(lg.get("nombre_sur_la_page")) and roles.get(n) in ("plan_type", "plan_niveau"):
+                e["dessines"].append((n, int(_num(lg["nombre_sur_la_page"]))))
+    prog, seen = [], set()
+    for n, d in sorted(results.items()):
+        for p in d.get("programme") or []:
+            if not isinstance(p, dict):
+                continue
+            lg = {k: int(_num(v)) for k, v in ((_type_key(a) or str(a)[:12], v) for a, v in (p.get("logements") or {}).items()) if _num(v)} \
+                if isinstance(p.get("logements"), dict) else {}
+            entry = {"niveaux": str(p.get("niveaux") or "")[:40], "nombre_niveaux": int(_num(p.get("nombre_niveaux")) or 1),
+                     "affectation": str(p.get("affectation") or "")[:80], "logements": lg, "page": n}
+            sig = (_key(entry["niveaux"]), tuple(sorted(lg.items())))
+            if sig not in seen:
+                seen.add(sig)
+                prog.append(entry)
+    typed: dict[str, list[dict]] = {}
+    for r in rooms:
+        k = _type_key(r.get("logement"))
+        if k and roles.get(r["page"]) in ("tableau", "logement_type"):
+            typed.setdefault(k, []).append(r)
+    if not typed and not declared:
+        return rooms, {}
+
+    def floors(n: int) -> int:   # étages que représente un plan : écrit sur la page, sinon le programme (« R+2 à R+35 » → 34)
+        rep = next((r["repetition"] for r in rooms if r["page"] == n), int(_num(results[n].get("repetition")) or 1))
+        if rep > 1:
+            return rep
+        cov = _key(str(results[n].get("niveaux_couverts") or results[n].get("niveau") or ""))
+        return next((p["nombre_niveaux"] for p in prog if cov and _key(p["niveaux"]) == cov), 1)
+
+    notes, summary, out = [], [], []
+    for k in sorted(set(typed) | set(declared)):
+        dec = declared.get(k, {})
+        from_prog = sum(p["nombre_niveaux"] * p["logements"].get(k, 0) for p in prog)
+        drawn = sum(c * floors(n) for n, c in dict(dec.get("dessines") or []).items())
+        total_written, _ = _vote(dec.get("nombre_total") or [])
+        count, source = next(((int(v), src) for v, src in ((from_prog, "programme"), (drawn, "plans d'étage"),
+                                                            (total_written, "nombre écrit")) if v), (1, "inconnu : compté 1 fois"))
+        for v, src in ((from_prog, "le programme"), (drawn, "les plans d'étage"), (total_written, "le nombre écrit")):
+            if v and int(v) != count:
+                notes.append(f"Type {k} : {count} logements ({source}) mais {int(v)} d'après {src} : à vérifier.")
+        chosen: list[dict] = []
+        pages = typed.get(k) or []
+        if pages:
+            best = max({"tableau": 2, "logement_type": 1}.get(roles[r["page"]], 0) for r in pages)
+            names: set[str] = set()
+            for r in pages:
+                if _key(r["nom"]).startswith("total"):   # ligne TOTAL d'un tableau : jamais une pièce
+                    continue
+                if {"tableau": 2, "logement_type": 1}.get(roles[r["page"]], 0) == best and _key(r["nom"]) not in names:
+                    names.add(_key(r["nom"]))
+                    twin = next((t for t in pages if t is not r and _key(t["nom"]) == _key(r["nom"]) and t.get("longueur_m")), None)
+                    if twin and not r.get("longueur_m"):   # cotes de la fiche, surface du tableau
+                        r = {**r, "longueur_m": twin["longueur_m"], "largeur_m": twin["largeur_m"],
+                             **({"rectangles": twin["rectangles"]} if twin.get("rectangles") else {})}
+                    outside = re.search(r"\b(balcon|loggia|terrasse)\b", _key(r["nom"]))   # extérieur : pas de faux plafond
+                    chosen.append({**r, "logement": f"Type {k}", "niveau": None, "repetition": count,
+                                   **({"plafond": "non"} if outside else {})})
+        inside = round(sum(r["surface_m2"] or 0 for r in chosen if r["plafond"] != "non"), 2)
+        declared_in, conflict = _vote(dec.get("surface_interieure_m2") or [])
+        if conflict:
+            notes.append(f"Type {k} : surfaces intérieures différentes d'une page à l'autre ({', '.join(f'{v:g}' for v in sorted({x for x in dec['surface_interieure_m2'] if x}))} m²).")
+        check = ("non vérifiable" if not (chosen and declared_in) else "OK" if abs(inside - declared_in) <= max(1.0, declared_in * 0.01)
+                 else f"écart : pièces {inside:g} m² ≠ {declared_in:g} m² déclarés")
+        if check.startswith("écart"):
+            notes.append(f"Type {k} : {check}.")
+        exterior, _ = _vote(dec.get("exterieur_m2") or [])
+        desc, _ = _vote(dec.get("description") or [])
+        summary.append({"type": k, "description": desc, "nombre": count, "source_nombre": source,
+                        "pieces": sum(1 for r in chosen if r["plafond"] != "non"),
+                        "surface_interieure_m2": declared_in, "somme_pieces_m2": inside if chosen else None, "exterieur_m2": exterior,
+                        "controle": check, "pages": sorted({r["page"] for r in pages})})
+        out += chosen
+    for r in rooms:   # le reste : parties communes et logements sans fiche
+        k, role = _type_key(r.get("logement")), roles.get(r["page"])
+        if k in typed or role in ("programme", "cloisons", "autre"):
+            continue   # déjà compté par son type, ou page sans plan
+        out.append({**r, "repetition": floors(r["page"]) if role == "plan_type" else r["repetition"]})
+    return out, {"logements": summary, "total_logements": sum(t["nombre"] for t in summary), "programme": prog, "remarques": notes}
+
+
 def _merge(results: dict[int, dict], numbers: list[int], errors: dict[int, str], running: bool, text_pages: list[int],
            beyond: list[int]) -> dict:
     """Assemble les pages lues : chaque pièce garde sa page, son niveau et la répétition de son étage ; totaux par niveau (en code)."""
@@ -493,7 +625,7 @@ def _merge(results: dict[int, dict], numbers: list[int], errors: dict[int, str],
         kinds.setdefault(kind, []).append(n)
         niveau = (str(data.get("niveau")).strip()[:40] or None) if data.get("niveau") not in (None, "", "null") else None
         try:
-            rep = max(1, min(50, int(data.get("repetition") or 1)))
+            rep = max(1, min(200, int(data.get("repetition") or 1)))
         except (TypeError, ValueError):
             rep = 1
         page = _clean(data)
@@ -515,6 +647,9 @@ def _merge(results: dict[int, dict], numbers: list[int], errors: dict[int, str],
             lv["plafond_confirme_m2"] = round(lv["plafond_confirme_m2"] + page["total_plafond_confirme_m2"] * rep, 2)
             lv["plafond_a_confirmer_m2"] = round(lv["plafond_a_confirmer_m2"] + page["total_plafond_a_confirmer_m2"] * rep, 2)
 
+    rooms, dossier = _dossier(results, rooms)
+    notes += dossier.pop("remarques", [])
+
     def total(flag: str) -> float:
         return round(sum((r["surface_m2"] or 0) * r["repetition"] for r in rooms if r["plafond"] == flag), 2)
     complete = not running and not errors and set(results) >= set(numbers)
@@ -533,6 +668,7 @@ def _merge(results: dict[int, dict], numbers: list[int], errors: dict[int, str],
             f"Contrôle d'emprise fait page par page ({len(checks)} page(s) cotées hors-tout) : voir remarques.") if checks else ""},
         "unite_plan": max(set(units), key=units.count) if units else "inconnue",
         "niveaux": list(levels.values()),
+        **dossier,
         "pieces": rooms,
         "cloisons": cloisons[:120], "references": refs[:120],
         "total_plafond_confirme_m2": total("oui"), "total_plafond_a_confirmer_m2": total("a_confirmer"),
