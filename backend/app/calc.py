@@ -171,6 +171,18 @@ def partition_area(
     }
 
 
+def ceiling_layout(run: float, across: float) -> tuple[int, int, float]:
+    """Fourrures parallèles à `run`, espacées de 0,50 m sur `across` ; tiges tous les 0,90 m sur chaque fourrure.
+    Rend (lignes de fourrure, tiges, mètres de fourrure)."""
+    rows = ceil_int(across / DEFAULTS["furring_spacing_m"]) + 1
+    return rows, rows * (ceil_int(run / DEFAULTS["hanger_spacing_m"]) + 1), round_qty(run * rows, 2)
+
+
+def ceiling_run(a: float, b: float) -> tuple[float, float]:
+    """Sens de pose (run, across) d'une zone a × b : celui qui demande le moins de tiges, puis le moins de fourrure."""
+    return min(((a, b), (b, a)), key=lambda d: ceiling_layout(*d)[1:])
+
+
 def boards_needed(net_area: float, waste: float, board_m2: float) -> int:
     if board_m2 <= 0:
         raise ValueError("Surface de plaque invalide")
@@ -575,19 +587,12 @@ def calculate_ceiling(
     area = round_qty(sum(a * b for a, b in zones), 3)
     b_area = board_area(board_width, board_height)
     n_boards = boards_needed(area, waste, b_area)
-    # Fourrures parallèles à la longueur, espacées de 0,50 m sur la largeur ; tiges tous les 0,90 m sur chaque fourrure.
-    # Sens de pose retenu : celui qui demande le moins de tiges (fourrures dans le sens le plus économique).
     f_sp, h_sp = DEFAULTS["furring_spacing_m"], DEFAULTS["hanger_spacing_m"]
-
-    def layout(run: float, across: float) -> tuple[int, int, float]:
-        rows_ = ceil_int(across / f_sp) + 1
-        return rows_, rows_ * (ceil_int(run / h_sp) + 1), round_qty(run * rows_, 2)
-
     fx = fixings(fixing_values)
     rows = hangers = anchors = 0
     furring_ml = perimeter = 0.0
     for a, b in zones:
-        z_rows, z_hangers, z_furring = min(layout(a, b), layout(b, a), key=lambda t: (t[1], t[2]))
+        z_rows, z_hangers, z_furring = ceiling_layout(*ceiling_run(a, b))
         z_perimeter = round_qty(2 * (a + b), 2)
         rows, hangers, furring_ml, perimeter = rows + z_rows, hangers + z_hangers, furring_ml + z_furring, perimeter + z_perimeter
         anchors += anchor_points(z_perimeter, 4, fx["anchor_spacing_m"])   # cornière de rive : une longueur par mur
