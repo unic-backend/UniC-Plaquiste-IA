@@ -830,11 +830,38 @@ _WORD_NUMBERS = {
 _WORD_NUM = "|".join(sorted(_WORD_NUMBERS, key=len, reverse=True))
 
 
+# Mots du métier tapés vite ou dictés : fautes, abréviations SMS. Seuls les mots ci-dessous sont touchés (jamais un mot juste).
+_TYPOS = {
+    "devi": "devis", "devie": "devis", "devit": "devis", "dvis": "devis", "dvs": "devis",
+    "factur": "facture", "facure": "facture", "facturre": "facture", "factre": "facture", "fature": "facture", "fact": "facture",
+    "plafon": "plafond", "plafont": "plafond", "plaffond": "plafond", "plaphond": "plafond", "plafonf": "plafond", "plafons": "plafonds",
+    "cloisson": "cloison", "cloissons": "cloisons", "cloisonn": "cloison", "kloison": "cloison", "cloizon": "cloison", "cloisone": "cloison",
+    "clwazon": "cloison", "closon": "cloison",
+    "peintur": "peinture", "peinteure": "peinture", "painture": "peinture", "pinture": "peinture", "peintture": "peinture",
+    "plako": "placo", "placau": "placo", "plaquo": "placo", "plakos": "placo",
+    "anduit": "enduit", "enduie": "enduit", "enduix": "enduit", "enduis": "enduit",
+    "montan": "montant", "montans": "montants", "fourure": "fourrure", "fourures": "fourrures", "corniere": "cornière",
+    "longeur": "longueur", "largueur": "largeur", "hauteure": "hauteur", "hotteur": "hauteur", "otteur": "hauteur",
+    "pr": "pour", "ds": "dans", "avc": "avec", "cmb": "combien", "cb": "combien", "qte": "quantité", "qté": "quantité",
+}
+_TYPO_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, _TYPOS), key=len, reverse=True)) + r")\b")
+
+
+def fix_typos(text: str) -> str:
+    """« fai le devi d'une cloisson de 4 mettre pr moussa » → « … devis d'une cloison de 4 mètres pour moussa » : le sens du patron,
+    pas son orthographe. Texte en minuscules ; les noms propres et les mots justes ne changent pas."""
+    t = _TYPO_RE.sub(lambda m: _TYPOS[m.group(1)], text)
+    t = re.sub(r"\bfau[tx]?\s*-?\s*plafond", "faux plafond", t)                     # « faut plafond », « fauxplafond »
+    t = re.sub(r"(\d)\s*mett?res?\b", r"\1 mètres", t)                                # « 4 mettre », « 3metres »
+    return t
+
+
 def normalize_dimensions(text: str) -> str:
     """Écritures françaises des mesures ramenées à une forme simple AVANT tout calcul (sinon « 4m50 sur 2m60 » se lisait
     50 × 2 m) : « 4m50 » → 4.50 m ; « 3 mètres 20 » → 3.20 m ; « 2 mètres et demi » → 2.5 m ; « mètres carrés » → m² ;
-    nombres en lettres collés à une mesure (« cinq mètres sur quatre ») → chiffres. « 6 mètres 2 portes » reste 6 m + 2 portes."""
-    t = text.lower().replace("\u00a0", " ")
+    nombres en lettres collés à une mesure (« cinq mètres sur quatre ») → chiffres. « 6 mètres 2 portes » reste 6 m + 2 portes.
+    Fautes courantes d'abord (fix_typos) : « cloisson », « plafon », « 4 mettre »."""
+    t = fix_typos(text.lower().replace("\u00a0", " "))
     t = re.sub(r"\bm[eè]tres?\s+carr[eé]s?\b|\bm\s+carr[eé]s?\b", "m²", t)
     # nombres en lettres, seulement près d'une mesure (« un plafond » reste tel quel)
     t = re.sub(rf"\b({_WORD_NUM})\b(?=\s*(?:m\b|m²|m[eè]tres?\b|virgule\b|et\s+demi|sur\b|par\b|x\b))",
