@@ -50,8 +50,8 @@ def _pose(p: dict, rects: list[list[float]], board_width: float, board_length: f
             "tiges": tiges, "plaques": f"{entieres} entières + {morceaux} pour les morceaux = {entieres + morceaux}"}
 
 
-# Laine : couverture d'un paquet supposée d'après le devis de référence du patron (1 paquet par paroi de 5,40 × 2,50 m) ; à confirmer
-LAINE_M2_PAR_PAQUET = 13.5
+# Laine : un paquet couvre 18 m² (règle du patron)
+LAINE_M2_PAR_PAQUET = 18
 
 
 def systeme(libelle: str) -> dict:
@@ -111,8 +111,8 @@ def cloisons_mesurees(metre: dict, *, board_width: float = 1.2, board_length: fl
             res.quantities.append(calc.QuantityLine(
                 "UC-LAINE-DE-VERRE-PAQUET", f"Laine de verre{f' {mm} mm' if mm else ''} (paquet)",
                 calc.ceil_int(surface / LAINE_M2_PAR_PAQUET), "paquet",
-                f"⌈ {surface:g} m² de cloison / {LAINE_M2_PAR_PAQUET:g} m² par paquet ⌉", calc.STATUS_ASSUMED,
-                notes="couverture d'un paquet supposée (devis de référence : 1 paquet par paroi de 5,40 × 2,50 m) : à confirmer"))
+                f"⌈ {surface:g} m² de cloison / {LAINE_M2_PAR_PAQUET:g} m² par paquet ⌉", calc.STATUS_CONFIRMED,
+                notes=f"règle du patron : 1 paquet couvre {LAINE_M2_PAR_PAQUET:g} m²"))
         anchors = sum(calc.anchor_points(2 * a, 2, fx["anchor_spacing_m"]) for a, _ in ws)
         studs = int(next(st.result for st in res.steps if st.label.startswith("Nombre de montants")))
         out.append({"libelle": label, "systeme": sy, "result": res, "murs": len(ws), "ml": round(sum(a for a, _ in ws), 2),
