@@ -717,7 +717,7 @@ TOOLS: list[dict] = [
             "length_m": {"type": "number", "description": "Plafond : longueur ; cloison : longueur du mur."},
             "width_m": {"type": "number", "description": "Plafond : largeur."},
             "height_m": {"type": "number", "description": "Cloison : hauteur."},
-            "sides": {"type": "integer", "enum": [1, 2], "description": "Cloison : faces (2 par défaut)."},
+            "sides": {"type": "integer", "enum": [1, 2], "description": "Cloison : faces habillées (2 par défaut ; 1 si le patron dit une seule face)."},
             "plaque_m": {"type": "number", "enum": [2.0, 2.5, 3.0],
                          "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."},
             "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Plafond : 50 par défaut (fourrures) ; cloison : 60 par "

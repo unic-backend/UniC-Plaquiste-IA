@@ -202,12 +202,21 @@ def test_cloison_exemple_du_patron():
     assert d["montants"] == 15 and d["jonctions_doublees"] == 4 and "11 + 4 = 15 montants de 2,50 m" in d["consignes"][0]
     assert "Plaques DEBOUT" in d["consignes"][2] and "le morceau en haut" in d["consignes"][2]
     assert "sens des 2,50 m → 1 plaque de 2 m + un morceau de 50 cm" in d["consignes"][3]
-    assert "5 par face × 2 = 10 plaques entières" in d["consignes"][3]
+    assert "5 par face × 2 faces = 10 plaques entières" in d["consignes"][3]
     assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 10, "par_plaque": 4, "plaques": 3, "pris_dans_les_chutes": 0}]
     assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 14 and "alerte" not in d
     assert "cloison 6 × 2,50 m (2 faces)" in diagrams.sanitize(d["svg"])
     with pytest.raises(pp.PlanError):
         pp.plan_cloison(6, 2.5, entraxe_cm=40)
+
+
+def test_cloison_une_seule_face():
+    d = pp.plan_cloison(6, 2.5, sides=1)
+    assert d["faces"] == 1 and d["montants"] == 15                            # les montants ne changent pas
+    assert "1 × 5 = 5 plaques entières (une seule face" in d["consignes"][3]
+    assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 5, "par_plaque": 4, "plaques": 2, "pris_dans_les_chutes": 0}]
+    assert d["plaques_utilisees"] == 7 and d["plaques_devis"] == _qty(calc.calculate_partition(6, 2.5, 1), "BA13-2000x1200") == 7
+    assert "cloison 6 × 2,50 m (1 face)" in diagrams.sanitize(d["svg"])
 
 
 def test_l_ia_dessine_le_plan_de_cloison():
@@ -220,4 +229,5 @@ def test_l_ia_dessine_le_plan_de_cloison():
         assert s.images[-1]["title"] == "Plan de pose — 6 × 2.5 m"
         assert s("pose_plan", {"ouvrage": "cloison", "length_m": 6, "height_m": 2.5, "entraxe_cm": 50})["pose"] == "couchée"
         assert "error" in s("pose_plan", {"ouvrage": "cloison", "length_m": 6})
+        assert s("pose_plan", {"ouvrage": "cloison", "length_m": 6, "height_m": 2.5, "sides": 1})["plaques_utilisees"] == 7
         assert "error" in s("pose_plan", {"length_m": 6})
