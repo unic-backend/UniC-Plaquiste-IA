@@ -663,10 +663,17 @@ OWNER_RULES_V14 = (
     "ajouter). Cloison de 6 m en 60 cm : 11 + 4 = 15 montants.",
 )
 
+OWNER_RULES_V15 = (
+    "Cloison plus haute que 2,80 m : chaque montant = une barre de 2,80 m + une rallonge de la longueur qui manque (3,50 m → "
+    "rallonge de 70 cm ; une barre de 2,80 m donne 4 rallonges). Chaque raccord de montant est tenu par un morceau de rail de "
+    "40 cm (une barre de rail en donne 7) : compter les rallonges, les raccords et les barres de rail en plus.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
               "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12,
-              "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14}
+              "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14,
+              "v15": OWNER_RULES_V15}
 
 
 def seed_owner_rules(db: Session) -> int:

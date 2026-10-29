@@ -236,6 +236,22 @@ def test_montants_plus_hauts_qu_une_barre():
     assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 16 and calc.verify(r)["ok"]
 
 
+@pytest.mark.parametrize("h, splices", [(2.5, (0, 0.0)), (2.8, (0, 0.0)), (3.5, (1, 0.7)), (5.6, (1, 0.0)), (6.0, (2, 0.4))])
+def test_raccords_de_montant(h, splices):
+    assert calc.stud_splices(h) == splices
+
+
+def test_cloison_haute_rallonges_et_eclisses_au_devis():
+    # 6 × 3,50 m : 15 montants = 15 barres + 15 rallonges de 70 cm (4 par barre → 4) = 19 ; rails 5 + éclisses ⌈15 / 7⌉ = 3
+    r = calc.calculate_partition(6, 3.5, 2)
+    q = {x.sku: x for x in r.quantities}
+    assert q["MONTANT-M48"].quantity == 19 and "1 rallonge de 70 cm" in q["MONTANT-M48"].notes
+    assert "rail de 40 cm" in q["MONTANT-M48"].notes
+    assert q["UC-RAILS-48-MM"].quantity == 8 and "éclisses : 15 morceaux de 40 cm, 7 par barre → 3" in q["UC-RAILS-48-MM"].formula
+    assert calc.verify(r)["ok"]
+    assert {x.sku: x.quantity for x in calc.calculate_partition(6, 2.5, 2).quantities}["UC-RAILS-48-MM"] == 5   # pas de raccord
+
+
 def test_plafond_compte_la_corniere_de_rive():
     # 4 × 5 m : périmètre 18 ml → ⌈18 / 2,80⌉ = 7 barres de cornière
     r = calc.calculate_ceiling(4, 5)
