@@ -176,6 +176,8 @@ def test_ai_eval_cas_du_metier():
     missing = evals.score_case(case["idees-chambre"], [("ceiling_designs", room)])
     assert not missing["ok"] and "chambre" in missing["problems"][0]
     assert not evals.score_case(case["idees-chambre"], [("ceiling_designs", {**room, "piece": "chambre", "styles": ["ilot"]})])["ok"]
+    assert evals.score_case(case["plan-de-pose"], [("pose_plan", {"length_m": 3.7, "width_m": 6})])["ok"]
+    assert not evals.score_case(case["plan-de-pose"], [("ceiling_designs", {"length_m": 6, "width_m": 3.7})])["ok"]
     assert evals.score_case(case["table-ronde"], [("round_table", {"topic": "camion", "context": "prêt ou location"})])["ok"]
 
 
