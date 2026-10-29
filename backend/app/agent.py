@@ -374,7 +374,10 @@ TOOLS: list[dict] = [
                         "`niveaux` donne les totaux par étage. Dossier à logements TYPES (fiches, tableaux, programme) : `logements` "
                         "donne chaque type (nombre, surface intérieure, somme des pièces, contrôle) et `total_logements` ; chaque type "
                         "est compté UNE fois puis multiplié par son nombre : cite ces nombres tels quels. Cloisons sans cotes ni échelle : "
-                        "dis que le métré des cloisons demande un plan coté, n'invente aucune longueur. Si `lecture.en_cours` : dis au patron combien de pages sont lues et "
+                        "dis que le métré des cloisons demande un plan coté, n'invente aucune longueur. PLAN VECTORIEL (export de logiciel) : "
+                        "`metre_cloisons` = cloisons MESURÉES dans le fichier par type de la légende (ml et m² par niveau, × niveaux "
+                        "concernés et hauteur du cartouche, puis total) ; les pièces étiquetées (`source: dessin`) ont leurs cotes exactes : "
+                        "cite ces nombres tels quels. Si `lecture.en_cours` : dis au patron combien de pages sont lues et "
                         "rappelle read_plan un peu plus tard (rien n'est perdu, la lecture continue). "
                         "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture. "
                         "QUESTION PRÉCISE sur l'image ou le plan (angles, jonctions en T, équerres, nombre de cloisons, cotes, orientation…) : "
@@ -1446,6 +1449,7 @@ class AgentSession:
         pose = data.get("pose") or []
         return {"titre": data["title"], "compris": data["understanding"], "quantites": data["quantities"],
                 "niveaux": data.get("niveaux") or [],
+                **({"metre_cloisons": analysis["metre_cloisons"]} if analysis.get("metre_cloisons") else {}),
                 "pose": pose[:60], **({"pose_non_listee": len(pose) - 60} if len(pose) > 60 else {}),
                 "hypotheses": data["assumptions"][:80], "manquant": data["missing"],
                 "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
