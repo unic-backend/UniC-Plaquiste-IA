@@ -198,6 +198,7 @@ TOOLS: list[dict] = [
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (tiges en 60 × 60, plaque dans le sens des fourrures)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -711,7 +712,8 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {
             "length_m": {"type": "number"}, "width_m": {"type": "number"},
             "plaque_m": {"type": "number", "enum": [2.0, 2.5, 3.0],
-                         "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."}},
+                         "description": "Longueur de plaque : 2 m par défaut ; 2,50 (ou 3) SEULEMENT si le patron le dit."},
+            "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (tiges en 60 × 60, plaque dans le sens des fourrures)."}},
             "required": ["length_m", "width_m"], "additionalProperties": False},
     },
     {
@@ -1109,12 +1111,13 @@ class AgentSession:
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "l'ossature des retombées et le prix du LED se demandent au patron.")}
 
-    def _t_pose_plan(self, length_m: float, width_m: float, plaque_m: float | None = None) -> dict:
+    def _t_pose_plan(self, length_m: float, width_m: float, plaque_m: float | None = None, entraxe_cm: int = 50) -> dict:
         from app import diagrams, plan_pose
         co = company_dict(self.db)
         try:
             out = plan_pose.plan(length_m, width_m, board_width=co.get("board_width_m") or 1.2,
-                                 board_height=plaque_m or co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08)
+                                 board_height=plaque_m or co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08,
+                                 entraxe_cm=entraxe_cm or 50)
         except ValueError as exc:
             return {"error": str(exc)}
         svg = out.pop("svg")
@@ -1689,7 +1692,7 @@ class AgentSession:
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
                                with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
                                decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15,
-                               hydrofuge: bool = False) -> dict:
+                               hydrofuge: bool = False, entraxe_cm: int | None = None) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1746,7 +1749,7 @@ class AgentSession:
             elif kind == "ceiling" and rects:
                 res = calc.calculate_ceiling(rects[0][0], rects[0][1], zones=[(a, b) for a, b, _ in rects], waste=cfg["waste"],
                                              board_width=cfg["board_width"], board_height=cfg["board_height"], fixing_values=cfg["fixings"],
-                                             dims_known=all(k for *_, k in rects))
+                                             dims_known=all(k for *_, k in rects), entraxe_cm=entraxe_cm)
             elif kind == "partition" and not (length_m and height_m) and area_m2:
                 res = calc.calculate_partition_from_area(area_m2, sides, sides_known=sides_known, waste=cfg["waste"], fixing_values=cfg["fixings"],
                                                          board_width=cfg["board_width"], board_height=cfg["board_height"])
@@ -1772,7 +1775,7 @@ class AgentSession:
                     raise ConnectorError("Longueur et largeur (ou surface) du plafond requises.", 400)
                 res = calc.calculate_ceiling(a, b, waste=cfg["waste"], board_width=cfg["board_width"], board_height=cfg["board_height"],
                                              fixing_values=cfg["fixings"],
-                                             dims_known=not square)
+                                             dims_known=not square, entraxe_cm=entraxe_cm)
             elif kind == "moulure":
                 rooms = [(a, b) for a, b, _ in rects] or ([(length_m, width_m or height_m)] if length_m and (width_m or height_m) else [])
                 if not rooms and area_m2:
