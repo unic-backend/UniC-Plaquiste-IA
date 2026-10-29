@@ -1899,9 +1899,9 @@ function CompanyPage() {
             />
           </label>
           <label>
-            Déchet par défaut
+            Chute en plus (0 = marge du patron : +3 / +5 / +10 pièces)
             <input
-              value={s.default_waste ?? 0.08}
+              value={s.default_waste ?? 0}
               onChange={(e) => setS({ ...s, default_waste: Number(e.target.value) })}
             />
           </label>

@@ -189,6 +189,7 @@ RÈGLES ABSOLUES
 MÉTIER UniC (Sénégal)
 - FAUX PLAFOND BA13 (plaques de plâtre) : ossature suspendue = tiges (suspentes) fixées au plafond par chevilles à laiton, pivots, fourrures (barres de 2,80 m tous les 0,50 m), cornières de rive fixées aux murs par chevilles à frapper, puis plaques de plâtre vissées. Tiges : la première à 30 cm du mur, puis une tous les 90 cm. Plaques de 2 m en travers des fourrures (50 × 4 = 2 m), entières d'un mur à l'autre : seule la dernière est coupée. Pas de rails ni de montants.
 - CLOISON SÈCHE : rails au sol et au plafond fixés par chevilles à frapper, montants dans les rails tenus par vis de 9 mm, plaques de plâtre vissées (vis 25 ou 35 mm) sur une ou deux faces, puis bande, enduit et accessoires de finition. Pas de tiges, pivots ni fourrures. Montants tous les 60 cm (plaque debout) ou 50 cm si le patron le dit (plaque couchée) ; 2 montants côte à côte à chaque jonction de plaques ; cloison en L ou en U = un mur par côté (chaque bout a son montant, rien à ajouter à l'angle). Plus haut que 2,80 m : rallonge sur chaque montant, chaque raccord tenu par un morceau de rail de 40 cm.
+- MARGE (règle du patron) : compte exact, puis + 3 pièces par article en dessous de 50 m², + 5 de 50 à 100 m², + 10 au-delà, sur les plaques et chaque barre de 2,80 m ; pivots et chevilles à laiton au compte exact des tiges, en paquets. Plus de pourcentage de chute. L'outil de calcul l'ajoute : ne la rajoute jamais.
 - Ne mélange jamais les deux listes. « Plafond suspendu », « faux plafond », « plafond BA13 », « plafond en placo » = le même ouvrage ; « cloison », « cloison sèche », « paroi en placo », « mur en plaque » = l'autre.
 """
 
@@ -630,7 +631,7 @@ def _create_project(db: Session, text: str, user_id: str | None) -> str:
 def _calc_defaults(db: Session) -> dict:
     company = company_dict(db)
     return {
-        "waste": company.get("default_waste") or 0.08,
+        "waste": company.get("default_waste") or 0.0,
         "board_width_m": company.get("board_width_m") or 1.2,
         "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,

@@ -48,7 +48,7 @@ def test_from_text_partition_spec_example():
     brute = next(s for s in r.steps if s.label == "Surface brute")
     assert brute.result == 1600.0
     boards = next(q for q in r.quantities if q.sku.startswith("BA13"))
-    assert boards.quantity == 720   # plaque de 2 m par défaut (1600 m² × 1,08 ÷ 2,40 m²)
+    assert boards.quantity == 678   # plan de pose (plaque de 2 m) : 532 entières + 136 pour les morceaux, + 10 de marge (800 m²)
     assert any("prix" in m.lower() for m in r.missing)
 
 
@@ -77,11 +77,11 @@ def _q(res):
 
 
 def test_real_case_cloison_30m2_one_face():
-    # 12 m × 2,5 m = 30 m² ; plaque 2,40 m² ; chute 8 % ; entraxe 0,60 m ; barres de 2,80 m
+    # 12 m × 2,5 m = 30 m² ; plaque 1,20 × 2 m debout ; entraxe 0,60 m ; barres de 2,80 m ; marge du patron : + 3 (moins de 50 m²)
     q = _q(calc.calculate_partition(12, 2.5, 1, []))
-    assert q["BA13-2000x1200"] == 14      # ⌈30 × 1,08 / 2,4⌉ = ⌈13,5⌉
-    assert q["MONTANT-M48"] == 30         # ⌈12 / 0,6⌉ + 1 = 21, + 9 jonctions doublées (règle du patron)
-    assert q["UC-RAILS-48-MM"] == 9       # ⌈24 / 2,8⌉
+    assert q["BA13-2000x1200"] == 13 + 3  # 10 entières + 10 morceaux de 50 × 120 (4 par plaque → 3)
+    assert q["MONTANT-M48"] == 30 + 3     # ⌈12 / 0,6⌉ + 1 = 21, + 9 jonctions doublées (règle du patron)
+    assert q["UC-RAILS-48-MM"] == 9 + 3   # ⌈24 / 2,8⌉
     assert q["VIS-PLAQUE"] == 450         # 30 × 15
     assert q["BANDE-JOINT"] == 42.0       # 30 × 1,4
     assert q["ENDUIT-JOINT"] == 21.0      # 30 × 0,35 × 2
@@ -89,7 +89,7 @@ def test_real_case_cloison_30m2_one_face():
 
 def test_real_case_plafond_15m2():
     q = _q(calc.calculate_ceiling(5, 3))
-    assert q["BA13-2000x1200"] == 7       # ⌈15 × 1,08 / 2,4⌉ = ⌈6,75⌉
+    assert q["BA13-2000x1200"] == 7 + 3   # plan de pose : 4 entières + 3 pour les morceaux ; + 3 de marge (moins de 50 m²)
 
 
 def test_real_case_paint_and_plaster():
@@ -214,17 +214,17 @@ def test_montants_du_patron_deux_montants_a_chaque_jonction():
     assert calc.studs_needed(6.0, 0.5, 1.2, 2.0) == 15     # 50 cm : plaques couchées de 2 m → 13 + 2 jonctions
     assert calc.studs_needed(5.0, 0.5, 1.2) == 11          # sans longueur de plaque connue : la grille seule
     r = calc.calculate_partition(5, 2.5, 2)
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 14 and calc.verify(r)["ok"]
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 14 + 3 and calc.verify(r)["ok"]   # + 3 : marge du patron
     q = {x.sku: x for x in calc.calculate_partition(6, 2.5, 2).quantities}["MONTANT-M48"]
-    assert q.quantity == 15 and "2 côte à côte" in q.formula and "tous les 1,2 m, plaque debout" in q.formula
+    assert q.quantity == 15 + 3 and "2 côte à côte" in q.formula and "tous les 1,2 m, plaque debout" in q.formula
     r = calc.calculate_partition(6, 2.5, 2, stud_spacing=0.5)
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 15 and calc.verify(r)["ok"]
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 15 + 3 and calc.verify(r)["ok"]
 
 
 def test_cloison_en_l_chaque_cote_a_ses_montants_d_about():
     # règle du patron : cloison en L = un mur par côté ; l'angle a déjà 2 montants (le bout de chaque mur), rien à ajouter
     r = calc.calculate_partition(4, 2.5, 2, walls=[(4, 2.5), (3, 2.5)])
-    assert {x.sku: x.quantity for x in r.quantities}["MONTANT-M48"] == 11 + 8 and calc.verify(r)["ok"]   # (8 + 3) + (6 + 2)
+    assert {x.sku: x.quantity for x in r.quantities}["MONTANT-M48"] == 11 + 8 + 3 and calc.verify(r)["ok"]   # (8 + 3) + (6 + 2) + marge
 
 
 def test_montants_plus_hauts_qu_une_barre():
@@ -233,7 +233,7 @@ def test_montants_plus_hauts_qu_une_barre():
     assert calc.stud_bars(11, 3.2) == 13
     assert calc.stud_bars(11, 2.5) == 11 and calc.stud_bars(11, 5.8) == 23 and calc.stud_bars(11, 2.8) == 11
     r = calc.calculate_partition(5, 3.2, 2)
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 16 and calc.verify(r)["ok"]
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 16 + 3 and calc.verify(r)["ok"]   # + 3 : marge
 
 
 @pytest.mark.parametrize("h, splices", [(2.5, (0, 0.0)), (2.8, (0, 0.0)), (3.5, (1, 0.7)), (5.6, (1, 0.0)), (6.0, (2, 0.4))])
@@ -245,31 +245,31 @@ def test_cloison_haute_rallonges_et_eclisses_au_devis():
     # 6 × 3,50 m : 15 montants = 15 barres + 15 rallonges de 70 cm (4 par barre → 4) = 19 ; rails 5 + éclisses ⌈15 / 7⌉ = 3
     r = calc.calculate_partition(6, 3.5, 2)
     q = {x.sku: x for x in r.quantities}
-    assert q["MONTANT-M48"].quantity == 19 and "1 rallonge de 70 cm" in q["MONTANT-M48"].notes
+    assert q["MONTANT-M48"].quantity == 19 + 3 and "1 rallonge de 70 cm" in q["MONTANT-M48"].notes   # + 3 : marge du patron
     assert "rail de 40 cm" in q["MONTANT-M48"].notes
-    assert q["UC-RAILS-48-MM"].quantity == 8 and "éclisses : 15 morceaux de 40 cm, 7 par barre → 3" in q["UC-RAILS-48-MM"].formula
+    assert q["UC-RAILS-48-MM"].quantity == 8 + 3 and "éclisses : 15 morceaux de 40 cm, 7 par barre → 3" in q["UC-RAILS-48-MM"].formula
     assert calc.verify(r)["ok"]
-    assert {x.sku: x.quantity for x in calc.calculate_partition(6, 2.5, 2).quantities}["UC-RAILS-48-MM"] == 5   # pas de raccord
+    assert {x.sku: x.quantity for x in calc.calculate_partition(6, 2.5, 2).quantities}["UC-RAILS-48-MM"] == 5 + 3   # pas de raccord
 
 
 def test_plafond_compte_la_corniere_de_rive():
-    # 4 × 5 m : périmètre 18 ml → ⌈18 / 2,80⌉ = 7 barres de cornière
+    # 4 × 5 m : périmètre 18 ml → ⌈18 / 2,80⌉ = 7 barres de cornière, + 3 de marge (moins de 50 m²)
     r = calc.calculate_ceiling(4, 5)
     q = {x.sku: x.quantity for x in r.quantities}
-    assert q["UC-CORNIERES"] == 7 and calc.verify(r)["ok"]
+    assert q["UC-CORNIERES"] == 7 + 3 and calc.verify(r)["ok"]
 
 
 def test_trois_montants_de_renfort_par_porte():
-    # 6 m : 15 montants (11 + 4 jonctions doublées) ; 2 portes → + 2 × 3 = 21 (règle UniC)
+    # 6 m : 15 montants (11 + 4 jonctions doublées) ; 2 portes → + 2 × 3 = 21 (règle UniC) ; + 3 de marge
     r = calc.calculate_partition(6, 2.7, 2, [calc.Opening("door", 0.9, 2.04, 2)])
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 21 and calc.verify(r)["ok"]
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 21 + 3 and calc.verify(r)["ok"]
     r = calc.calculate_partition(6, 2.7, 2, [calc.Opening("window", 1.2, 1.2, 1)])
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 15      # fenêtre : pas de renfort automatique
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 15 + 3  # fenêtre : pas de renfort automatique
 
 
 def test_portes_en_toutes_lettres_et_taille_supposee():
     r = calc.calculate_from_text("cloison 6 x 2.7 avec une porte")
     assert [(o["kind"], o["quantity"], o["assumed_size"]) for o in r.inputs["openings"]] == [("door", 1, True)]
-    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 18   # 15 + 3 de renfort
+    assert {q.sku: q.quantity for q in r.quantities}["MONTANT-M48"] == 18 + 3   # 15 + 3 de renfort, + 3 de marge
     r = calc.calculate_from_text("cloison 6 x 2.7 avec deux portes et une fenêtre")
     assert [(o["kind"], o["quantity"]) for o in r.inputs["openings"]] == [("door", 2), ("window", 1)]

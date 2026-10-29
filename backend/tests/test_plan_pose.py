@@ -1,6 +1,7 @@
 """Plan de pose d'un faux plafond (calepinage) dessiné pour les ouvriers, règles du patron : fourrures tous les 50 cm, tiges à
 30 cm du mur puis tous les 90 cm, plaques de 2 m en travers (chaque bout sur une fourrure), plaques entières d'un mur à l'autre
-et seule la dernière coupée. MÊMES nombres que le devis ; alerte si le plan consomme plus de plaques que le devis."""
+et seule la dernière coupée. MÊMES nombres que le devis : le plan donne le compte exact, le devis y ajoute la marge du patron
+(+ 3 / + 5 / + 10 pièces selon la surface) ; alerte si le plan consommait plus de plaques que le devis."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,16 +16,19 @@ def _qty(result, sku):
 @pytest.mark.parametrize("L, W", [(5, 4), (4, 5), (6, 3.7), (3, 2), (12.4, 8.3), (9, 3), (4.1, 3.3)])
 def test_memes_nombres_que_le_devis(L, W):
     d, r = pp.plan(L, W), calc.calculate_ceiling(L, W)
-    assert d["tiges"] == _qty(r, "UC-TIGES-A-L-UNITE")
-    assert d["barres_fourrure"] == _qty(r, "UC-BARRE-DE-FOURRURE-2-90-M") and d["cornieres"] == _qty(r, "UC-CORNIERES")
-    assert d["plaques_devis"] == _qty(r, calc.board_sku(1.2, 2.0)[0])
+    m = calc.margin_pieces(L * W)
+    assert d["tiges"] == _qty(r, "UC-TIGES-A-L-UNITE") and d["marge"] == m                          # tiges : compte exact
+    assert d["barres_fourrure"] + m == _qty(r, "UC-BARRE-DE-FOURRURE-2-90-M") and d["cornieres"] + m == _qty(r, "UC-CORNIERES")
+    assert d["plaques_utilisees"] + m == d["plaques_devis"] == _qty(r, calc.board_sku(1.2, 2.0)[0])
     assert d["fourrures"] == next(s.result for s in r.steps if s.label.startswith("Lignes de fourrure"))
 
 
 def test_plafond_5_par_4():
     d = pp.plan(5, 4)
     assert d["piece"] == [5, 4] and d["fourrures"] == 9 and d["tiges"] == 54 and d["tiges_par_fourrure"] == 6
-    assert (d["plaques_entieres"], d["morceaux_coupes"], d["plaques_utilisees"], d["plaques_devis"]) == (8, 2, 9, 9)
+    assert (d["plaques_entieres"], d["morceaux_coupes"], d["plaques_utilisees"], d["plaques_devis"]) == (8, 2, 9, 9 + 3)
+    assert "À acheter (devis : + 3 pièces de marge par article, surface 20 m²) : 12 plaques, 20 barres de fourrure, 10 cornières." \
+        in d["consignes"]
     assert "alerte" not in d and "une tous les 50 cm" in d["consignes"][0]
     assert "la première à 30 cm du mur, puis une tous les 90 cm" in d["consignes"][1]
     assert "seule la dernière de chaque rangée est coupée" in d["consignes"][2] and "50 cm × 4 = 2 m" in d["consignes"][2]
@@ -142,13 +146,13 @@ def test_barres_de_2_80_et_plaque_de_2_50_si_le_patron_le_dit():
     assert "20 barres de 2,80 m" in d["consignes"][0] and "Plaques de 2 m" in d["consignes"][2]
     big = pp.plan(5, 4, board_height=2.5)
     assert big["plaque"] == "1,20 × 2,50 m" and "Plaques de 2,50 m" in big["consignes"][2] and "50 cm × 5 = 2,50 m" in big["consignes"][2]
-    assert big["plaques_devis"] == 8 and big["plaques_utilisees"] == 9 and "ajoute 1 plaque" in big["alerte"]
+    assert big["plaques_devis"] == 9 + 3 and big["plaques_utilisees"] == 9 and "alerte" not in big   # avant : 8 au devis
 
 
-def test_petite_piece_le_plan_previent_quand_le_devis_est_juste():
-    d = pp.plan(2.5, 1.5)
-    assert d["plaques_utilisees"] == 3 and d["plaques_devis"] == 2
-    assert "ajoute 1 plaque" in d["alerte"]
+def test_petite_piece_le_devis_couvre_le_plan_avec_la_marge():
+    d = pp.plan(2.5, 1.5)                    # avant (surface + 8 %) : 2 plaques au devis pour 3 posées → alerte
+    assert d["plaques_utilisees"] == 3 and d["plaques_devis"] == 3 + 3
+    assert "alerte" not in d
 
 
 def test_entrees_refusees():
@@ -164,7 +168,7 @@ def test_l_ia_dessine_le_plan_de_pose():
     with TestClient(app), SessionLocal() as db:
         s = AgentSession(db, None, {})
         out = s("pose_plan", {"length_m": 5, "width_m": 4})
-        assert out["tiges"] == 54 and "svg" not in out and len(out["consignes"]) == 7 and out["plaque"] == "1,20 × 2 m"
+        assert out["tiges"] == 54 and "svg" not in out and len(out["consignes"]) == 8 and out["plaque"] == "1,20 × 2 m"
         assert len(s.images) == 1 and s.images[0]["filename"].endswith(".png")
         assert s("pose_plan", {"length_m": 5, "width_m": 4, "plaque_m": 2.5})["plaque"] == "1,20 × 2,50 m"   # 2,50 seulement si dit
         assert s("pose_plan", {"length_m": 5, "width_m": 4, "entraxe_cm": 60})["tiges"] == 48                # 8 fourrures × 6 tiges
@@ -185,8 +189,10 @@ def test_cloison_regles_du_patron(L, H, sp, debout, monkeypatch):
     monkeypatch.setattr(pp, "_svg_cloison", spy)
     d = pp.plan_cloison(L, H, entraxe_cm=sp)
     r = calc.calculate_partition(L, H, 2, stud_spacing=sp / 100)
-    assert d["montants"] == calc.studs_needed(L, sp / 100, 1.2, 2.0) and d["barres_montant"] == _qty(r, "MONTANT-M48")
-    assert d["barres_rail"] == _qty(r, "UC-RAILS-48-MM") and d["plaques_devis"] == _qty(r, "BA13-2000x1200")
+    m = calc.margin_pieces(L * H)   # le plan donne le compte exact, le devis y ajoute la marge du patron
+    assert d["montants"] == calc.studs_needed(L, sp / 100, 1.2, 2.0) and d["barres_montant"] + m == _qty(r, "MONTANT-M48")
+    assert d["barres_rail"] + m == _qty(r, "UC-RAILS-48-MM") and d["plaques_devis"] == _qty(r, "BA13-2000x1200")
+    assert d["plaques_utilisees"] + m == d["plaques_devis"]
     assert d["pose"] == ("debout" if debout else "couchée")
     grid, joints, tiles = seen["grid"], seen["joints"], seen["tiles"]
     assert grid[0] == 0 and grid[-1] == seen["L"] and all(b - a == sp for a, b in zip(grid, grid[1:-1]))
@@ -204,7 +210,9 @@ def test_cloison_exemple_du_patron():
     assert "sens des 2,50 m → 1 plaque de 2 m + un morceau de 50 cm" in d["consignes"][3]
     assert "5 par face × 2 faces = 10 plaques entières" in d["consignes"][3]
     assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 10, "par_plaque": 4, "plaques": 3, "pris_dans_les_chutes": 0}]
-    assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 14 and "alerte" not in d
+    assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 13 + 3 and "alerte" not in d
+    assert "À acheter (devis : + 3 pièces de marge par article, surface 15 m²) : 16 plaques, 18 barres de montant, 8 barres de rail." \
+        == d["consignes"][-1]
     assert "cloison 6 × 2,50 m (2 faces)" in diagrams.sanitize(d["svg"])
     with pytest.raises(pp.PlanError):
         pp.plan_cloison(6, 2.5, entraxe_cm=40)
@@ -215,7 +223,7 @@ def test_cloison_une_seule_face():
     assert d["faces"] == 1 and d["montants"] == 15                            # les montants ne changent pas
     assert "1 × 5 = 5 plaques entières (une seule face" in d["consignes"][3]
     assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 5, "par_plaque": 4, "plaques": 2, "pris_dans_les_chutes": 0}]
-    assert d["plaques_utilisees"] == 7 and d["plaques_devis"] == _qty(calc.calculate_partition(6, 2.5, 1), "BA13-2000x1200") == 7
+    assert d["plaques_utilisees"] == 7 and d["plaques_devis"] == _qty(calc.calculate_partition(6, 2.5, 1), "BA13-2000x1200") == 7 + 3
     assert "cloison 6 × 2,50 m (1 face)" in diagrams.sanitize(d["svg"])
 
 
@@ -242,7 +250,8 @@ def test_cloison_haute_rallonges_et_eclisses():
     assert "1 rallonge de 70 cm (une barre donne 4 rallonges → 4 barres pour 15 rallonges)" in d["consignes"][0]
     assert "15 raccords, chacun tenu par un morceau de rail de 40 cm" in d["consignes"][0]
     assert "éclisses : 15 morceaux de 40 cm (une barre en donne 7) → 3 barres ; total 8 barres de rail" in d["consignes"][1]
-    assert d["decoupe"][0]["morceau"] == "150 × 120 cm" and d["plaques_utilisees"] == 20 and "ajoute 1 plaque" in d["alerte"]
+    assert d["decoupe"][0]["morceau"] == "150 × 120 cm" and d["plaques_utilisees"] == 20 and "alerte" not in d   # avant : 19 au devis
+    assert "23 plaques, 22 barres de montant, 11 barres de rail" in d["consignes"][-1]                             # + 3 de marge
     assert "éclisse" in diagrams.sanitize(d["svg"])
     low = pp.plan_cloison(6, 2.5)
     assert low["raccords"] == 0 and low["barres_eclisses"] == 0 and "éclisses" not in low["consignes"][1]

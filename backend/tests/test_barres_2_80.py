@@ -9,11 +9,11 @@ from app.main import app
 
 def test_le_calcul_compte_des_barres_de_2_80():
     assert calc.BAR_LENGTH_M == 2.80 and calc.DEFAULTS["bar_length_m"] == 2.80
-    q = {x.sku: x for x in calc.calculate_ceiling(6, 3.7).quantities}
-    assert q["UC-BARRE-DE-FOURRURE-2-90-M"].name == "Barre de fourrure (2,80 m)" and q["UC-BARRE-DE-FOURRURE-2-90-M"].quantity == 20
-    assert q["UC-CORNIERES"].name == "Cornière de rive (barre de 2,80 m)" and q["UC-CORNIERES"].quantity == 7
+    q = {x.sku: x for x in calc.calculate_ceiling(6, 3.7).quantities}   # + 3 : marge du patron (moins de 50 m²)
+    assert q["UC-BARRE-DE-FOURRURE-2-90-M"].name == "Barre de fourrure (2,80 m)" and q["UC-BARRE-DE-FOURRURE-2-90-M"].quantity == 20 + 3
+    assert q["UC-CORNIERES"].name == "Cornière de rive (barre de 2,80 m)" and q["UC-CORNIERES"].quantity == 7 + 3
     p = {x.sku: x for x in calc.calculate_partition(10, 2.5, 2).quantities}
-    assert "2,80 m" in p["MONTANT-M48"].name and "2,80 m" in p["UC-RAILS-48-MM"].name and p["UC-RAILS-48-MM"].quantity == 8
+    assert "2,80 m" in p["MONTANT-M48"].name and "2,80 m" in p["UC-RAILS-48-MM"].name and p["UC-RAILS-48-MM"].quantity == 8 + 3
 
 
 def test_la_barre_de_fourrure_garde_son_identifiant_et_son_prix():

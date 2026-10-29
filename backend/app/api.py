@@ -2556,7 +2556,7 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     from app import calc as calcmod
     company = company_dict(db)
     defaults = {
-        "waste": company.get("default_waste") or 0.08,
+        "waste": company.get("default_waste") or 0.0,
         "board_width_m": company.get("board_width_m") or 1.2,
         "board_height_m": company.get("board_height_m") or 2.0,
         "stud_spacing_m": company.get("stud_spacing_m") or 0.6,

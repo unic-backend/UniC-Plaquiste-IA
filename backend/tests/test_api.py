@@ -2726,8 +2726,9 @@ def test_plan_to_quote_without_retyping(client, monkeypatch):
                                         "partitions": [{"label": "Cloison DRH", "length_m": 5.12, "height_m": 2.8}]})
         assert "error" not in out, out
         q = {x["sku"]: x["quantity"] for x in out["quantites"]}
-        assert q["BA13-2000x1200"] >= 38            # ⌈99,05 × 1,08 / 2,4⌉ = 45 plafond (+ cloison) ; jamais arrondi pièce par pièce
-        assert q["BA13-2000x1200-H"] == 4           # ⌈8,05 × 1,08 / 2,4⌉
+        # plan de pose pièce par pièce : plafonds 11 + 34 = 45, cloison 13 ; + 10 de marge (113 m² couverts) une seule fois
+        assert q["BA13-2000x1200"] == 45 + 13 + 10
+        assert q["BA13-2000x1200-H"] == 4 + 3       # 3,99 × 2,04 : 4 plaques au plan de pose, + 3 (8,05 m² couverts)
         assert any("Accueil" in m for m in out["manquant"])
         assert any("Contrôle" in h for h in out["hypotheses"])
         r = s("create_quote", {"client_name": "Pape Diop", "checks": "pièces du plan confirmées par le patron",
