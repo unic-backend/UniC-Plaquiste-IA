@@ -21,11 +21,11 @@ def _boards(qid):
 
 def test_le_devis_prend_le_metre_dit_dans_la_phrase():
     with TestClient(app) as c:
-        cid, _, _ = _say(c, "cloison 10 m x 2,5 m deux faces")                                   # 23 plaques
+        cid, _, _ = _say(c, "cloison 10 m x 2,5 m deux faces")                                   # 24 plaques
         cid, _, qid = _say(c, "fais le devis cloison 3 m x 2,5 m une face pour Awa Ndiaye", cid)
-        assert qid and _boards(qid) == 4                                                          # 3 × 2,5 × 1,08 / 2,4 → 4 (avant : 23)
+        assert qid and _boards(qid) == 7               # plan de pose 3 × 2,5, une face : 2 entières + 2 pour les morceaux, + 3 de marge
         cid, _, qid = _say(c, "fais le devis pour Awa Ndiaye", cid)                               # sans métré : le dernier calcul
-        assert qid and _boards(qid) == 4
+        assert qid and _boards(qid) == 7
 
 
 def test_pas_de_devis_ni_de_bon_sur_un_calcul_partiel_sans_le_demander():
@@ -37,4 +37,4 @@ def test_pas_de_devis_ni_de_bon_sur_un_calcul_partiel_sans_le_demander():
         _, _, qid = _say(c, "fais le devis partiel quand même", cid)                              # demandé explicitement : fait
         assert qid
         _, _, qid = _say(c, "cloison 8 x 2,5, fais le devis pour Awa Ndiaye", cid)               # métré complet : devis normal
-        assert qid and _boards(qid) == 18                                                        # 8 × 2,5 × 2 × 1,08 / 2,4 → 18
+        assert qid and _boards(qid) == 21              # plan de pose 8 × 2,5, 2 faces : 12 entières + 6 pour les morceaux, + 3 de marge

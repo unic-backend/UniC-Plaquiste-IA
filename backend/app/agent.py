@@ -1103,7 +1103,7 @@ class AgentSession:
         conseil = "" if styles else plafond_design.suggest(piece, length_m, width_m)[1]
         try:
             ideas = plafond_design.designs(length_m, width_m, styles, piece, marge_m=marge_m, retombee_m=retombee_m,
-                                           waste=co.get("default_waste") or 0.08, board_m2=board)
+                                           waste=co.get("default_waste") or 0.0, board_m2=board)
         except ValueError as exc:
             return {"error": str(exc)}
         out = []
@@ -1125,7 +1125,7 @@ class AgentSession:
         from app import diagrams, plan_pose
         co = company_dict(self.db)
         board = {"board_width": co.get("board_width_m") or 1.2, "board_height": plaque_m or co.get("board_height_m") or 2.0,
-                 "waste": co.get("default_waste") or 0.08}
+                 "waste": co.get("default_waste") or 0.0}
         try:
             if ouvrage == "cloison":
                 if not height_m:
@@ -1420,7 +1420,7 @@ class AgentSession:
         try:
             data = plan_quote.build(analysis, rooms=rooms, include_to_confirm=include_to_confirm,
                                     hydrofuge_rooms=hydrofuge_rooms, partitions=partitions,
-                                    waste=co.get("default_waste") or 0.08, board_width=co.get("board_width_m") or 1.2,
+                                    waste=co.get("default_waste") or 0.0, board_width=co.get("board_width_m") or 1.2,
                                     board_length=board_length_m or co.get("board_height_m") or 2.0,
                                     stud_spacing=co.get("stud_spacing_m") or 0.6, fixings=calc_fixings(co))
         except plan_quote.PlanQuoteError as exc:
@@ -1745,7 +1745,7 @@ class AgentSession:
         sides_known = sides is not None
         sides = int(sides) if sides_known else 2
         co = company_dict(self.db)
-        cfg = {"waste": co.get("default_waste") or 0.08, "board_width": co.get("board_width_m") or 1.2,
+        cfg = {"waste": co.get("default_waste") or 0.0, "board_width": co.get("board_width_m") or 1.2,
                "board_height": board_length_m or co.get("board_height_m") or 2.0, "stud_spacing": co.get("stud_spacing_m") or 0.6,
                "fixings": calc_fixings(co)}
         if entraxe_cm in (50, 60) and kind == "partition":   # cloison : montants tous les 60 cm (debout) ou 50 cm (couchée)

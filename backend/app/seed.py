@@ -52,6 +52,13 @@ SERVICES = [
 ]
 
 
+# règle du patron (marge en pièces) : fiche des plaques
+_NEW_PLATES_TEXT = """Nombre de plaques (méthode du patron) = plan de pose : plaques entières d'un mur à l'autre, la dernière coupée ; chaque
+morceau compté en plaques entières (aucune fourniture ne vend de morceaux).
+Marge du patron, en PIÈCES (jamais en paquets) : + 10 au-delà de 100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m²,
+sur les plaques et chaque barre de 2,80 m (fourrures, cornières, montants, rails). Pivots et chevilles à laiton : une par
+tige, en paquets, sans marge."""
+
 ARTICLES = [
     (
         "services-unic",
@@ -107,11 +114,10 @@ Toute action sensible (envoi devis, facture, e-mail, publication, suppression, m
         "method",
         """Surface brute = longueur × hauteur × nombre de faces.
 Surface nette = surface brute − (ouvertures × faces concernées).
-Nombre de plaques = ⌈ surface nette × (1 + déchet) / (largeur plaque × hauteur plaque) ⌉.
+""" + _NEW_PLATES_TEXT + """
 
 Valeurs par défaut (HYPOTHÈSES, configurables dans Paramètres) :
 - Plaque BA13 2,00 × 1,20 m = 2,40 m² (plaque UniC par défaut ; 2,50 m seulement si demandé)
-- Déchet 8 %
 Ces valeurs ne sont pas des tarifs UniC.""",
     ),
     (
@@ -387,6 +393,33 @@ def apply_owner_studs_v9(db: Session) -> int:
     if art is not None and _OLD_STUDS_TEXT in (art.body or ""):
         art.body = art.body.replace(_OLD_STUDS_TEXT, _NEW_STUDS_TEXT)
         n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+_OLD_PLATES_TEXT = "Nombre de plaques = ⌈ surface nette × (1 + déchet) / (largeur plaque × hauteur plaque) ⌉."
+_OLD_WASTE_LINE = "\n- Déchet 8 %"
+
+
+def apply_owner_margin_v10(db: Session) -> int:
+    """Règle du patron : compte exact puis marge en pièces (+ 3 / + 5 / + 10 selon la surface), plus de pourcentage de chute.
+    Le réglage « chute par défaut » passe à 0 % et la fiche des plaques est mise à jour si elle porte encore le texte d'origine
+    (une fiche retouchée par le patron n'est pas écrasée). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_margin_v10"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for co in db.query(CompanySettings).all():
+        if co.default_waste:
+            co.default_waste = 0.0
+            n += 1
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-plaques").first()
+    if art is not None and _OLD_PLATES_TEXT in (art.body or ""):
+        art.body = art.body.replace(_OLD_PLATES_TEXT, _NEW_PLATES_TEXT).replace(_OLD_WASTE_LINE, "")
+        n += 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

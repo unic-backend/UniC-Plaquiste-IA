@@ -20,12 +20,12 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.12"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.13"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
     "board_height_m": 2.00,
-    "waste": 0.08,
+    "waste": 0.0,                # chute en % : 0 = règle du patron (compte exact + marge en pièces, voir margin_pieces)
     "stud_spacing_m": 0.60,
     "screws_per_m2": 15.0,
     "tape_m_per_m2": 1.40,
@@ -221,6 +221,107 @@ def boards_needed(net_area: float, waste: float, board_m2: float) -> int:
     return ceil_int(net_area * (1.0 + waste) / board_m2)
 
 
+def cut_plan(groups: list[tuple[int, int, int]], pw: int, ph: int) -> list[dict]:
+    """Méthode du patron : aucune fourniture ne vend de morceaux, chaque morceau se compte en plaques ENTIÈRES.
+    `groups` = (longueur dans le sens des 2 m, largeur dans le sens des 1,20 m, nombre) en cm. Pour chaque taille : combien de
+    morceaux une plaque donne (47 × 120 dans une plaque de 2 m : 4), donc combien de plaques. Les morceaux d'une plaque déjà
+    entamée qui restent (chutes de même taille) servent d'abord aux morceaux plus petits. Sens de la plaque gardé."""
+    spares: list[list[int]] = []   # [longueur, largeur, nombre] : morceaux taillés en trop, réutilisables
+    out = []
+    for ln, wd, n in sorted(groups, key=lambda g: g[0] * g[1], reverse=True):
+        need, from_spares = n, 0
+        for sp in spares:
+            per = (sp[0] // ln) * (sp[1] // wd)
+            if need and sp[2] and per:
+                use = min(sp[2], -(-need // per))
+                got = min(need, use * per)
+                sp[2] -= use
+                need -= got
+                from_spares += got
+        per_board = (ph // ln) * (pw // wd)
+        boards = -(-need // per_board) if need else 0
+        if boards * per_board > need:
+            spares.append([ln, wd, boards * per_board - need])
+        out.append({"morceau": f"{ln} × {wd} cm", "nombre": n, "par_plaque": per_board, "plaques": boards,
+                    "pris_dans_les_chutes": from_spares})
+    return out
+
+
+def whole_boards(l2_cm: int, l12_cm: int, pw: int, ph: int, faces: int = 1) -> dict:
+    """Plaques comptées comme le patron : entières dans chaque sens (`l2_cm` reçoit le côté de 2 m, `l12_cm` celui de 1,20 m),
+    la dernière coupée au mur ; puis chaque taille de morceau convertie en plaques entières (cut_plan). `faces` : même pose."""
+    n2, r2 = divmod(l2_cm, ph)
+    n12, r12 = divmod(l12_cm, pw)
+    groups = [(a, b, n * faces) for a, b, n in ((r2, pw, n12), (ph, r12, n2), (r2, r12, 1)) if a and b and n]
+    decoupe = cut_plan(groups, pw, ph)
+    full, for_pieces = n2 * n12 * faces, sum(d["plaques"] for d in decoupe)
+    return {"n2": n2, "r2": r2, "n12": n12, "r12": r12, "entieres": full, "decoupe": decoupe, "pour_morceaux": for_pieces,
+            "plaques": full + for_pieces, "l2": l2_cm, "l12": l12_cm, "pw": pw, "ph": ph}
+
+
+def ceiling_boards(a: float, b: float, entraxe_cm: int | None = None, board_width: float = DEFAULTS["board_width_m"],
+                   board_height: float = DEFAULTS["board_height_m"]) -> dict:
+    """Plaques d'un plafond a × b posées comme le patron : trame 50, la plaque EN TRAVERS des fourrures (2 m sur l'écart :
+    50 × 4) ; trame 60, DANS LE SENS des fourrures (1,20 m sur l'écart : 60 × 2). Fourrures dans le sens de ceiling_run."""
+    run, across = ceiling_run(a, b, entraxe_cm)
+    pw, ph = round(min(board_width, board_height) * 100), round(max(board_width, board_height) * 100)
+    sp_cm = round(grid(entraxe_cm)[0] * 100)
+    parallel = sp_cm != 50 and pw % sp_cm == 0
+    run_cm, across_cm = round(run * 100), round(across * 100)
+    return {**whole_boards(*((run_cm, across_cm) if parallel else (across_cm, run_cm)), pw, ph), "parallel": parallel}
+
+
+def wall_boards(length_m: float, height_m: float, spacing_m: float, board_width: float = DEFAULTS["board_width_m"],
+                board_height: float = DEFAULTS["board_height_m"], sides: int = 2) -> dict:
+    """Plaques d'une cloison L × H comme le patron : DEBOUT si l'écart des montants divise 1,20 m (60 cm), COUCHÉES s'il divise
+    2 m (50 cm) ; entières depuis le mur et depuis le sol, le morceau en haut et au dernier mur ; même pose sur chaque face."""
+    pw, ph = round(min(board_width, board_height) * 100), round(max(board_width, board_height) * 100)
+    along = board_along(spacing_m, min(board_width, board_height), max(board_width, board_height))
+    debout = along is None or round(along * 100) == pw
+    L_cm, H_cm = round(length_m * 100), round(height_m * 100)
+    return {**whole_boards(*((H_cm, L_cm) if debout else (L_cm, H_cm)), pw, ph, sides), "debout": debout}
+
+
+# Règle du patron (marge) : on compte JUSTE, puis on ajoute des PIÈCES (jamais des paquets) aux plaques et à chaque barre
+# d'ossature. Pivots et chevilles à laiton : une par tige, en paquets, sans marge (73 tiges = 73 pivots).
+MARGIN_SKUS = ("UC-BARRE-DE-FOURRURE-2-90-M", "UC-CORNIERES", "MONTANT-M48", "UC-RAILS-48-MM")
+MARGIN_RULE = "+ 10 pièces par article au-delà de 100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m²"
+
+
+def margin_pieces(surface_m2: float) -> int:
+    return 10 if surface_m2 > 100 + 1e-9 else 5 if surface_m2 >= 50 - 1e-9 else 3
+
+
+def margin_formula(surface_m2: float) -> str:
+    m = margin_pieces(surface_m2)
+    band = "plus de 100 m²" if m == 10 else "de 50 à 100 m²" if m == 5 else "moins de 50 m²"
+    return f" ; + {m} de marge ({band})"
+
+
+def takes_margin(sku: str) -> bool:
+    """Plaques (toutes tailles, hydrofuges comprises) et barres de 2,80 m : fourrures, cornières, montants, rails."""
+    return sku in MARGIN_SKUS or sku.startswith("BA13-")
+
+
+def _add_margin(result: CalcResult, surface_m2: float, enabled: bool = True) -> None:
+    """Marge du patron sur les lignes concernées. `enabled=False` (devis depuis un plan) : la marge est ajoutée une seule fois,
+    sur le total de toutes les pièces, par l'appelant."""
+    m = margin_pieces(surface_m2) if enabled else 0
+    result.inputs["marge"] = m
+    if not m:
+        return
+    for q in result.quantities:
+        if takes_margin(q.sku):
+            q.quantity += m
+            q.formula += margin_formula(surface_m2)
+    result.steps.append(CalcStep("Marge du patron", MARGIN_RULE, {"surface": round_qty(surface_m2, 2)}, m, "pièces par article",
+                                 STATUS_CONFIRMED))
+    result.data_used.append({"label": "Marge", "value": f"+ {m} pièces", "unit": "", "status": STATUS_CONFIRMED})
+    surface = f"{round_qty(surface_m2, 2):g}".replace(".", ",")
+    result.assumptions.append(f"Marge du patron : compte exact, puis + {m} pièces sur les plaques et chaque barre de {BAR_TXT} m "
+                              f"(surface {surface} m² ; {MARGIN_RULE}). Pivots, chevilles et vis : compte exact, en paquets.")
+
+
 def board_along(spacing_m: float, board_width_m: float | None = None, board_height_m: float | None = None) -> float | None:
     """Côté de plaque posé le long de la cloison (règle du patron) : la largeur de 1,20 m si l'écart des montants la divise
     (60 cm × 2 : plaque DEBOUT), sinon la longueur de 2 m si l'écart la divise (50 cm × 4 : plaque COUCHÉE)."""
@@ -342,6 +443,7 @@ def calculate_partition(
     openings_known: bool | None = None,
     fixing_values: dict | None = None,
     walls: list[tuple[float, float]] | None = None,
+    margin: bool = True,
 ) -> CalcResult:
     """`walls` : plusieurs cloisons (longueur, hauteur) de mêmes faces ; cloison en L ou en U = un mur par côté : chaque mur a
     son montant à chaque bout, l'angle en a donc déjà 2 (règle du patron, rien à ajouter). Montants, rails et chevilles sont
@@ -360,7 +462,11 @@ def calculate_partition(
     b_area = board_area(board_width, board_height)
     # plusieurs cloisons : surface d'une face de toutes les cloisons (longueur × hauteur additionnées)
     areas = partition_area(one_face, 1.0, sides, openings) if multi else partition_area(length_m, height_m, sides, openings)
-    n_boards = boards_needed(areas["net"], waste, b_area)
+    # plaques comptées comme le patron (plan de pose, cloison par cloison) ; une ouverture ne rend que des plaques ENTIÈRES
+    laid = [wall_boards(w, h, stud_spacing, board_width, board_height, sides) for w, h in walls]
+    b_full, b_pieces = sum(x["entieres"] for x in laid), sum(x["pour_morceaux"] for x in laid)
+    ops_boards = math.floor(areas["openings"] / b_area + 1e-9)
+    n_boards = ceil_int(max(ceil_int(areas["net"] / b_area), b_full + b_pieces - ops_boards) * (1.0 + waste))
     wall_studs = [studs_needed(w, stud_spacing, board_width, board_height) for w, _ in walls]
     n_studs = sum(wall_studs)
     n_doors = sum(o.quantity for o in openings if o.kind == "door")
@@ -425,7 +531,7 @@ def calculate_partition(
             "unit": "m",
             "status": STATUS_ASSUMED,
         },
-        {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
+        *([{"label": "Chute en plus", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED}] if waste else []),
         {"label": "Entraxe montants", "value": stud_spacing, "unit": "m", "status": STATUS_ASSUMED},
     ]
 
@@ -464,8 +570,9 @@ def calculate_partition(
         ),
         CalcStep(
             "Nombre de plaques",
-            "⌈ surface nette × (1 + déchet) / surface plaque ⌉",
-            {"nette": areas["net"], "dechet": waste, "plaque": b_area},
+            "plan de pose" + (" de chaque cloison" if multi else "") + " : plaques entières + morceaux comptés en plaques entières"
+            + (" − plaques entières des ouvertures" if ops_boards else "") + (" ; × (1 + chute)" if waste else ""),
+            {"entieres": b_full, "pour_morceaux": b_pieces, "ouvertures": ops_boards, **({"chute": waste} if waste else {})},
             n_boards,
             "u",
             STATUS_ESTIMATED,
@@ -498,7 +605,8 @@ def calculate_partition(
 
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
-                     "⌈Snette×(1+d)/Splaque⌉", STATUS_ESTIMATED),
+                     f"{b_full} entières + {b_pieces} pour les morceaux" + (f" − {ops_boards} (ouvertures)" if ops_boards else "")
+                     + (f", × (1 + {waste:g})" if waste else ""), STATUS_ESTIMATED),
         QuantityLine("MONTANT-M48", f"Montant M48 (barre de {BAR_TXT} m)", n_stud_bars, "u",
                      stud_rule + (" + rallonges" if n_stud_bars - door_studs != n_studs else "")
                      + (f" + 3 × {n_doors} porte(s)" if n_doors else ""), STATUS_ESTIMATED,
@@ -533,9 +641,10 @@ def calculate_partition(
 
     result.assumptions = [
         f"Plaque standard BA13 {board_width:g} × {board_height:g} m = {b_area:.2f} m² (catalogue par défaut, non une donnée UniC confirmée).",
-        f"Coefficient de déchet = {waste*100:.0f} % (paramètre par défaut, à confirmer selon la complexité du chantier).",
-        f"Entraxe des montants = {stud_spacing:g} m : méthode UniC, chaque plaque prend 3 montants (bords + milieu), "
-        "le montant de jonction est partagé entre deux plaques.",
+        "Plaques comptées comme le patron : entières depuis le mur et depuis le sol, le morceau en haut et au dernier mur, "
+        "chaque morceau compté en plaques entières (plan de pose)." + (f" Chute en plus : {waste * 100:.0f} %." if waste else ""),
+        f"Entraxe des montants = {stud_spacing:g} m : méthode UniC, chaque bord de plaque sur un montant ; 2 montants côte à côte "
+        "à chaque jonction de plaques.",
         f"Vis = {DEFAULTS['screws_per_m2']:g} / m² (règle professionnelle par défaut).",
         "Portes : 3 montants de renfort par porte (règle UniC). Fenêtres : renforts non ajoutés automatiquement.",
         _fx_text(fx, "rail"),
@@ -558,13 +667,14 @@ def calculate_partition(
         "Les quantités de plaques et d'ossature sont des ESTIMATIONS arrondies à l'unité supérieure.",
     ]
     if multi:
-        result.assumptions.insert(0, f"{len(walls)} cloisons ({sizes} m) : montants, rails et chevilles comptés cloison par cloison ; "
-                                     "plaques et paquets sur le total ; ouvertures déduites du total.")
+        result.assumptions.insert(0, f"{len(walls)} cloisons ({sizes} m) : montants, rails, chevilles et plaques comptés cloison "
+                                     "par cloison ; paquets et marge sur le total ; ouvertures déduites du total.")
     if top > board_height + 1e-9:
         result.notes.append(f"Hauteur {top:g} m > plaque {board_height:g} m : raccords horizontaux et chutes à prévoir "
                             "(ou plaques plus longues).")
     else:
         result.notes.append("Vérifier la hauteur réelle des locaux : si H > hauteur de plaque, prévoir chutes / bandes de rive.")
+    _add_margin(result, one_face, margin)
     return result
 
 
@@ -602,17 +712,18 @@ def calculate_partition_from_area(
         {"label": "Ouvertures", "value": "inconnues — à renseigner", "unit": "", "status": STATUS_MISSING},
         {"label": "Longueur / hauteur", "value": "inconnues — à renseigner", "unit": "", "status": STATUS_MISSING},
         {"label": "Plaque", "value": f"{board_width:g} × {board_height:g}", "unit": "m", "status": STATUS_ASSUMED},
-        {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
+        *([{"label": "Chute en plus", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED}] if waste else []),
     ]
     result.steps = [
         CalcStep("Surface totale à parementer", "surface × faces", {"surface": area_m2, "faces": sides}, total, "m²",
                  STATUS_CALCULATED if sides_known else STATUS_ESTIMATED),
-        CalcStep("Nombre de plaques", "⌈ surface totale × (1 + déchet) / surface plaque ⌉",
-                 {"totale": total, "dechet": waste, "plaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
+        CalcStep("Nombre de plaques", "⌈ surface totale" + (" × (1 + chute)" if waste else "") + " / surface plaque ⌉",
+                 {"totale": total, **({"chute": waste} if waste else {}), "plaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
         CalcStep("Montants et rails", "dépend de la longueur et de la hauteur", {}, "non calculable", "", STATUS_MISSING),
     ]
     result.quantities = [
-        QuantityLine(*board_sku(board_width, board_height), n_boards, "u", "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
+        QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
+                     f"⌈ {total:g} m²" + (f" × (1 + {waste:g})" if waste else "") + f" / {b_area:g} ⌉", STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u", f"S×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
     ]
     if include_finish:
@@ -623,7 +734,8 @@ def calculate_partition_from_area(
         ]
     result.assumptions = [
         f"Plaque standard BA13 {board_width:g} × {board_height:g} m = {b_area:.2f} m² (catalogue par défaut).",
-        f"Déchet {waste*100:.0f} % (paramètre par défaut).",
+        "Plaques : surface ÷ surface d'une plaque (sans plan de pose, faute de longueur et de hauteur)."
+        + (f" Chute en plus : {waste * 100:.0f} %." if waste else ""),
         "« Surface de cloison » = une face ; multipliée par le nombre de faces.",
     ]
     if not sides_known:
@@ -648,6 +760,7 @@ def calculate_partition_from_area(
         f"≈ {ceil_int(anchor_points(est_tracks, 2, fx['anchor_spacing_m']) / fx['anchors_per_pack'])} paquet(s) de chevilles à frapper, "
         f"≈ {ceil_int(est_studs * fx['screws9_per_stud'] / fx['screws9_per_pack'])} paquet(s) de vis 9 mm. "
         "À confirmer avec la longueur et la hauteur réelles.")
+    _add_margin(result, area_m2)
     return result
 
 
@@ -665,6 +778,7 @@ def calculate_ceiling(
     fixing_values: dict | None = None,
     zones: list[tuple[float, float]] | None = None,
     entraxe_cm: int | None = None,
+    margin: bool = True,
 ) -> CalcResult:
     """`entraxe_cm` : 50 par défaut (règle du patron) ; 60 seulement s'il le dit (fourrures tous les 60 cm, tiges toujours à 90 cm).
     `zones` : plusieurs pièces, ou un plafond en L découpé en rectangles (longueur, largeur). Ossature, tiges et cornière sont
@@ -675,8 +789,9 @@ def calculate_ceiling(
                            "largeur de plaque": board_width, "hauteur de plaque": board_height},
                  surface_m2=sum(a * b for a, b in zones), waste=waste, confirmed_large=confirmed_large)
     area = round_qty(sum(a * b for a, b in zones), 3)
-    b_area = board_area(board_width, board_height)
-    n_boards = boards_needed(area, waste, b_area)
+    laid = [ceiling_boards(a, b, entraxe_cm, board_width, board_height) for a, b in zones]   # plan de pose, zone par zone
+    b_full, b_pieces = sum(x["entieres"] for x in laid), sum(x["pour_morceaux"] for x in laid)
+    n_boards = ceil_int((b_full + b_pieces) * (1.0 + waste))
     f_sp, h_sp = grid(entraxe_cm)
     sp_txt, h_txt = f"{f_sp:.2f}".replace(".", ","), f"{round(h_sp * 100)} cm"
     fx = fixings(fixing_values)
@@ -702,6 +817,8 @@ def calculate_ceiling(
             **({"zones": [[a, b] for a, b in zones]} if multi else {"length_m": length_m, "width_m": width_m}),
             "waste": waste,
             "system": system,
+            "board_width": board_width,
+            "board_height": board_height,
             "fixings": fx,
             **({"entraxe_cm": entraxe_cm} if entraxe_cm not in (None, 50) else {}),
         },
@@ -714,15 +831,16 @@ def calculate_ceiling(
         {"label": "Largeur", "value": width_m, "unit": "m", "status": dims_status},
     ]) + [
         {"label": "Système", "value": system, "unit": "", "status": STATUS_ASSUMED},
-        {"label": "Déchet", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED},
+        *([{"label": "Chute en plus", "value": waste * 100, "unit": "%", "status": STATUS_ASSUMED}] if waste else []),
     ]
     each = "par zone, " if multi else ""
     result.steps = [
         CalcStep("Surface", "Σ longueur × largeur des zones" if multi else "longueur × largeur",
                  {"zones": sizes} if multi else {"longueur": length_m, "largeur": width_m}, area, "m²",
                  STATUS_CALCULATED if dims_known else STATUS_ESTIMATED),
-        CalcStep("Nombre de plaques", "⌈ S × (1+d) / Splaque ⌉",
-                 {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
+        CalcStep("Nombre de plaques", f"{each}plan de pose : plaques entières + morceaux comptés en plaques entières"
+                 + (" ; × (1 + chute)" if waste else ""),
+                 {"entieres": b_full, "pour_morceaux": b_pieces, **({"chute": waste} if waste else {})}, n_boards, "u", STATUS_ESTIMATED),
         CalcStep(f"Lignes de fourrure (entraxe {sp_txt} m)", f"{each}⌈ côté / {sp_txt} ⌉ + 1", {"entraxe": f_sp}, rows, "u",
                  STATUS_ESTIMATED),
         CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
@@ -731,7 +849,7 @@ def calculate_ceiling(
     ]
     result.quantities = [
         QuantityLine(*board_sku(board_width, board_height), n_boards, "u",
-                     "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
+                     f"{b_full} entières + {b_pieces} pour les morceaux" + (f", × (1 + {waste:g})" if waste else ""), STATUS_ESTIMATED),
         # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
         QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
                      f"sur chaque fourrure : 1re tige à 30 cm du mur, puis 1 tous les {h_txt}", STATUS_ESTIMATED),
@@ -760,7 +878,8 @@ def calculate_ceiling(
         ]
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
-        f"Déchet {waste*100:.0f} %.",
+        "Plaques comptées comme le patron : entières d'un mur à l'autre, seule la dernière coupée, chaque morceau compté en "
+        "plaques entières (plan de pose)." + (f" Chute en plus : {waste * 100:.0f} %." if waste else ""),
         (f"Méthode UniC : fourrures tous les {sp_txt} m ; tiges (tige + pivot + cheville à laiton) à 30 cm du mur puis tous les {h_txt} ; "
          + ("plaques de 2 m posées en travers des fourrures (50 × 4 = 2 m : chaque bout sur une fourrure)." if f_sp == 0.5 else
             "plaques posées dans le sens des fourrures : chaque plaque touche 3 fourrures, un bord, le milieu, l'autre bord "
@@ -778,8 +897,8 @@ def calculate_ceiling(
         "Prix UniC non renseignés.",
     ]
     if multi:
-        result.assumptions.insert(0, f"{len(zones)} zones ({sizes} m) : fourrures, tiges et cornière comptées zone par zone ; "
-                                     "plaques et paquets sur le total. Zones qui se touchent (plafond en L) : la cornière du côté "
+        result.assumptions.insert(0, f"{len(zones)} zones ({sizes} m) : fourrures, tiges, cornière et plaques comptées zone "
+                                     "par zone ; paquets et marge sur le total. Zones qui se touchent (plafond en L) : la cornière du côté "
                                      "commun est comptée en trop.")
     if not dims_known:
         result.assumptions.insert(0, ("Zone(s) dont seule la surface est connue, supposée(s) carrée(s)" if multi else
@@ -787,6 +906,7 @@ def calculate_ceiling(
                                   + " faute de longueur et largeur : fourrures et tiges sont approximatives. "
                                     "Donne les deux côtés pour un calcul exact.")
         result.missing.insert(0, "Longueur et largeur réelles du plafond (seule la surface est connue).")
+    _add_margin(result, area, margin)
     return result
 
 
@@ -1685,6 +1805,33 @@ def _min_count(need: Fraction, unit: Fraction) -> int:
     return int(n if n * unit >= need else n + 1)
 
 
+def _marge(inp: dict, surface: Fraction) -> int:
+    """Marge du patron recomptée en fractions exactes : 10 pièces si plus de 100 m², 5 de 50 à 100, 3 en dessous ; 0 quand
+    l'appelant l'ajoute lui-même sur le total (devis depuis un plan)."""
+    if inp.get("marge") == 0:
+        return 0
+    return 3 if surface < 50 else 5 if surface <= 100 else 10
+
+
+def _boards_bounds(sizes: list[tuple[Fraction, Fraction]], faces: int, bw: Fraction, bh: Fraction, net: Fraction,
+                   waste: Fraction) -> tuple[int, int]:
+    """Bornes indépendantes du compte des plaques : au moins ⌈ surface / plaque ⌉ ; au plus, chaque morceau pris dans une
+    plaque neuve (aucune chute réutilisée), dans le sens de pose le moins favorable."""
+    pw, ph = int(min(bw, bh) * 100), int(max(bw, bh) * 100)
+
+    def no_reuse(l2: int, l12: int) -> int:
+        n2, r2 = divmod(l2, ph)
+        n12, r12 = divmod(l12, pw)
+        return n2 * n12 + sum(_min_count(Fraction(n), Fraction((ph // a) * (pw // b)))
+                              for a, b, n in ((r2, pw, n12), (ph, r12, n2), (r2, r12, 1)) if a and b and n)
+    hi = 0
+    for x, y in sizes:
+        xc, yc = int(round(x * 100)), int(round(y * 100))
+        hi += faces * max(no_reuse(xc, yc), no_reuse(yc, xc))
+    lo = _min_count(net, bw * bh)
+    return _min_count(lo * (1 + waste), Fraction(1)), _min_count(hi * (1 + waste), Fraction(1))
+
+
 def verify(result: "CalcResult") -> dict[str, Any]:
     problems: list[str] = []
     for q in result.quantities:
@@ -1706,10 +1853,12 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Surface brute : moteur {step.get('Surface brute')} ≠ contrôle {float(gross):g} m².")
             if abs(_F(step.get("Surface nette", -1)) - net) > Fraction(1, 1000):
                 problems.append(f"Surface nette : moteur {step.get('Surface nette')} ≠ contrôle {float(net):g} m².")
+            m = _marge(inp, gross / sides)   # marge sur la surface d'une face
             sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
-            boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
-            if qty.get(sku) != boards:
-                problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
+            lo, hi = _boards_bounds(walls, sides, _F(inp["board_width"]), _F(inp["board_height"]), _F(round_qty(float(net), 3)),
+                                    _F(inp["waste"]))
+            if not (isinstance(qty.get(sku), int) and lo + m <= qty[sku] <= hi + m):
+                problems.append(f"Plaques : moteur {qty.get(sku)} hors du contrôle ({lo + m} à {hi + m}).")
             bw, bh, e = _F(inp["board_width"]), _F(inp["board_height"]), _F(inp["stud_spacing"])
             along = next((side for side in (bw, bh) if side / e >= 1 and (side / e).denominator == 1), None)
             bar = _F(BAR_LENGTH_M)
@@ -1724,10 +1873,12 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 pts += _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
                 n += n_w
             studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
+            studs += m
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * sum((L for L, _ in walls), Fraction(0)), _F(BAR_LENGTH_M))
             bars += _min_count(Fraction(joints), Fraction(int(bar // _F(ECLISSE_M)))) if joints else 0   # éclisses de 40 cm
+            bars += m
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
             packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
@@ -1741,6 +1892,7 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             net = _F(inp["area_m2"]) * int(inp["sides"])
             sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
             boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
+            boards += _marge(inp, _F(inp["area_m2"]))
             if qty.get(sku) != boards:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
             if "MONTANT-M48" in qty or "UC-RAILS-48-MM" in qty:
@@ -1759,8 +1911,16 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             area = sum((a * b for a, b in zones), Fraction(0))
             if abs(_F(step.get("Surface", -1)) - area) > Fraction(1, 1000):
                 problems.append(f"Surface : moteur {step.get('Surface')} ≠ contrôle {float(area):g} m².")
+            m = _marge(inp, area)
+            if "board_width" in inp:   # plaques du plafond (la 1re ligne : un décor ajoute ses retombées à part)
+                bw, bh = _F(inp["board_width"]), _F(inp["board_height"])
+                sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
+                got = next((q.quantity for q in result.quantities if q.sku == sku), None)
+                lo, hi = _boards_bounds(zones, 1, bw, bh, area, _F(inp["waste"]))
+                if not (isinstance(got, int) and lo + m <= got <= hi + m):
+                    problems.append(f"Plaques : moteur {got} hors du contrôle ({lo + m} à {hi + m}).")
             pers = [2 * (a + b) for a, b in zones]   # cornière de rive : chaque zone a ses 4 côtés
-            rive = _min_count(sum(pers, Fraction(0)), _F(BAR_LENGTH_M))
+            rive = _min_count(sum(pers, Fraction(0)), _F(BAR_LENGTH_M)) + m
             if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
                 problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
             fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}

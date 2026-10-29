@@ -29,9 +29,11 @@ def _match(name: str, wanted: list[str]) -> bool:
 
 def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm: bool = False,
           hydrofuge_rooms: list[str] | None = None, partitions: list[dict] | None = None,
-          waste: float = 0.08, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
+          waste: float = 0.0, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
           fixings: dict | None = None) -> dict:
-    """Métré (format de CalcResult.to_dict) à partir de l'analyse du plan."""
+    """Métré (format de CalcResult.to_dict) à partir de l'analyse du plan. Chaque pièce est comptée juste (plaques au plan de
+    pose) ; la marge du patron (en pièces) est ajoutée UNE fois par article, selon la surface que l'article couvre sur tout le
+    plan (fourrures et cornières : les plafonds ; montants et rails : les cloisons ; plaques hydrofuges : les pièces humides)."""
     pieces = analysis.get("pieces") or []
     if not pieces and not partitions:
         raise PlanQuoteError("Aucune pièce lue sur ce plan : relis le plan (read_plan) ou donne les dimensions.")
@@ -52,6 +54,8 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     steps, assumptions, missing = [], [], []
     others: dict[str, dict] = {}
     area_by_type = {"": 0.0, "-H": 0.0}
+    boards_by_type = {"": 0, "-H": 0}   # plaques au plan de pose, pièce par pièce
+    partition_m2 = 0.0
     fx = calc.fixings(fixings)
     # articles vendus au paquet : les pièces de TOUTES les pièces du plan sont additionnées, puis arrondies au paquet une seule
     # fois (sinon 5 pièces à 30 chevilles = 5 paquets au lieu de 2)
@@ -83,7 +87,9 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             assumptions.append(f"{p['nom']} : dimensions non cotées, ossature estimée sur un carré de {area:g} m².")
         suffix = "-H" if _match(p["nom"], hydro) else ""
         area_by_type[suffix] += area
-        res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length, fixing_values=fixings)
+        res = calc.calculate_ceiling(L, l, waste=waste, board_width=board_width, board_height=board_length, fixing_values=fixings,
+                                     margin=False)
+        boards_by_type[suffix] += int(next(q.quantity for q in res.quantities if q.sku.startswith("BA13-")))
         hangers = step_result(res, "Points d'accroche")
         count("UC-PIVOT", hangers)
         count("UC-CHEVILLES-A-LETON", hangers)
@@ -102,11 +108,12 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         sku, name = calc.board_sku(board_width, board_length, suffix)
         if suffix:
             name = name.replace("BA13", "BA13 hydrofuge")
-        n = calc.boards_needed(total, waste, calc.board_area(board_width, board_length))
-        boards.append(asdict(calc.QuantityLine(sku, name, n, "u", f"⌈{total:g} × (1+{waste:g}) / {board_width * board_length:g}⌉",
+        n = boards_by_type[suffix]
+        boards.append(asdict(calc.QuantityLine(sku, name, n, "u", f"plan de pose, pièce par pièce ({total:g} m²)".replace(".", ","),
                                                calc.STATUS_ESTIMATED)))
-        steps.append(calc.CalcStep("Plaques " + ("hydrofuges" if suffix else "standard"), "⌈ S × (1+d) / Splaque ⌉",
-                                   {"S": round(total, 2), "d": waste}, n, "u", calc.STATUS_ESTIMATED))
+        steps.append(calc.CalcStep("Plaques " + ("hydrofuges" if suffix else "standard"),
+                                   "Σ plan de pose des pièces : entières + morceaux comptés en plaques entières",
+                                   {"S": round(total, 2)}, n, "u", calc.STATUS_ESTIMATED))
 
     for c in partitions or []:
         length, height = float(c.get("length_m") or 0), float(c.get("height_m") or 0)
@@ -114,7 +121,8 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             raise PlanQuoteError("Cloison : longueur et hauteur requises (la hauteur n'est pas sur le plan, demande-la).")
         sides = int(c.get("sides") or 2)
         res = calc.calculate_partition(length, height, sides, [], waste=waste, board_width=board_width,
-                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings)
+                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings, margin=False)
+        partition_m2 += length * height
         count("UC-PAQUET-CHEVILLES-A-FRAPPER", calc.anchor_points(2 * length, 2, fx["anchor_spacing_m"]))
         count("UC-VIS-9-MM", step_result(res, "Nombre de montants") * fx["screws9_per_stud"])
         for q in res.quantities:
@@ -134,10 +142,26 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         same = next((b for b in quantities if b["sku"] == sku), None)
         if same:
             same["quantity"] += q["quantity"]
+            same["formula"] += f" + cloisons ({q['quantity']:g})"
         else:
             quantities.append(q)
     if not quantities:
         raise PlanQuoteError("Rien à chiffrer : aucune pièce avec surface ni cloison retenue.")
+    # marge du patron : une fois par article, sur la surface qu'il couvre dans tout le plan (une face pour les cloisons)
+    ceiling_m2 = round(sum(area_by_type.values()), 2)
+    covered = {"UC-BARRE-DE-FOURRURE-2-90-M": ceiling_m2, "UC-CORNIERES": ceiling_m2, "MONTANT-M48": round(partition_m2, 2),
+               "UC-RAILS-48-MM": round(partition_m2, 2)}
+    marges = {}
+    for q in quantities:
+        if calc.takes_margin(q["sku"]):
+            surface = covered.get(q["sku"]) or round(area_by_type["-H"] if q["sku"].endswith("-H")
+                                                     else area_by_type[""] + partition_m2, 2)
+            q["quantity"] += calc.margin_pieces(surface)
+            q["formula"] += calc.margin_formula(surface)
+            marges[q["name"]] = calc.margin_pieces(surface)
+    steps.append(calc.CalcStep("Marge du patron", calc.MARGIN_RULE + " (surface couverte par chaque article)",
+                               {"plafonds_m2": ceiling_m2, "cloisons_m2": round(partition_m2, 2)},
+                               " ; ".join(f"{name} + {m}" for name, m in marges.items()), "pièces", calc.STATUS_CONFIRMED))
 
     check = analysis.get("controle_emprise") or {}
     if check.get("note"):
@@ -149,7 +173,10 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         "understanding": f"{len([s for s in steps if s.label.startswith('Plafond')])} pièce(s) en faux plafond, "
                          f"{total_ceiling:g} m²" + (f", {len(partitions or [])} cloison(s)" if partitions else "") + ".",
         "steps": [asdict(s) for s in steps], "quantities": quantities,
-        "assumptions": assumptions + [f"Déchet {waste * 100:.0f} %. Plaques {board_width:g} × {board_length:g} m."],
+        "assumptions": assumptions + [f"Plaques {board_width:g} × {board_length:g} m comptées au plan de pose, pièce par pièce"
+                                      + (f", + {waste * 100:.0f} % de chute" if waste else "")
+                                      + f". Marge du patron sur les plaques et chaque barre de {calc.BAR_TXT} m ({calc.MARGIN_RULE}, "
+                                      "selon la surface couverte par l'article) ; pivots, chevilles et vis au compte exact, en paquets."],
         "missing": missing, "notes": [], "data_used": [], "inputs": {"surface_plafond_m2": total_ceiling},
         "next_step": "Prêt pour le devis.",
     }

@@ -10,7 +10,8 @@ poser les plaques. Règles du patron (Sénégal) :
 
 Mêmes nombres que le devis (calc.ceiling_run / ceiling_layout). Plaques comptées comme le patron : entières dans chaque sens
 (3 × 3 = 9), puis chaque taille de morceau convertie en plaques ENTIÈRES (aucune fourniture ne vend de morceaux : 47 × 120 cm,
-une plaque de 2 m en donne 4) ; les morceaux en trop d'une plaque entamée servent aux plus petits. Total comparé au devis.
+une plaque de 2 m en donne 4) ; les morceaux en trop d'une plaque entamée servent aux plus petits. Le devis prend ce compte exact
++ la marge du patron en pièces (calc.margin_pieces).
 Dessin : fourrures verticales (bleu), tiges en points rouges, cornière de rive en orange, plaques en vert (coupées en vert pâle,
 cote de coupe en cm).
 """
@@ -43,38 +44,18 @@ def _cuts(total: int, step: int) -> list[int]:
     return list(range(0, total, step)) + [total]
 
 
-def _decoupe(groups: list[tuple[int, int, int]], pw: int, ph: int) -> list[dict]:
-    """Méthode du patron : aucune fourniture ne vend de morceaux, chaque morceau se compte en plaques ENTIÈRES.
-    `groups` = (longueur dans le sens des 2 m, largeur dans le sens des 1,20 m, nombre) en cm. Pour chaque taille : combien de
-    morceaux une plaque donne (47 × 120 dans une plaque de 2 m : 4), donc combien de plaques. Les morceaux d'une plaque déjà
-    entamée qui restent (chutes de même taille) servent d'abord aux morceaux plus petits. Sens de la plaque gardé."""
-    spares: list[list[int]] = []   # [longueur, largeur, nombre] : morceaux taillés en trop, réutilisables
-    out = []
-    for ln, wd, n in sorted(groups, key=lambda g: g[0] * g[1], reverse=True):
-        need, from_spares = n, 0
-        for sp in spares:
-            per = (sp[0] // ln) * (sp[1] // wd)
-            if need and sp[2] and per:
-                use = min(sp[2], -(-need // per))
-                got = min(need, use * per)
-                sp[2] -= use
-                need -= got
-                from_spares += got
-        per_board = (ph // ln) * (pw // wd)
-        boards = -(-need // per_board) if need else 0
-        if boards * per_board > need:
-            spares.append([ln, wd, boards * per_board - need])
-        out.append({"morceau": f"{ln} × {wd} cm", "nombre": n, "par_plaque": per_board, "plaques": boards,
-                    "pris_dans_les_chutes": from_spares})
-    return out
-
-
 def _decoupe_txt(d: dict) -> str:
     txt = f"{d['nombre']} morceau{'x' if d['nombre'] > 1 else ''} de {d['morceau']}"
     if d["pris_dans_les_chutes"] == d["nombre"]:
         return f"{txt} : pris dans les chutes → 0 plaque"
     chutes = f" ({d['pris_dans_les_chutes']} pris dans les chutes)" if d["pris_dans_les_chutes"] else ""
     return f"{txt}{chutes} : une plaque en donne {d['par_plaque']} → {d['plaques']} plaque{'s' if d['plaques'] > 1 else ''}"
+
+
+def _achat(marge: int, surface_m2: float, lines: list[tuple[str, int]]) -> str:
+    """Consigne d'achat : le plan donne le compte exact, le devis ajoute la marge du patron (en pièces, par article)."""
+    head = f"À acheter (devis : + {marge} pièces de marge par article, surface {_fmt(surface_m2)} m²)" if marge else "À acheter (devis)"
+    return f"{head} : " + ", ".join(f"{n} {name}" for name, n in lines) + "."
 
 
 def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS["board_width_m"],
@@ -93,14 +74,13 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     run_cm, across_cm = round(run * 100), round(across * 100)
     sp_cm, h_cm = round(spacing * 100), round(step * 100)
     first_cm = round(calc.HANGER_FIRST_M * 100)
-    pw, ph = round(min(board_width, board_height) * 100), round(max(board_width, board_height) * 100)
+    cb = calc.ceiling_boards(length_m, width_m, entraxe_cm, board_width, board_height)   # même compte que le devis
+    pw, ph, parallel, l2, l12 = cb["pw"], cb["ph"], cb["parallel"], cb["l2"], cb["l12"]
     lines = [k * sp_cm for k in range(rows - 1)] + [across_cm]   # fourrures : la première et la dernière contre le mur
     ties = [round(p * 100) for p in calc.hanger_positions(run, step)]
 
     # trame 50 : plaque EN TRAVERS (2 m sur `across`, 50 × 4 = 2 m) ; trame 60 : plaque DANS LE SENS des fourrures (1,20 m sur
     # `across`, 60 × 2 = 1,20 m). Les plaques partent d'un mur, seule la dernière de chaque rangée est coupée.
-    parallel = sp_cm != 50 and pw % sp_cm == 0
-    l2, l12 = (run_cm, across_cm) if parallel else (across_cm, run_cm)   # côté qui reçoit les 2 m, côté qui reçoit les 1,20 m
     s_run, s_across = (ph, pw) if parallel else (pw, ph)
     along, cross = _cuts(run_cm, s_run), _cuts(across_cm, s_across)
     tiles = []
@@ -109,15 +89,14 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
             ln, wd = (a1 - a, b1 - b) if parallel else (b1 - b, a1 - a)   # morceau : longueur (sens des 2 m) × largeur
             tiles.append((a, b, a1 - a, b1 - b, ln == ph and wd == pw, f"{ln}×{wd}"))
     # plaques entières : combien dans chaque sens (comme le patron compte), puis les morceaux convertis en plaques entières
-    n2, r2 = divmod(l2, ph)     # sens des 2 m : plaques entières + morceau au dernier mur
-    n12, r12 = divmod(l12, pw)  # sens des 1,20 m : rangées entières + rangée coupée au dernier mur
-    full = n2 * n12
-    groups = [g for g in ((r2, pw, n12), (ph, r12, n2), (r2, r12, 1)) if g[0] and g[1] and g[2]]
-    decoupe = _decoupe(groups, pw, ph)
+    # (sens des 2 m : plaques entières + morceau au dernier mur ; sens des 1,20 m : rangées entières + rangée coupée)
+    n2, r2, n12, r12, full = cb["n2"], cb["r2"], cb["n12"], cb["r12"], cb["entieres"]
+    decoupe, for_pieces, used = cb["decoupe"], cb["pour_morceaux"], cb["plaques"]
     pieces = sum(d["nombre"] for d in decoupe)
-    for_pieces = sum(d["plaques"] for d in decoupe)
-    used = full + for_pieces
-    quote = calc.boards_needed(round(length_m * width_m, 3), waste, board_width * board_height)
+    devis = calc.calculate_ceiling(length_m, width_m, waste=waste, board_width=board_width, board_height=board_height,
+                                   entraxe_cm=entraxe_cm)
+    quote = next(q.quantity for q in devis.quantities if q.sku.startswith("BA13-"))
+    marge = devis.inputs["marge"]
     bar = calc.BAR_TXT
     furring_bars = calc.ceil_int(furring_ml / calc.BAR_LENGTH_M)
     perimeter = round(2 * (run + across), 2)
@@ -133,7 +112,7 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
         "piece": [run, across], "entraxe_cm": sp_cm, "fourrures": rows, "fourrures_sens": f"dans le sens des {_fmt(run)} m", "fourrure_ml": furring_ml,
         "barres_fourrure": furring_bars, "tiges": hangers, "tiges_par_fourrure": len(ties), "cornieres": angle_bars,
         "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "morceaux_coupes": pieces,
-        "decoupe": decoupe, "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote,
+        "decoupe": decoupe, "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote, "marge": marge,
         "consignes": [
             f"Fourrures dans le sens des {_fmt(run)} m : une tous les {sp_cm} cm, la première et la dernière contre le mur. "
             f"{rows} fourrures = {_fmt(furring_ml)} ml = {furring_bars} barres de {bar} m.",
@@ -145,8 +124,10 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
             f"{n12} rangée{'s' if n12 > 1 else ''} de {_len(pw / 100)} m" + (f" + une rangée de {r12} cm" if r12 else "")
             + f" ; {n2} × {n12} = {full} plaque{'s' if full > 1 else ''} entière{'s' if full > 1 else ''}.",
             "Morceaux (comptés en plaques entières) : " + (" ; ".join(_decoupe_txt(d) for d in decoupe) if decoupe else "aucun") + ".",
-            f"Total à acheter : {full} entières + {for_pieces} pour les morceaux = {used} plaques (devis : {quote}).",
+            f"Plaques posées : {full} entières + {for_pieces} pour les morceaux = {used} plaques.",
             f"Cornières : périmètre {_fmt(perimeter)} ml = {angle_bars} barres de {bar} m.",
+            _achat(marge, length_m * width_m, [("plaques", quote), ("barres de fourrure", furring_bars + marge),
+                                               ("cornières", angle_bars + marge)]),
         ],
     }
     if used > quote:
@@ -156,7 +137,7 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
         f"Fourrures tous les {sp_cm} cm · tiges : {first_cm} cm du mur puis tous les {h_cm} cm · plaques "
         + ("dans le sens des fourrures" if parallel else "en travers"),
         f"{rows} fourrures ({furring_bars} barres de {bar} m) · {hangers} tiges · {angle_bars} cornières de {bar} m",
-        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} plaques à acheter (devis : {quote})",
+        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} posées · à acheter : {quote} (marge comprise)",
         "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → " + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} "
                                                                            f"({d['par_plaque']} par plaque)" if d["plaques"] else "chutes")
                                     for d in decoupe) if decoupe else "aucun")])
@@ -246,9 +227,9 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     sides = 2 if sides not in (1, 2) else sides
     s = entraxe_cm / 100
     L_cm, H_cm = round(length_m * 100), round(height_m * 100)
-    pw, ph = round(min(board_width, board_height) * 100), round(max(board_width, board_height) * 100)
+    wb = calc.wall_boards(length_m, height_m, s, board_width, board_height, sides)   # même compte que le devis
+    pw, ph, debout = wb["pw"], wb["ph"], wb["debout"]
     along = calc.board_along(s, min(board_width, board_height), max(board_width, board_height))
-    debout = along is None or round(along * 100) == pw
     along_cm = round(along * 100) if along else None
     grid = [k * entraxe_cm for k in range(calc.ceil_int(length_m / s))] + [L_cm]   # premier et dernier contre le mur
     joints = [k * along_cm for k in range(1, calc.ceil_int(length_m / along))] if along else []
@@ -262,21 +243,16 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
         for y, y1 in zip(ys, ys[1:]):
             ln, wd = (y1 - y, x1 - x) if debout else (x1 - x, y1 - y)   # morceau : longueur (sens des 2 m) × largeur
             tiles.append((x, y, x1 - x, y1 - y, ln == ph and wd == pw, f"{ln}×{wd}"))
-    l2, l12 = (H_cm, L_cm) if debout else (L_cm, H_cm)
-    n2, r2 = divmod(l2, ph)
-    n12, r12 = divmod(l12, pw)
+    l2, l12, n2, r2, n12, r12 = wb["l2"], wb["l12"], wb["n2"], wb["r2"], wb["n12"], wb["r12"]
     full_face = n2 * n12
-    groups = [(a, b, n * sides) for a, b, n in ((r2, pw, n12), (ph, r12, n2), (r2, r12, 1)) if a and b and n]
-    decoupe = _decoupe(groups, pw, ph)
-    full = full_face * sides
-    for_pieces = sum(d["plaques"] for d in decoupe)
-    used = full + for_pieces
+    decoupe, full, for_pieces, used = wb["decoupe"], wb["entieres"], wb["pour_morceaux"], wb["plaques"]
     res = calc.calculate_partition(length_m, height_m, sides, waste=waste, board_width=min(board_width, board_height),
                                    board_height=max(board_width, board_height), stud_spacing=s)
     qty = {q.sku: q.quantity for q in res.quantities}
+    marge = res.inputs["marge"]   # le plan donne le compte exact ; le devis ajoute la marge du patron
     quote = qty.get(calc.board_sku(min(board_width, board_height), max(board_width, board_height))[0], 0)
-    rails = qty.get("UC-RAILS-48-MM", 0)
-    bars = qty.get("MONTANT-M48", n_studs)
+    rails = qty.get("UC-RAILS-48-MM", marge) - marge
+    bars = qty.get("MONTANT-M48", n_studs + marge) - marge
     bar = calc.BAR_TXT
     faces = f"{sides} face{'s' if sides > 1 else ''}"
     # montant plus haut qu'une barre : rallonges taillées dans des barres, chaque raccord tenu par un morceau de rail de 40 cm
@@ -304,7 +280,7 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
         "montants": n_studs, "jonctions_doublees": len(joints), "barres_montant": bars, "barres_rail": rails,
         "rallonges": n_studs if rest else 0, "rallonge_cm": round(rest * 100), "raccords": splices, "barres_eclisses": ecl_bars,
         "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "decoupe": decoupe,
-        "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote,
+        "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote, "marge": marge,
         "consignes": [
             f"Montants : un tous les {entraxe_cm} cm, le premier et le dernier contre le mur ; 2 côte à côte à chaque jonction "
             f"de plaques ({len(joints)} jonction{'s' if len(joints) > 1 else ''}). {len(grid)} + {len(joints)} = {n_studs} montants"
@@ -321,7 +297,9 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
                f"l'autre côté des montants reste nu)."),
             f"Morceaux ({faces}, comptés en plaques entières) : "
             + (" ; ".join(_decoupe_txt(d) for d in decoupe) if decoupe else "aucun") + ".",
-            f"Total à acheter : {full} entières + {for_pieces} pour les morceaux = {used} plaques (devis : {quote}).",
+            f"Plaques posées : {full} entières + {for_pieces} pour les morceaux = {used} plaques.",
+            _achat(marge, length_m * height_m, [("plaques", quote), ("barres de montant", bars + marge),
+                                                ("barres de rail", rails + marge)]),
         ],
     }
     if used > quote:
@@ -332,7 +310,7 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
         f"Montants tous les {entraxe_cm} cm · 2 montants à chaque jonction · plaques {'debout' if debout else 'couchées'}",
         f"{n_studs} montants ({bars} barres de {bar} m) · rails : {rails} barres de {bar} m"
         + (f" · {splices} raccords (éclisses de 40 cm)" if splices else ""),
-        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} plaques à acheter (devis : {quote})",
+        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} posées · à acheter : {quote} (marge comprise)",
         "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → "
                                     + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} ({d['par_plaque']} par plaque)"
                                        if d["plaques"] else "chutes") for d in decoupe) if decoupe else "aucun")])

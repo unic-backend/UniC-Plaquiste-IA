@@ -1,7 +1,8 @@
 """Plusieurs pièces, plusieurs cloisons, cotes en centimètres : « salon 5x4 et chambre 4x3 », « 2 cloisons de 3 x 2,5 »,
 « plafond en L 4x3 plus 2x2 » ne comptaient que la PREMIÈRE mesure (devis à moitié vide) ; « 400 x 350 cm » donnait 400 m ;
 « cloison de 20 m2 » devenait 20 m × 2 m ; « 2 portes » servait de hauteur. Chaque pièce compte maintenant, l'ossature est
-calculée pièce par pièce, plaques et paquets sur le total, et le contrôle indépendant refait tout le calcul."""
+calculée pièce par pièce (plaques au plan de pose), paquets et marge du patron sur le total, et le contrôle indépendant refait
+tout le calcul."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,7 +36,9 @@ def test_chaque_piece_du_plafond_compte(text, zones):
     q = _q(r)
     assert q["UC-TIGES-A-L-UNITE"] == sum(_q(s)["UC-TIGES-A-L-UNITE"] for s in singles)
     assert q["UC-PIVOT"] == calc.ceil_int(q["UC-TIGES-A-L-UNITE"] / 100)                       # paquets sur le total, pas par pièce
-    assert q["BA13-2000x1200"] == calc.boards_needed(sum(a * b for a, b in zones), 0.08, 2.4)    # plaques sur la surface totale
+    # plaques au plan de pose de chaque pièce ; la marge du patron une seule fois, sur la surface totale
+    assert q["BA13-2000x1200"] == (sum(calc.ceiling_boards(a, b)["plaques"] for a, b in zones)
+                                   + calc.margin_pieces(sum(a * b for a, b in zones)))
 
 
 def test_plafond_en_l_signale_la_corniere_du_cote_commun():
@@ -58,7 +61,7 @@ def test_chaque_cloison_compte(text, walls):
     assert r.to_dict()["verification"]["ok"]
     singles = [calc.calculate_partition(w, h) for w, h in walls]
     assert _step(r, "Nombre de montants") == sum(_step(s, "Nombre de montants") for s in singles)   # montants d'about de chaque cloison
-    assert _q(r)["MONTANT-M48"] == sum(_q(s)["MONTANT-M48"] for s in singles)
+    assert _q(r)["MONTANT-M48"] == sum(_q(s)["MONTANT-M48"] - s.inputs["marge"] for s in singles) + r.inputs["marge"]   # marge 1 fois
     assert _step(r, "Surface brute") == pytest.approx(sum(w * h * 2 for w, h in walls))
 
 

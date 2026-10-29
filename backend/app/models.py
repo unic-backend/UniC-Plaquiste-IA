@@ -60,7 +60,7 @@ class CompanySettings(Base):
     # paiement mobile : numéro Wave et lien de paiement Wave du patron, imprimés sur les factures et les relances (QR du lien)
     wave_number: Mapped[str] = mapped_column(String(64), default="")
     wave_link: Mapped[str] = mapped_column(String(255), default="")
-    default_waste: Mapped[float] = mapped_column(Float, default=0.08)
+    default_waste: Mapped[float] = mapped_column(Float, default=0.0)   # chute en % ; 0 = marge du patron en pièces (calc)
     default_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     board_width_m: Mapped[float] = mapped_column(Float, default=1.20)
     board_height_m: Mapped[float] = mapped_column(Float, default=2.00)
