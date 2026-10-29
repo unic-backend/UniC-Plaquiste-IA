@@ -8,8 +8,9 @@ poser les plaques. Règles du patron (Sénégal) :
 - plaques entières posées d'un mur jusqu'à l'autre : seule la dernière de chaque rangée est coupée (6,47 m = 3 plaques de 2 m
   + un morceau de 47 cm).
 
-Mêmes nombres que le devis (calc.ceiling_run / ceiling_layout). Les morceaux coupés sont pris dans le moins de plaques possible
-(les chutes servent, sens de la plaque gardé) : le plan dit combien de plaques il consomme, à comparer au devis.
+Mêmes nombres que le devis (calc.ceiling_run / ceiling_layout). Plaques comptées comme le patron : entières dans chaque sens
+(3 × 3 = 9), puis chaque taille de morceau convertie en plaques ENTIÈRES (aucune fourniture ne vend de morceaux : 47 × 120 cm,
+une plaque de 2 m en donne 4) ; les morceaux en trop d'une plaque entamée servent aux plus petits. Total comparé au devis.
 Dessin : fourrures verticales (bleu), tiges en points rouges, cornière de rive en orange, plaques en vert (coupées en vert pâle,
 cote de coupe en cm).
 """
@@ -40,20 +41,38 @@ def _cuts(total: int, step: int) -> list[int]:
     return list(range(0, total, step)) + [total]
 
 
-def _pack(pieces: list[tuple[int, int]], pw: int, ph: int) -> int:
-    """Plaques entamées pour couper `pieces` (largeur, longueur en cm, sens gardé) : premier emplacement libre, coupe en
-    guillotine (bande à côté, bande au bout). Approche simple et prudente : jamais moins de plaques qu'il n'en faut."""
-    free: list[tuple[int, int]] = []
-    boards = 0
-    for w, h in sorted(pieces, key=lambda p: (p[1] * p[0], p[1]), reverse=True):
-        spot = next((i for i, (fw, fh) in enumerate(free) if w <= fw and h <= fh), None)
-        if spot is None:
-            boards += 1
-            fw, fh = pw, ph
-        else:
-            fw, fh = free.pop(spot)
-        free += [r for r in ((fw - w, fh), (w, fh - h)) if r[0] > 0 and r[1] > 0]
-    return boards
+def _decoupe(groups: list[tuple[int, int, int]], pw: int, ph: int) -> list[dict]:
+    """Méthode du patron : aucune fourniture ne vend de morceaux, chaque morceau se compte en plaques ENTIÈRES.
+    `groups` = (longueur dans le sens des 2 m, largeur dans le sens des 1,20 m, nombre) en cm. Pour chaque taille : combien de
+    morceaux une plaque donne (47 × 120 dans une plaque de 2 m : 4), donc combien de plaques. Les morceaux d'une plaque déjà
+    entamée qui restent (chutes de même taille) servent d'abord aux morceaux plus petits. Sens de la plaque gardé."""
+    spares: list[list[int]] = []   # [longueur, largeur, nombre] : morceaux taillés en trop, réutilisables
+    out = []
+    for ln, wd, n in sorted(groups, key=lambda g: g[0] * g[1], reverse=True):
+        need, from_spares = n, 0
+        for sp in spares:
+            per = (sp[0] // ln) * (sp[1] // wd)
+            if need and sp[2] and per:
+                use = min(sp[2], -(-need // per))
+                got = min(need, use * per)
+                sp[2] -= use
+                need -= got
+                from_spares += got
+        per_board = (ph // ln) * (pw // wd)
+        boards = -(-need // per_board) if need else 0
+        if boards * per_board > need:
+            spares.append([ln, wd, boards * per_board - need])
+        out.append({"morceau": f"{ln} × {wd} cm", "nombre": n, "par_plaque": per_board, "plaques": boards,
+                    "pris_dans_les_chutes": from_spares})
+    return out
+
+
+def _decoupe_txt(d: dict) -> str:
+    txt = f"{d['nombre']} morceau{'x' if d['nombre'] > 1 else ''} de {d['morceau']}"
+    if d["pris_dans_les_chutes"] == d["nombre"]:
+        return f"{txt} : pris dans les chutes → 0 plaque"
+    chutes = f" ({d['pris_dans_les_chutes']} pris dans les chutes)" if d["pris_dans_les_chutes"] else ""
+    return f"{txt}{chutes} : une plaque en donne {d['par_plaque']} → {d['plaques']} plaque{'s' if d['plaques'] > 1 else ''}"
 
 
 def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS["board_width_m"],
@@ -77,9 +96,15 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     along, cross = _cuts(run_cm, pw), _cuts(across_cm, ph)
     tiles = [(a, b, a1 - a, b1 - b, a1 - a == pw and b1 - b == ph)
              for a, a1 in zip(along, along[1:]) for b, b1 in zip(cross, cross[1:])]
-    full = sum(1 for t in tiles if t[4])
-    cut = [(w, h) for _, _, w, h, whole in tiles if not whole]
-    used = full + _pack(cut, pw, ph)
+    # plaques entières : combien dans chaque sens (comme le patron compte), puis les morceaux convertis en plaques entières
+    n_cross, r_cross = divmod(across_cm, ph)   # sens des 2 m : plaques entières + morceau au dernier mur
+    n_along, r_along = divmod(run_cm, pw)      # sens des 1,20 m : rangées entières + rangée coupée au dernier mur
+    full = n_cross * n_along
+    groups = [g for g in ((r_cross, pw, n_along), (ph, r_along, n_cross), (r_cross, r_along, 1)) if g[0] and g[1] and g[2]]
+    decoupe = _decoupe(groups, pw, ph)
+    pieces = sum(d["nombre"] for d in decoupe)
+    for_pieces = sum(d["plaques"] for d in decoupe)
+    used = full + for_pieces
     quote = calc.boards_needed(round(length_m * width_m, 3), waste, board_width * board_height)
     bar = calc.BAR_TXT
     furring_bars = calc.ceil_int(furring_ml / calc.BAR_LENGTH_M)
@@ -90,8 +115,8 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     out = {
         "piece": [run, across], "fourrures": rows, "fourrures_sens": f"dans le sens des {_fmt(run)} m", "fourrure_ml": furring_ml,
         "barres_fourrure": furring_bars, "tiges": hangers, "tiges_par_fourrure": len(ties), "cornieres": angle_bars,
-        "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "morceaux_coupes": len(cut),
-        "plaques_utilisees": used, "plaques_devis": quote,
+        "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "morceaux_coupes": pieces,
+        "decoupe": decoupe, "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote,
         "consignes": [
             f"Fourrures dans le sens des {_fmt(run)} m : une tous les {sp_cm} cm, la première et la dernière contre le mur. "
             f"{rows} fourrures = {_fmt(furring_ml)} ml = {furring_bars} barres de {bar} m.",
@@ -99,7 +124,12 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
             f"{len(ties)} par fourrure = {hangers} tiges.",
             f"Plaques de {_len(ph / 100)} m en travers des fourrures {ends}. Plaques entières d'un mur à l'autre : "
             f"seule la dernière de chaque rangée est coupée.",
-            f"Plaques : {full} entières + {len(cut)} coupées = {used} plaques (devis : {quote}).",
+            f"Plaques entières : sens des {_fmt(across_cm / 100)} m → {n_cross} plaque{'s' if n_cross > 1 else ''} de "
+            f"{_len(ph / 100)} m" + (f" + un morceau de {r_cross} cm" if r_cross else "") + f" ; sens des {_fmt(run_cm / 100)} m → "
+            f"{n_along} rangée{'s' if n_along > 1 else ''} de {_len(pw / 100)} m" + (f" + une rangée de {r_along} cm" if r_along else "")
+            + f" ; {n_cross} × {n_along} = {full} plaque{'s' if full > 1 else ''} entière{'s' if full > 1 else ''}.",
+            "Morceaux (comptés en plaques entières) : " + (" ; ".join(_decoupe_txt(d) for d in decoupe) if decoupe else "aucun") + ".",
+            f"Total à acheter : {full} entières + {for_pieces} pour les morceaux = {used} plaques (devis : {quote}).",
             f"Cornières : périmètre {_fmt(perimeter)} ml = {angle_bars} barres de {bar} m.",
         ],
     }
@@ -108,7 +138,10 @@ def plan(length_m: float, width_m: float, *, board_width: float = calc.DEFAULTS[
     out["svg"] = _svg(run_cm, across_cm, lines, ties, tiles, (sp_cm, first_cm, h_cm), [
         f"Plan de pose — plafond {_fmt(length_m)} × {_fmt(width_m)} m",
         f"{rows} fourrures ({furring_bars} barres de {bar} m) · {hangers} tiges · {angle_bars} cornières de {bar} m",
-        f"{full} plaques entières + {len(cut)} coupées = {used} plaques (devis : {quote})"])
+        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} plaques à acheter (devis : {quote})",
+        "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → " + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} "
+                                                                           f"({d['par_plaque']} par plaque)" if d["plaques"] else "chutes")
+                                    for d in decoupe) if decoupe else "aucun")])
     return out
 
 
@@ -120,7 +153,7 @@ def _svg(run_cm: int, across_cm: int, lines: list[int], ties: list[int], tiles: 
     scale = min(700 / across_cm, 820 / run_cm)
     rw, rh = across_cm * scale, run_cm * scale
     x0, y0 = (900 - rw) / 2, 120
-    H = round(y0 + rh + 180)
+    H = round(y0 + rh + 205)
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 {H}" font-family="Arial">',
          f'<rect x="0" y="0" width="900" height="{H}" fill="#ffffff"/>',
          f'<text x="450" y="42" font-size="28" font-weight="bold" fill="{BOARD_STROKE}" text-anchor="middle">{texts[0]}</text>',
@@ -162,8 +195,9 @@ def _svg(run_cm: int, across_cm: int, lines: list[int], ties: list[int], tiles: 
               f'<text x="{xr + 10:.1f}" y="{(ya + yz) / 2 + 5:.1f}" font-size="15" font-weight="bold" fill="{HANGER}">{label}</text>']
     ty = y0 + rh + 78
     p += [f'<text x="450" y="{ty:.0f}" font-size="18" fill="{WALL}" text-anchor="middle">{texts[1]}</text>',
-          f'<text x="450" y="{ty + 30:.0f}" font-size="19" font-weight="bold" fill="{WALL}" text-anchor="middle">{texts[2]}</text>']
-    ly = ty + 72   # légende : une couleur par matériau
+          f'<text x="450" y="{ty + 30:.0f}" font-size="19" font-weight="bold" fill="{WALL}" text-anchor="middle">{texts[2]}</text>',
+          f'<text x="450" y="{ty + 56:.0f}" font-size="15" fill="{BOARD_STROKE}" text-anchor="middle">{texts[3]}</text>']
+    ly = ty + 96   # légende : une couleur par matériau
     p += [f'<circle cx="70" cy="{ly - 5:.0f}" r="6" fill="{HANGER}"/>',
           f'<text x="84" y="{ly:.0f}" font-size="15" fill="{WALL}">tige</text>',
           f'<line x1="140" y1="{ly - 5:.0f}" x2="175" y2="{ly - 5:.0f}" stroke="{FURRING}" stroke-width="4"/>',

@@ -83,6 +83,23 @@ def test_tiges_du_patron(run, ties):
     assert calc.hanger_positions(run) == ties
 
 
+def test_plaques_comptees_comme_le_patron():
+    d = pp.plan(6.47, 4)
+    assert "sens des 6,47 m → 3 plaques de 2 m + un morceau de 47 cm" in d["consignes"][3]
+    assert "sens des 4 m → 3 rangées de 1,20 m + une rangée de 40 cm" in d["consignes"][3] and "3 × 3 = 9 plaques entières" in d["consignes"][3]
+    dec = {x["morceau"]: x for x in d["decoupe"]}
+    assert dec["47 × 120 cm"]["nombre"] == 3 and dec["47 × 120 cm"]["par_plaque"] == 4 and dec["47 × 120 cm"]["plaques"] == 1
+    assert dec["200 × 40 cm"]["nombre"] == 3 and dec["200 × 40 cm"]["par_plaque"] == 3 and dec["200 × 40 cm"]["plaques"] == 1
+    assert dec["47 × 40 cm"]["plaques"] == 0 and dec["47 × 40 cm"]["pris_dans_les_chutes"] == 1   # la 4e chute de 47 × 120
+    assert "une plaque en donne 4 → 1 plaque" in d["consignes"][4]
+    assert (d["plaques_entieres"], d["plaques_pour_morceaux"], d["plaques_utilisees"]) == (9, 2, 11)
+    assert "9 entières + 2 pour les morceaux = 11 plaques" in d["consignes"][5]
+    six = pp.plan(6, 4)
+    assert six["decoupe"] == [] and "Morceaux (comptés en plaques entières) : aucun." in six["consignes"][4]
+    big = pp.plan(6, 3.7)                     # 5 morceaux de 170 × 120 : une plaque n'en donne qu'un → 5 plaques
+    assert big["decoupe"] == [{"morceau": "170 × 120 cm", "nombre": 5, "par_plaque": 1, "plaques": 5, "pris_dans_les_chutes": 0}]
+
+
 def test_barres_de_2_80_et_plaque_de_2_50_si_le_patron_le_dit():
     d = pp.plan(6, 3.7)
     assert d["barres_fourrure"] == 20 and d["cornieres"] == 7          # 54 ml / 2,80 ; périmètre 19,4 ml / 2,80
@@ -111,7 +128,7 @@ def test_l_ia_dessine_le_plan_de_pose():
     with TestClient(app), SessionLocal() as db:
         s = AgentSession(db, None, {})
         out = s("pose_plan", {"length_m": 5, "width_m": 4})
-        assert out["tiges"] == 54 and "svg" not in out and len(out["consignes"]) == 5 and out["plaque"] == "1,20 × 2 m"
+        assert out["tiges"] == 54 and "svg" not in out and len(out["consignes"]) == 7 and out["plaque"] == "1,20 × 2 m"
         assert len(s.images) == 1 and s.images[0]["filename"].endswith(".png")
         assert s("pose_plan", {"length_m": 5, "width_m": 4, "plaque_m": 2.5})["plaque"] == "1,20 × 2,50 m"   # 2,50 seulement si dit
         assert "error" in s("pose_plan", {"length_m": 30, "width_m": 20})
