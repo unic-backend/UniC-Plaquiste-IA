@@ -182,15 +182,15 @@ def _rooms(boxes):
 def _merge_runs(segs):
     """Longueur d'un ensemble de traits sans compter deux fois un tronçon dessiné en double (traits alignés qui se recouvrent)."""
     import math
-    lines, other = {}, 0.0
+    lines, diagonals = {}, []
     for x0, y0, x1, y1 in segs:
         if abs(y1 - y0) < 0.5:
             lines.setdefault(("h", round((y0 + y1) / 2 * 2) / 2), []).append(tuple(sorted((x0, x1))))
         elif abs(x1 - x0) < 0.5:
             lines.setdefault(("v", round((x0 + x1) / 2 * 2) / 2), []).append(tuple(sorted((y0, y1))))
         else:
-            other += math.hypot(x1 - x0, y1 - y0)
-    total, runs = other, []
+            diagonals.append(math.hypot(x1 - x0, y1 - y0))
+    runs = list(diagonals)   # un tronçon en biais compte pour lui-même
     for spans in lines.values():
         spans.sort()
         start, end = spans[0]
@@ -201,7 +201,7 @@ def _merge_runs(segs):
                 runs.append(end - start)
                 start, end = a, b
         runs.append(end - start)
-    return total + sum(runs), runs
+    return sum(runs), runs
 
 
 def _measure(page, boxes):
@@ -263,7 +263,8 @@ def _measure(page, boxes):
                     and (len(twins) == 1 or abs(wd - e["_width"]) < 0.3)]
             length, runs = _merge_runs(mine)
             cloisons.append({"libelle": e["libelle"], "couleur": e["couleur"], "longueur_m": round(length * m_per_pt, 2),
-                             "troncons": len(runs), "plus_long_m": round(max(runs, default=0) * m_per_pt, 2)})
+                             "troncons": len(runs), "plus_long_m": round(max(runs, default=0) * m_per_pt, 2),
+                             "troncons_m": [round(r * m_per_pt, 2) for r in runs if r * m_per_pt >= 0.05][:600]})
     out = {"pieces": [{k: v for k, v in rm.items() if k != "_c"} for rm in rooms], "cartouche": cartouche}
     if cloisons:
         out["cloisons"] = cloisons
