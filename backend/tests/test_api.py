@@ -2472,14 +2472,15 @@ def test_round_table_experts_then_arbiter(monkeypatch):
     from app.agent import AgentSession
     from app.database import SessionLocal
     seen = []
-    def fake(system, user):
+    def fake(system, user, **kw):
         seen.append(system.split(".")[0])
         return "Synthèse OK" if "arbitre" in system else ("avis " + system.split(",")[0])
     monkeypatch.setattr(roundtable, "_ask", fake)
     with SessionLocal() as db:
         out = AgentSession(db, None, {})("round_table", {"topic": "Devis plafond", "context": "20 m2 BA13"})
-    assert set(out["experts"]) == {"Métreur", "Contrôleur", "Commercial"} and out["synthese"] == "Synthèse OK" and len(seen) == 4
-    monkeypatch.setattr(roundtable, "_ask", lambda s, u: "")
+    assert set(out["experts"]) == {"Métreur", "Contrôleur", "Commercial"} and out["synthese"] == "Synthèse OK"
+    assert len(seen) == 7 and out["tours"] == 2 and set(out["debat"]) == set(out["experts"])   # 3 avis, 3 répliques, 1 arbitre
+    monkeypatch.setattr(roundtable, "_ask", lambda s, u, **kw: "")
     assert "error" in roundtable.run("x", "y")
     assert "error" in roundtable.run("", "y")
 

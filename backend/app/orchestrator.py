@@ -140,6 +140,21 @@ DEEP_SEARCHES = 6  # recherches Internet permises pour une question difficile (3
 DEEP_TOOL_ROUNDS = 14  # étapes d'outils permises pour une tâche complexe (8 pour une demande courante)
 HISTORY_SIZE = 8   # derniers messages envoyés tels quels au modèle ; au-delà, mem.thread_recall rappelle le fil utile
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
+# « table ronde », « à plusieurs », « débattez », « consulte les experts », « meilleure solution » : le patron veut plusieurs regards
+TABLE_RE = re.compile(r"table[- ]ronde|round[- ]table|[àa] plusieurs|d[ée]batt?(?:ez|ent|re)|consulte\w* (?:les |des |tes )?experts?|"
+                      r"avis d'experts|plusieurs avis|meilleure? solution", re.I)
+
+
+def round_table_note(text: str, deep: bool) -> str:
+    """Quand réunir la table ronde (experts qui débattent, arbitre qui tranche) : le patron la demande, ou réflexion profonde."""
+    if TABLE_RE.search(text or ""):
+        return ("\n\nLe patron demande PLUSIEURS REGARDS : réunis la TABLE RONDE (round_table, avec tout le dossier et des experts adaptés "
+                "au problème) AVANT de répondre, puis donne la meilleure solution retenue, pourquoi, et les désaccords qui restent.")
+    if deep:
+        return ("\n\nRÉFLEXION PROFONDE : si la demande est un problème à résoudre, une décision ou un choix entre plusieurs options "
+                "(pas une simple question de fait ni un calcul), réunis d'abord la TABLE RONDE (round_table, experts adaptés au problème), "
+                "puis réponds avec la meilleure solution, pourquoi, et les désaccords qui restent.")
+    return ""
 
 SYSTEM_RULES = """Tu es UniC, l'assistant personnel du patron d'UniC Plaquiste. Tu es une intelligence universelle : tu réponds à TOUTE question, sur n'importe quel sujet (sciences, droit, santé générale, informatique, cuisine, voyage, langues, histoire, actualité générale, maths, rédaction, conseils, discussion libre). Rien n'est « hors sujet ».
 Le BTP, la plaquisterie, les devis, factures, chantiers, e-mails et réseaux d'UniC sont ta spécialité, mais ils ne limitent jamais ce dont tu peux parler.
@@ -1098,7 +1113,7 @@ def handle_turn(
     else:
         # general: knowledge + optional LLM polish. Never invent.
         arts = _search_knowledge(db, text)
-        asked_deep = deep or bool(DEEP_RE.search(text))
+        asked_deep = deep or bool(DEEP_RE.search(text)) or bool(TABLE_RE.search(text))   # table ronde demandée : réflexion profonde aussi
         deep = wants_deep(db, text, asked=asked_deep, voice=voice, attached=bool(attached), focus=bool(state.get("focus")))
         ai_first = bool(chain0) and chain0[0].id in ("claude", "vibecode")
         calc_try = None if ai_first else _calc_for(db, text)   # avec un moteur IA cloud, c'est lui qui calcule (outil), pas le parseur local
@@ -1194,6 +1209,7 @@ def handle_turn(
                 if tools_on:
                     msgs[0]["content"] += agent.AGENT_PROMPT          # texte fixe : dans la partie en cache
                     msgs[1]["content"] += agent.availability_note(db)   # varie (connecteurs branchés) : hors cache
+                    msgs[1]["content"] += round_table_note(text, deep)   # plusieurs regards : demandés, ou réflexion profonde
                 else:   # téléphone verrouillé, moteur de secours : la date n'est pas une donnée de l'entreprise, l'IA la reçoit toujours
                     msgs[1]["content"] += "\n" + agent.today_line()
                 voice_kw: dict = {}
