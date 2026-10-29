@@ -382,9 +382,14 @@ TOOLS: list[dict] = [
                         "Sans file_id : dernier fichier joint. refresh=true force une nouvelle lecture. "
                         "QUESTION PRÉCISE sur l'image ou le plan (angles, jonctions en T, équerres, nombre de cloisons, cotes, orientation…) : "
                         "passe question=« … » : l'image est REGARDÉE de nouveau (pas le résumé) et tu réponds d'après elle. "
+                        "Un détail trop petit (cote, texte, jonction) : la lecture fait elle-même des CAPTURES AGRANDIES de la zone "
+                        "(zooms haute définition, sur un PDF, un scan ou une photo) ; `zooms` dit lesquelles. Gros dossier : page=N "
+                        "pour une question sur une page précise. "
                         "Fonctionne à tout moment de la conversation, même plusieurs messages après l'envoi du fichier."),
         "input_schema": {"type": "object", "properties": {
-            "file_id": {"type": "string"}, "refresh": {"type": "boolean"}, "question": {"type": "string"}}, "additionalProperties": False},
+            "file_id": {"type": "string"}, "refresh": {"type": "boolean"}, "question": {"type": "string"},
+            "page": {"type": "integer", "minimum": 1, "description": "Avec question : la page du dossier à regarder."}},
+            "additionalProperties": False},
     },
     {
         "name": "add_appointment",
@@ -1460,13 +1465,13 @@ class AgentSession:
                 "hypotheses": data["assumptions"][:80], "manquant": data["missing"],
                 "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
 
-    def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "") -> dict:
+    def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "", page: int | None = None) -> dict:
         from app import plans
         fid = file_id or self.state.get("last_file_id")
         if not fid:
             return {"error": "Aucun plan joint à la conversation."}
         if (question or "").strip():   # question précise (angles, jonctions…) : on REGARDE l'image, le résumé en cache ne répond pas à cela
-            return plans.ask(self.db, fid, question)
+            return plans.ask(self.db, fid, question, page)
         return plans.compact(plans.analyze(self.db, fid, refresh=bool(refresh)))
 
     # --- mémoire
