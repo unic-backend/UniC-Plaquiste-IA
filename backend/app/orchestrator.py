@@ -140,6 +140,12 @@ DEEP_SEARCHES = 6  # recherches Internet permises pour une question difficile (3
 DEEP_TOOL_ROUNDS = 14  # étapes d'outils permises pour une tâche complexe (8 pour une demande courante)
 HISTORY_SIZE = 8   # derniers messages envoyés tels quels au modèle ; au-delà, mem.thread_recall rappelle le fil utile
 DEEP_RE = re.compile(r"r[ée]fl[ée]chis|en profondeur|raisonne|approfondi|analyse profonde|think hard|deep", re.I)
+# « note que Moussa a payé 50 000 », « retiens que j'ai rendez-vous jeudi à 10 h » : un ÉVÉNEMENT (argent, travail, agenda), pas une
+# simple note. Avec l'IA cloud, il part à l'IA qui l'enregistre au bon endroit (versement, dépense, journée, agenda) ; avant, il finissait
+# dans la mémoire et le suivi des encaissements ne le voyait jamais.
+REMEMBER_EVENT_RE = re.compile(r"\bpay[ée]e?s?\b|\bre[çc]u\b|\bvers[ée]e?\b|\bavance\b|\bacompte\b|encaiss|d[ée]pens|achet[ée]|\bdonn[ée]\b|"
+                               r"travaill[ée]|rendez[- ]vous|\brdv\b|\bdemain\b|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|"
+                               r"\b\d{1,2}\s*h(?:\d{2})?\b", re.I)
 # « table ronde », « à plusieurs », « débattez », « consulte les experts », « meilleure solution » : le patron veut plusieurs regards
 TABLE_RE = re.compile(r"table[- ]ronde|round[- ]table|[àa] plusieurs|d[ée]batt?(?:ez|ent|re)|consulte\w* (?:les |des |tes )?experts?|"
                       r"avis d'experts|plusieurs avis|meilleure? solution", re.I)
@@ -693,7 +699,8 @@ def handle_turn(
             # UniC est universel : « envoie un mail à ma banque », « publie une annonce pour recruter », « rapport de la réunion »
             # recevaient une réponse toute faite (ou un PDF vide) au lieu du travail demandé
             "send_email", "draft_email", "connector_na", "site_report") \
-            or chain0 and chain0[0].id in ("claude", "vibecode") and intent == "site_status" and _match_project(db, text) is None:
+            or chain0 and chain0[0].id in ("claude", "vibecode") and intent == "site_status" and _match_project(db, text) is None \
+            or chain0 and chain0[0].id in ("claude", "vibecode") and intent == "remember" and REMEMBER_EVENT_RE.search(mem.parse_remember(text) or ""):
         intent = "chat"   # avec un moteur IA cloud, c'est l'IA qui lit, calcule, vérifie et crée (outils) : l'automate local ne sert que sans lui
 
     if intent == "cancel_pending":
