@@ -52,6 +52,15 @@ SERVICES = [
 ]
 
 
+# fiche ossature : fixations et finitions (chevilles à 30 cm, valeurs validées par le patron)
+_FIXINGS_TEXT = """Chevilles à frapper : une tous les 30 cm de rail ou de cornière (règle du patron) ; 4 vis de 9 mm par montant.
+Vis : 15 / m² (validé par le patron).
+Bande à joint : 1,40 m / m² (validé par le patron).
+Enduit à joint : 0,35 kg/m²/passe × 2 passes (validé par le patron)."""
+_OLD_FIXINGS_TEXT = """Vis : 15 / m² (hypothèse professionnelle).
+Bande à joint : 1,40 m / m² (hypothèse).
+Enduit à joint : 0,35 kg/m²/passe × 2 passes (hypothèse)."""
+
 # règle du patron (marge en pièces) : fiche des plaques
 _MARGIN_TEXT = """Marge du patron (faux plafond), en PIÈCES (jamais en paquets) : + 10 au-delà de 100 m², + 5 de 50 à 100 m², + 3 en
 dessous de 50 m², sur les plaques, les fourrures et les cornières. Pivots et chevilles à laiton : une par tige, en paquets,
@@ -134,9 +143,7 @@ Ces valeurs ne sont pas des tarifs UniC.""",
 un mur par côté, chaque bout a son montant (6 m en 60 cm : 11 + 4 = 15). Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.
 Rails : longueur × 2 (haut + bas).
 Portes : 3 montants de renfort par porte (règle UniC). Renforts de fenêtre : à saisir si connus.
-Vis : 15 / m² (hypothèse professionnelle).
-Bande à joint : 1,40 m / m² (hypothèse).
-Enduit à joint : 0,35 kg/m²/passe × 2 passes (hypothèse).""",
+""" + _FIXINGS_TEXT,
     ),
     (
         "approbation",
@@ -443,6 +450,29 @@ def apply_owner_margin_v11(db: Session) -> int:
     if art is not None and _PLATES_MARGIN_V10 in (art.body or ""):
         art.body = art.body.replace(_PLATES_MARGIN_V10, _MARGIN_TEXT)
         n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_fixings_v12(db: Session) -> int:
+    """Règle du patron : une cheville à frapper tous les 30 cm (avant : 50 cm supposés) ; vis, bande et enduit validés. Réglage
+    « écart des chevilles » à 0,50 m (l'ancienne valeur par défaut) passé à 0,30 ; fiche ossature mise à jour si elle porte encore
+    le texte d'origine (une fiche retouchée par le patron n'est pas écrasée). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_fixings_v12"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for co in db.query(CompanySettings).all():
+        if co.anchor_spacing_m and abs(co.anchor_spacing_m - 0.5) < 1e-9:
+            co.anchor_spacing_m = 0.30
+            n += 1
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
+    if art is not None and _OLD_FIXINGS_TEXT in (art.body or ""):
+        art.body = art.body.replace(_OLD_FIXINGS_TEXT, _FIXINGS_TEXT)
+        n += 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n
