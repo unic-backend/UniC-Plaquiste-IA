@@ -461,6 +461,17 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {"montant": {"type": "number"}}, "required": ["montant"], "additionalProperties": False},
     },
     {
+        "name": "weather",
+        "description": ("MÉTÉO RÉELLE (Open-Meteo, données du jour) : maintenant et jusqu'à 7 jours pour une ville ou un chantier (lieu vide : ville de "
+                        "l'entreprise, sinon Dakar). Rend le ciel, la température, la pluie (mm et %), l'humidité, le vent, et des CONSEILS DE CHANTIER "
+                        "calculés en code (livraison et stockage des plaques sous la pluie, séchage des bandes et de l'enduit par air humide, "
+                        "manutention par vent fort, enduit par forte chaleur). Cite les chiffres et les conseils tels quels, avec la source."),
+        "input_schema": {"type": "object", "properties": {
+            "lieu": {"type": "string", "description": "ville ou quartier du chantier (vide : ville de l'entreprise)"},
+            "jours": {"type": "integer", "minimum": 1, "maximum": 7, "description": "jours de prévision (3 par défaut)"}},
+            "additionalProperties": False},
+    },
+    {
         "name": "business_calc",
         "description": ("CALCULS D'AFFAIRES EXACTS (en code, jamais de tête) : « echeancier » (répartir un montant en acompte/avancement/solde selon des pourcentages : "
                         "la somme des étapes égale toujours le total), « delai » (un délai demandé est-il tenable en comptant le risque de retard), « marge » "
@@ -829,7 +840,7 @@ TOOL_LABELS = {
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
-    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "visit_report": "Compte rendu préparé",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "weather": "Météo consultée", "visit_report": "Compte rendu préparé",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -932,7 +943,7 @@ SELF_EDIT = re.compile(
 # Contenu de tiers lu pendant le tour (e-mail, fichier, plan, avis) : à partir de là, certaines actions exigent que le
 # patron les ait demandées DANS SON MESSAGE. Contrôle déterministe côté serveur : une consigne cachée dans un document
 # ne suffit jamais, quoi que le modèle en pense.
-UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan"}
+UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan", "weather"}
 OWNER_ASK = {
     "forget_memory": re.compile(r"oubli|retire|supprime|efface|enl[eè]ve|m[ée]moire", re.I),
     "generate_visual": re.compile(r"visuel|image|photo|illustr|affiche|dessin|g[ée]n[èe]re|higgsfield|rendu|cr[ée]e", re.I),
@@ -1274,6 +1285,10 @@ class AgentSession:
         from app import margin
         m = margin.analyze(q)
         return {"alertes": m["alertes"], "marge_pct": m["marge_pct"], "couverture_pct": m["couverture_pct"]}
+
+    def _t_weather(self, lieu: str = "", jours: int = 3) -> dict:
+        from app import meteo
+        return meteo.prevision(lieu, jours, defaut=company_dict(self.db).get("city") or "")
 
     def _t_business_calc(self, action: str, total=None, etapes=None, jours_disponibles=None, jours_estimes=None, jours_risque=0,
                          revenu=None, couts=None, base=None, variantes=None, facteurs=None) -> dict:

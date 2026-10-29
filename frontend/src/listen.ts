@@ -8,7 +8,8 @@ const ERR_TEXT: Record<number, string> = {
   5: "La reconnaissance vocale s'est arrêtée.", 8: "Le moteur de dictée est occupé.", 9: "Micro refusé : autorise-le dans Réglages › Applis › UniC AI › Autorisations.",
   10: "Le moteur de dictée est surchargé.", 11: "Le moteur de dictée du téléphone est indisponible.", 12: "Langue française non disponible pour la dictée.", 13: "Langue française non disponible pour la dictée.",
 };
-export async function listenOnce(onHear?: (text: string) => void, onReady?: () => void, lang = "fr-FR", signal?: AbortSignal): Promise<string> {
+/** `quiet` : écoute discrète (pendant que UniC réfléchit) : pas de signal sonore à l'ouverture du micro. */
+export async function listenOnce(onHear?: (text: string) => void, onReady?: () => void, lang = "fr-FR", signal?: AbortSignal, quiet = false): Promise<string> {
   if (isNative) {
     return new Promise<string>((resolve, reject) => {
       let heard = "", done = false, retries = 0, timer: ReturnType<typeof setTimeout> | undefined, openTimer: ReturnType<typeof setTimeout> | undefined;
@@ -20,7 +21,7 @@ export async function listenOnce(onHear?: (text: string) => void, onReady?: () =
       signal?.addEventListener("abort", () => { if (done) return; done = true; cleanup(); resolve(""); });   // arrêt demandé (touche, fermeture) : on rend la main tout de suite
       const begin = () => ear.start(lang).catch((e) => fail(e?.message || "Le micro n'a pas pu s'ouvrir."));
       (async () => {
-        handles.push(await ear.on("ready", () => { clearTimeout(openTimer); onReady?.(); ding(660, 0.05); arm(15000); }));   // le micro est réellement ouvert : écran et signal sonore ensemble
+        handles.push(await ear.on("ready", () => { clearTimeout(openTimer); onReady?.(); if (!quiet) ding(660, 0.05); arm(15000); }));   // le micro est réellement ouvert : écran et signal sonore ensemble
         handles.push(await ear.on("partial", (d) => { if (d.text) { heard = d.text; onHear?.(heard); } }));
         handles.push(await ear.on("final", (d) => { if (d.text) heard = d.text; finish(); }));
         handles.push(await ear.on("error", (d) => {
@@ -39,7 +40,7 @@ export async function listenOnce(onHear?: (text: string) => void, onReady?: () =
   return new Promise<string>((resolve) => {
     const r = new SR();
     signal?.addEventListener("abort", () => { try { r.abort(); } catch { /* déjà arrêté */ } resolve(""); });
-    r.lang = lang; r.interimResults = false; r.maxAlternatives = 1;
+    r.lang = lang; r.interimResults = quiet; r.maxAlternatives = 1;   // discrète : on sait tout de suite qu'il parle encore
     let text = "";
     r.onresult = (e: any) => { text = Array.from(e.results).map((x: any) => x[0].transcript).join(" "); onHear?.(text); };
     r.onend = () => resolve(text.trim());
