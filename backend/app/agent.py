@@ -702,6 +702,15 @@ TOOLS: list[dict] = [
             "required": ["length_m", "width_m"], "additionalProperties": False},
     },
     {
+        "name": "pose_plan",
+        "description": ("PLAN DE POSE dessiné d'un faux plafond (calepinage) pour les OUVRIERS : fourrures (sens et entraxe 0,50 m), tiges, "
+                        "plaques entières et coupées à joints décalés, vue de dessus cotée (PNG partageable). Mêmes règles et mêmes nombres "
+                        "que le calcul du devis ; dit si le plan consomme plus de plaques que le devis. Pour « plan de pose », « calepinage », "
+                        "« comment poser les plaques », « montre aux ouvriers ». Un plafond rectangulaire par appel (une pièce)."),
+        "input_schema": {"type": "object", "properties": {"length_m": {"type": "number"}, "width_m": {"type": "number"}},
+                         "required": ["length_m", "width_m"], "additionalProperties": False},
+    },
+    {
         "name": "round_table",
         "description": ("TABLE RONDE : 3 experts adaptés au problème (placo : métreur, contrôleur, commercial ; argent, droit, vente ou autre : "
                         "les leurs) donnent leur avis, puis DÉBATTENT (chacun lit les autres, conteste, corrige), et un arbitre rend la MEILLEURE "
@@ -778,7 +787,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "pose_plan": "Plan de pose dessiné", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -1094,6 +1103,24 @@ class AgentSession:
                                        "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions. Quand le client a choisi : "
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "l'ossature des retombées et le prix du LED se demandent au patron.")}
+
+    def _t_pose_plan(self, length_m: float, width_m: float) -> dict:
+        from app import diagrams, plan_pose
+        co = company_dict(self.db)
+        try:
+            out = plan_pose.plan(length_m, width_m, board_width=co.get("board_width_m") or 1.2,
+                                 board_height=co.get("board_height_m") or 2.0, waste=co.get("default_waste") or 0.08)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        svg = out.pop("svg")
+        try:
+            art = diagrams.render(self.db, "Plan de pose", svg, self.user_id)
+            self.images.append({"id": art.id, "filename": art.filename, "title": f"Plan de pose — {length_m:g} × {width_m:g} m"})
+        except diagrams.DiagramError as exc:
+            out["dessin"] = f"non dessiné : {exc}"
+        out["note"] = ("Plan affiché dans la conversation (bouton Partager pour l'équipe). Donne les consignes en quelques lignes ; "
+                       "si `alerte` est présente, dis-la au patron avant de commander les plaques.")
+        return out
 
     def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
         from app import roundtable
