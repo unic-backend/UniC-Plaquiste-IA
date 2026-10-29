@@ -696,7 +696,8 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {
             "length_m": {"type": "number"}, "width_m": {"type": "number"},
             "styles": {"type": "array", "items": {"type": "string", "enum": ["caisson", "gorge", "bandeau", "ilot"]}, "maxItems": 4,
-                       "description": "Omis : caisson, gorge, îlot."},
+                       "description": "Omis : les styles conseillés pour la pièce (sinon caisson, gorge, îlot)."},
+            "piece": {"type": "string", "description": "La pièce si le patron la nomme (salon, chambre, cuisine, couloir, bureau, salle de bain…)."},
             "marge_m": {"type": "number", "description": "Largeur du bandeau / distance aux murs (0,60 m par défaut)."},
             "retombee_m": {"type": "number", "description": "Hauteur de la retombée (0,15 m par défaut)."}},
             "required": ["length_m", "width_m"], "additionalProperties": False},
@@ -1073,12 +1074,13 @@ class AgentSession:
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
 
     def _t_ceiling_designs(self, length_m: float, width_m: float, styles: list | None = None, marge_m: float = 0.6,
-                           retombee_m: float = 0.15) -> dict:
+                           retombee_m: float = 0.15, piece: str = "") -> dict:
         from app import diagrams, plafond_design
         co = company_dict(self.db)
         board = (co.get("board_width_m") or 1.2) * (co.get("board_height_m") or 2.0)
+        conseil = "" if styles else plafond_design.suggest(piece, length_m, width_m)[1]
         try:
-            ideas = plafond_design.designs(length_m, width_m, styles, marge_m=marge_m, retombee_m=retombee_m,
+            ideas = plafond_design.designs(length_m, width_m, styles, piece, marge_m=marge_m, retombee_m=retombee_m,
                                            waste=co.get("default_waste") or 0.08, board_m2=board)
         except ValueError as exc:
             return {"error": str(exc)}
@@ -1090,7 +1092,7 @@ class AgentSession:
             except diagrams.DiagramError as exc:
                 idea["dessin"] = f"non dessiné : {exc}"
             out.append(idea)
-        return {"idees": out, "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
+        return {"idees": out, **({"conseil": conseil} if conseil else {}), "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
                                        "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions. Quand le client a choisi : "
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "l'ossature des retombées et le prix du LED se demandent au patron.")}
