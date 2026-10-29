@@ -15,6 +15,7 @@ def test_ancienne_regle_archivee_et_fiche_mise_a_jour():
                              "voisines partagent le montant de jonction.", kind="preference", source="user", pinned=True)
         art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-ossature").first()
         art.body = _OLD_STUDS_TEXT + " Barres de 2,80 m : au-delà de 2,80 m de haut, rallonges.\nRails : longueur × 2."
+        db.query(Memory).filter(Memory.text.like("Cloison : un montant tous les 60 cm%")).delete(synchronize_session=False)
         for flag in ("seed_owner_rules_v14", "seed_owner_studs_v9"):
             row = db.get(AppSetting, flag)
             if row:
