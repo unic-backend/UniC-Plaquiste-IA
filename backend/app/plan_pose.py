@@ -16,6 +16,8 @@ cote de coupe en cm).
 """
 from __future__ import annotations
 
+import math
+
 from app import calc
 
 WALL, FURRING, HANGER, ANGLE, DIM = "#263238", "#1565c0", "#d32f2f", "#ef6c00", "#37474f"
@@ -277,6 +279,22 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     bars = qty.get("MONTANT-M48", n_studs)
     bar = calc.BAR_TXT
     faces = f"{sides} face{'s' if sides > 1 else ''}"
+    # montant plus haut qu'une barre : rallonges taillées dans des barres, chaque raccord tenu par un morceau de rail de 40 cm
+    per_stud, rest = calc.stud_splices(height_m)
+    splices = n_studs * per_stud
+    full_bars = math.floor(height_m / calc.BAR_LENGTH_M + 1e-9)
+    per_bar = math.floor(calc.BAR_LENGTH_M / rest + 1e-9) if rest else 0
+    rallonge_bars = math.ceil(n_studs / per_bar) if rest else 0
+    ecl_per_bar = math.floor(calc.BAR_LENGTH_M / calc.ECLISSE_M + 1e-9)
+    ecl_bars = calc.eclisse_bars(splices)
+    track_bars = rails - ecl_bars
+    if splices:
+        studs_txt = (f" de {_len(height_m)} m : chacun = {full_bars} barre{'s' if full_bars > 1 else ''} de {bar} m"
+                     + (f" + 1 rallonge de {round(rest * 100)} cm (une barre donne {per_bar} rallonges → {rallonge_bars} "
+                        f"barre{'s' if rallonge_bars > 1 else ''} pour {n_studs} rallonges)" if rest else "")
+                     + f" ; {splices} raccords, chacun tenu par un morceau de rail de 40 cm. Total : {bars} barres de montant.")
+    else:
+        studs_txt = f" de {_len(height_m)} m ({bars} barres de {bar} m)."
     pose = (f"Plaques DEBOUT ({entraxe_cm} cm × {pw // entraxe_cm} = {_len(pw / 100)} m : chaque bord sur un montant), entières "
             f"depuis le mur et depuis le sol ; le morceau en haut." if debout else
             f"Plaques COUCHÉES ({entraxe_cm} cm × {ph // entraxe_cm} = {_len(ph / 100)} m : chaque bout sur un montant), "
@@ -284,14 +302,16 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     out = {
         "cloison": [length_m, height_m], "faces": sides, "entraxe_cm": entraxe_cm, "pose": "debout" if debout else "couchée",
         "montants": n_studs, "jonctions_doublees": len(joints), "barres_montant": bars, "barres_rail": rails,
+        "rallonges": n_studs if rest else 0, "rallonge_cm": round(rest * 100), "raccords": splices, "barres_eclisses": ecl_bars,
         "plaque": f"{_len(pw / 100)} × {_len(ph / 100)} m", "plaques_entieres": full, "decoupe": decoupe,
         "plaques_pour_morceaux": for_pieces, "plaques_utilisees": used, "plaques_devis": quote,
         "consignes": [
             f"Montants : un tous les {entraxe_cm} cm, le premier et le dernier contre le mur ; 2 côte à côte à chaque jonction "
             f"de plaques ({len(joints)} jonction{'s' if len(joints) > 1 else ''}). {len(grid)} + {len(joints)} = {n_studs} montants"
-            + (f" de {_len(height_m)} m" if height_m <= calc.BAR_LENGTH_M else f" ; hauteur {_len(height_m)} m > {bar} m : rallonges")
-            + f" ({bars} barres de {bar} m).",
-            f"Rails haut et bas : 2 × {_fmt(length_m)} m = {_fmt(2 * length_m)} ml = {rails} barres de {bar} m.",
+            + studs_txt,
+            f"Rails haut et bas : 2 × {_fmt(length_m)} m = {_fmt(2 * length_m)} ml = {track_bars} barres de {bar} m"
+            + (f" ; éclisses : {splices} morceaux de 40 cm (une barre en donne {ecl_per_bar}) → {ecl_bars} barre"
+               f"{'s' if ecl_bars > 1 else ''} ; total {rails} barres de rail." if splices else "."),
             pose,
             f"Plaques entières par face : sens des {_len(l2 / 100)} m → {n2} plaque{'s' if n2 > 1 else ''} de {_len(ph / 100)} m"
             + (f" + un morceau de {r2} cm" if r2 else "") + f" ; sens des {_len(l12 / 100)} m → {n12} plaque{'s' if n12 > 1 else ''} "
@@ -306,10 +326,12 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     }
     if used > quote:
         out["alerte"] = f"Ce plan consomme {used} plaques, le devis en prévoit {quote} : ajoute {used - quote} plaque(s)."
-    out["svg"] = _svg_cloison(L_cm, H_cm, grid, joints, tiles, entraxe_cm, [
+    splice_heights = [round(k * calc.BAR_LENGTH_M * 100) for k in range(1, per_stud + 1)]
+    out["svg"] = _svg_cloison(L_cm, H_cm, grid, joints, tiles, entraxe_cm, splice_heights, [
         f"Plan de pose — cloison {_len(length_m)} × {_len(height_m)} m ({faces})",
         f"Montants tous les {entraxe_cm} cm · 2 montants à chaque jonction · plaques {'debout' if debout else 'couchées'}",
-        f"{n_studs} montants ({bars} barres de {bar} m) · rails : {rails} barres de {bar} m",
+        f"{n_studs} montants ({bars} barres de {bar} m) · rails : {rails} barres de {bar} m"
+        + (f" · {splices} raccords (éclisses de 40 cm)" if splices else ""),
         f"{full} plaques entières + {for_pieces} pour les morceaux = {used} plaques à acheter (devis : {quote})",
         "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → "
                                     + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} ({d['par_plaque']} par plaque)"
@@ -317,13 +339,14 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     return out
 
 
-def _svg_cloison(L_cm: int, H_cm: int, grid: list[int], joints: list[int], tiles: list, sp_cm: int, texts: list[str]) -> str:
+def _svg_cloison(L_cm: int, H_cm: int, grid: list[int], joints: list[int], tiles: list, sp_cm: int, splices: list[int],
+                 texts: list[str]) -> str:
     """Vue de face d'une face de la cloison (l'autre face est identique) : plaques en vert, montants en bleu (doublés aux
-    jonctions), rails haut et bas en orange, cotes en cm."""
-    scale = min(760 / L_cm, 520 / H_cm)
+    jonctions), rails haut et bas en orange, raccords de montant (éclisses de rail de 40 cm) en orange, cotes en cm."""
+    scale = min(720 / L_cm, 520 / H_cm)
     rw, rh = L_cm * scale, H_cm * scale
-    x0, y0 = (900 - rw) / 2, 120
-    H = round(y0 + rh + 205)
+    x0, y0 = 100 + (720 - rw) / 2, 120   # marge gauche pour la cote de hauteur
+    H = round(y0 + rh + (235 if splices else 205))
     yb = y0 + rh   # le sol
     p = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 {H}" font-family="Arial">',
          f'<rect x="0" y="0" width="900" height="{H}" fill="#ffffff"/>',
@@ -346,6 +369,8 @@ def _svg_cloison(L_cm: int, H_cm: int, grid: list[int], joints: list[int], tiles
           f'stroke-width="3"/>' for x in grid]
     p += [f'<line x1="{x0 + x * scale + 5:.1f}" y1="{y0:.1f}" x2="{x0 + x * scale + 5:.1f}" y2="{yb:.1f}" stroke="{FURRING}" '
           f'stroke-width="3"/>' for x in joints]   # 2e montant collé au premier : jonction de plaques
+    p += [f'<rect x="{x0 + x * scale - 5:.1f}" y="{yb - (h + 20) * scale:.1f}" width="10" height="{40 * scale:.1f}" fill="{ANGLE}"/>'
+          for h in splices for x in grid + [j + 5 / scale for j in joints]]   # éclisse : rail de 40 cm à cheval sur le raccord
     p += labels + [
         f'<line x1="{x0:.1f}" y1="{y0:.1f}" x2="{x0 + rw:.1f}" y2="{y0:.1f}" stroke="{ANGLE}" stroke-width="6"/>',
         f'<line x1="{x0:.1f}" y1="{yb:.1f}" x2="{x0 + rw:.1f}" y2="{yb:.1f}" stroke="{ANGLE}" stroke-width="6"/>',
@@ -374,6 +399,10 @@ def _svg_cloison(L_cm: int, H_cm: int, grid: list[int], joints: list[int], tiles
           f'<rect x="460" y="{ly - 16:.0f}" width="30" height="20" fill="{BOARD_FULL}" stroke="{BOARD_STROKE}"/>',
           f'<text x="498" y="{ly:.0f}" font-size="15" fill="{WALL}">plaque entière</text>',
           f'<rect x="630" y="{ly - 16:.0f}" width="30" height="20" fill="{BOARD_CUT}" stroke="{BOARD_STROKE}"/>',
-          f'<text x="668" y="{ly:.0f}" font-size="15" fill="{WALL}">coupée (cm)</text>',
-          '</svg>']
+          f'<text x="668" y="{ly:.0f}" font-size="15" fill="{WALL}">coupée (cm)</text>']
+    if splices:
+        p += [f'<rect x="70" y="{ly + 14:.0f}" width="10" height="22" fill="{ANGLE}"/>',
+              f'<text x="88" y="{ly + 30:.0f}" font-size="15" fill="{WALL}">éclisse : morceau de rail de 40 cm sur chaque raccord '
+              f'de montant (rallonge au-dessus de 2,80 m)</text>']
+    p.append('</svg>')
     return "".join(p)

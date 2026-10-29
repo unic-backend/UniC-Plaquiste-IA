@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.11"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.12"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -245,9 +245,27 @@ def studs_needed(length_m: float, spacing_m: float, board_width_m: float | None 
     return grid + joints
 
 
+ECLISSE_M = 0.40   # règle du patron : chaque raccord de montant est tenu par un morceau de rail de 40 cm
+
+
+def stud_splices(height_m: float, bar_m: float = BAR_LENGTH_M) -> tuple[int, float]:
+    """Montant plus haut qu'une barre (règle du patron) : (raccords par montant, longueur de la rallonge en m).
+    3,50 m = 1 barre de 2,80 + une rallonge de 0,70 → 1 raccord ; 5,60 m = 2 barres pleines → 1 raccord, pas de rallonge."""
+    full = math.floor(height_m / bar_m + 1e-9)
+    rest = round(height_m - full * bar_m, 6)
+    if full == 0 or (full == 1 and rest <= 1e-6):
+        return 0, 0.0
+    return (full if rest > 1e-6 else full - 1), (rest if rest > 1e-6 else 0.0)
+
+
+def eclisse_bars(splices: int, bar_m: float = BAR_LENGTH_M) -> int:
+    """Barres de rail coupées en morceaux de 40 cm pour tenir chaque raccord de montant (7 morceaux par barre de 2,80 m)."""
+    return math.ceil(splices / math.floor(bar_m / ECLISSE_M + 1e-9)) if splices > 0 else 0
+
+
 def stud_bars(n_studs: int, height_m: float, bar_m: float = BAR_LENGTH_M) -> int:
-    """Barres de montant (2,80 m) : une par montant jusqu'à 2,80 m de haut ; au-delà, des rallonges taillées dans
-    d'autres barres (chutes réutilisées). Recouvrement d'éclissage non compté."""
+    """Barres de montant (2,80 m) : une par montant jusqu'à 2,80 m de haut ; au-delà, des rallonges de même longueur taillées
+    dans d'autres barres (3,50 m : rallonge de 70 cm, une barre en donne 4)."""
     if n_studs <= 0:
         return 0
     full = math.floor(height_m / bar_m + 1e-9)
@@ -258,6 +276,22 @@ def stud_bars(n_studs: int, height_m: float, bar_m: float = BAR_LENGTH_M) -> int
         return n_studs * full
     per_bar = max(1, math.floor(bar_m / rest + 1e-9))
     return n_studs * full + math.ceil(n_studs / per_bar)
+
+
+def _splice_note(walls: list[tuple[float, float]], wall_studs: list[int]) -> str:
+    """« 15 montants de 3,50 m : 1 barre + 1 rallonge de 70 cm chacun (4 rallonges par barre) ; 15 raccords tenus par un morceau
+    de rail de 40 cm »."""
+    parts = []
+    for (_, h), n in zip(walls, wall_studs):
+        joints, rest = stud_splices(h)
+        if not joints:
+            continue
+        full = math.floor(h / BAR_LENGTH_M + 1e-9)
+        per = math.floor(BAR_LENGTH_M / rest + 1e-9) if rest else 0
+        parts.append(f"{n} montants de {h:g} m : {full} barre{'s' if full > 1 else ''}"
+                     + (f" + 1 rallonge de {round(rest * 100)} cm chacun ({per} rallonges par barre)" if rest else " chacun")
+                     + f", {n * joints} raccord{'s' if n * joints > 1 else ''}")
+    return (" ; " + " ; ".join(parts) + " ; chaque raccord tenu par un morceau de rail de 40 cm (éclisse)").replace(".", ",")
 
 
 def tracks_length(length_m: float, runs: int = 2) -> float:
@@ -332,6 +366,8 @@ def calculate_partition(
     n_doors = sum(o.quantity for o in openings if o.kind == "door")
     door_studs = DOOR_STUDS * n_doors   # règle UniC : 3 montants de renfort par porte
     n_stud_bars = sum(stud_bars(n, h) for n, (_, h) in zip(wall_studs, walls)) + door_studs
+    splices = sum(n * stud_splices(h)[0] for n, (_, h) in zip(wall_studs, walls))   # un raccord de montant = une éclisse de rail
+    n_eclisse_bars = eclisse_bars(splices)
     along = board_along(stud_spacing, board_width, board_height)
     total_length = sum(w for w, _ in walls)
     tracks = tracks_length(total_length, 2)
@@ -467,11 +503,14 @@ def calculate_partition(
                      stud_rule + (" + rallonges" if n_stud_bars - door_studs != n_studs else "")
                      + (f" + 3 × {n_doors} porte(s)" if n_doors else ""), STATUS_ESTIMATED,
                      notes=f"{n_studs} montants, soit {stud_ml} ml " + ("à la hauteur de chaque cloison" if multi else f"à la hauteur {height_m:g} m")
-                     + (f" ; hauteur > {BAR_TXT} m : rallonges (recouvrement d'éclissage non compté)"
-                        if n_stud_bars - door_studs != n_studs else "")
+                     + (_splice_note(walls, wall_studs) if splices else "")
                      + (f" ; + {door_studs} montants de renfort ({n_doors} porte(s) × 3)" if n_doors else "")),
-        QuantityLine("UC-RAILS-48-MM", f"Rails 48 mm (barre de {BAR_TXT} m, haut + bas)", ceil_int(tracks / BAR_LENGTH_M), "barre",
-                     f"⌈ L × 2 / {BAR_TXT} ⌉", STATUS_ESTIMATED),
+        QuantityLine("UC-RAILS-48-MM", f"Rails 48 mm (barre de {BAR_TXT} m, haut + bas"
+                     + (", + éclisses des raccords de montant)" if splices else ")"),
+                     ceil_int(tracks / BAR_LENGTH_M) + n_eclisse_bars, "barre",
+                     f"⌈ L × 2 / {BAR_TXT} ⌉" + (f" + éclisses : {splices} morceaux de 40 cm, "
+                                                 f"{math.floor(BAR_LENGTH_M / ECLISSE_M + 1e-9)} par barre → {n_eclisse_bars}"
+                                                 if splices else ""), STATUS_ESTIMATED),
         QuantityLine("VIS-PLAQUE", "Vis à plaque", screws, "u",
                      f"Snette×{DEFAULTS['screws_per_m2']:g}", STATUS_ASSUMED),
         # rails fixés au sol et au plafond par chevilles à frapper ; montants tenus dans les rails par vis de 9 mm
@@ -1675,18 +1714,20 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             along = next((side for side in (bw, bh) if side / e >= 1 and (side / e).denominator == 1), None)
             bar = _F(BAR_LENGTH_M)
             fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
-            n = studs = pts = 0
+            n = studs = pts = joints = 0
             for L, H in walls:   # chaque cloison a ses montants, ses barres et ses chevilles
                 n_w = _min_count(L, e) + 1 + (max(0, _min_count(L, along) - 1) if along else 0)   # + jonctions doublées
                 full = int(H // bar)
                 rest = H - full * bar
                 studs += n_w if full == 0 else n_w * full if rest == 0 else n_w * full + _min_count(Fraction(n_w), Fraction(int(bar // rest)))
+                joints += n_w * (0 if full == 0 or (full == 1 and rest == 0) else full if rest else full - 1)   # raccords
                 pts += _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
                 n += n_w
             studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * sum((L for L, _ in walls), Fraction(0)), _F(BAR_LENGTH_M))
+            bars += _min_count(Fraction(joints), Fraction(int(bar // _F(ECLISSE_M)))) if joints else 0   # éclisses de 40 cm
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
             packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))

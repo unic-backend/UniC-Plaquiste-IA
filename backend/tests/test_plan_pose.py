@@ -231,3 +231,18 @@ def test_l_ia_dessine_le_plan_de_cloison():
         assert "error" in s("pose_plan", {"ouvrage": "cloison", "length_m": 6})
         assert s("pose_plan", {"ouvrage": "cloison", "length_m": 6, "height_m": 2.5, "sides": 1})["plaques_utilisees"] == 7
         assert "error" in s("pose_plan", {"length_m": 6})
+
+
+def test_cloison_haute_rallonges_et_eclisses():
+    # règle du patron : 6 × 3,50 m → chaque montant = 1 barre de 2,80 + 1 rallonge de 70 cm (4 par barre) ; chaque raccord tenu
+    # par un morceau de rail de 40 cm (7 par barre de rail)
+    d = pp.plan_cloison(6, 3.5)
+    assert (d["montants"], d["rallonges"], d["rallonge_cm"], d["raccords"]) == (15, 15, 70, 15)
+    assert d["barres_montant"] == 15 + 4 and d["barres_eclisses"] == 3 and d["barres_rail"] == 5 + 3
+    assert "1 rallonge de 70 cm (une barre donne 4 rallonges → 4 barres pour 15 rallonges)" in d["consignes"][0]
+    assert "15 raccords, chacun tenu par un morceau de rail de 40 cm" in d["consignes"][0]
+    assert "éclisses : 15 morceaux de 40 cm (une barre en donne 7) → 3 barres ; total 8 barres de rail" in d["consignes"][1]
+    assert d["decoupe"][0]["morceau"] == "150 × 120 cm" and d["plaques_utilisees"] == 20 and "ajoute 1 plaque" in d["alerte"]
+    assert "éclisse" in diagrams.sanitize(d["svg"])
+    low = pp.plan_cloison(6, 2.5)
+    assert low["raccords"] == 0 and low["barres_eclisses"] == 0 and "éclisses" not in low["consignes"][1]
