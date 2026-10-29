@@ -41,7 +41,7 @@ def _pose(p: dict, rects: list[list[float]], board_width: float, board_length: f
         run, across = calc.ceiling_run(a, b)
         rows, hangers, _ = calc.ceiling_layout(run, across)
         laid = calc.ceiling_boards(a, b, None, board_width, board_length)
-        fourrures.append(f"{rows} lignes dans le sens des {run:g} m".replace(".", ","))
+        fourrures.append(f"{rows} lignes dans le sens des {round(run, 2):g} m".replace(".", ","))
         tiges, entieres, morceaux = tiges + hangers, entieres + laid["entieres"], morceaux + laid["pour_morceaux"]
     return {"piece": room_label(p), "page": p.get("page"), "niveau": p.get("niveau"), "surface_m2": p.get("surface_m2"),
             "repetition": int(p.get("repetition") or 1), "zones": len(rects),
@@ -129,11 +129,12 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         for q in res.quantities:
             if not q.sku.startswith("BA13-"):   # plaques comptées plus bas, sur le total
                 add(calc.QuantityLine(**{**asdict(q), "quantity": q.quantity * rep}))
-        steps.append(calc.CalcStep(f"Plafond {name}" + (f" × {rep} étages identiques" if rep > 1 else "") + (" (hydrofuge)" if suffix else ""),
+        times = f" × {rep} logements" if str(p.get("logement") or "").startswith("Type ") else f" × {rep} étages identiques"
+        steps.append(calc.CalcStep(f"Plafond {name}" + (times if rep > 1 else "") + (" (hydrofuge)" if suffix else ""),
                                    "surface lue sur le plan", {"page": p.get("page") or 1, **({"niveau": p["niveau"]} if p.get("niveau") else {})},
                                    area, "m²", calc.STATUS_CONFIRMED))
         assumptions.append(f"{name} : {area:g} m² (plan" + (f", p. {p['page']}" if p.get("page") else "")
-                           + (f", × {rep} étages" if rep > 1 else "") + (", hydrofuge" if suffix else "") + ").")
+                           + (f",{times}" if rep > 1 else "") + (", hydrofuge" if suffix else "") + ").")
         pose.append(_pose(p, rects, board_width, board_length))
         lv = levels.setdefault(p.get("niveau") or f"page {p.get('page') or 1}", {"niveau": p.get("niveau") or f"page {p.get('page') or 1}",
                                                                                 "pieces": 0, "surface_m2": 0.0, "repetition": rep})
