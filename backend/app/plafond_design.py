@@ -7,6 +7,8 @@ retombées suivent la règle des plaques du moteur (⌈ S × (1 + d) / Splaque �
 """
 from __future__ import annotations
 
+import re
+
 from app import calc
 
 STYLES = {
@@ -16,6 +18,20 @@ STYLES = {
     "ilot": ("Îlot suspendu", "Un îlot rectangulaire au-dessus de la zone principale (salon, table), éclairé par LED sur son pourtour."),
 }
 DEFAULT_STYLES = ("caisson", "gorge", "ilot")
+# styles conseillés selon la pièce, le plus adapté d'abord, et pourquoi (ce que le patron dirait au client)
+ROOM_STYLES = [
+    (r"salle (?:de|d')\s?(?:bain|eau)|douche|\bwc\b|toilettes?", ("bandeau",),
+     "pièce humide : bandeau avec spots étanches, plaques hydrofuges"),
+    (r"salle [àa] manger", ("ilot", "caisson", "gorge"), "l'îlot au-dessus de la table souligne le repas"),
+    (r"salon|s[ée]jour|living|pi[eè]ce [àa] vivre", ("caisson", "ilot", "gorge"),
+     "pièce à vivre : du volume au centre et une lumière d'ambiance"),
+    (r"chambre", ("gorge", "caisson", "bandeau"), "chambre : lumière douce et indirecte pour le repos"),
+    (r"cuisine", ("bandeau", "ilot"), "cuisine : spots au-dessus du plan de travail, îlot au-dessus de la table"),
+    (r"couloir|\bhall\b|entr[ée]e|d[ée]gagement", ("bandeau", "gorge"), "pièce de passage : spots en ligne ou lumière rasante"),
+    (r"bureau|boutique|magasin|commerce|accueil|r[ée]ception|showroom", ("bandeau", "ilot", "gorge"),
+     "lieu de travail ou de vente : éclairage franc et un point fort pour l'œil"),
+]
+LONG_ROOM = 2.5   # longueur ≥ 2,5 × largeur : un caisson central paraîtrait étiré
 GREEN, COPPER, LIGHT, INK = "#1f5e3b", "#b87333", "#e8f1ea", "#1d2321"
 
 
@@ -88,6 +104,18 @@ def _svg(style: str, name: str, L: float, W: float, marge: float, iw: float, ih:
     return "".join(parts)
 
 
-def designs(length_m: float, width_m: float, styles: list | None = None, **kw) -> list[dict]:
-    chosen = [s for s in (styles or DEFAULT_STYLES) if s in STYLES][:4] or list(DEFAULT_STYLES)
+def suggest(piece: str, length_m: float, width_m: float) -> tuple[tuple, str]:
+    """Styles à proposer quand le patron n'en choisit pas : selon la pièce nommée, sinon selon la forme de la pièce."""
+    low = (piece or "").lower()
+    for words, styles, why in ROOM_STYLES:
+        if re.search(words, low):
+            return styles, why
+    L, W = max(length_m, width_m), min(length_m, width_m)
+    if W > 0 and L / W >= LONG_ROOM:
+        return ("bandeau", "gorge", "caisson"), "pièce longue : le bandeau et la gorge suivent les murs, un caisson central paraîtrait étiré"
+    return DEFAULT_STYLES, ""
+
+
+def designs(length_m: float, width_m: float, styles: list | None = None, piece: str = "", **kw) -> list[dict]:
+    chosen = [s for s in (styles or suggest(piece, length_m, width_m)[0]) if s in STYLES][:4] or list(DEFAULT_STYLES)
     return [design(s, length_m, width_m, **kw) for s in chosen]

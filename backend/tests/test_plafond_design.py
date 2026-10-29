@@ -44,3 +44,31 @@ def test_l_ia_dessine_les_idees_pour_le_client():
         assert len(s.images) == 3 and all(img["filename"].endswith(".png") for img in s.images)
         assert "svg" not in out["idees"][0]                               # le dessin part en image, pas dans le texte
         assert "error" in s("ceiling_designs", {"length_m": 3, "width_m": 1.2})
+
+
+@pytest.mark.parametrize("piece, L, W, first, why", [
+    ("salon", 5, 4, ["caisson", "ilot", "gorge"], "pièce à vivre"),
+    ("la chambre des parents", 4, 3.5, ["gorge", "caisson", "bandeau"], "repos"),
+    ("cuisine", 4, 3, ["bandeau", "ilot"], "plan de travail"),
+    ("salle à manger", 5, 4, ["ilot", "caisson", "gorge"], "table"),
+    ("salle de bain", 3, 2.5, ["bandeau"], "hydrofuges"),
+    ("couloir", 6, 1.8, ["bandeau", "gorge"], "passage"),
+    ("", 9, 3, ["bandeau", "gorge", "caisson"], "pièce longue"),   # pas de pièce nommée : la forme décide
+    ("", 5, 4, ["caisson", "gorge", "ilot"], ""),
+])
+def test_idees_adaptees_a_la_piece(piece, L, W, first, why):
+    styles, reason = pd.suggest(piece, L, W)
+    assert list(styles) == first and why in reason
+    assert [d["style"] for d in pd.designs(L, W, piece=piece)] == first
+
+
+def test_le_choix_du_patron_passe_avant_le_conseil():
+    assert [d["style"] for d in pd.designs(5, 4, ["gorge"], piece="cuisine")] == ["gorge"]
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    with TestClient(app), SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        out = s("ceiling_designs", {"length_m": 4, "width_m": 3.5, "piece": "chambre"})
+        assert [i["style"] for i in out["idees"]] == ["gorge", "caisson", "bandeau"] and "repos" in out["conseil"]
+        out = s("ceiling_designs", {"length_m": 4, "width_m": 3.5, "piece": "chambre", "styles": ["ilot"]})
+        assert [i["style"] for i in out["idees"]] == ["ilot"] and "conseil" not in out
