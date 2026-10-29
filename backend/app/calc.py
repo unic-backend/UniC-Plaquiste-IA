@@ -725,6 +725,23 @@ def add_moulure(result: CalcResult, total_ml: float, taille: int | None = None, 
     return result
 
 
+_HYDRO_RE = re.compile(r"hydrofuges?|\bhydro\b|plaques?\s+vertes?", re.I)
+_WET_RE = re.compile(r"salles?\s+(?:de\s+|d['’])?(?:bains?|eau)|\bsdb\b|douches?|\bwc\b|toilettes?|buanderie|pi[eè]ces?\s+humides?", re.I)
+_DRY_RE = re.compile(r"salons?|chambres?|bureaux?|s[ée]jours?|couloirs?|halls?|magasins?|boutiques?|cuisines?", re.I)   # autres pièces
+
+
+def make_hydrofuge(result: CalcResult, why: str = "") -> CalcResult:
+    """Plaques hydrofuges (pièce humide) : chaque plaque BA13 du calcul passe en référence « -H » (son propre prix au catalogue,
+    6 000 FCFA la 2 m) ; quantités et ossature inchangées. Avant : la plaque standard était chiffrée même en salle de bain."""
+    for q in result.quantities:
+        if q.sku.startswith("BA13-") and not q.sku.endswith("-H"):
+            q.sku, q.name = q.sku + "-H", q.name.replace("BA13", "BA13 hydrofuge", 1)
+    result.inputs["hydrofuge"] = True
+    result.understanding = result.understanding.rstrip(".") + ", plaques hydrofuges."
+    result.assumptions.append(why or "Plaques hydrofuges (demandées).")
+    return result
+
+
 DECOR_RE = re.compile(r"caisson|d[ée]caiss|gorge|bandeau|[îi]lots?\b|plafond\s+lumineux", re.I)
 
 
@@ -1210,6 +1227,13 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     if result is not None and result.kind == "ceiling" and result.quantities and re.search(r"moulures?|corniches?", t):
         zs = result.inputs.get("zones") or [[result.inputs["length_m"], result.inputs["width_m"]]]
         add_moulure(result, sum(2 * (a + b) for a, b in zs), _moulure_size(t), _glue(t))
+    if result is not None and result.kind in ("ceiling", "partition", "partition_area") and result.quantities:
+        if _HYDRO_RE.search(t):
+            make_hydrofuge(result)
+        elif _WET_RE.search(t) and not _DRY_RE.search(t):
+            make_hydrofuge(result, f"Pièce humide ({_WET_RE.search(t).group(0)}) : plaques hydrofuges retenues (à confirmer).")
+        elif _WET_RE.search(t):
+            result.missing.append("Pièce humide citée avec d'autres pièces : dis lesquelles en plaques hydrofuges (prix différent).")
     plenum_text = re.sub(r"retomb[ée]e\s*(?:de\s*)?[\d.,]+\s*(?:cm|m)\b", " ", text.lower()) if style else text   # décor : la retombée n'est pas le plénum
     plenum = _plenum(plenum_text) if result is not None and result.kind == "ceiling" and result.quantities else None
     if plenum:   # donné par le patron : plus « manquant » ; les tiges doivent couvrir cette hauteur
@@ -1565,7 +1589,7 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Surface brute : moteur {step.get('Surface brute')} ≠ contrôle {float(gross):g} m².")
             if abs(_F(step.get("Surface nette", -1)) - net) > Fraction(1, 1000):
                 problems.append(f"Surface nette : moteur {step.get('Surface nette')} ≠ contrôle {float(net):g} m².")
-            sku, _ = board_sku(inp["board_width"], inp["board_height"])
+            sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
             boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
             if qty.get(sku) != boards:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
@@ -1596,7 +1620,7 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Vis 9 mm : moteur {qty['UC-VIS-9-MM']} ≠ contrôle {packs9}.")
         elif result.kind == "partition_area" and inp:
             net = _F(inp["area_m2"]) * int(inp["sides"])
-            sku, _ = board_sku(inp["board_width"], inp["board_height"])
+            sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
             boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
             if qty.get(sku) != boards:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
