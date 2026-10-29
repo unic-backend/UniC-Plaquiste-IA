@@ -160,7 +160,7 @@ def test_materiaux_des_cloisons_mur_par_mur(mesures):
         assert q["UC-RAILS-48-MM"].quantity >= calc.ceil_int(2 * t["ml"] / 2.8)
     assert next(x for x in types[HYDRO]["result"].quantities if x.sku.startswith("BA13-")).sku == "BA13-2000x1200-H"
     laine = {x.sku: x for x in types[DOUBLE]["result"].quantities}["UC-LAINE-DE-VERRE-PAQUET"]
-    assert laine.quantity == 354 and laine.status == calc.STATUS_ASSUMED and "45 mm" in laine.name   # 4 775,5 m² / 13,5
+    assert laine.quantity == 266 and laine.status == calc.STATUS_CONFIRMED and "45 mm" in laine.name   # ⌈ 4 775,5 m² / 18 ⌉
     assert "UC-LAINE-DE-VERRE-PAQUET" not in {x.sku for x in types[STD]["result"].quantities}
 
 
