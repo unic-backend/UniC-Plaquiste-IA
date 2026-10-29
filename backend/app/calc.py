@@ -20,7 +20,7 @@ STATUS_ASSUMED = "assumed"
 STATUS_MISSING = "missing"
 STATUS_CALCULATED = "calculated"     # résultat d'une formule déterministe appliquée à des mesures confirmées (≠ la mesure elle-même)
 STATUS_CONFLICTING = "conflicting"   # plusieurs sources se contredisent : jamais traité comme confirmé
-ENGINE_VERSION = "2026.10.8"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
+ENGINE_VERSION = "2026.10.9"          # version du moteur : sert à comprendre un ancien devis après une évolution des formules
 
 DEFAULTS = {
     "board_width_m": 1.20,
@@ -172,11 +172,29 @@ def partition_area(
     }
 
 
+HANGER_FIRST_M = 0.30   # règle du patron : la première tige à 30 cm du mur, puis tous les 90 cm
+HANGER_END_MAX_M = 0.50  # la dernière tige reste près de l'autre mur : au-delà de 50 cm, une tige de plus à 30 cm du mur
+
+
+def hanger_positions(run: float) -> list[float]:
+    """Tiges le long d'une fourrure de `run` m (règle du patron) : la première à 30 cm du mur, puis une tous les 90 cm ;
+    toujours une tige près de l'autre mur (ajoutée à 30 cm du mur si la dernière en est à plus de 50 cm)."""
+    first, step = HANGER_FIRST_M, DEFAULTS["hanger_spacing_m"]
+    if run <= 2 * first:
+        return [round_qty(run / 2, 3)]   # fourrure très courte : une tige au milieu
+    pos = [first]
+    while pos[-1] + step <= run - first + 1e-9:
+        pos.append(round_qty(pos[-1] + step, 3))
+    if run - pos[-1] > HANGER_END_MAX_M + 1e-9:
+        pos.append(round_qty(run - first, 3))
+    return pos
+
+
 def ceiling_layout(run: float, across: float) -> tuple[int, int, float]:
-    """Fourrures parallèles à `run`, espacées de 0,50 m sur `across` ; tiges tous les 0,90 m sur chaque fourrure.
-    Rend (lignes de fourrure, tiges, mètres de fourrure)."""
+    """Fourrures parallèles à `run`, espacées de 0,50 m sur `across` (la première et la dernière contre le mur) ; tiges selon
+    hanger_positions sur chaque fourrure. Rend (lignes de fourrure, tiges, mètres de fourrure)."""
     rows = ceil_int(across / DEFAULTS["furring_spacing_m"]) + 1
-    return rows, rows * (ceil_int(run / DEFAULTS["hanger_spacing_m"]) + 1), round_qty(run * rows, 2)
+    return rows, rows * len(hanger_positions(run)), round_qty(run * rows, 2)
 
 
 def ceiling_run(a: float, b: float) -> tuple[float, float]:
@@ -634,7 +652,7 @@ def calculate_ceiling(
                  {"S": area, "d": waste, "Splaque": b_area}, n_boards, "u", STATUS_ESTIMATED),
         CalcStep("Lignes de fourrure (entraxe 0,50 m)", f"{each}⌈ côté / 0,50 ⌉ + 1", {"entraxe": f_sp}, rows, "u", STATUS_ESTIMATED),
         CalcStep("Points d'accroche (tige + pivot + cheville à laiton)",
-                 f"{each}lignes × (⌈ longueur de fourrure / 0,90 ⌉ + 1)",
+                 f"{each}lignes × tiges par fourrure (1re à 30 cm du mur, puis tous les 90 cm, une près de l'autre mur)",
                  {"lignes": rows, "e": h_sp}, hangers, "u", STATUS_ESTIMATED),
     ]
     result.quantities = [
@@ -642,7 +660,7 @@ def calculate_ceiling(
                      "⌈S×(1+d)/Splaque⌉", STATUS_ESTIMATED),
         # point d'accroche UniC = 1 tige + 1 pivot + 1 cheville à laiton (pivots et chevilles vendus par paquet de 100)
         QuantityLine("UC-TIGES-A-L-UNITE", "Tiges (à l'unité)", hangers, "u",
-                     "1 tige tous les 0,90 m sur chaque fourrure", STATUS_ESTIMATED),
+                     "sur chaque fourrure : 1re tige à 30 cm du mur, puis 1 tous les 90 cm", STATUS_ESTIMATED),
         QuantityLine("UC-PIVOT", "Pivot (paquet de 100)", ceil_int(hangers / 100), "paquet",
                      f"⌈{hangers} points / 100⌉", STATUS_ASSUMED),
         QuantityLine("UC-CHEVILLES-A-LETON", "Chevilles à laiton (paquet de 100)", ceil_int(hangers / 100), "paquet",
@@ -669,8 +687,8 @@ def calculate_ceiling(
     result.assumptions = [
         f"Système par défaut : plaques BA13 {board_width:g}×{board_height:g} m.",
         f"Déchet {waste*100:.0f} %.",
-        "Méthode UniC : fourrures tous les 0,50 m, une tige tous les 0,90 m (tige + pivot + cheville à laiton), "
-        "plaques de 2 m posées en travers des fourrures.",
+        "Méthode UniC : fourrures tous les 0,50 m ; tiges (tige + pivot + cheville à laiton) à 30 cm du mur puis tous les 0,90 m ; "
+        "plaques de 2 m posées en travers des fourrures (50 × 4 = 2 m : chaque bout sur une fourrure).",
         "Cornière de rive sur tout le périmètre (2 × (longueur + largeur)), fixée aux murs par chevilles à frapper ; "
         "entretoises non comptées.",
         _fx_text(fx, "cornière"),

@@ -648,9 +648,18 @@ OWNER_RULES_V12 = (
     "un paquet : ne jamais confondre ni convertir l'un en l'autre.",
 )
 
+OWNER_RULES_V13 = (
+    "Tiges de faux plafond : la première à 30 cm du mur, puis une tous les 90 cm ; toujours une tige près de l'autre mur.",
+    "Plaques de 1,20 × 2 m posées entières d'un mur jusqu'à l'autre : seule la dernière est coupée "
+    "(6,47 m = 3 plaques de 2 m + un morceau de 47 cm).",
+    "Fourrures tous les 50 cm : la plaque se pose en travers des fourrures (50 × 4 = 2 m, chaque bout sur une fourrure). "
+    "Fourrures tous les 60 cm : la plaque se pose dans le sens des fourrures (60 × 2 = 1,20 m).",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
-              "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12}
+              "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12,
+              "v13": OWNER_RULES_V13}
 
 
 def seed_owner_rules(db: Session) -> int:

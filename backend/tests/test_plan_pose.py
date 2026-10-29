@@ -1,6 +1,6 @@
-"""Plan de pose d'un faux plafond (calepinage) dessiné pour les ouvriers : fourrures, tiges et plaques, avec les MÊMES nombres que
-le devis ; joints de bout sur une fourrure, joints décalés, pas de lamelle de plaque contre un mur ; alerte si le plan consomme
-plus de plaques que le devis."""
+"""Plan de pose d'un faux plafond (calepinage) dessiné pour les ouvriers, règles du patron : fourrures tous les 50 cm, tiges à
+30 cm du mur puis tous les 90 cm, plaques de 2 m en travers (chaque bout sur une fourrure), plaques entières d'un mur à l'autre
+et seule la dernière coupée. MÊMES nombres que le devis ; alerte si le plan consomme plus de plaques que le devis."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,15 +23,36 @@ def test_memes_nombres_que_le_devis(L, W):
 
 def test_plafond_5_par_4():
     d = pp.plan(5, 4)
-    assert d["piece"] == [5, 4] and d["fourrures"] == 9 and d["tiges"] == 63 and d["tiges_par_fourrure"] == 7
-    assert (d["plaques_entieres"], d["morceaux_coupes"], d["plaques_utilisees"], d["plaques_devis"]) == (6, 4, 9, 9)
-    assert "alerte" not in d and "une tous les 50 cm" in d["consignes"][0] and "une tous les 90 cm" in d["consignes"][1]
+    assert d["piece"] == [5, 4] and d["fourrures"] == 9 and d["tiges"] == 54 and d["tiges_par_fourrure"] == 6
+    assert (d["plaques_entieres"], d["morceaux_coupes"], d["plaques_utilisees"], d["plaques_devis"]) == (8, 2, 9, 9)
+    assert "alerte" not in d and "une tous les 50 cm" in d["consignes"][0]
+    assert "la première à 30 cm du mur, puis une tous les 90 cm" in d["consignes"][1]
+    assert "seule la dernière de chaque rangée est coupée" in d["consignes"][2] and "50 cm × 4 = 2 m" in d["consignes"][2]
     assert "17 barres de 2,80 m" in d["consignes"][0] and d["cornieres"] == 7 and d["plaque"] == "1,20 × 2 m"
     svg = diagrams.sanitize(d["svg"])
-    assert "Plan de pose" in svg and "5 m" in svg and "4 m" in svg
+    assert "Plan de pose — plafond 5 × 4 m" in svg and "30 cm" in svg and "90 cm" in svg and "50 cm" in svg
 
 
-@pytest.mark.parametrize("L, W", [(5, 4), (6, 3.7), (9, 3), (12.4, 8.3), (4.1, 3.3), (7, 5)])
+def test_exemples_du_patron_seule_la_derniere_plaque_est_coupee():
+    six = pp.plan(6, 4)                       # 6 m = 3 plaques de 2 m : aucune coupe
+    assert six["morceaux_coupes"] == 0 and six["plaques_entieres"] == 10
+    d = pp.plan(6.47, 4)                      # 6,47 m = 3 plaques de 2 m + un morceau de 47 cm
+    seen = {}
+    real = pp._svg
+
+    def spy(*args):
+        seen["tiles"] = args[4]
+        return real(*args)
+    pp._svg = spy
+    try:
+        pp.plan(6.47, 4)
+    finally:
+        pp._svg = real
+    assert sorted({h for _, _, _, h, _ in seen["tiles"]}) == [47, 200] and d["morceaux_coupes"] == 4 + 3
+    assert "Plan de pose — plafond 6,47 × 4 m" in d["svg"]
+
+
+@pytest.mark.parametrize("L, W", [(5, 4), (6, 3.7), (9, 3), (12.4, 8.3), (4.1, 3.3), (7, 5), (6.47, 4)])
 def test_pose_dans_les_regles(L, W, monkeypatch):
     seen = {}
     real = pp._svg
@@ -41,15 +62,25 @@ def test_pose_dans_les_regles(L, W, monkeypatch):
         return real(run_cm, across_cm, lines, ties, tiles, *rest)
     monkeypatch.setattr(pp, "_svg", spy)
     pp.plan(L, W)
-    tiles, lines, ties = seen["tiles"], set(seen["lines"]), seen["ties"]
-    assert ties[0] == 0 and ties[-1] == seen["run"] and all(b - a == 90 for a, b in zip(ties, ties[1:-1]))   # tiges tous les 90 cm
-    assert 0 < ties[-1] - ties[-2] <= 90                                                                   # la dernière contre le mur
-    assert sum(w * h for _, _, w, h, _ in tiles) == seen["run"] * seen["across"]          # tout le plafond, sans chevauchement
-    assert all(y in lines and y + h in lines for _, y, _, h, _ in tiles)                 # bouts de plaque sur une fourrure
-    assert min(w for _, _, w, _, _ in tiles) >= pp.MIN_PIECE_CM                          # pas de lamelle contre un mur
-    rows = sorted({y for _, y, _, _, _ in tiles})
-    joints = [{x for x, y, _, _, _ in tiles if y == r} - {0} for r in rows]
-    assert all(not (a & b) for a, b in zip(joints, joints[1:]))                          # joints décalés d'une rangée à l'autre
+    tiles, lines, ties, run = seen["tiles"], set(seen["lines"]), seen["ties"], seen["run"]
+    assert ties == [round(p * 100) for p in calc.hanger_positions(run / 100)]
+    assert ties[0] == 30 and all(b - a == 90 for a, b in zip(ties, ties[1:-1]))           # 30 cm du mur, puis tous les 90 cm
+    assert 0 < run - ties[-1] <= 50                                                       # toujours une tige près de l'autre mur
+    assert sum(w * h for _, _, w, h, _ in tiles) == run * seen["across"]                  # tout le plafond, sans chevauchement
+    assert all(b in lines and b + h in lines for _, b, _, h, _ in tiles)                 # bouts de plaque (2 m) sur une fourrure
+    pw, ph = 120, 200
+    assert all((w == pw or a + w == run) and (h == ph or b + h == seen["across"])        # coupe seulement au dernier mur
+               for a, b, w, h, _ in tiles)
+
+
+@pytest.mark.parametrize("run, ties", [
+    (6, [0.3, 1.2, 2.1, 3.0, 3.9, 4.8, 5.7]),       # la dernière à 30 cm du mur : rien à ajouter
+    (5, [0.3, 1.2, 2.1, 3.0, 3.9, 4.7]),            # 3,90 est à 1,10 m du mur : une tige de plus à 30 cm du mur
+    (6.47, [0.3, 1.2, 2.1, 3.0, 3.9, 4.8, 5.7, 6.17]),
+    (0.5, [0.25]),
+])
+def test_tiges_du_patron(run, ties):
+    assert calc.hanger_positions(run) == ties
 
 
 def test_barres_de_2_80_et_plaque_de_2_50_si_le_patron_le_dit():
@@ -57,7 +88,7 @@ def test_barres_de_2_80_et_plaque_de_2_50_si_le_patron_le_dit():
     assert d["barres_fourrure"] == 20 and d["cornieres"] == 7          # 54 ml / 2,80 ; périmètre 19,4 ml / 2,80
     assert "20 barres de 2,80 m" in d["consignes"][0] and "Plaques de 2 m" in d["consignes"][2]
     big = pp.plan(5, 4, board_height=2.5)
-    assert big["plaque"] == "1,20 × 2,50 m" and "Plaques de 2,50 m" in big["consignes"][2]
+    assert big["plaque"] == "1,20 × 2,50 m" and "Plaques de 2,50 m" in big["consignes"][2] and "50 cm × 5 = 2,50 m" in big["consignes"][2]
     assert big["plaques_devis"] == 8 and big["plaques_utilisees"] == 9 and "ajoute 1 plaque" in big["alerte"]
 
 
@@ -80,7 +111,7 @@ def test_l_ia_dessine_le_plan_de_pose():
     with TestClient(app), SessionLocal() as db:
         s = AgentSession(db, None, {})
         out = s("pose_plan", {"length_m": 5, "width_m": 4})
-        assert out["tiges"] == 63 and "svg" not in out and len(out["consignes"]) == 5 and out["plaque"] == "1,20 × 2 m"
+        assert out["tiges"] == 54 and "svg" not in out and len(out["consignes"]) == 5 and out["plaque"] == "1,20 × 2 m"
         assert len(s.images) == 1 and s.images[0]["filename"].endswith(".png")
         assert s("pose_plan", {"length_m": 5, "width_m": 4, "plaque_m": 2.5})["plaque"] == "1,20 × 2,50 m"   # 2,50 seulement si dit
         assert "error" in s("pose_plan", {"length_m": 30, "width_m": 20})

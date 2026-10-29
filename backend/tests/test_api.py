@@ -2971,7 +2971,8 @@ def test_ceiling_uses_owner_hanging_kit_not_suspente(client):
     q = {x.sku: x for x in res.quantities}
     assert "SUSPENTE" not in q
     points = q["UC-TIGES-A-L-UNITE"].quantity
-    assert points == 63 and q["UC-PIVOT"].quantity == 1 and q["UC-CHEVILLES-A-LETON"].quantity == 1
+    # 9 fourrures × 6 tiges (la première à 30 cm du mur, puis tous les 90 cm, la dernière près de l'autre mur)
+    assert points == 54 and q["UC-PIVOT"].quantity == 1 and q["UC-CHEVILLES-A-LETON"].quantity == 1
     assert q["UC-PIVOT"].unit == "paquet"
     with SessionLocal() as db:
         s = AgentSession(db, None, {})
