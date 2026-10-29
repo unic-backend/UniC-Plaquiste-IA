@@ -249,7 +249,7 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
     res = calc.calculate_partition(length_m, height_m, sides, waste=waste, board_width=min(board_width, board_height),
                                    board_height=max(board_width, board_height), stud_spacing=s)
     qty = {q.sku: q.quantity for q in res.quantities}
-    marge = res.inputs["marge"]   # le plan donne le compte exact ; le devis ajoute la marge du patron
+    marge = res.inputs["marge"]   # cloison : 0, pas de marge (règle du patron)
     quote = qty.get(calc.board_sku(min(board_width, board_height), max(board_width, board_height))[0], 0)
     rails = qty.get("UC-RAILS-48-MM", marge) - marge
     bars = qty.get("MONTANT-M48", n_studs + marge) - marge
@@ -310,7 +310,8 @@ def plan_cloison(length_m: float, height_m: float, *, sides: int = 2, entraxe_cm
         f"Montants tous les {entraxe_cm} cm · 2 montants à chaque jonction · plaques {'debout' if debout else 'couchées'}",
         f"{n_studs} montants ({bars} barres de {bar} m) · rails : {rails} barres de {bar} m"
         + (f" · {splices} raccords (éclisses de 40 cm)" if splices else ""),
-        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} posées · à acheter : {quote} (marge comprise)",
+        f"{full} plaques entières + {for_pieces} pour les morceaux = {used} posées · à acheter : {quote}"
+        + (" (marge comprise)" if marge else ""),
         "Morceaux : " + (" · ".join(f"{d['nombre']} de {d['morceau'].replace(' × ', '×')} → "
                                     + (f"{d['plaques']} plaque{'s' if d['plaques'] > 1 else ''} ({d['par_plaque']} par plaque)"
                                        if d["plaques"] else "chutes") for d in decoupe) if decoupe else "aucun")])

@@ -35,8 +35,8 @@ def test_case_320m_two_faces_openings_unknown():
     # 320 × 2,50 × 2 = 1 600 m² brut ; ouvertures inconnues → nette = 1 600 « estimée », jamais « confirmée »
     # plaques 1,20 × 2 m debout (plan de pose) : 320 m = 266 plaques + 80 cm ; 2,50 m = 1 plaque + 50 cm → par face 266 entières ;
     # morceaux (2 faces) : 532 de 50 × 120 (4 par plaque → 133), 2 de 200 × 80 (1 par plaque → 2), 2 de 50 × 80 (4 par plaque → 1)
-    # → 532 + 136 = 668 ; marge du patron : 800 m² (une face) > 100 → + 10 = 678
-    # montants (règle du patron) : ⌈320 / 0,60⌉ + 1 = 535, + 266 jonctions doublées = 801, + 10 ; rails : ⌈640 / 2,80⌉ = 229, + 10
+    # → 532 + 136 = 668 ; cloison : pas de marge (règle du patron)
+    # montants (règle du patron) : ⌈320 / 0,60⌉ + 1 = 535, + 266 jonctions doublées = 801 ; rails : ⌈640 / 2,80⌉ = 229
     r = calc.calculate_partition(320, 2.5, 2, **STD)
     d = r.to_dict()
     assert _step(r, "Surface brute")["result"] == 1600 and _step(r, "Surface brute")["status"] == calc.STATUS_CALCULATED
@@ -44,7 +44,7 @@ def test_case_320m_two_faces_openings_unknown():
     nette = _step(r, "Surface nette")
     assert nette["result"] == 1600 and nette["status"] == calc.STATUS_ESTIMATED and "sans déduction" in nette["label"]
     assert _status(r, "Ouvertures") == calc.STATUS_MISSING
-    assert _qty(r, "BA13-2000x1200") == 678 and _qty(r, "MONTANT-M48") == 811 and _qty(r, "UC-RAILS-48-MM") == 239
+    assert _qty(r, "BA13-2000x1200") == 668 and _qty(r, "MONTANT-M48") == 801 and _qty(r, "UC-RAILS-48-MM") == 229
     assert any("Ouvertures" in m for m in d["missing"])
     assert any("2.5 m > plaque 2 m" in n for n in d["notes"])
     assert d["verification"]["ok"]
@@ -53,14 +53,14 @@ def test_case_320m_two_faces_openings_unknown():
 def test_case_small_wall_with_confirmed_door():
     # 4 × 2,50 × 1 = 10 m² ; porte 0,90 × 2,04 = 1,836 m² ; nette = 8,164 m²
     # plaques 1,20 × 2,50 debout (plan de pose) : 3 entières + 1 morceau de 250 × 40 (3 par plaque → 1) = 4 ; la porte (1,836 m²)
-    # ne rend aucune plaque entière ; chute en plus 10 % (donnée explicitement) : ⌈4 × 1,10⌉ = 5 ; + 3 de marge (10 m²) = 8
-    # montants ⌈4/0,6⌉+1 = 8, + 3 jonctions doublées, + 3 de renfort pour la porte = 14, + 3 ; rails ⌈8/2,8⌉ = 3, + 3
+    # ne rend aucune plaque entière ; chute en plus 10 % (donnée explicitement) : ⌈4 × 1,10⌉ = 5 ; cloison : pas de marge
+    # montants ⌈4/0,6⌉+1 = 8, + 3 jonctions doublées, + 3 de renfort pour la porte = 14 ; rails ⌈8/2,8⌉ = 3
     r = calc.calculate_partition(4, 2.5, 1, [calc.Opening("door", 0.9, 2.04)], waste=0.10, board_width=1.2,
                                  board_height=2.5, stud_spacing=0.6)
     assert _step(r, "Surface des ouvertures")["result"] == 1.836
     assert _step(r, "Surface nette")["result"] == 8.164 and _step(r, "Surface nette")["status"] == calc.STATUS_CALCULATED
     assert _status(r, "Ouvertures") == calc.STATUS_CONFIRMED
-    assert _qty(r, "BA13-2500x1200") == 8 and _qty(r, "MONTANT-M48") == 17 and _qty(r, "UC-RAILS-48-MM") == 6
+    assert _qty(r, "BA13-2500x1200") == 5 and _qty(r, "MONTANT-M48") == 14 and _qty(r, "UC-RAILS-48-MM") == 3
     assert r.to_dict()["verification"]["ok"]
 
 
@@ -288,10 +288,10 @@ def test_quote_margin_uses_only_recorded_purchase_prices():
 
 def test_partition_from_area_only_is_partial_honest_and_never_becomes_a_quote():
     """« 200 m² de cloison » : plaques, vis, bande, enduit calculés (valeurs vérifiées à la main) ; ossature NON calculée, dite manquante."""
-    # 200 m² × 2 faces = 400 m² ; plaques 1,20 × 2,00 = 2,40 m² : ⌈400 / 2,40⌉ = ⌈166,7⌉ = 167 ; + 10 de marge (200 m² > 100)
+    # 200 m² × 2 faces = 400 m² ; plaques 1,20 × 2,00 = 2,40 m² : ⌈400 / 2,40⌉ = ⌈166,7⌉ = 167 ; cloison : pas de marge
     r = calc.calculate_partition_from_area(200, 2, board_width=1.2, board_height=2.0)
     d = r.to_dict()
-    assert _qty(r, "BA13-2000x1200") == 177
+    assert _qty(r, "BA13-2000x1200") == 167
     assert not any(q["sku"] in ("MONTANT-M48", "UC-RAILS-48-MM") for q in d["quantities"])      # aucune ossature inventée
     assert _step(r, "Montants et rails")["result"] == "non calculable" and _step(r, "Montants et rails")["status"] == calc.STATUS_MISSING
     assert _status(r, "Longueur / hauteur") == calc.STATUS_MISSING and _status(r, "Faces") == calc.STATUS_ASSUMED

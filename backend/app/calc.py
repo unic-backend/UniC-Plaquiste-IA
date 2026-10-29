@@ -282,9 +282,10 @@ def wall_boards(length_m: float, height_m: float, spacing_m: float, board_width:
     return {**whole_boards(*((H_cm, L_cm) if debout else (L_cm, H_cm)), pw, ph, sides), "debout": debout}
 
 
-# Règle du patron (marge) : on compte JUSTE, puis on ajoute des PIÈCES (jamais des paquets) aux plaques et à chaque barre
-# d'ossature. Pivots et chevilles à laiton : une par tige, en paquets, sans marge (73 tiges = 73 pivots).
-MARGIN_SKUS = ("UC-BARRE-DE-FOURRURE-2-90-M", "UC-CORNIERES", "MONTANT-M48", "UC-RAILS-48-MM")
+# Règle du patron (marge) : faux plafond, on compte JUSTE, puis on ajoute des PIÈCES (jamais des paquets) aux plaques, aux
+# fourrures et aux cornières. Pivots et chevilles à laiton : une par tige, en paquets, sans marge (73 tiges = 73 pivots).
+# Cloison : aucune marge (plaques, montants, rails au compte exact).
+MARGIN_SKUS = ("UC-BARRE-DE-FOURRURE-2-90-M", "UC-CORNIERES")
 MARGIN_RULE = "+ 10 pièces par article au-delà de 100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m²"
 
 
@@ -299,7 +300,7 @@ def margin_formula(surface_m2: float) -> str:
 
 
 def takes_margin(sku: str) -> bool:
-    """Plaques (toutes tailles, hydrofuges comprises) et barres de 2,80 m : fourrures, cornières, montants, rails."""
+    """Plaques (toutes tailles, hydrofuges comprises), fourrures et cornières du faux plafond."""
     return sku in MARGIN_SKUS or sku.startswith("BA13-")
 
 
@@ -318,8 +319,14 @@ def _add_margin(result: CalcResult, surface_m2: float, enabled: bool = True) -> 
                                  STATUS_CONFIRMED))
     result.data_used.append({"label": "Marge", "value": f"+ {m} pièces", "unit": "", "status": STATUS_CONFIRMED})
     surface = f"{round_qty(surface_m2, 2):g}".replace(".", ",")
-    result.assumptions.append(f"Marge du patron : compte exact, puis + {m} pièces sur les plaques et chaque barre de {BAR_TXT} m "
+    result.assumptions.append(f"Marge du patron : compte exact, puis + {m} pièces sur les plaques, les fourrures et les cornières "
                               f"(surface {surface} m² ; {MARGIN_RULE}). Pivots, chevilles et vis : compte exact, en paquets.")
+
+
+def _no_margin(result: CalcResult) -> None:
+    """Règle du patron : pas de marge sur une cloison."""
+    result.inputs["marge"] = 0
+    result.assumptions.append("Pas de marge sur une cloison (règle du patron) : plaques, montants et rails au compte exact.")
 
 
 def board_along(spacing_m: float, board_width_m: float | None = None, board_height_m: float | None = None) -> float | None:
@@ -443,7 +450,6 @@ def calculate_partition(
     openings_known: bool | None = None,
     fixing_values: dict | None = None,
     walls: list[tuple[float, float]] | None = None,
-    margin: bool = True,
 ) -> CalcResult:
     """`walls` : plusieurs cloisons (longueur, hauteur) de mêmes faces ; cloison en L ou en U = un mur par côté : chaque mur a
     son montant à chaque bout, l'angle en a donc déjà 2 (règle du patron, rien à ajouter). Montants, rails et chevilles sont
@@ -668,13 +674,13 @@ def calculate_partition(
     ]
     if multi:
         result.assumptions.insert(0, f"{len(walls)} cloisons ({sizes} m) : montants, rails, chevilles et plaques comptés cloison "
-                                     "par cloison ; paquets et marge sur le total ; ouvertures déduites du total.")
+                                     "par cloison ; paquets sur le total ; ouvertures déduites du total.")
     if top > board_height + 1e-9:
         result.notes.append(f"Hauteur {top:g} m > plaque {board_height:g} m : raccords horizontaux et chutes à prévoir "
                             "(ou plaques plus longues).")
     else:
         result.notes.append("Vérifier la hauteur réelle des locaux : si H > hauteur de plaque, prévoir chutes / bandes de rive.")
-    _add_margin(result, one_face, margin)
+    _no_margin(result)
     return result
 
 
@@ -760,7 +766,7 @@ def calculate_partition_from_area(
         f"≈ {ceil_int(anchor_points(est_tracks, 2, fx['anchor_spacing_m']) / fx['anchors_per_pack'])} paquet(s) de chevilles à frapper, "
         f"≈ {ceil_int(est_studs * fx['screws9_per_stud'] / fx['screws9_per_pack'])} paquet(s) de vis 9 mm. "
         "À confirmer avec la longueur et la hauteur réelles.")
-    _add_margin(result, area_m2)
+    _no_margin(result)
     return result
 
 
@@ -1853,12 +1859,11 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 problems.append(f"Surface brute : moteur {step.get('Surface brute')} ≠ contrôle {float(gross):g} m².")
             if abs(_F(step.get("Surface nette", -1)) - net) > Fraction(1, 1000):
                 problems.append(f"Surface nette : moteur {step.get('Surface nette')} ≠ contrôle {float(net):g} m².")
-            m = _marge(inp, gross / sides)   # marge sur la surface d'une face
             sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
             lo, hi = _boards_bounds(walls, sides, _F(inp["board_width"]), _F(inp["board_height"]), _F(round_qty(float(net), 3)),
-                                    _F(inp["waste"]))
-            if not (isinstance(qty.get(sku), int) and lo + m <= qty[sku] <= hi + m):
-                problems.append(f"Plaques : moteur {qty.get(sku)} hors du contrôle ({lo + m} à {hi + m}).")
+                                    _F(inp["waste"]))   # cloison : pas de marge (règle du patron)
+            if not (isinstance(qty.get(sku), int) and lo <= qty[sku] <= hi):
+                problems.append(f"Plaques : moteur {qty.get(sku)} hors du contrôle ({lo} à {hi}).")
             bw, bh, e = _F(inp["board_width"]), _F(inp["board_height"]), _F(inp["stud_spacing"])
             along = next((side for side in (bw, bh) if side / e >= 1 and (side / e).denominator == 1), None)
             bar = _F(BAR_LENGTH_M)
@@ -1873,12 +1878,10 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 pts += _min_count(2 * L, _F(fx["anchor_spacing_m"])) + 2
                 n += n_w
             studs += DOOR_STUDS * sum(int(o["quantity"]) for o in inp.get("openings") or [] if o.get("kind") == "door")
-            studs += m
             if qty.get("MONTANT-M48") != studs:
                 problems.append(f"Montants : moteur {qty.get('MONTANT-M48')} ≠ contrôle {studs}.")
             bars = _min_count(2 * sum((L for L, _ in walls), Fraction(0)), _F(BAR_LENGTH_M))
             bars += _min_count(Fraction(joints), Fraction(int(bar // _F(ECLISSE_M)))) if joints else 0   # éclisses de 40 cm
-            bars += m
             if qty.get("UC-RAILS-48-MM") != bars:
                 problems.append(f"Rails : moteur {qty.get('UC-RAILS-48-MM')} ≠ contrôle {bars} barres.")
             packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
@@ -1892,7 +1895,6 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             net = _F(inp["area_m2"]) * int(inp["sides"])
             sku = board_sku(inp["board_width"], inp["board_height"], "-H" if inp.get("hydrofuge") else "")[0]
             boards = _min_count(_F(round_qty(float(net), 3)) * (1 + _F(inp["waste"])), _F(inp["board_width"]) * _F(inp["board_height"]))
-            boards += _marge(inp, _F(inp["area_m2"]))
             if qty.get(sku) != boards:
                 problems.append(f"Plaques : moteur {qty.get(sku)} ≠ contrôle {boards}.")
             if "MONTANT-M48" in qty or "UC-RAILS-48-MM" in qty:
