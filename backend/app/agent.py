@@ -683,6 +683,20 @@ TOOLS: list[dict] = [
             "svg": {"type": "string", "description": "Le SVG complet"}}, "required": ["title", "svg"], "additionalProperties": False},
     },
     {
+        "name": "ceiling_designs",
+        "description": ("IDÉES DE PLAFOND DESSINÉES pour une pièce : caisson central, gorge lumineuse (LED cachée), bandeau périphérique "
+                        "(spots), îlot suspendu. Chaque idée est dessinée en vue de dessus cotée (PNG partageable au client) avec la longueur "
+                        "de retombée, le ruban LED et les plaques des retombées. Pour « idées / modèles / designs de plafond », « montre au "
+                        "client », « plafond moderne pour mon salon 5x4 ». Dimensions données par le patron uniquement."),
+        "input_schema": {"type": "object", "properties": {
+            "length_m": {"type": "number"}, "width_m": {"type": "number"},
+            "styles": {"type": "array", "items": {"type": "string", "enum": ["caisson", "gorge", "bandeau", "ilot"]}, "maxItems": 4,
+                       "description": "Omis : caisson, gorge, îlot."},
+            "marge_m": {"type": "number", "description": "Largeur du bandeau / distance aux murs (0,60 m par défaut)."},
+            "retombee_m": {"type": "number", "description": "Hauteur de la retombée (0,15 m par défaut)."}},
+            "required": ["length_m", "width_m"], "additionalProperties": False},
+    },
+    {
         "name": "round_table",
         "description": ("TABLE RONDE : 3 experts adaptés au problème (placo : métreur, contrôleur, commercial ; argent, droit, vente ou autre : "
                         "les leurs) donnent leur avis, puis DÉBATTENT (chacun lit les autres, conteste, corrige), et un arbitre rend la MEILLEURE "
@@ -759,7 +773,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -1052,6 +1066,28 @@ class AgentSession:
             return {"error": str(exc)}
         self.images.append({"id": art.id, "filename": art.filename, "title": title[:80]})
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
+
+    def _t_ceiling_designs(self, length_m: float, width_m: float, styles: list | None = None, marge_m: float = 0.6,
+                           retombee_m: float = 0.15) -> dict:
+        from app import diagrams, plafond_design
+        co = company_dict(self.db)
+        board = (co.get("board_width_m") or 1.2) * (co.get("board_height_m") or 2.0)
+        try:
+            ideas = plafond_design.designs(length_m, width_m, styles, marge_m=marge_m, retombee_m=retombee_m,
+                                           waste=co.get("default_waste") or 0.08, board_m2=board)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        out = []
+        for idea in ideas:
+            try:
+                art = diagrams.render(self.db, f"Plafond {idea['nom']}", idea.pop("svg"), self.user_id)
+                self.images.append({"id": art.id, "filename": art.filename, "title": f"{idea['nom']} — {length_m:g} × {width_m:g} m"})
+            except diagrams.DiagramError as exc:
+                idea["dessin"] = f"non dessiné : {exc}"
+            out.append(idea)
+        return {"idees": out, "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
+                                       "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions : l'ossature des retombées, "
+                                       "le ruban LED et la pose se chiffrent quand le client a choisi.")}
 
     def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
         from app import roundtable
