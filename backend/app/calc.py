@@ -1187,6 +1187,22 @@ def _unitless_to_m(text: str) -> tuple[str, list[str]]:
     return _UNITLESS.sub(conv, text), seen
 
 
+def _cm_to_m(t: str) -> str:
+    """Centimètres et millimètres ramenés en mètres : « 400 x 350 cm » (les DEUX cotes), « 3500 mm » → 3.5 m."""
+    def to_m(raw: str, unit: str, first: bool = False) -> str:
+        v, div = parse_number(raw), (1000 if unit == "mm" else 100)
+        return f"{v:g}" if first and v / div < 0.1 else f"{v / div:g}"   # « 4,5 x 350 cm » : 4,5 est déjà en mètres
+    t = re.sub(rf"({_NUM})\s*(?:x|sur|par)\s*({_NUM})\s*(mm|cm)\b",
+               lambda m: f"{to_m(m.group(1), m.group(3), True)} x {to_m(m.group(2), m.group(3))} m", t)
+    return re.sub(rf"({_NUM})\s*(mm|cm)\b", lambda m: f"{parse_number(m.group(1)) / (1000 if m.group(2) == 'mm' else 100):g} m", t)
+
+
+def metric_text(text: str) -> str:
+    """Phrase lue comme le calcul la lit (fautes, mesures dites, « 4m50 », cm, mm, cotes sans unité), en mètres et minuscules :
+    pour les autres lectures (méthode UniC) qui ne doivent pas comprendre moins bien que le calcul."""
+    return _cm_to_m(_unitless_to_m(normalize_dimensions(text))[0].replace("×", "x"))
+
+
 def _plenum_decor(t: str) -> float | None:
     """Hauteur de retombée dite (« retombée de 20 cm ») : le décor l'utilise ; absente = 15 cm."""
     m = re.search(rf"retomb[ée]e\s*(?:de\s*)?({_NUM})\s*(cm|m)\b", t)
@@ -1313,13 +1329,7 @@ def _calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult 
     if re.search(r"plaques?\s*(?:de\s*)?(?:2[.,]50?|2500)\b", t):
         cfg["board_height_m"] = 2.5   # seulement si le patron le précise : la plaque par défaut fait 2 m
     t = re.sub(r"\b(?:ba|bs)\s?\d{1,2}\b", " ", t)  # références produit (BA13, BA 18) : pas des dimensions
-    def to_m(raw: str, unit: str, first: bool = False) -> str:
-        v, div = parse_number(raw), (1000 if unit == "mm" else 100)
-        return f"{v:g}" if first and v / div < 0.1 else f"{v / div:g}"   # « 4,5 x 350 cm » : 4,5 est déjà en mètres
-    t = re.sub(rf"({_NUM})\s*(?:x|sur|par)\s*({_NUM})\s*(mm|cm)\b",
-               lambda m: f"{to_m(m.group(1), m.group(3), True)} x {to_m(m.group(2), m.group(3))} m", t)   # 400 x 350 cm : les DEUX cotes
-    t = re.sub(rf"({_NUM})\s*(mm|cm)\b",
-               lambda m: f"{parse_number(m.group(1)) / (1000 if m.group(2) == 'mm' else 100):g} m", t)   # 3500 mm → 3.5 m
+    t = _cm_to_m(t)
 
     zones = _zones(t) if kind in ("ceiling", "partition", "moulure") else []
     # plafond / cloison : la première vraie mesure (pas « plaques 1200 x 2500 » ni « porte de 0,9 x 2,1 », qui ne sont pas l'ouvrage)
