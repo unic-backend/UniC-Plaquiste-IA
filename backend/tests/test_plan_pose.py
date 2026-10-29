@@ -16,6 +16,7 @@ def _qty(result, sku):
 def test_memes_nombres_que_le_devis(L, W):
     d, r = pp.plan(L, W), calc.calculate_ceiling(L, W)
     assert d["tiges"] == _qty(r, "UC-TIGES-A-L-UNITE")
+    assert d["barres_fourrure"] == _qty(r, "UC-BARRE-DE-FOURRURE-2-90-M") and d["cornieres"] == _qty(r, "UC-CORNIERES")
     assert d["plaques_devis"] == _qty(r, calc.board_sku(1.2, 2.0)[0])
     assert d["fourrures"] == next(s.result for s in r.steps if s.label.startswith("Lignes de fourrure"))
 
@@ -24,7 +25,8 @@ def test_plafond_5_par_4():
     d = pp.plan(5, 4)
     assert d["piece"] == [5, 4] and d["fourrures"] == 9 and d["tiges"] == 63 and d["tiges_par_fourrure"] == 7
     assert (d["plaques_entieres"], d["morceaux_coupes"], d["plaques_utilisees"], d["plaques_devis"]) == (6, 4, 9, 9)
-    assert "alerte" not in d and "0,50 m" in d["consignes"][0]
+    assert "alerte" not in d and "une tous les 50 cm" in d["consignes"][0] and "une tous les 90 cm" in d["consignes"][1]
+    assert "17 barres de 2,80 m" in d["consignes"][0] and d["cornieres"] == 7 and d["plaque"] == "1,20 × 2 m"
     svg = diagrams.sanitize(d["svg"])
     assert "Plan de pose" in svg and "5 m" in svg and "4 m" in svg
 
@@ -34,18 +36,29 @@ def test_pose_dans_les_regles(L, W, monkeypatch):
     seen = {}
     real = pp._svg
 
-    def spy(run_cm, across_cm, lines, per_line, tiles, info):
-        seen.update(run=run_cm, across=across_cm, lines=lines, tiles=tiles)
-        return real(run_cm, across_cm, lines, per_line, tiles, info)
+    def spy(run_cm, across_cm, lines, ties, tiles, *rest):
+        seen.update(run=run_cm, across=across_cm, lines=lines, ties=ties, tiles=tiles)
+        return real(run_cm, across_cm, lines, ties, tiles, *rest)
     monkeypatch.setattr(pp, "_svg", spy)
     pp.plan(L, W)
-    tiles, lines = seen["tiles"], set(seen["lines"])
+    tiles, lines, ties = seen["tiles"], set(seen["lines"]), seen["ties"]
+    assert ties[0] == 0 and ties[-1] == seen["run"] and all(b - a == 90 for a, b in zip(ties, ties[1:-1]))   # tiges tous les 90 cm
+    assert 0 < ties[-1] - ties[-2] <= 90                                                                   # la dernière contre le mur
     assert sum(w * h for _, _, w, h, _ in tiles) == seen["run"] * seen["across"]          # tout le plafond, sans chevauchement
     assert all(y in lines and y + h in lines for _, y, _, h, _ in tiles)                 # bouts de plaque sur une fourrure
     assert min(w for _, _, w, _, _ in tiles) >= pp.MIN_PIECE_CM                          # pas de lamelle contre un mur
     rows = sorted({y for _, y, _, _, _ in tiles})
     joints = [{x for x, y, _, _, _ in tiles if y == r} - {0} for r in rows]
     assert all(not (a & b) for a, b in zip(joints, joints[1:]))                          # joints décalés d'une rangée à l'autre
+
+
+def test_barres_de_2_80_et_plaque_de_2_50_si_le_patron_le_dit():
+    d = pp.plan(6, 3.7)
+    assert d["barres_fourrure"] == 20 and d["cornieres"] == 7          # 54 ml / 2,80 ; périmètre 19,4 ml / 2,80
+    assert "20 barres de 2,80 m" in d["consignes"][0] and "Plaques de 2 m" in d["consignes"][2]
+    big = pp.plan(5, 4, board_height=2.5)
+    assert big["plaque"] == "1,20 × 2,50 m" and "Plaques de 2,50 m" in big["consignes"][2]
+    assert big["plaques_devis"] == 8 and big["plaques_utilisees"] == 9 and "ajoute 1 plaque" in big["alerte"]
 
 
 def test_petite_piece_le_plan_previent_quand_le_devis_est_juste():
@@ -67,6 +80,7 @@ def test_l_ia_dessine_le_plan_de_pose():
     with TestClient(app), SessionLocal() as db:
         s = AgentSession(db, None, {})
         out = s("pose_plan", {"length_m": 5, "width_m": 4})
-        assert out["tiges"] == 63 and "svg" not in out and len(out["consignes"]) == 4
+        assert out["tiges"] == 63 and "svg" not in out and len(out["consignes"]) == 5 and out["plaque"] == "1,20 × 2 m"
         assert len(s.images) == 1 and s.images[0]["filename"].endswith(".png")
+        assert s("pose_plan", {"length_m": 5, "width_m": 4, "plaque_m": 2.5})["plaque"] == "1,20 × 2,50 m"   # 2,50 seulement si dit
         assert "error" in s("pose_plan", {"length_m": 30, "width_m": 20})
