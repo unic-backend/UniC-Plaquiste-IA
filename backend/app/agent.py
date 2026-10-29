@@ -680,11 +680,15 @@ TOOLS: list[dict] = [
     },
     {
         "name": "round_table",
-        "description": ("TABLE RONDE : 3 experts (métreur, contrôleur, commercial) examinent le même dossier, puis un arbitre synthétise accords, "
-                        "désaccords et actions. À utiliser pour un devis important, un plan ambigu ou une décision à enjeu, ou quand le patron "
-                        "demande de vérifier à plusieurs. Mets dans `context` tout le dossier (chiffres, lignes, hypothèses). Coûte 4 appels : pas pour les questions simples."),
+        "description": ("TABLE RONDE : 3 experts adaptés au problème (placo : métreur, contrôleur, commercial ; argent, droit, vente ou autre : "
+                        "les leurs) donnent leur avis, puis DÉBATTENT (chacun lit les autres, conteste, corrige), et un arbitre rend la MEILLEURE "
+                        "SOLUTION, pourquoi, les désaccords, les risques et les actions. Pour un devis important, un plan ambigu, une décision à "
+                        "enjeu, un problème à résoudre en réflexion profonde, ou quand le patron demande de vérifier à plusieurs. Mets dans "
+                        "`context` tout le dossier (chiffres, faits, options, contraintes). Coûte 7 appels : pas pour les questions simples."),
         "input_schema": {"type": "object", "properties": {
-            "topic": {"type": "string"}, "context": {"type": "string", "description": "Dossier complet à examiner"}},
+            "topic": {"type": "string"}, "context": {"type": "string", "description": "Dossier complet à examiner"},
+            "experts": {"type": "array", "items": {"type": "string"}, "maxItems": 4,
+                        "description": "Optionnel : 3 métiers adaptés au problème (ex. « juriste OHADA », « comptable », « banquier »). Sans : choisis selon le sujet."}},
             "required": ["topic", "context"], "additionalProperties": False},
     },
     {
@@ -811,8 +815,10 @@ AGENT_PROMPT = (
     "explique la cause en clair. Pour corriger ou ajouter une fonction : improve_myself (tu codes toi-même ; une proposition testée attend "
     "le clic « Fusionner » du patron dans Paramètres › Atelier — ne dis jamais que c'est en ligne avant). Une tâche à répéter → propose "
     "create_agent (toujours proposé, le patron l'active). Ne dis jamais qu'un bug est corrigé sans preuve."
-    "\nTABLE RONDE : pour un devis important, un plan ambigu ou une décision à enjeu (ou si le patron demande de vérifier à plusieurs), appelle round_table avec tout le dossier, "
-    "puis résume la synthèse et les désaccords en 5 lignes. Pas pour les questions simples (coût : 4 appels)."
+    "\nTABLE RONDE : pour un devis important, un plan ambigu, une décision à enjeu, un problème à résoudre en réflexion profonde, ou si le patron "
+    "le demande (« table ronde », « à plusieurs », « débattez », « consulte les experts »), appelle round_table avec tout le dossier (et des experts "
+    "adaptés si le sujet n'est pas le placo), puis donne la MEILLEURE SOLUTION retenue, pourquoi, et les désaccords qui restent, en 5 lignes. "
+    "Pas pour les questions simples (coût : 7 appels)."
     "\nLOGOS : demande de logo, favicon ou icône → lis logo_guide (processus, principes, types_de_marques, construction_svg), pose au plus 5 questions "
     "(nom exact, activité, 3 adjectifs, couleurs imposées) ou annonce tes hypothèses, imagine 3 concepts différents d'une phrase chacun, dessine-les "
     "avec draw_diagram (viewBox 0 0 256 256, formes simples, noir d'abord), passe audit_logo et corrige, puis montre les 3 et ATTENDS le choix du patron "
@@ -1043,9 +1049,9 @@ class AgentSession:
         self.images.append({"id": art.id, "filename": art.filename, "title": title[:80]})
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
 
-    def _t_round_table(self, topic: str, context: str) -> dict:
+    def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
         from app import roundtable
-        return roundtable.run(topic, context)
+        return roundtable.run(topic, context, experts)
 
     def _t_logo_guide(self, topic: str) -> dict:
         from app import logo
