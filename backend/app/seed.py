@@ -53,9 +53,14 @@ SERVICES = [
 
 
 # règle du patron (marge en pièces) : fiche des plaques
+_MARGIN_TEXT = """Marge du patron (faux plafond), en PIÈCES (jamais en paquets) : + 10 au-delà de 100 m², + 5 de 50 à 100 m², + 3 en
+dessous de 50 m², sur les plaques, les fourrures et les cornières. Pivots et chevilles à laiton : une par tige, en paquets,
+sans marge. Cloison : aucune marge (plaques, montants, rails au compte exact)."""
 _NEW_PLATES_TEXT = """Nombre de plaques (méthode du patron) = plan de pose : plaques entières d'un mur à l'autre, la dernière coupée ; chaque
 morceau compté en plaques entières (aucune fourniture ne vend de morceaux).
-Marge du patron, en PIÈCES (jamais en paquets) : + 10 au-delà de 100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m²,
+""" + _MARGIN_TEXT
+# texte posé par la version 10 (marge aussi sur les cloisons), remplacé une fois par apply_owner_margin_v11
+_PLATES_MARGIN_V10 = """Marge du patron, en PIÈCES (jamais en paquets) : + 10 au-delà de 100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m²,
 sur les plaques et chaque barre de 2,80 m (fourrures, cornières, montants, rails). Pivots et chevilles à laiton : une par
 tige, en paquets, sans marge."""
 
@@ -420,6 +425,24 @@ def apply_owner_margin_v10(db: Session) -> int:
     if art is not None and _OLD_PLATES_TEXT in (art.body or ""):
         art.body = art.body.replace(_OLD_PLATES_TEXT, _NEW_PLATES_TEXT).replace(_OLD_WASTE_LINE, "")
         n += 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+def apply_owner_margin_v11(db: Session) -> int:
+    """Règle du patron : pas de marge sur les cloisons (la marge en pièces reste pour le faux plafond). Fiche des plaques
+    corrigée si elle porte encore le texte de la version 10 (une fiche retouchée par le patron n'est pas écrasée). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_margin_v11"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-plaques").first()
+    if art is not None and _PLATES_MARGIN_V10 in (art.body or ""):
+        art.body = art.body.replace(_PLATES_MARGIN_V10, _MARGIN_TEXT)
+        n = 1
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

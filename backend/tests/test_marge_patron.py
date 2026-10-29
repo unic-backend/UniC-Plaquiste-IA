@@ -1,7 +1,7 @@
-"""Règle du patron (marge) : on compte JUSTE (plaques au plan de pose, morceaux comptés en plaques entières), puis on ajoute des
-PIÈCES, jamais des paquets, aux plaques et à chaque barre de 2,80 m (fourrures, cornières, montants, rails) : + 10 au-delà de
-100 m², + 5 de 50 à 100 m², + 3 en dessous de 50 m². Pivots et chevilles à laiton : une par tige, en paquets, sans marge.
-Plus de pourcentage de chute (avant : surface × 1,08)."""
+"""Règle du patron (marge) : on compte JUSTE (plaques au plan de pose, morceaux comptés en plaques entières), puis, au faux
+plafond, on ajoute des PIÈCES, jamais des paquets, aux plaques, aux fourrures et aux cornières : + 10 au-delà de 100 m², + 5 de
+50 à 100 m², + 3 en dessous de 50 m². Cloison : aucune marge. Pivots et chevilles à laiton : une par tige, en paquets, sans
+marge. Plus de pourcentage de chute (avant : surface × 1,08)."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,18 +35,23 @@ def test_plafond_de_73_m2_et_de_120_m2():
     assert big.inputs["marge"] == 10 and _q(big)["BA13-2000x1200"] == 50 + 10 and big.to_dict()["verification"]["ok"]
 
 
-def test_cloison_marge_sur_la_surface_d_une_face():
-    r = calc.calculate_partition(6, 3.5, 2)                  # 21 m² de cloison (42 m² de plaques) → + 3
+def test_cloison_sans_marge():
+    r = calc.calculate_partition(6, 3.5, 2)                  # règle du patron : « non, pas de marge » sur une cloison
     q = _q(r)
-    assert q["BA13-2000x1200"] == 20 + 3 and q["MONTANT-M48"] == 19 + 3 and q["UC-RAILS-48-MM"] == 8 + 3
+    assert q["BA13-2000x1200"] == 20 and q["MONTANT-M48"] == 19 and q["UC-RAILS-48-MM"] == 8 and r.inputs["marge"] == 0
     assert q["UC-VIS-9-MM"] == calc.ceil_int(15 * 4 / 100)                  # vis : compte exact, en paquets
-    assert calc.calculate_partition(20, 3, 2).inputs["marge"] == 5          # 60 m²
+    assert any("Pas de marge sur une cloison" in a for a in r.assumptions) and not any(s.label == "Marge du patron" for s in r.steps)
+    assert calc.calculate_partition(40, 3, 2).inputs["marge"] == 0          # 120 m² : toujours rien
+    assert _q(calc.calculate_partition_from_area(200, 2))["BA13-2000x1200"] == 167   # ⌈400 / 2,4⌉, sans marge
     assert r.to_dict()["verification"]["ok"]
 
 
 def test_le_controle_independant_voit_une_marge_oubliee():
     r = calc.calculate_partition(6, 2.5, 2)
-    next(x for x in r.quantities if x.sku == "MONTANT-M48").quantity -= 3
+    next(x for x in r.quantities if x.sku == "MONTANT-M48").quantity += 3   # marge ajoutée à tort sur une cloison
+    assert not calc.verify(r)["ok"]
+    r = calc.calculate_ceiling(5, 4)
+    next(x for x in r.quantities if x.sku == "UC-CORNIERES").quantity -= 3  # marge oubliée au plafond
     assert not calc.verify(r)["ok"]
     r = calc.calculate_ceiling(5, 4)
     next(x for x in r.quantities if x.sku.startswith("BA13-")).quantity += 6   # plaques au-delà du plan de pose + marge
@@ -66,12 +71,12 @@ def test_devis_depuis_un_plan_marge_une_fois_par_article():
     d = plan_quote.build(plan, hydrofuge_rooms=["douche"], partitions=[{"length_m": 4, "height_m": 2.5}])
     q = {x["sku"]: x["quantity"] for x in d["quantities"]}
     one = calc.ceiling_boards(4, 3)["plaques"]
-    # plaques standard : 5 chambres + la cloison (60 m² + 10 m² couverts) → + 5 une seule fois ; hydrofuges (4 m²) → + 3
-    assert q["BA13-2000x1200"] == 5 * one + calc.wall_boards(4, 2.5, 0.6)["plaques"] + 5
+    # plaques standard : 5 chambres (60 m² de plafond) → + 5 une seule fois ; la cloison au compte exact ; hydrofuges (4 m²) → + 3
+    assert q["BA13-2000x1200"] == 5 * one + 5 + calc.wall_boards(4, 2.5, 0.6)["plaques"]
     assert q["BA13-2000x1200-H"] == calc.ceiling_boards(2, 2)["plaques"] + 3
     single = _q(calc.calculate_ceiling(4, 3, margin=False))["UC-CORNIERES"]
     assert q["UC-CORNIERES"] == 5 * single + _q(calc.calculate_ceiling(2, 2, margin=False))["UC-CORNIERES"] + 5   # 64 m² de plafond
-    assert q["MONTANT-M48"] == calc.studs_needed(4, 0.6, 1.2, 2.0) + 3                                          # 10 m² de cloison
+    assert q["MONTANT-M48"] == calc.studs_needed(4, 0.6, 1.2, 2.0)                                              # cloison : exact
     assert any(s["label"] == "Marge du patron" for s in d["steps"])
 
 
@@ -93,13 +98,31 @@ def test_reglage_chute_remis_a_zero_et_fiche_des_plaques_une_fois():
         db.refresh(co)
         db.refresh(art)
         assert co.default_waste == 0.0
-        assert "Marge du patron, en PIÈCES" in art.body and "Déchet 8 %" not in art.body and "(1 + déchet)" not in art.body
-        for flag in ("seed_owner_rules_v16",):
+        assert "Marge du patron (faux plafond)" in art.body and "Déchet 8 %" not in art.body and "(1 + déchet)" not in art.body
+        assert "Cloison : aucune marge" in art.body
+        for flag in ("seed_owner_rules_v16", "seed_owner_rules_v17"):
             row = db.get(AppSetting, flag)
             if row:
                 db.delete(row)
-        for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Marge : on compte juste%")):
+        for m in db.query(Memory).filter(Memory.text.like("Marge : %")):
             db.delete(m)
         db.commit()
-        assert memory.seed_owner_rules(db) == 1
-        assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("Marge : on compte juste%")).count() == 1
+        assert memory.seed_owner_rules(db) == 2                       # V16 posée puis archivée par V17 (cloisons sans marge)
+        active = [m.text for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Marge : %"))]
+        assert len(active) == 1 and active[0].startswith("Marge : seulement sur le faux plafond") and "Cloison : aucune" in active[0]
+
+
+def test_fiche_des_plaques_version_10_corrigee_une_fois():
+    from app.database import SessionLocal
+    from app.models import AppSetting, KnowledgeArticle
+    from app.seed import _PLATES_MARGIN_V10, apply_owner_margin_v11
+    with TestClient(app), SessionLocal() as db:
+        art = db.query(KnowledgeArticle).filter(KnowledgeArticle.slug == "methode-plaques").first()
+        art.body = "Nombre de plaques = plan de pose.\n" + _PLATES_MARGIN_V10 + "\n\nFin."
+        row = db.get(AppSetting, "seed_owner_margin_v11")
+        if row:
+            db.delete(row)
+        db.commit()
+        assert apply_owner_margin_v11(db) == 1 and apply_owner_margin_v11(db) == 0     # une seule fois
+        db.refresh(art)
+        assert "montants, rails)" not in art.body and "Cloison : aucune marge" in art.body and art.body.endswith("Fin.")

@@ -32,8 +32,8 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
           waste: float = 0.0, board_width: float = 1.2, board_length: float = 2.0, stud_spacing: float = 0.6,
           fixings: dict | None = None) -> dict:
     """Métré (format de CalcResult.to_dict) à partir de l'analyse du plan. Chaque pièce est comptée juste (plaques au plan de
-    pose) ; la marge du patron (en pièces) est ajoutée UNE fois par article, selon la surface que l'article couvre sur tout le
-    plan (fourrures et cornières : les plafonds ; montants et rails : les cloisons ; plaques hydrofuges : les pièces humides)."""
+    pose) ; la marge du patron (en pièces) est ajoutée UNE fois par article du faux plafond, selon la surface de plafond qu'il
+    couvre sur tout le plan (plaques hydrofuges : les pièces humides). Cloisons : aucune marge (règle du patron)."""
     pieces = analysis.get("pieces") or []
     if not pieces and not partitions:
         raise PlanQuoteError("Aucune pièce lue sur ce plan : relis le plan (read_plan) ou donne les dimensions.")
@@ -121,7 +121,7 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             raise PlanQuoteError("Cloison : longueur et hauteur requises (la hauteur n'est pas sur le plan, demande-la).")
         sides = int(c.get("sides") or 2)
         res = calc.calculate_partition(length, height, sides, [], waste=waste, board_width=board_width,
-                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings, margin=False)
+                                       board_height=board_length, stud_spacing=stud_spacing, fixing_values=fixings)
         partition_m2 += length * height
         count("UC-PAQUET-CHEVILLES-A-FRAPPER", calc.anchor_points(2 * length, 2, fx["anchor_spacing_m"]))
         count("UC-VIS-9-MM", step_result(res, "Nombre de montants") * fx["screws9_per_stud"])
@@ -147,21 +147,21 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
             quantities.append(q)
     if not quantities:
         raise PlanQuoteError("Rien à chiffrer : aucune pièce avec surface ni cloison retenue.")
-    # marge du patron : une fois par article, sur la surface qu'il couvre dans tout le plan (une face pour les cloisons)
+    # marge du patron : une fois par article du faux plafond, sur la surface de plafond qu'il couvre (cloisons : aucune)
     ceiling_m2 = round(sum(area_by_type.values()), 2)
-    covered = {"UC-BARRE-DE-FOURRURE-2-90-M": ceiling_m2, "UC-CORNIERES": ceiling_m2, "MONTANT-M48": round(partition_m2, 2),
-               "UC-RAILS-48-MM": round(partition_m2, 2)}
     marges = {}
     for q in quantities:
         if calc.takes_margin(q["sku"]):
-            surface = covered.get(q["sku"]) or round(area_by_type["-H"] if q["sku"].endswith("-H")
-                                                     else area_by_type[""] + partition_m2, 2)
+            surface = ceiling_m2 if q["sku"] in calc.MARGIN_SKUS else round(area_by_type["-H" if q["sku"].endswith("-H") else ""], 2)
+            if surface <= 0:   # plaques des seules cloisons
+                continue
             q["quantity"] += calc.margin_pieces(surface)
             q["formula"] += calc.margin_formula(surface)
             marges[q["name"]] = calc.margin_pieces(surface)
-    steps.append(calc.CalcStep("Marge du patron", calc.MARGIN_RULE + " (surface couverte par chaque article)",
-                               {"plafonds_m2": ceiling_m2, "cloisons_m2": round(partition_m2, 2)},
-                               " ; ".join(f"{name} + {m}" for name, m in marges.items()), "pièces", calc.STATUS_CONFIRMED))
+    if marges:
+        steps.append(calc.CalcStep("Marge du patron", calc.MARGIN_RULE + " (faux plafond, surface couverte par chaque article ; "
+                                   "cloisons : aucune)", {"plafonds_m2": ceiling_m2, "cloisons_m2": round(partition_m2, 2)},
+                                   " ; ".join(f"{name} + {m}" for name, m in marges.items()), "pièces", calc.STATUS_CONFIRMED))
 
     check = analysis.get("controle_emprise") or {}
     if check.get("note"):
@@ -175,8 +175,8 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
         "steps": [asdict(s) for s in steps], "quantities": quantities,
         "assumptions": assumptions + [f"Plaques {board_width:g} × {board_length:g} m comptées au plan de pose, pièce par pièce"
                                       + (f", + {waste * 100:.0f} % de chute" if waste else "")
-                                      + f". Marge du patron sur les plaques et chaque barre de {calc.BAR_TXT} m ({calc.MARGIN_RULE}, "
-                                      "selon la surface couverte par l'article) ; pivots, chevilles et vis au compte exact, en paquets."],
+                                      + f". Marge du patron sur les plaques, fourrures et cornières du faux plafond ({calc.MARGIN_RULE}, "
+                                      "selon la surface de plafond couverte) ; cloisons, pivots, chevilles et vis au compte exact."],
         "missing": missing, "notes": [], "data_used": [], "inputs": {"surface_plafond_m2": total_ceiling},
         "next_step": "Prêt pour le devis.",
     }

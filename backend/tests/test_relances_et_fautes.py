@@ -73,7 +73,7 @@ def test_devis_ecrit_avec_des_fautes_sans_ia_cloud():
         with SessionLocal() as db:
             assert db.get(Quotation, qid).client_label == "Moussa Ba"
             boards = next(i.quantity for i in db.query(QuotationItem).filter(QuotationItem.quotation_id == qid) if "Plaque" in i.description)
-            assert boards == 12                    # plan de pose 4 × 2,5, 2 faces : 6 entières + 3 pour les morceaux, + 3 de marge
+            assert boards == 9                     # plan de pose 4 × 2,5, 2 faces : 6 entières + 3 pour les morceaux (pas de marge)
 
 
 def test_l_ia_recoit_la_tache_en_cours_quand_le_patron_relance(monkeypatch):

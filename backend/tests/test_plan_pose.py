@@ -1,7 +1,8 @@
 """Plan de pose d'un faux plafond (calepinage) dessiné pour les ouvriers, règles du patron : fourrures tous les 50 cm, tiges à
 30 cm du mur puis tous les 90 cm, plaques de 2 m en travers (chaque bout sur une fourrure), plaques entières d'un mur à l'autre
-et seule la dernière coupée. MÊMES nombres que le devis : le plan donne le compte exact, le devis y ajoute la marge du patron
-(+ 3 / + 5 / + 10 pièces selon la surface) ; alerte si le plan consommait plus de plaques que le devis."""
+et seule la dernière coupée. MÊMES nombres que le devis : le plan donne le compte exact, le devis du faux plafond y ajoute la
+marge du patron (+ 3 / + 5 / + 10 pièces selon la surface ; cloison : aucune) ; alerte si le plan consommait plus de plaques
+que le devis."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -189,10 +190,10 @@ def test_cloison_regles_du_patron(L, H, sp, debout, monkeypatch):
     monkeypatch.setattr(pp, "_svg_cloison", spy)
     d = pp.plan_cloison(L, H, entraxe_cm=sp)
     r = calc.calculate_partition(L, H, 2, stud_spacing=sp / 100)
-    m = calc.margin_pieces(L * H)   # le plan donne le compte exact, le devis y ajoute la marge du patron
-    assert d["montants"] == calc.studs_needed(L, sp / 100, 1.2, 2.0) and d["barres_montant"] + m == _qty(r, "MONTANT-M48")
-    assert d["barres_rail"] + m == _qty(r, "UC-RAILS-48-MM") and d["plaques_devis"] == _qty(r, "BA13-2000x1200")
-    assert d["plaques_utilisees"] + m == d["plaques_devis"]
+    assert d["marge"] == 0   # cloison : pas de marge (règle du patron), le plan et le devis donnent les mêmes nombres
+    assert d["montants"] == calc.studs_needed(L, sp / 100, 1.2, 2.0) and d["barres_montant"] == _qty(r, "MONTANT-M48")
+    assert d["barres_rail"] == _qty(r, "UC-RAILS-48-MM") and d["plaques_devis"] == _qty(r, "BA13-2000x1200")
+    assert d["plaques_utilisees"] == d["plaques_devis"]
     assert d["pose"] == ("debout" if debout else "couchée")
     grid, joints, tiles = seen["grid"], seen["joints"], seen["tiles"]
     assert grid[0] == 0 and grid[-1] == seen["L"] and all(b - a == sp for a, b in zip(grid, grid[1:-1]))
@@ -210,9 +211,8 @@ def test_cloison_exemple_du_patron():
     assert "sens des 2,50 m → 1 plaque de 2 m + un morceau de 50 cm" in d["consignes"][3]
     assert "5 par face × 2 faces = 10 plaques entières" in d["consignes"][3]
     assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 10, "par_plaque": 4, "plaques": 3, "pris_dans_les_chutes": 0}]
-    assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 13 + 3 and "alerte" not in d
-    assert "À acheter (devis : + 3 pièces de marge par article, surface 15 m²) : 16 plaques, 18 barres de montant, 8 barres de rail." \
-        == d["consignes"][-1]
+    assert d["plaques_utilisees"] == 13 and d["plaques_devis"] == 13 and "alerte" not in d
+    assert d["consignes"][-1] == "À acheter (devis) : 13 plaques, 15 barres de montant, 5 barres de rail."
     assert "cloison 6 × 2,50 m (2 faces)" in diagrams.sanitize(d["svg"])
     with pytest.raises(pp.PlanError):
         pp.plan_cloison(6, 2.5, entraxe_cm=40)
@@ -223,7 +223,7 @@ def test_cloison_une_seule_face():
     assert d["faces"] == 1 and d["montants"] == 15                            # les montants ne changent pas
     assert "1 × 5 = 5 plaques entières (une seule face" in d["consignes"][3]
     assert d["decoupe"] == [{"morceau": "50 × 120 cm", "nombre": 5, "par_plaque": 4, "plaques": 2, "pris_dans_les_chutes": 0}]
-    assert d["plaques_utilisees"] == 7 and d["plaques_devis"] == _qty(calc.calculate_partition(6, 2.5, 1), "BA13-2000x1200") == 7 + 3
+    assert d["plaques_utilisees"] == 7 and d["plaques_devis"] == _qty(calc.calculate_partition(6, 2.5, 1), "BA13-2000x1200") == 7
     assert "cloison 6 × 2,50 m (1 face)" in diagrams.sanitize(d["svg"])
 
 
@@ -251,7 +251,7 @@ def test_cloison_haute_rallonges_et_eclisses():
     assert "15 raccords, chacun tenu par un morceau de rail de 40 cm" in d["consignes"][0]
     assert "éclisses : 15 morceaux de 40 cm (une barre en donne 7) → 3 barres ; total 8 barres de rail" in d["consignes"][1]
     assert d["decoupe"][0]["morceau"] == "150 × 120 cm" and d["plaques_utilisees"] == 20 and "alerte" not in d   # avant : 19 au devis
-    assert "23 plaques, 22 barres de montant, 11 barres de rail" in d["consignes"][-1]                             # + 3 de marge
+    assert "20 plaques, 19 barres de montant, 8 barres de rail" in d["consignes"][-1]                              # pas de marge
     assert "éclisse" in diagrams.sanitize(d["svg"])
     low = pp.plan_cloison(6, 2.5)
     assert low["raccords"] == 0 and low["barres_eclisses"] == 0 and "éclisses" not in low["consignes"][1]
