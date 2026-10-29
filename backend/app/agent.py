@@ -193,6 +193,10 @@ TOOLS: list[dict] = [
             "with_moulure": {"type": "boolean", "description": "Faux plafond : true seulement si le patron demande aussi la moulure (barres et colles sur le tour)."},
             "moulure_taille": {"type": "integer", "enum": [2, 4], "description": "Taille de moulure dite par le patron (omise : 4 supposée et signalée)."},
             "colle": {"type": "string", "enum": ["silicone", "pompe"], "description": "Colle des moulures : silicone par défaut, pompe si le patron la demande."},
+            "decor_style": {"type": "string", "enum": ["caisson", "gorge", "bandeau", "ilot"],
+                            "description": "Faux plafond : idée choisie par le client (ceiling_designs). Ajoute les plaques des retombées et le ruban LED."},
+            "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
+            "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -1086,8 +1090,9 @@ class AgentSession:
                 idea["dessin"] = f"non dessiné : {exc}"
             out.append(idea)
         return {"idees": out, "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
-                                       "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions : l'ossature des retombées, "
-                                       "le ruban LED et la pose se chiffrent quand le client a choisi.")}
+                                       "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions. Quand le client a choisi : "
+                                       "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
+                                       "l'ossature des retombées et le prix du LED se demandent au patron.")}
 
     def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
         from app import roundtable
@@ -1648,7 +1653,8 @@ class AgentSession:
                                area_m2: float | None = None, sides: int | None = None, parois: int | None = None,
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
-                               with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone") -> dict:
+                               with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
+                               decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1754,6 +1760,12 @@ class AgentSession:
                 res = calc.calculate_surface(length_m, height_m or width_m)
         except ValueError as exc:
             raise ConnectorError(str(exc), 400)
+        if decor_style and res.kind == "ceiling" and res.quantities:   # l'idée de plafond choisie par le client devient des quantités
+            try:
+                calc.add_decor(res, decor_style, retombee_m=retombee_m, board_width=cfg["board_width"], board_height=cfg["board_height"],
+                               led=decor_led)
+            except ValueError as exc:
+                raise ConnectorError(str(exc), 400)
         if with_moulure and res.kind == "ceiling" and res.quantities:   # moulure demandée avec le plafond : sur le tour du plafond
             zs = res.inputs.get("zones") or [[res.inputs["length_m"], res.inputs["width_m"]]]
             calc.add_moulure(res, sum(2 * (a + b) for a, b in zs), moulure_taille, colle)

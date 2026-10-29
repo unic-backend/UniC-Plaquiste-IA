@@ -725,6 +725,51 @@ def add_moulure(result: CalcResult, total_ml: float, taille: int | None = None, 
     return result
 
 
+DECOR_RE = re.compile(r"caisson|d[ée]caiss|gorge|bandeau|[îi]lots?\b|plafond\s+lumineux", re.I)
+
+
+def decor_style(text: str) -> str | None:
+    """« faux plafond 5x4 avec gorge lumineuse » → « gorge » (le style d'idée de plafond choisi par le client)."""
+    t = text.lower()
+    for style, words in (("gorge", r"gorge|plafond\s+lumineux"), ("ilot", r"[îi]lots?\b"), ("bandeau", r"bandeau"),
+                         ("caisson", r"caisson|d[ée]caiss")):
+        if re.search(words, t):
+            return style
+    return None
+
+
+def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_m: float = 0.15, waste: float | None = None,
+              board_width: float = DEFAULTS["board_width_m"], board_height: float = DEFAULTS["board_height_m"],
+              led: bool | None = None) -> CalcResult:
+    """L'idée de plafond choisie par le client devient des quantités : plaques des retombées (règle des plaques du moteur) et ruban
+    LED (mètres). L'ossature des retombées et le prix du LED restent à donner par le patron : signalés, jamais inventés."""
+    from app import plafond_design
+    if result.inputs.get("zones"):
+        result.missing.append(f"Décor « {style} » : dis dans quelle pièce (plusieurs zones), il n'est pas compté.")
+        return result
+    d = plafond_design.design(style, result.inputs["length_m"], result.inputs["width_m"], marge_m=marge_m, retombee_m=retombee_m,
+                              waste=result.inputs.get("waste", DEFAULTS["waste"]) if waste is None else waste,
+                              board_m2=board_area(board_width, board_height))
+    if not (style in ("gorge", "ilot") if led is None else led):   # LED : propre à la gorge et à l'îlot, ailleurs seulement si demandée
+        d["led_ml"] = 0.0
+    sku, name = board_sku(board_width, board_height)
+    result.quantities.append(QuantityLine(sku, f"{name} — retombées ({d['retombee_m2']:g} m²)", d["plaques_retombees"], "u",
+                                          f"⌈ {d['retombee_ml']:g} ml × {retombee_m:g} m × (1+d) / Splaque ⌉", STATUS_ESTIMATED))
+    if d["led_ml"]:
+        result.quantities.append(QuantityLine("UC-RUBAN-LED", "Ruban LED (ml)", ceil_int(d["led_ml"]), "ml",
+                                              f"⌈ pourtour {d['led_ml']:g} ml ⌉", STATUS_ESTIMATED))
+    result.steps.append(CalcStep(f"Décor : {d['nom']}", "retombée = pourtour × hauteur",
+                                 {"pourtour": d["retombee_ml"], "hauteur": retombee_m}, d["retombee_m2"], "m²", STATUS_CALCULATED))
+    result.inputs["decor"] = {k: d[k] for k in ("style", "nom", "interieur", "retombee_m", "retombee_ml", "retombee_m2", "led_ml")}
+    result.understanding = result.understanding.rstrip(".") + f", décor {d['nom'].lower()}."
+    result.assumptions.append(f"{d['nom']} : retombée de {retombee_m * 100:g} cm sur {d['retombee_ml']:g} ml ({d['retombee_m2']:g} m²)"
+                              + (f", ruban LED {d['led_ml']:g} ml" if d["led_ml"] else "") + ".")
+    result.missing.append("Ossature des retombées (fourrures, cornières, tiges en plus) : à chiffrer selon ta méthode.")
+    if d["led_ml"]:
+        result.missing.append("Ruban LED : prix et longueur des rouleaux (et transformateur) à donner.")
+    return result
+
+
 def calculate_moulure(length_ml: float | None = None, *, rooms: list[tuple[float, float]] | None = None,
                       taille: int | None = None, colle: str = "silicone", rooms_known: bool = True) -> CalcResult:
     """Moulures de plafond, règles du patron : barres de 3 m (⌈ longueur / 3 ⌉), 1 colle pour 5 barres. Longueur donnée en ml,
@@ -1103,6 +1148,15 @@ def _unitless_to_m(text: str) -> tuple[str, list[str]]:
     return _UNITLESS.sub(conv, text), seen
 
 
+def _plenum_decor(t: str) -> float | None:
+    """Hauteur de retombée dite (« retombée de 20 cm ») : le décor l'utilise ; absente = 15 cm."""
+    m = re.search(rf"retomb[ée]e\s*(?:de\s*)?({_NUM})\s*(cm|m)\b", t)
+    if not m:
+        return None
+    v = parse_number(m.group(1)) / (100 if m.group(2) == "cm" else 1)
+    return v if 0 < v <= 1 else None
+
+
 def _plenum(t: str) -> float | None:
     """Hauteur de suspente (plénum), en m : « plénum de 40 cm », « à 30 cm sous la dalle », « descente 0,5 m »."""
     m = re.search(rf"(?:pl[ée]num|descente|suspentes?|retomb[ée]e)\s*(?:de\s*|:\s*)?({_NUM})\s*(cm|mm|m)\b"
@@ -1122,10 +1176,20 @@ def calculate_from_text(text: str, defaults: dict | None = None) -> CalcResult |
     result = _calculate_from_text(text, defaults)
     if result is not None and unitless:
         result.assumptions.insert(0, "Cotes sans unité : " + " ; ".join(unitless) + " (à confirmer).")
+    style = decor_style(t) if result is not None and result.kind == "ceiling" and result.quantities else None
+    if style:   # « faux plafond 5x4 avec gorge lumineuse » : l'idée choisie par le client devient des quantités
+        try:
+            add_decor(result, style, retombee_m=(_plenum_decor(t) or 0.15),
+                      board_width=(defaults or {}).get("board_width_m", DEFAULTS["board_width_m"]),
+                      board_height=(defaults or {}).get("board_height_m", DEFAULTS["board_height_m"]),
+                      led=True if re.search(r"\bled\b|lumineu|[ée]clairage", t) else None)
+        except ValueError as exc:   # pièce trop étroite pour un décor : le plafond plat reste calculé
+            result.missing.append(f"Décor non compté : {exc}")
     if result is not None and result.kind == "ceiling" and result.quantities and re.search(r"moulures?|corniches?", t):
         zs = result.inputs.get("zones") or [[result.inputs["length_m"], result.inputs["width_m"]]]
         add_moulure(result, sum(2 * (a + b) for a, b in zs), _moulure_size(t), _glue(t))
-    plenum = _plenum(text) if result is not None and result.kind == "ceiling" and result.quantities else None
+    plenum_text = re.sub(r"retomb[ée]e\s*(?:de\s*)?[\d.,]+\s*(?:cm|m)\b", " ", text.lower()) if style else text   # décor : la retombée n'est pas le plénum
+    plenum = _plenum(plenum_text) if result is not None and result.kind == "ceiling" and result.quantities else None
     if plenum:   # donné par le patron : plus « manquant » ; les tiges doivent couvrir cette hauteur
         result.inputs["plenum_m"] = plenum
         result.data_used.insert(-2, {"label": "Plénum (hauteur de suspente)", "value": plenum, "unit": "m", "status": STATUS_CONFIRMED})
