@@ -197,6 +197,7 @@ TOOLS: list[dict] = [
                             "description": "Faux plafond : idée choisie par le client (ceiling_designs). Ajoute les plaques des retombées et le ruban LED."},
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
+            "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
                 "height_m": {"type": "number"}, "count": {"type": "integer"}}, "required": ["kind"]}},
@@ -1654,7 +1655,8 @@ class AgentSession:
                                already_developed: bool = False, coats: int = 2, openings: list | None = None,
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
                                with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
-                               decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15) -> dict:
+                               decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15,
+                               hydrofuge: bool = False) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1769,6 +1771,8 @@ class AgentSession:
         if with_moulure and res.kind == "ceiling" and res.quantities:   # moulure demandée avec le plafond : sur le tour du plafond
             zs = res.inputs.get("zones") or [[res.inputs["length_m"], res.inputs["width_m"]]]
             calc.add_moulure(res, sum(2 * (a + b) for a, b in zs), moulure_taille, colle)
+        if hydrofuge and res.kind in ("ceiling", "partition", "partition_area") and res.quantities:
+            calc.make_hydrofuge(res)
         data = res.to_dict()
         self.state["last_calc"] = data   # utilisé par create_quote / bons
         self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible
