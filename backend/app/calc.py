@@ -995,6 +995,12 @@ _TYPOS = {
     "montan": "montant", "montans": "montants", "fourure": "fourrure", "fourures": "fourrures", "corniere": "cornière",
     "longeur": "longueur", "largueur": "largeur", "hauteure": "hauteur", "hotteur": "hauteur", "otteur": "hauteur",
     "pr": "pour", "ds": "dans", "avc": "avec", "cmb": "combien", "cb": "combien", "qte": "quantité", "qté": "quantité",
+    "cornier": "cornière", "corniers": "cornières", "cornieres": "cornières", "osature": "ossature", "ossatur": "ossature",
+    "suspante": "suspente", "suspantes": "suspentes", "tije": "tige", "tijes": "tiges", "chevile": "cheville", "cheviles": "chevilles",
+    "plak": "plaque", "plaks": "plaques", "plakes": "plaques", "placopatre": "placo", "placoplatre": "placo",
+    "metrage": "métré", "mettrage": "métré", "hidrofuge": "hydrofuge", "hydrofige": "hydrofuge", "idrofuge": "hydrofuge",
+    "moulur": "moulure", "mouleur": "moulure", "moulurs": "moulures", "caison": "caisson", "kaisson": "caisson", "bandau": "bandeau",
+    "ratisage": "ratissage", "lisage": "lissage", "fenetre": "fenêtre", "fenetres": "fenêtres",
 }
 _TYPO_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, _TYPOS), key=len, reverse=True)) + r")\b")
 
