@@ -1,6 +1,6 @@
 """Scénario d'une vidéo (JSON) : validation stricte, partagée par make.py. Le scénario vient de l'appli (donc de Claude) : on ne lui fait pas confiance.
 
-Forme : {"format": "vertical|horizontal|square", "scenes": [ {type: title|text|photo|gallery|stats|quote|page|outro, seconds, ...}, ... ]}
+Forme : {"format": "vertical|horizontal|square", "scenes": [ {type: title|text|photo|gallery|stats|quote|page|outro|clip|typewriter|kinetic|checklist|neon|slogan, seconds, ...}, ... ]}
 Ancienne forme (url + chapters) acceptée : convertie en titre + page + fin.
 """
 from __future__ import annotations
@@ -16,7 +16,10 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
-TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip")
+TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan")
+# Effets « cinéma » : texte tapé au clavier, titre dont le dernier mot arrive en or, liste cochée sur verre dépoli, titre néon, carte slogan.
+# Les quatre premiers peuvent aussi s'incruster sur un clip (clé « overlay » d'une scène clip) : le texte passe alors sur les images filmées.
+OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon")
 # Garde-fous techniques seulement (pas un plafond métier) : la durée n'est limitée que par le temps de calcul GitHub. Au-delà, on coupe en tronçons (chunks()).
 MAX_SCENES, MAX_TOTAL = 5000, 43200.0
 
@@ -79,10 +82,51 @@ def _url(raw) -> str:
     return str(raw)
 
 
+def _lines_of(v, n: int, k: int, upper: bool = False) -> list[str]:
+    out = [_txt(x, n) for x in (v if isinstance(v, list) else [v]) if _txt(x, n)][:k]
+    return [x.upper() for x in out] if upper else out
+
+
+def _fx(s: dict, t: str, overlay: bool = False) -> dict:
+    """Scène d'effet (ou incrustation d'un clip si `overlay`) : textes bornés, fond facultatif (photo du catalogue ou média https)."""
+    if t == "typewriter":
+        lines = _lines_of(s.get("lines"), 60, 3)
+        if not lines:
+            raise ValueError("machine à écrire : texte vide")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 12, 4), "lines": lines}
+    elif t == "kinetic":
+        lines = _lines_of(s.get("lines"), 26, 3, upper=True)
+        if not lines:
+            raise ValueError("titre animé : texte vide")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 10, 3.5), "lines": lines, "tag": _txt(s.get("tag"), 12).upper(), "place": _txt(s.get("place"), 28).upper()}
+    elif t == "checklist":
+        items = _lines_of(s.get("items"), 40, 5)
+        if not items:
+            raise ValueError("liste cochée : aucun élément")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 3, 12, max(4.0, 1.4 + 0.8 * len(items))), "heading": _txt(s.get("heading"), 40).upper(), "items": items}
+    elif t == "neon":
+        lines = _lines_of(s.get("lines"), 16, 2, upper=True)
+        if not lines:
+            raise ValueError("néon : texte vide")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 8, 3), "lines": lines, "tag": _txt(s.get("tag"), 12).upper()}
+    else:   # slogan (carte de fin, jamais en incrustation)
+        l1, l2 = _txt(s.get("l1"), 30).upper(), _txt(s.get("l2"), 30).upper()
+        if not (l1 or l2):
+            raise ValueError("slogan vide")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 4, 12, 7), "l1": l1, "l2": l2, "brand": _txt(s.get("brand"), 30).upper(),
+               "lines": _lines_of(s.get("lines"), 40, 4)}
+    if not overlay and t != "slogan" and (s.get("url") or s.get("image")):
+        out["bg"] = _media_url(s.get("url")) if s.get("url") else _img(s.get("image"))
+        out["reveal"] = "dots" if s.get("reveal") == "dots" else ""
+    return out
+
+
 def _scene(s: dict) -> dict:
     t = s.get("type")
     if t not in TYPES:
         raise ValueError(f"type de scène inconnu : {str(t)[:20]}")
+    if t in ("typewriter", "kinetic", "checklist", "neon", "slogan"):
+        return _fx(s, t)
     if t == "title":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "l1": _txt(s.get("l1"), 24).upper(), "l2": _txt(s.get("l2"), 24).upper(), "sub": _txt(s.get("sub"), 40).upper()}
     if t == "text":
@@ -91,7 +135,11 @@ def _scene(s: dict) -> dict:
             raise ValueError("scène texte sans contenu")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 10, 5), "heading": _txt(s.get("heading"), 40), "bullets": b}
     if t == "clip":
-        return {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url"))}
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url"))}
+        ov = s.get("overlay")
+        if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:   # texte incrusté sur le film : même durée que le clip
+            out["overlay"] = {**_fx(ov, ov["type"], overlay=True), "seconds": out["seconds"]}
+        return out
     if t == "photo":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "src": _media_url(s.get("url")) if s.get("url") else _img(s.get("image")), "caption": _txt(s.get("caption"), 60),
                 "dir": s.get("direction") if s.get("direction") in ("in", "out", "left", "right") else "in"}

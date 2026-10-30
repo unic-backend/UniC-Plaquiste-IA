@@ -1,5 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@500;600&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@500;600&family=Special+Elite&display=block">
 <style>
 /* Thèmes : couleur de fond (--royal), texte (--fg), accent (--gold), nuances (--soft), halos (--g1, --g2), cartes de chiffres (--cardbg/--cardfg) */
 :root,[data-theme="unic"]{--royal:#02083a;--fg:#fff;--soft:#ffefa3;--gold:#ffc400;--g1:#14307f;--g2:#3a2d00;--cardbg:#ffefa3;--cardfg:#02083a;--u:calc(min(100vw,100vh)/360)}
@@ -51,6 +51,36 @@ html,body{margin:0;width:100vw;height:100vh;overflow:hidden;background:var(--roy
 .e4{font-size:calc(var(--u)*19);letter-spacing:.1em;color:var(--royal);background:var(--gold);padding:calc(var(--u)*12) calc(var(--u)*22);border-radius:999px}
 .e5{font-size:calc(var(--u)*22);font-weight:600;letter-spacing:.04em}
 .e6{font-size:calc(var(--u)*15);font-weight:500;color:var(--soft);opacity:.85}
+/* effets cinéma : fond photo (+ points), machine à écrire, titre animé (dernier mot en or), liste cochée sur verre, néon, carte slogan */
+.fxbg{position:absolute;inset:0;overflow:hidden}
+.fxbg img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;will-change:transform}
+.fxbg .dots{-webkit-mask-repeat:repeat;mask-repeat:repeat}
+.fxshade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.38) 0,transparent 26%,transparent 50%,rgba(0,0,0,.62) 100%)}
+.fxbox{position:absolute;left:calc(var(--u)*20);right:calc(var(--u)*20);display:flex;flex-direction:column;align-items:flex-start;text-align:left}
+.tw{font-family:"Special Elite",monospace;color:var(--fg);text-shadow:0 2px 10px rgba(0,0,0,.6);white-space:pre-wrap;line-height:1.3}
+.tw .cur{display:inline-block;width:.12em;height:1em;margin-left:.06em;vertical-align:-.1em;background:var(--gold)}
+.tag{display:flex;align-items:center;overflow:hidden;margin-bottom:calc(var(--u)*8);border-radius:calc(var(--u)*5);white-space:nowrap}
+.tag b{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.06em;background:var(--gold);color:var(--royal);padding:calc(var(--u)*4) calc(var(--u)*8)}
+.tag i{font-style:normal;font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.06em;color:var(--fg);padding:0 calc(var(--u)*8);text-shadow:0 2px 8px rgba(0,0,0,.6)}
+.kl{display:flex;flex-wrap:nowrap;white-space:nowrap;font-family:Anton,Impact,sans-serif;line-height:.98;letter-spacing:.01em;color:var(--fg)}
+.kl span{display:inline-block;white-space:pre;text-shadow:0 4px 18px rgba(0,0,0,.55);transform-origin:50% 70%}
+.kl .last{color:var(--gold);position:relative}
+.kl .last u{position:absolute;left:0;bottom:-.06em;height:.07em;background:var(--gold);text-decoration:none;transform-origin:left center}
+.glass{position:relative;width:100%;border-radius:calc(var(--u)*16);padding:calc(var(--u)*16) calc(var(--u)*18);background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.32);
+  -webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 18px 40px -16px rgba(0,0,0,.55)}
+.glass h3{margin:0 0 calc(var(--u)*10);display:flex;align-items:center;gap:calc(var(--u)*8);font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.08em;color:var(--fg)}
+.glass h3:before{content:"";width:calc(var(--u)*8);height:calc(var(--u)*8);border-radius:50%;background:var(--gold)}
+.ck{display:flex;align-items:center;gap:calc(var(--u)*12);margin:calc(var(--u)*9) 0;font-weight:600;color:var(--fg)}
+.ck svg{flex:none;width:calc(var(--u)*24);height:calc(var(--u)*24);overflow:visible}
+.neon{font-family:Anton,Impact,sans-serif;text-align:center;line-height:.95;color:#fff1c2}
+.slog{width:100%;border-radius:calc(var(--u)*18);padding:calc(var(--u)*18) calc(var(--u)*18) calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 88%,#fff 4%);border:1px solid color-mix(in srgb,var(--gold) 45%,transparent)}
+.slog .s1,.slog .s2{font-family:Anton,Impact,sans-serif;line-height:1.05;white-space:nowrap}
+.slog .s2{color:var(--gold)}
+.slog hr{border:0;height:1px;background:rgba(255,255,255,.3);margin:calc(var(--u)*12) 0 calc(var(--u)*10);transform-origin:left}
+.slog .br{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.1em}
+.sl2{margin-top:calc(var(--u)*18);text-align:center;width:100%}
+html.ovl,html.ovl body{background:transparent!important}
+html.ovl #bg,html.ovl #sweep{display:none}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
   border-radius:calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 93%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
@@ -110,9 +140,11 @@ window.setup = sc => {
     A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`;
       const mins = { e1: 34, e2: 20, e4: 14 }, k = Object.keys(mins).find(c => e.classList.contains(c));
       if (k) fitLine(e, W() - 48 * u, mins[k] * u); else fit(e, W() - 48 * u); }); fitH(box, u);
+  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan"].includes(T)) {
+    fxSetup(sc, root, u);
   }
 };
-const FONTS = ["400 40px Anton", "500 20px Barlow", "600 20px Barlow", "600 20px 'Barlow Condensed'", "700 20px 'Barlow Condensed'"];
+const FONTS = ["400 40px 'Special Elite'", "400 40px Anton", "500 20px Barlow", "600 20px Barlow", "600 20px 'Barlow Condensed'", "700 20px 'Barlow Condensed'"];
 window.fontsOk = async () => {   // rend la liste des polices manquantes (vide = tout est là)
   await Promise.all(FONTS.map(f => document.fonts.load(f).catch(() => null)));
   const miss = FONTS.filter(f => !document.fonts.check(f));
@@ -155,10 +187,95 @@ window.draw = (t, dur) => {
     A.e.forEach((e, i) => { const k = eo(ramp(t, .25 + i * .12, .95 + i * .12)); fx(e, k, (1 - k) * 26 * u, .96 + .04 * k); });
     $("#sc").style.transform = `scale(${1 + ramp(t, .8, dur) * .04})`;
   }
+  else if (A.fx) fxDraw(sc, t, dur, u);
   // fondu enchaîné via la couleur de fond (entrée 0,35 s, sortie 0,35 s)
   root.style.opacity = eio(ramp(t, 0, .35)) * (1 - eio(ramp(t, dur - .35, dur)));
 };
 
+
+// ---------- effets cinéma ----------
+const CPS = 14;   // machine à écrire : 14 caractères par seconde (le son du clavier, ajouté au montage, suit le même rythme)
+const typed = (lines, t, t0) => { const out = []; let tt = t0;   // texte visible à l'instant t, ligne par ligne
+  for (const l of lines) { const n = cl(Math.floor((t - tt) * CPS), 0, l.length); out.push(t >= tt ? l.slice(0, n) : null); tt += l.length / CPS + .3; }
+  return { out, end: tt }; };
+const CHECK = '<circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="2"/><circle class="f" cx="12" cy="12" r="10.5" fill="currentColor"/><path class="p" d="M6.6 12.4l3.6 3.6 7.2-7.6" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1"/>';
+function fxBg(sc, root) {
+  if (!sc.bg) return;
+  const w = el("div", "fxbg", "", root), im = el("img", "", "", w); im.src = sc.bg; im.decoding = "sync"; A.bg = im;
+  if (sc.reveal === "dots") { const d = el("img", "dots", "", w); d.src = sc.bg; d.decoding = "sync"; A.dots = d; }
+  el("div", "fxshade", "", root);
+}
+function kWords(parent, lines, size, u) {   // titre animé : un mot = un span ; le dernier reçoit la classe « last » (or + soulignement)
+  const words = [];
+  lines.forEach((ln, li) => { const row = el("div", "kl", "", parent); row.style.fontSize = size + "px";
+    ln.split(" ").forEach((w, i, arr) => { const s = el("span", "", w + (i < arr.length - 1 ? " " : ""), row); words.push(s); });
+    fit(row, W() - 40 * u); });
+  const last = words[words.length - 1]; if (last) { last.classList.add("last"); last.textContent = last.textContent.trimEnd(); A.u = el("u", "", "", last); A.u.style.width = "100%"; }
+  return words;
+}
+function fxSetup(sc, root, u) {
+  A.fx = true; root.style.padding = "0"; fxBg(sc, root); const T = sc.type, box = el("div", "fxbox", "", root);
+  const low = sc.bg || document.documentElement.classList.contains("ovl");   // texte en bas quand il y a une image derrière
+  if (T === "typewriter") {
+    box.style.alignItems = "center"; box.style.textAlign = "center"; box.style.top = low ? "56%" : "40%";
+    A.tw = sc.lines.map((l, i) => { const d = el("div", "tw", "", box); d.style.fontSize = (i ? 22 : 30) * u + "px"; return d; });
+  } else if (T === "kinetic" || T === "neon") {
+    if (sc.tag) { const g = el("div", "tag", "", box); el("b", "", sc.tag, g); if (sc.place) el("i", "", sc.place, g); g.style.fontSize = 12 * u + "px"; A.tag = g; }
+    if (T === "kinetic") { box.style.bottom = (low ? 20 : 36) + "%"; A.w = kWords(box, sc.lines, 64 * u, u); }
+    else { box.style.alignItems = "center"; box.style.top = "30%"; A.ne = sc.lines.map(l => { const d = el("div", "neon", l, box); d.style.fontSize = 86 * u + "px"; fit(d, W() - 40 * u); return d; }); }
+  } else if (T === "checklist") {
+    box.style.top = low ? "50%" : "30%"; const g = el("div", "glass", "", box);
+    if (sc.heading) { const h = el("h3", "", sc.heading, g); h.style.fontSize = 14 * u + "px"; }
+    A.ck = sc.items.map(it => { const r = el("div", "ck", "", g); r.style.fontSize = 18 * u + "px"; const sv = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      sv.setAttribute("viewBox", "0 0 24 24"); sv.innerHTML = CHECK; sv.style.color = getComputedStyle(document.documentElement).getPropertyValue("--gold"); r.appendChild(sv);   // CHECK est une constante du moteur, jamais un texte du scénario
+      sv.querySelector(".p").style.stroke = getComputedStyle(document.documentElement).getPropertyValue("--royal"); el("span", "", fr(it), r); return { r, sv }; });
+    A.glass = g;
+  } else if (T === "slogan") {
+    box.style.top = "30%"; const c = el("div", "slog", "", box);
+    A.s1 = sc.l1 ? el("div", "s1", sc.l1, c) : null; A.s2 = sc.l2 ? el("div", "s2", sc.l2, c) : null;
+    [A.s1, A.s2].filter(Boolean).forEach(e => { e.style.fontSize = 44 * u + "px"; fit(e, W() - 76 * u); });
+    A.hr = el("hr", "", "", c); A.br = sc.brand ? el("div", "br", sc.brand, c) : null; if (A.br) A.br.style.fontSize = 13 * u + "px"; A.card = c;
+    const l2 = el("div", "sl2", "", box); A.tw = (sc.lines || []).map((l, i) => { const d = el("div", "tw", "", l2); d.style.fontSize = (i ? 17 : 24) * u + "px"; return d; });
+  }
+}
+function fxDraw(sc, t, dur, u) {
+  const T = sc.type;
+  if (A.bg) { const k = ramp(t, 0, dur); A.bg.style.transform = `translate3d(0,${lerp(1, -1, k)}%,0) scale(${lerp(1.04, 1.14, k)})`; }
+  if (A.dots) {   // apparition en points : trame de points qui grossissent jusqu'à l'image entière
+    const k = eio(ramp(t, .2, 1.8)), cell = 7 * u, r = lerp(.18, .75, k) * cell;
+    const m = `radial-gradient(circle, #000 ${r}px, transparent ${r + .6}px)`;
+    A.dots.style.webkitMaskImage = A.dots.style.maskImage = m; A.dots.style.webkitMaskSize = A.dots.style.maskSize = `${cell}px ${cell}px`;
+    A.dots.style.transform = A.bg.style.transform; A.bg.style.opacity = eio(ramp(t, 1.2, 2.2)); A.dots.style.opacity = 1 - eio(ramp(t, 1.8, 2.4));
+  }
+  if (A.tag) { const k = eo(ramp(t, .1, .6)); A.tag.style.clipPath = `inset(0 ${(1 - k) * 100}% 0 0)`; }
+  if (A.tw) {
+    const t0 = T === "slogan" ? 2.4 : .35, { out, end } = typed(sc.lines, t, t0), blink = Math.floor(t * 2.5) % 2 === 0;
+    A.tw.forEach((d, i) => { const s = out[i]; d.textContent = s ?? ""; d.style.visibility = s == null ? "hidden" : "visible";
+      const typing = s != null && (s.length < sc.lines[i].length), lastOn = i === A.tw.length - 1 && t >= end - .3;
+      if (s != null && (typing || (lastOn && blink))) el("span", "cur", "", d); });
+  }
+  if (A.w) A.w.forEach((s, i) => { const last = i === A.w.length - 1, a = .25 + i * .09 + (last ? .15 : 0), k = eo(ramp(t, a, a + (last ? .55 : .45)));
+    if (!last) fx(s, k, (1 - k) * 34 * u);
+    else { const sc2 = 1 + .35 * Math.pow(1 - k, 2); s.style.opacity = cl(k * 1.6); s.style.transform = `scale(${sc2})`;
+      s.style.textShadow = `0 0 ${(18 + 30 * (1 - k)) * u}px color-mix(in srgb,var(--gold) ${Math.round(40 + 40 * (1 - k))}%,transparent),0 4px 18px rgba(0,0,0,.55)`;
+      if (A.u) A.u.style.transform = `scaleX(${eo(ramp(t, a + .35, a + .8))})`; } });
+  if (A.ne) {   // néon : allumage qui grésille puis léger souffle
+    const flick = [[0, 1], [.08, 0], [.16, 1], [.22, 0], [.4, 1], [.46, .3], [.55, 1]], dt = t - .3;
+    let on = 0; for (const [a, v] of flick) if (dt >= a) on = v; if (dt > .55) on = .92 + .08 * Math.sin(dt * 23) * Math.sin(dt * 7);
+    A.ne.forEach(d => { d.style.opacity = on; d.style.textShadow = `0 0 ${6 * u}px #fff3c4,0 0 ${16 * u}px #ffb020,0 0 ${34 * u}px #ff9a00,0 0 ${60 * u}px #ff8000`; });
+  }
+  if (A.ck) {
+    const step = Math.min(.9, Math.max(.45, (dur - 1.6) / A.ck.length)), kg = eo(ramp(t, .1, .6)); fx(A.glass, kg, (1 - kg) * 30 * u);
+    A.ck.forEach((o, i) => { const a = .7 + i * step, k = eo(ramp(t, a, a + .35)); fx(o.r, k, (1 - k) * 10 * u);
+      o.sv.querySelector(".f").style.transform = `scale(${eo(ramp(t, a + .15, a + .35))})`; o.sv.querySelector(".f").style.transformOrigin = "12px 12px";
+      o.sv.querySelector(".p").style.strokeDashoffset = 1 - eo(ramp(t, a + .3, a + .55)); });
+  }
+  if (A.card) { const k = eo(ramp(t, .1, .6)); fx(A.card, k, (1 - k) * 30 * u);
+    [A.s1, A.s2].forEach((e, i) => { if (!e) return; const a = .45 + i * .7, q = eo(ramp(t, a, a + .5)); e.style.clipPath = `inset(0 ${(1 - q) * 100}% 0 0)`; });
+    A.hr.style.transform = `scaleX(${eo(ramp(t, 1.6, 2.2))})`; if (A.br) A.br.style.opacity = eo(ramp(t, 1.9, 2.4)); }
+}
+// incrustation sur un clip : fond transparent, seul le texte est rendu
+window.overlayMode = on => { document.documentElement.classList.toggle("ovl", !!on); };
 // pastille de chapitre : mode incrustation (fond transparent)
 window.pillMode = () => { $("#root").style.display = "none"; document.documentElement.style.background = document.body.style.background = "transparent"; };
 window.pill = (on, t) => {
