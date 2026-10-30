@@ -6,9 +6,11 @@ import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from
 
 type Say = (m: string) => void;
 
-const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)" };
+const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
+  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan" };
 const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
-  const d = c.type === "title" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" ? String(c.heading || "") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
+  const d = c.type === "title" || c.type === "slogan" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" || c.type === "checklist" ? String(c.heading || "")
+    : ["typewriter", "kinetic", "neon"].includes(c.type) && Array.isArray(c.lines) ? (c.lines as unknown[]).map(String).join(" ") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
   return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
 };
 
@@ -39,6 +41,15 @@ function SceneFrame({ s }: { s: VideoScene }) {
   }
   if (t === "page") return <><b className="f-h">Le site défile</b>{items(s, "chapters").slice(0, 6).map((c, i) => <small key={i} className="f-chip">{frText((c as { label?: string })?.label)}</small>)}</>;
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
+  const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;
+  const L = items(s, "lines").map(frText).filter(Boolean);
+  if (t === "typewriter") return <>{bg}{L.map((l, i) => <small key={i} className="f-sub">{l}{i === L.length - 1 ? " ▍" : ""}</small>)}</>;
+  if (t === "kinetic" || t === "neon") {   // le dernier mot en couleur d'accent, comme dans la vidéo
+    const words = L.join(" ").split(" "), last = words.pop() || "";
+    return <>{bg}{txt(s, "tag") && <small className="f-chip">{txt(s, "tag")}{txt(s, "place") ? ` · ${txt(s, "place")}` : ""}</small>}<b className="f-t2">{words.join(" ")} <span style={{ color: "var(--vac)" }}>{last}</span></b></>;
+  }
+  if (t === "checklist") return <>{bg}<div className="f-text">{txt(s, "heading") && <b className="f-h">{txt(s, "heading")}</b>}<ul>{items(s, "items").slice(0, 5).map((b, i) => <li key={i}>✓ {frText(b)}</li>)}</ul></div></>;
+  if (t === "slogan") return <>{txt(s, "l1") && <b className="f-t2">{txt(s, "l1")}</b>}{txt(s, "l2") && <b className="f-t1">{txt(s, "l2")}</b>}{L.slice(0, 2).map((l, i) => <small key={i} className="f-sub">{l}</small>)}</>;
   return <small>{t}</small>;
 }
 

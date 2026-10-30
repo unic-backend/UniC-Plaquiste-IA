@@ -51,7 +51,7 @@ def to_engine(spec: dict, assets: dict) -> dict:
     scenes = []
     for i, s in enumerate(spec["scenes"]):
         if s.get("type") == "ai_clip":
-            scenes.append({"type": "clip", "url": assets[str(i)]["url"], "seconds": s["seconds"]})
+            scenes.append({"type": "clip", "url": assets[str(i)]["url"], "seconds": s["seconds"], **({"overlay": s["overlay"]} if s.get("overlay") else {})})
         elif s.get("type") == "ai_image":
             scenes.append({"type": "photo", "url": assets[str(i)]["url"], "seconds": s["seconds"], "caption": s.get("caption", ""), "direction": s.get("direction", "in")})
         else:
