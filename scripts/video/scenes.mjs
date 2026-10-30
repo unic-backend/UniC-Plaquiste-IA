@@ -31,22 +31,30 @@ const settle = async () => {
   }
 };
 let n = 0, blk = 0, mode = "";
-const setMode = async m => {   // "html" ou "pill" : on ne bascule que si nécessaire
+const setMode = async m => {   // "html", "pill" ou "ovl" (texte incrusté sur un clip) : on ne bascule que si nécessaire
   if (mode === m) return;
-  if (m === "pill") await p.evaluate(() => window.pillMode());
-  else await p.evaluate(() => { window.pill(null, 0); document.querySelector("#root").style.display = ""; document.documentElement.style.background = document.body.style.background = ""; });
+  if (m === "pill") await p.evaluate(() => { window.overlayMode(false); window.pillMode(); });
+  else await p.evaluate(o => { window.pill(null, 0); window.overlayMode(o); document.querySelector("#root").style.display = ""; document.documentElement.style.background = document.body.style.background = ""; }, m === "ovl");
   mode = m;
 };
 const ONLY = process.env.ONLY || "";   // "html" : scènes seules (avant la fin des captures de pages) ; "pill" : pastilles seules
 for (const seg of PLAN.segments) {
-  if (seg.kind === "clip") continue;   // film d'IA : déjà mis en images par make.py
-  if (ONLY && (ONLY === "html") !== (seg.kind === "html")) continue;
+  if (seg.kind === "clip" && !seg.overlay) continue;   // film : déjà mis en images par make.py
+  const htmlLike = seg.kind === "html" || seg.kind === "clip";   // l'incrustation d'un clip ne dépend pas des pages
+  if (ONLY && (ONLY === "html") !== htmlLike) continue;
   fs.mkdirSync(seg.out, { recursive: true });
   const act = []; let ready = false;
   for (let start = 0; start < seg.frames; start += BLOCK) {
     if (blk++ % WORKERS !== WORKER) continue;   // paquet traité par un autre Chrome
     const end = Math.min(seg.frames, start + BLOCK);
-    if (seg.kind === "html") {
+    if (seg.kind === "clip") {   // texte incrusté : PNG transparents, posés sur les images du film par compose.py
+      await setMode("ovl"); fs.mkdirSync(seg.ovl, { recursive: true });
+      if (!ready) { await p.evaluate(sc => window.setup(sc), seg.overlay); ready = true; }
+      for (let f = start; f < end; f++) {
+        await p.evaluate(a => window.draw(a[0], a[1]), [f / FPS, seg.frames / FPS]);
+        fs.writeFileSync(`${seg.ovl}/${String(f).padStart(5, "0")}.png`, await p.screenshot({ omitBackground: true, type: "png" })); n++;
+      }
+    } else if (seg.kind === "html") {
       await setMode("html");
       if (!ready) { await p.evaluate(sc => window.setup(sc), seg.scene); await settle(); ready = true; }
       for (let f = start; f < end; f++) {
@@ -63,6 +71,6 @@ for (const seg of PLAN.segments) {
       }
     }
   }
-  if (seg.kind !== "html") fs.writeFileSync(`${seg.out}/list.${WORKER}.json`, JSON.stringify(act));
+  if (seg.kind === "page") fs.writeFileSync(`${seg.out}/list.${WORKER}.json`, JSON.stringify(act));
 }
 console.log(`Chrome ${WORKER + 1}/${WORKERS} : ${n} images`); await b.close();
