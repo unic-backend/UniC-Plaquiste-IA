@@ -35,8 +35,10 @@ if "--plan" in args:   # plan des tronçons (GitHub Actions) : {"chunks": N, "ma
     print(json.dumps({"chunks": len(parts), "matrix": list(range(len(parts))), "seconds": round(sum(sp.scene_seconds(s) for s in cfg["scenes"]))}))
     raise SystemExit(0)
 out = args[1]
+CHUNK_OFFSET = 0.0   # début du tronçon dans la vidéo entière (pour caler musique et voix)
 if "--chunk" in args:   # un seul tronçon : fondu d'entrée sur le premier, de sortie sur le dernier
     k = int(args[args.index("--chunk") + 1]); parts = sp.chunks(cfg["scenes"], float(os.environ.get("CHUNK_SECONDS", "90")))
+    CHUNK_OFFSET = sum(sp.scene_seconds(s) for p in parts[:k] for s in p)
     cfg["scenes"] = parts[k]
     os.environ["FADE_IN"], os.environ["FADE_OUT"] = ("1" if k == 0 else "0"), ("1" if k == len(parts) - 1 else "0")
 FPS = int(os.environ.get("VIDEO_FPS") or cfg["fps"])      # 60 i/s par défaut : c'est ce qui donne la fluidité
@@ -89,6 +91,22 @@ try:
         if s["kind"] == "page":
             done = sorted(sum((json.load(open(f)) for f in Path(s["out"]).glob("list.*.json")), []))
             Path(s["out"], "list.json").write_text(json.dumps(done))
-    subprocess.run([sys.executable, str(here / "compose.py"), str(work / "plan.json"), out], check=True, env=env)
+    au = cfg.get("audio")
+    silent = out if not au else str(work / "silent.mp4")
+    subprocess.run([sys.executable, str(here / "compose.py"), str(work / "plan.json"), silent], check=True, env=env)
+    if au:   # bande son du tronçon : musique, voix, clavier (sound.py), puis réunion image + son sans ré-encoder l'image
+        import sound
+        files = {}
+        for key in ("music", "voice"):
+            if au.get(key):
+                files[key] = work / f"{key}.audio"
+                fetch_media(au[key]["url"], files[key])
+        timeline, t = [], 0.0
+        for sc, sg in zip(cfg["scenes"], segs):
+            secs = sg["frames"] / FPS
+            timeline.append((t, secs, sc)); t += secs
+        wav = sound.build(au, timeline, files, CHUNK_OFFSET, t, work, os.environ.get("FADE_IN", "1") == "1", os.environ.get("FADE_OUT", "1") == "1")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", silent, "-i", str(wav), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", out], check=True)
 finally:
     shutil.rmtree(work, ignore_errors=True)

@@ -195,6 +195,36 @@ def chunks(scenes: list[dict], target: float = 90.0, max_chunks: int = 250) -> l
     return out
 
 
+DUCKS = ("light", "normal", "strong")
+
+
+def _audio(a) -> dict | None:
+    """Bande son facultative : musique (https), voix (https, ex. ElevenLabs), clavier des textes tapés, force de la baisse de la musique sous la voix."""
+    if not isinstance(a, dict):
+        return None
+    out: dict = {}
+    m = a.get("music")
+    if isinstance(m, dict) and m.get("url"):
+        out["music"] = {"url": _media_url(m["url"]), "start": _secs(m.get("start"), 0, 3600, 0), "volume": _secs(m.get("volume"), 0, 2, 1)}
+    v = a.get("voice")
+    if isinstance(v, dict) and v.get("url"):
+        out["voice"] = {"url": _media_url(v["url"]), "offset": _secs(v.get("offset"), 0, 43200, 0), "volume": _secs(v.get("volume"), 0, 2, 1)}
+    out["keys"] = bool(a.get("keys", True))
+    out["duck"] = a.get("duck") if a.get("duck") in DUCKS else "normal"
+    return out if ("music" in out or "voice" in out or out["keys"]) else None
+
+
+def _voice_seg(sc: dict, raw: dict) -> dict:
+    """Morceau de la piste voix lu pendant la scène : « voice »: [début, fin] en secondes (60 s au plus), « voice_at » : décalage dans la scène."""
+    seg = raw.get("voice")
+    if isinstance(seg, (list, tuple)) and len(seg) == 2:
+        a, b = _secs(seg[0], 0, 3600, -1), _secs(seg[1], 0, 3600, -1)
+        if 0 <= a < b <= a + 60:
+            sc["voice"] = [a, b]
+            sc["voice_at"] = _secs(raw.get("voice_at"), 0, 30, 0)
+    return sc
+
+
 def clean(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("scénario invalide")
@@ -209,7 +239,7 @@ def clean(raw: dict) -> dict:
         raise ValueError("liste de scènes invalide")
     if len(raw_scenes) > MAX_SCENES:
         raise ValueError(f"trop de scènes ({MAX_SCENES} au maximum)")
-    scenes = [_scene(s) for s in raw_scenes if isinstance(s, dict)]
+    scenes = [_voice_seg(_scene(s), s) for s in raw_scenes if isinstance(s, dict)]
     if not scenes:
         raise ValueError("aucune scène")
     est = sum(scene_seconds(s) for s in scenes)
@@ -217,4 +247,8 @@ def clean(raw: dict) -> dict:
         raise ValueError("vidéo trop longue (12 heures au maximum)")
     fps = raw.get("fps") if raw.get("fps") in (24, 30, 60) else 60
     theme = raw.get("theme") if raw.get("theme") in THEMES else "unic"
-    return {"format": fmt, "fps": fps, "theme": theme, "scenes": scenes}
+    out = {"format": fmt, "fps": fps, "theme": theme, "scenes": scenes}
+    au = _audio(raw.get("audio"))
+    if au:
+        out["audio"] = au
+    return out
