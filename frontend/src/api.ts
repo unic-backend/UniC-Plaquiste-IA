@@ -221,6 +221,8 @@ export type VideoPlan = {
   spec: { format: string; theme?: string; scenes: VideoScene[] }; seconds: number; note: string; ai?: { clips: number; images: number };
   understood?: string; assumptions?: string[]; limits?: string[]; target?: number | null; changes?: string[];   // ce que l'IA a compris, et le fil des corrections
 };
+export type VideoMedia = { id: string; kind: "clip" | "music" | "voice"; name: string; seconds: number; size: number; at: number;
+  phrases?: { i: number; start: number; end: number; text: string | null }[] };
 export type VideoState = { state: string; detail: string; url?: string; can_retry?: boolean; ai?: { done: number; total: number } };
 export type VideoAIClip = {
   state: string; detail: string; duration?: number; format?: string; kind?: string;
@@ -256,6 +258,14 @@ export const net = {
     request<VideoPlan>("/api/website/video/plan", { method: "POST", body: JSON.stringify({ brief, format, theme, current: current ?? null, changes }) }),
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<VideoState>("/api/website/video/status"),
+  /** Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix off (phrases repérées). */
+  videoMedia: () => request<{ items: VideoMedia[] }>("/api/website/video/media"),
+  videoMediaAdd: (file: File, kind: VideoMedia["kind"], script = "") => {
+    const fd = new FormData();
+    fd.append("kind", kind); fd.append("script", script); fd.append("file", file, file.name);
+    return request<VideoMedia>("/api/website/video/media", { method: "POST", body: fd });
+  },
+  videoMediaHide: (id: string) => request<{ ok: boolean }>(`/api/website/video/media/${id}/hide`, { method: "POST" }),
   videoDraft: () => request<{ at?: string; brief?: string; plan?: VideoPlan }>("/api/website/video/draft"),
   videoRetry: () => request<{ ok: boolean; note: string }>("/api/website/video/retry", { method: "POST" }),
   videoFetch: () => request<{ id: string; filename: string; size: number; url: string }>("/api/website/video/fetch", { method: "POST" }),

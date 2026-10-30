@@ -61,7 +61,7 @@ try:
             fetch_media(sc["url"], src)
             n = round(sc["seconds"] * FPS); d.mkdir(parents=True, exist_ok=True)
             ow, oh = w * 3, h * 3
-            clips.append((i, subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", "-vf",
+            clips.append((i, subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-ss", str(sc.get("start") or 0), "-i", str(src), "-an", "-vf",
                                                f"scale={ow}:{oh}:force_original_aspect_ratio=increase,crop={ow}:{oh},fps={FPS},tpad=stop_mode=clone:stop_duration={sc['seconds']}",
                                                "-frames:v", str(n), "-q:v", "2", "-start_number", "0", str(d / "%05d.jpg")])))
             segs.append({"kind": "clip", "out": str(d), "frames": n, **({"overlay": sc["overlay"], "ovl": str(work / f"o{i}")} if sc.get("overlay") else {})})

@@ -135,7 +135,7 @@ def _scene(s: dict) -> dict:
             raise ValueError("scène texte sans contenu")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 10, 5), "heading": _txt(s.get("heading"), 40), "bullets": b}
     if t == "clip":
-        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url"))}
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url")), "start": _secs(s.get("start"), 0, 36000, 0)}
         ov = s.get("overlay")
         if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:   # texte incrusté sur le film : même durée que le clip
             out["overlay"] = {**_fx(ov, ov["type"], overlay=True), "seconds": out["seconds"]}
