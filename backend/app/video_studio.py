@@ -40,7 +40,11 @@ MEMORY_CHARS = 1800               # ce que le patron a appris à UniC, rappelé 
 READ_CPS = 22                     # caractères lus par seconde à l'écran (lecture rapide d'un texte court)
 FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.html)
 # durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
-SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8)}
+SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
+           "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12)}
+FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan")   # effets « cinéma » du moteur (scripts/video/scenes.html)
+OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon")         # textes qu'on peut incruster sur un clip IA
+TYPE_CPS = 14                                                         # machine à écrire : 14 caractères/s (scenes.html)
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
@@ -63,10 +67,10 @@ FALLBACK_IMAGES = ("avantapres-11 avantapres-12 avantapres-13 avantapres-14 deco
 _img_cache: dict = {"t": 0.0, "names": []}
 
 SCENE_PROPS = {
-    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro"]},
+    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES]},
     "prompt": {"type": "string", "description": "ai_clip / ai_image : description visuelle détaillée de ce qu'on doit voir (sujet, décor, lumière, mouvement de caméra), 8 à 1500 caractères, sans texte écrit dans l'image."},
     "seconds": {"type": "number", "description": "Durée en secondes (title 3-5, text 4-8, photo 3-5, gallery 2 à 3 s par photo, stats 4-6, quote 5-8, outro 4-6). Inutile pour page."},
-    "l1": {"type": "string", "description": "title : ligne 1, 18 caractères max."}, "l2": {"type": "string", "description": "title : ligne 2 facultative."},
+    "l1": {"type": "string", "description": "title : ligne 1, 18 caractères max. slogan : ligne blanche (30 car.)."}, "l2": {"type": "string", "description": "title : ligne 2 facultative. slogan : ligne en or (30 car.)."},
     "sub": {"type": "string", "description": "title : sous-titre court."},
     "heading": {"type": "string", "description": "text : titre."}, "bullets": {"type": "array", "items": {"type": "string"}, "description": "text : 2 à 4 puces courtes (60 caractères)."},
     "image": {"type": "string", "description": "photo : nom EXACT du catalogue."}, "images": {"type": "array", "items": {"type": "string"}, "description": "gallery : 2 à 6 noms EXACTS du catalogue."},
@@ -77,8 +81,17 @@ SCENE_PROPS = {
     "facts": {"type": "array", "items": {"type": "string", "enum": list(FACT_STATS)}, "description": "stats : chiffres vrais de l'entreprise UniC Plaquiste (seulement si le sujet la concerne)."},
     "text": {"type": "string", "description": "quote : texte de la citation (de la consigne, d'une source que tu connais avec certitude, ou une réplique de fiction)."}, "author": {"type": "string", "description": "quote : qui parle."},
     "quote": {"type": "string", "enum": list(QUOTES), "description": "quote : avis réel de l'entreprise UniC Plaquiste (seulement si le sujet la concerne)."},
-    "lines": {"type": "array", "items": {"type": "string"}, "description": "outro : jusqu'à 6 lignes libres (1 : grand titre, 2 : sous-titre, 3 : petite ligne, 4 : bouton, 5-6 : contact)."},
-    "brand": {"type": "boolean", "description": "outro : true pour la carte de l'entreprise UniC Plaquiste (téléphone, site) — seulement si le sujet la concerne."},
+    "lines": {"type": "array", "items": {"type": "string"}, "description": "outro : jusqu'à 6 lignes libres (1 : grand titre, 2 : sous-titre, 3 : petite ligne, 4 : bouton, 5-6 : contact). "
+              "typewriter : 1 à 3 lignes tapées au clavier (60 car.). kinetic : 1 à 3 lignes d'un grand titre dont le DERNIER mot arrive en or (26 car. par ligne). "
+              "neon : 1 ou 2 mots en néon (16 car.). slogan : lignes sous la carte (40 car.), inutile avec brand."},
+    "tag": {"type": "string", "description": "kinetic / neon : petite étiquette dorée au-dessus (ex. « SITE 01 », 12 car.)."},
+    "place": {"type": "string", "description": "kinetic : texte à côté de l'étiquette (ex. un lieu, 28 car.)."},
+    "checks": {"type": "array", "items": {"type": "string"}, "description": "checklist : 1 à 5 éléments cochés un à un sur verre dépoli (40 car.)."},
+    "reveal": {"type": "boolean", "description": "typewriter / kinetic / checklist / neon avec une photo (image) derrière : la photo apparaît en points-pixels."},
+    "overlay": {"type": "object", "description": "ai_clip : texte incrusté SUR le film (type typewriter, kinetic, checklist ou neon, avec ses champs lines / tag / place / heading / checks).",
+                "properties": {"type": {"type": "string", "enum": list(OVERLAY_TYPES)}, "lines": {"type": "array", "items": {"type": "string"}}, "tag": {"type": "string"},
+                               "place": {"type": "string"}, "heading": {"type": "string"}, "checks": {"type": "array", "items": {"type": "string"}}}, "required": ["type"]},
+    "brand": {"type": "boolean", "description": "outro / slogan : true pour la carte de l'entreprise UniC Plaquiste (nom, téléphone, site) — seulement si le sujet la concerne."},
     "page": {"type": "string", "enum": list(PAGES), "description": "page : page du site à faire défiler."},
     "chapters": {"type": "array", "description": "page : chapitres à montrer, dans l'ordre.", "items": {"type": "object", "properties": {
         "key": {"type": "string", "enum": list(PAGES["portfolio"]["chapters"])}, "label": {"type": "string"}, "seconds": {"type": "number"}}, "required": ["key"]}},
@@ -112,6 +125,9 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo. Tu composes le scénario de N'I
           "RESPECTE À LA LETTRE ce que le patron précise : durée (la somme des durées des scènes l'atteint), nombre et ordre des scènes, textes, chiffres, noms, slogan, contact ; reprends mot pour mot ce qu'il a écrit. "
           "Écris dans la langue de la demande (français par défaut). "
           "Aucun plafond de durée (les vidéos longues se rendent en tronçons) ; sans durée précisée, vise 20 à 60 secondes. Types de scènes : title, text, photo, gallery, stats, quote, page, outro ; choisis l'ambiance de couleurs (theme) qui va avec le sujet. "
+          "EFFETS CINÉMA (pour un rendu moderne, à varier) : typewriter (texte tapé au clavier, idéal en ouverture ou pour une phrase forte), kinetic (grand titre mot par mot, le dernier mot en or : noms de lieux, messages clés), "
+          "checklist (liste cochée une à une : prestations, étapes), neon (1-2 mots lumineux : un nom, un lieu), slogan (carte de fin : l1 blanche, l2 en or). "
+          "typewriter, kinetic, checklist et neon peuvent avoir une photo du catalogue derrière (image) qui apparaît en points-pixels (reveal) ; sur un ai_clip, overlay incruste le même genre de texte sur le film. "
           "Rythme : une idée par scène, des textes courts et lisibles sur téléphone (titre : 18 caractères par ligne ; puces et légendes : 60) ; laisse le temps de lire (environ 1 seconde pour 20 caractères à l'écran, plus 1 seconde). "
           "Tu écris titres, textes, légendes, chiffres et citations à partir de la demande et de tes connaissances générales ; "
           "n'affirme jamais comme réel un fait que tu ne connais pas avec certitude, et n'invente ni chiffre, ni prix, ni témoignage sur une personne ou une entreprise réelle. "
@@ -172,6 +188,18 @@ def _readable(sc: dict) -> float:
     elif t == "outro":
         lines = [x for x in sc["lines"] if x]
         shown, n = .95 + .12 * len(lines), sum(len(x) for x in lines)
+    elif t in ("typewriter", "slogan"):
+        lines = sc.get("lines") or []
+        t0 = .35 if t == "typewriter" else 2.4
+        shown = t0 + sum(len(x) for x in lines) / TYPE_CPS + .3 * max(len(lines) - 1, 0) if lines else 2.2
+        n = sum(len(x) for x in lines) + len(sc.get("l1") or "") + len(sc.get("l2") or "")
+    elif t == "kinetic":
+        words = sum(len(x.split()) for x in sc["lines"])
+        shown, n = .25 + .09 * words + .7, sum(len(x) for x in sc["lines"]) + len(sc.get("tag") or "") + len(sc.get("place") or "")
+    elif t == "checklist":
+        shown, n = .7 + .9 * len(sc["items"]), len(sc.get("heading") or "") + sum(len(x) for x in sc["items"])
+    elif t == "neon":
+        shown, n = 1.0, sum(len(x) for x in sc["lines"])
     elif t in ("photo", "ai_image") and sc.get("caption"):
         shown, n = 1.1, len(sc["caption"])
     else:
@@ -242,6 +270,39 @@ def _page_scene(sc: dict) -> dict | None:
     return {"type": "page", "page": sc.get("page") or "portfolio", "url": cat["url"], "hero_seconds": 4.4, "chapters": ch} if ch else None
 
 
+def _fx_scene(sc: dict, t: str, ok_imgs: set) -> dict | None:
+    """Effet cinéma (forme du moteur) : textes coupés à la longueur affichable, photo seulement du catalogue ; None si vide.
+    slogan + brand : nom, téléphone et site viennent de FACTS (jamais écrits par l'IA)."""
+    secs = sc.get("seconds")
+    lo, hi = SECONDS[t]
+    if t == "typewriter":
+        lines = [x for x in (_cut(v, 60) for v in (sc.get("lines") or [])) if x][:3]
+        out = {"type": t, "seconds": _num(secs, lo, hi, 4), "lines": lines} if lines else None
+    elif t == "kinetic":
+        lines = [x for x in (_cut(v, 26) for v in (sc.get("lines") or [])) if x][:3]
+        out = {"type": t, "seconds": _num(secs, lo, hi, 3.5), "lines": lines, "tag": _cut(sc.get("tag"), 12), "place": _cut(sc.get("place"), 28)} if lines else None
+    elif t == "checklist":
+        items = [x for x in (_cut(v, 40) for v in (sc.get("checks") or sc.get("items") or []) if isinstance(v, str)) if x][:5]
+        out = {"type": t, "seconds": _num(secs, lo, hi, max(4.0, 1.4 + .8 * len(items))), "heading": _cut(sc.get("heading"), 40), "items": items} if items else None
+    elif t == "neon":
+        lines = [x for x in (_cut(v, 16) for v in (sc.get("lines") or [])) if x][:2]
+        out = {"type": t, "seconds": _num(secs, lo, hi, 3), "lines": lines, "tag": _cut(sc.get("tag"), 12)} if lines else None
+    else:   # slogan
+        l1, l2 = _cut(sc.get("l1"), 30), _cut(sc.get("l2"), 30)
+        if not (l1 or l2):
+            return None
+        card = sc.get("brand") is True or sc.get("brand_card") is True   # brand_card : scénario renvoyé par l'appli (aller-retour)
+        if card:
+            brand, lines = " ".join(FACTS["name"]), [FACTS["phone"], FACTS["site"]]
+        else:
+            brand, lines = "", [x for x in (_cut(v, 40) for v in (sc.get("lines") or [])) if x][:4]
+        out = {"type": t, "seconds": _num(secs, lo, hi, 7), "l1": l1, "l2": l2, "brand": brand, "lines": lines, "brand_card": card}
+    if out and t != "slogan" and sc.get("image") in ok_imgs:
+        out["image"] = sc["image"]
+        out["reveal"] = "dots" if sc.get("reveal") in (True, "dots") else ""
+    return out
+
+
 def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: str = "unic", ai: dict | None = None) -> dict:
     """Scénario sûr (forme du moteur) à partir de scènes proposées par Claude ou renvoyées par l'appli. Ce qui sort du catalogue est écarté."""
     ok_imgs = set(names if names is not None else images())
@@ -262,7 +323,14 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
             if left.get(kind, 0) > 0 and len(prompt) >= 8:
                 left[kind] -= 1
                 if t == "ai_clip":
-                    out.append({"type": t, "seconds": int(_num(secs, 2, 30, 5)), "prompt": prompt})
+                    clip = {"type": t, "seconds": int(_num(secs, 2, 30, 5)), "prompt": prompt}
+                    ov = sc.get("overlay")
+                    if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
+                        o = _fx_scene(ov, ov["type"], set())          # incrustation : jamais de photo derrière
+                        if o:
+                            o.pop("seconds", None)
+                            clip["overlay"] = o
+                    out.append(clip)
                 else:
                     out.append({"type": t, "seconds": _num(secs, 2.5, 8, 4), "prompt": prompt, "caption": _cut(sc.get("caption"), 60),
                                 "direction": sc.get("direction") if sc.get("direction") in ("in", "out", "left", "right") else "in"})
@@ -297,6 +365,10 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
             p = _page_scene(sc)
             if p:
                 out.append(p)
+        elif t in FX_TYPES:
+            fx = _fx_scene(sc, t, ok_imgs)
+            if fx:
+                out.append(fx)
         elif t == "outro":
             if sc.get("brand") is True:      # carte de l'entreprise : faits du code, jamais écrits par l'IA
                 lines = [*FACTS["name"], FACTS["services"], _cut(sc.get("cta"), 40) or FACTS["cta"], FACTS["phone"], FACTS["site"]]
