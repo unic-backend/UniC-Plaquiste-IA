@@ -1,13 +1,13 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoPlan, type VideoScene, type VideoState } from "./api";
+import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
 import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from "./videoBoard";
 
 type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
-  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan" };
+  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo" };
 const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
   const d = c.type === "title" || c.type === "slogan" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" || c.type === "checklist" ? String(c.heading || "")
     : ["typewriter", "kinetic", "neon"].includes(c.type) && Array.isArray(c.lines) ? (c.lines as unknown[]).map(String).join(" ") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
@@ -40,6 +40,10 @@ function SceneFrame({ s }: { s: VideoScene }) {
     return <>{L[0] && <b className="f-t1">{L[0]}</b>}{L.slice(1, 4).map((l, i) => <small key={i} className={i === 2 ? "f-btn" : "f-sub"}>{l}</small>)}</>;
   }
   if (t === "page") return <><b className="f-h">Le site défile</b>{items(s, "chapters").slice(0, 6).map((c, i) => <small key={i} className="f-chip">{frText((c as { label?: string })?.label)}</small>)}</>;
+  if (t === "my_clip") {   // vraie vidéo du patron : texte incrusté éventuel
+    const ov = (s.overlay || {}) as { lines?: unknown[] };
+    return <div className="f-ai"><b>Ma vidéo</b><small>{(ov.lines || []).map((x) => frText(x)).join(" ")}</small></div>;
+  }
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
   const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;
   const L = items(s, "lines").map(frText).filter(Boolean);
@@ -71,6 +75,55 @@ function Storyboard({ spec, onRemove, busy }: { spec: VideoPlan["spec"]; onRemov
         </li>
       ))}
     </ol>
+  );
+}
+
+const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo de chantier", music: "Musique", voice: "Voix off" };
+const MEDIA_ACCEPT: Record<VideoMedia["kind"], string> = { clip: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm", music: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", voice: "audio/*,.mp3,.m4a,.aac,.wav,.ogg" };
+
+/** Médias du patron : ses vraies vidéos, sa musique et sa voix (ElevenLabs…). L'IA du Studio s'en sert ; rien n'est publié. */
+function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void> }) {
+  const [items, setItems] = useState<VideoMedia[]>([]);
+  const [kind, setKind] = useState<VideoMedia["kind"]>("clip");
+  const [script, setScript] = useState("");
+  const [sending, setSending] = useState("");
+  const load = () => net.videoMedia().then((r) => setItems(r.items)).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const send = async (files: FileList | null) => {
+    if (!files?.length) return;
+    for (const f of Array.from(files)) {
+      setSending(f.name);
+      try { await net.videoMediaAdd(f, kind, kind === "voice" ? script : ""); } catch (e: any) { say(`${f.name} : ${e.message || "envoi impossible"}`); }
+    }
+    setSending(""); if (kind === "voice") setScript(""); load();
+  };
+  return (
+    <details className="vs-media">
+      <summary>Mes médias ({items.length}) — vidéos de chantier, musique, voix off</summary>
+      <p className="vs-note">L'IA met tes vraies vidéos dans le montage, ta musique en fond (baissée quand la voix parle) et place chaque phrase de ta voix sur sa scène. Les fichiers restent privés : GitHub les télécharge seulement quand tu lances la fabrication.</p>
+      <div className="vs-fmt" role="radiogroup" aria-label="Type de média à envoyer">
+        {(Object.keys(MEDIA_FR) as VideoMedia["kind"][]).map((k) => (
+          <button key={k} role="radio" aria-checked={kind === k} className={`chip${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{MEDIA_FR[k]}</button>
+        ))}
+      </div>
+      {kind === "voice" && <textarea rows={3} value={script} onChange={(e) => setScript(e.target.value)} maxLength={6000}
+        placeholder="Facultatif : colle le texte de ta voix off (une phrase par ligne) pour que chaque morceau reçoive sa phrase." aria-label="Texte de la voix off" />}
+      <label className="btn btn-line btn-small">
+        {sending ? `Envoi de ${sending}…` : `Envoyer : ${MEDIA_FR[kind].toLowerCase()}`}
+        <input type="file" hidden multiple={kind === "clip"} accept={MEDIA_ACCEPT[kind]} disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />
+      </label>
+      {!!items.length && (
+        <ul className="vs-list">
+          {items.map((m) => (
+            <li key={m.id}>
+              <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}
+              {" "}<button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer de la liste"
+                onClick={() => run(async () => { await net.videoMediaHide(m.id); await load(); }, "Média retiré de la liste.")}>×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }
 
@@ -189,6 +242,7 @@ export function VideoStudio({ say }: { say: Say }) {
               </button>
             ))}
           </div>
+          <MediaPanel say={say} busy={busy} run={run} />
           <div className="row-actions">
             <button className="btn btn-copper btn-small" disabled={busy} onClick={() => propose()}>{plan ? "Nouveau scénario" : "Proposer un scénario"}</button>
             <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>

@@ -1838,6 +1838,16 @@ def agenda_public_ics(token: str, db: Session = Depends(get_db)):
                     headers={"Cache-Control": "private, max-age=900", "Content-Disposition": 'inline; filename="unic-agenda.ics"'})
 
 
+@router.get("/public/video-media/{token}", include_in_schema=False)
+def video_media_public(token: str, db: Session = Depends(get_db)):
+    """Média du patron téléchargé par GitHub pendant une fabrication qu'il a lancée : lien secret, ouvert 72 h, sinon introuvable."""
+    from app import video_media
+    p = video_media.public_path(db, token)
+    if p is None:
+        raise HTTPException(404, "Introuvable")
+    return FileResponse(p, media_type=video_media.media_type(p), headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+
+
 @router.post("/agenda")
 def agenda_create(body: AppointmentIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app import agenda

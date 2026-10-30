@@ -1,7 +1,7 @@
 """Site web : connexion GitHub, rédaction d'une page par l'IA, aperçu, publication après approbation."""
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -185,6 +185,43 @@ def video_retry(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     audit(db, user.id, "video_retry", "website", "portfolio")
     db.commit()
     return out
+
+
+@router.get("/video/media")
+def video_media_list(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix (phrases repérées)."""
+    from app import video_media
+    return {"items": video_media.listing(db)}
+
+
+@router.post("/video/media")
+async def video_media_add(kind: str = Form(...), script: str = Form(""), file: UploadFile = File(...),
+                          db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron : envoie une vidéo, une musique ou une voix (avec son texte, facultatif) au Studio. Rien n'est publié."""
+    from app import video_media
+    try:
+        it = await video_media.add(db, file, kind, script[:6000])
+    except video_media.MediaError as exc:
+        db.rollback()
+        raise HTTPException(exc.status, str(exc))
+    audit(db, user.id, "video_media_add", "video_media", it["id"], f"{kind} {it['name']}")
+    db.commit()
+    return it
+
+
+@router.post("/video/media/{mid}/hide")
+def video_media_hide(mid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Retire un média de la liste (le fichier reste sur le serveur : aucune suppression)."""
+    from app import video_media
+    if not video_media.ID_RE.match(mid):
+        raise HTTPException(404, "Média introuvable.")
+    try:
+        video_media.hide(db, mid)
+    except video_media.MediaError as exc:
+        raise HTTPException(exc.status, str(exc))
+    audit(db, user.id, "video_media_hide", "video_media", mid)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/video/status")
