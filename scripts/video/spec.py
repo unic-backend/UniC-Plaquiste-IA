@@ -17,7 +17,11 @@ IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
-         "counter", "flow", "wave", "chat", "badge", "lottie")
+         "counter", "flow", "wave", "chat", "badge", "lottie", "motion")
+# « motion » : animation libre dessinée par l'IA (SVG animé en CSS), nettoyée par le serveur (motion_svg.py) ; revérifiée ici (aucun script ni rien d'externe).
+MOTION_MAX = 60_000
+MOTION_BAD = re.compile(r"<\s*(script|foreignObject|iframe|image|img|a|object|embed|link|meta)\b|\son\w+\s*=|javascript:|data:|@import|"
+                        r"(?:href|src)\s*=\s*['\"](?!#)|url\s*\(\s*['\"]?\s*(?!#)", re.I)
 # Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge ; en scène, en incrustation ou en haut d'un écran divisé.
 PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
 # Animations vectorielles Lottie (lottie-web « light », sans expressions) : celles du moteur (dossier lottie/) ou celles du patron (lien https).
@@ -236,6 +240,11 @@ def _scene(s: dict) -> dict:
         raise ValueError(f"type de scène inconnu : {str(t)[:20]}")
     if t in FX_TYPES:
         return _fx(s, t)
+    if t == "motion":
+        svg = s.get("svg")
+        if not isinstance(svg, str) or not svg.lstrip().startswith("<svg") or len(svg) > MOTION_MAX or MOTION_BAD.search(svg):
+            raise ValueError("animation libre refusée (SVG invalide ou ressource externe)")
+        return {"type": t, "seconds": _secs(s.get("seconds"), 2, 15, 5), "svg": svg}
     if t == "title":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "l1": _txt(s.get("l1"), 24).upper(), "l2": _txt(s.get("l2"), 24).upper(), "sub": _txt(s.get("sub"), 40).upper()}
     if t == "text":

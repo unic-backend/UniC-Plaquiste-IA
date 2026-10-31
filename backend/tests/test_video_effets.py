@@ -62,5 +62,7 @@ def test_moteur_html_sans_interpretation_du_scenario():
     """Le texte du scénario passe par textContent : seule la coche (constante du moteur) utilise innerHTML."""
     html = (ROOT / "scenes.html").read_text(encoding="utf-8")
     assert html.count("innerHTML") == 1 and "sv.innerHTML = CHECK" in html
+    # l'animation libre de l'IA est lue comme un dessin SVG (DOMParser), jamais comme du HTML, et renettoyée par le moteur
+    assert 'parseFromString(String(sc.svg || ""), "image/svg+xml")' in html and 'querySelectorAll("script,foreignObject,image,iframe,a")' in html
     for t in ("typewriter", "kinetic", "checklist", "neon", "slogan"):
         assert f'"{t}"' in html

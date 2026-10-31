@@ -21,7 +21,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app import repair, website
+from app import motion_svg, repair, website
 from app.config import settings
 from app.services import store_artifact
 
@@ -46,7 +46,7 @@ FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.htm
 # durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
 SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
            "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12),
-           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8)}
+           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8), "motion": (2, 15)}
 PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
 # Animations Lottie du moteur (scripts/video/lottie/, créées pour UniC) et leur sens ; le patron peut aussi envoyer les siennes (Mes médias).
 BUILTIN_LOTTIE = {"check": "coche qui se trace dans un cercle (validé, terminé, garanti)", "spark": "éclat lumineux (nouveauté, effet waouh)",
@@ -90,7 +90,10 @@ FALLBACK_IMAGES = ("avantapres-11 avantapres-12 avantapres-13 avantapres-14 deco
 _img_cache: dict = {"t": 0.0, "names": []}
 
 SCENE_PROPS = {
-    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip", "my_photo"]},
+    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip", "my_photo", "motion"]},
+    "svg": {"type": "string", "description": "motion : TON dessin animé, un SVG complet (balise <svg viewBox=…>) animé en CSS (@keyframes dans <style>, "
+            "animation-delay pour enchaîner) : formes, dégradés, textes, filtres. Compact (4 000 caractères au plus : classes CSS réutilisées). "
+            "Aucun script, aucune image ni police externe."},
     "media": {"type": "string", "description": "my_clip : identifiant EXACT d'une vidéo du patron ; my_photo : d'une de SES photos ; lottie : identifiant EXACT d'une de SES animations (liste « Médias du patron »)."},
     "anim": {"type": "string", "enum": list(BUILTIN_LOTTIE), "description": "lottie : animation du moteur — " + " ; ".join(f"{k} = {v}" for k, v in BUILTIN_LOTTIE.items()) + "."},
     "loop": {"type": "boolean", "description": "lottie : rejouer l'animation en boucle (pulse, arrow) ; sinon elle s'arrête sur sa dernière image."},
@@ -198,7 +201,12 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo, LIBRE. Tu ne suis aucune recett
           "kinetic (titre mot par mot, dernier mot en couleur), checklist (liste cochée une à une), neon (1-2 mots lumineux), slogan (carte l1 / l2) ; "
           "panneaux animés counter (un nombre qui compte jusqu'à value, suffix, label), flow (2 à 4 étapes A → B → C), wave (onde sonore, lines = [légende, durée]), "
           "chat (bulle puis réponse tapée, lines = [réponse, note]), badge (pastille + nom), lottie (icône animée : anim du moteur ou media = une animation du patron) ; "
-          "et l'ambiance de couleurs (theme) qui va avec le contenu. typewriter, kinetic, checklist et neon peuvent avoir une photo derrière (image : "
+          "et l'ambiance de couleurs (theme) qui va avec le contenu. "
+          "ANIMATION LIBRE (motion) : quand aucun outil ne montre ce que la vidéo raconte, DESSINE-LE toi-même : un SVG animé en CSS "
+          "(interface qui s'assemble, écran flottant, objet, schéma vivant, décor, personnage stylisé, particules, lumière, profondeur en "
+          "perspective…), au format de la vidéo, avec un fond plein et un vrai mouvement pendant toute la scène ; chaque motion est pensée pour "
+          "CETTE scène (jamais un modèle réutilisé). Une scène montre TOUJOURS le contenu de la vidéo : jamais une animation décorative seule "
+          "(éclat, flèche, ondes, badge) comme sujet, jamais le nom d'un effet affiché à l'écran. typewriter, kinetic, checklist et neon peuvent avoir une photo derrière (image : "
           "seulement une photo du site, et seulement s'il les a demandées) qui apparaît en points-pixels (reveal). "
           "Lisibilité : une idée par scène, textes courts lisibles sur téléphone (titre : 18 caractères par ligne ; puces et légendes : 60), "
           "le temps de lire (environ 1 seconde pour 20 caractères, plus 1 seconde). "
@@ -651,6 +659,10 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
             p = _page_scene(sc)
             if p:
                 out.append(p)
+        elif t == "motion":      # animation libre dessinée par l'IA : SVG nettoyé (balises de dessin seulement, rien d'externe)
+            svg = motion_svg.clean(sc.get("svg"), fmt)
+            if svg:
+                out.append({"type": t, "seconds": _num(secs, *SECONDS[t], 5), "svg": svg})
         elif t == "my_photo":    # vraie photo du patron : seulement de sa liste
             it = (media or {}).get(str(sc.get("media") or ""))
             if it and it["kind"] == "photo":
