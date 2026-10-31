@@ -1905,3 +1905,8 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .toast.toast-global { bottom: calc(86px + env(safe-area-inset-bottom, 0px) + var(--kb, 0px)); }
 .kb-open .composer-wrap { padding-bottom: 10px; }
 .kb-open .sheet { padding-bottom: 16px; }
+
+/* Studio : un bouton par type de média (Android n'ouvrait que les vidéos avec un sélecteur mélangé) */
+.vs-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.vs-pick .chip { cursor: pointer; }
+.vs-pick .chip.off { opacity: .5; pointer-events: none; }

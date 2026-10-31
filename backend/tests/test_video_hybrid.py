@@ -59,8 +59,8 @@ def test_les_scenes_ia_ne_passent_que_si_autorisees_et_dans_les_quotas():
     assert vh.ai_counts(spec) == (1, 1)
 
 
-def test_le_studio_n_offre_plus_de_scenes_ia_payantes(monkeypatch):
-    """Décision du patron : plus de scènes IA payantes (Higgsfield) dans le Studio, même si Higgsfield est connecté."""
+def test_le_plan_offre_les_scenes_ia_si_activees_connectees_et_dans_le_plafond(monkeypatch):
+    """Décision du patron (après #245) : scènes IA payantes réactivées, plafonnées par les quotas du jour, et coupables dans les réglages."""
     monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle")
     seen = {}
 
@@ -68,11 +68,20 @@ def test_le_studio_n_offre_plus_de_scenes_ia_payantes(monkeypatch):
         seen.update(system=system, user=user, types=tool["input_schema"]["properties"]["scenes"]["items"]["properties"]["type"]["enum"])
         return {"theme": "earth", "scenes": [{"type": "ai_clip", "seconds": 6, "prompt": "Un lion court dans la savane"}, {"type": "title", "l1": "LION"}]}
     monkeypatch.setattr(vs, "_ask", ask)
-    for st in ({"connected": False}, {"connected": True, "video_left_today": 3, "left_today": 2}):
+    monkeypatch.setattr(vs, "ai_enabled", lambda db: True)
+    monkeypatch.setattr(hf, "status", lambda db: {"connected": True, "video_left_today": 3, "left_today": 2})
+    p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
+    assert "ai_clip" in seen["types"] and "SCÈNES IA" in seen["system"] and "3 film(s) IA" in seen["user"] and p["ai"] == {"clips": 1, "images": 0}
+    off = ({"connected": False}, {"connected": True, "video_left_today": 0, "left_today": 0})   # non connecté, plafond du jour atteint
+    for st in off:
         monkeypatch.setattr(hf, "status", lambda db, st=st: st)
         p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
         assert "ai_clip" not in seen["types"] and "SCÈNES IA" not in seen["system"] and p["ai"] == {"clips": 0, "images": 0}
         assert [s["type"] for s in p["spec"]["scenes"]] == ["title"]                       # une scène IA renvoyée quand même : écartée
+    monkeypatch.setattr(vs, "ai_enabled", lambda db: False)                              # le patron a coupé les scènes IA
+    monkeypatch.setattr(hf, "status", lambda db: {"connected": True, "video_left_today": 3, "left_today": 2})
+    p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
+    assert "ai_clip" not in seen["types"] and p["ai"] == {"clips": 0, "images": 0}
 
 
 def test_demarrage_refuse_hors_quota_ou_sans_connexion(monkeypatch, world):
@@ -201,3 +210,21 @@ def test_le_moteur_accepte_les_medias_ia_et_refuse_les_adresses_douteuses():
             eng.clean({"format": "vertical", "scenes": [{"type": "clip", "url": bad, "seconds": 5}]})
     with pytest.raises(ValueError):
         eng.clean({"format": "vertical", "scenes": [{"type": "photo", "url": "http://cdn.example/a.png"}]})
+
+
+def test_lancement_envoie_les_scenes_ia_a_higgsfield_seulement_si_activees(monkeypatch):
+    from app import video_media
+    sent = {}
+    monkeypatch.setattr(vs, "images", lambda db=None: [])
+    monkeypatch.setattr(video_media, "items_by_id", lambda db: {})
+    monkeypatch.setattr(vh, "start", lambda db, spec, uid: sent.update(hybrid=spec) or {"state": "assets"})
+    monkeypatch.setattr(vh, "clear", lambda db: None)
+    monkeypatch.setattr(vs, "dispatch", lambda db, spec: sent.update(montage=spec) or {"state": "queued"})
+    scenes = [{"type": "ai_clip", "seconds": 6, "prompt": "Un lion court dans la savane au coucher du soleil"}, {"type": "title", "l1": "LION"}]
+    monkeypatch.setattr(vs, "ai_enabled", lambda db: True)
+    assert vs.start(FakeDB(), {"format": "vertical", "scenes": scenes})["state"] == "assets"
+    assert [s["type"] for s in sent["hybrid"]["scenes"]] == ["ai_clip", "title"] and "montage" not in sent   # IA générée d'abord, montage ensuite
+    sent.clear()
+    monkeypatch.setattr(vs, "ai_enabled", lambda db: False)                             # coupées par le patron : scène IA écartée
+    assert vs.start(FakeDB(), {"format": "vertical", "scenes": scenes})["state"] == "queued"
+    assert [s["type"] for s in sent["montage"]["scenes"]] == ["title"] and "hybrid" not in sent
