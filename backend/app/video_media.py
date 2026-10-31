@@ -1,4 +1,4 @@
-"""Médias du patron pour le Studio vidéo : ses films de chantier, sa musique, sa voix (ex. ElevenLabs).
+"""Médias du patron pour le Studio vidéo : ses films (sur n'importe quel sujet), ses photos, sa musique, sa voix (ex. ElevenLabs).
 
 Stockés sur le disque du serveur (`storage/video_media`). GitHub Actions, qui fabrique la vidéo, les télécharge par un lien secret
 (`/api/public/video-media/<jeton>`) ouvert SEULEMENT après le clic « Lancer la fabrication », pendant OPEN_HOURS, et seulement pour

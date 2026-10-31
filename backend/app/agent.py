@@ -304,8 +304,8 @@ TOOLS: list[dict] = [
     },
     {
         "name": "plan_video",
-        "description": ("VIDÉO depuis le chat : écrit le SCÉNARIO d'une vidéo (montage : titres, textes, photos du site, chiffres, avis, fin) "
-                        "sur n'importe quel sujet, et le range dans le Studio vidéo. Rien n'est fabriqué ni publié : le patron ouvre "
+        "description": ("VIDÉO depuis le chat : écrit le SCÉNARIO d'une vidéo sur N'IMPORTE QUEL sujet (personnes, animaux, voyage, événement, "
+                        "produit, tuto, entreprise… pas forcément un chantier), monté à partir des médias et de la demande du patron, et le range dans le Studio vidéo. Rien n'est fabriqué ni publié : le patron ouvre "
                         "Menu › Studio vidéo, relit, corrige et appuie lui-même sur « Lancer la fabrication ». À appeler quand il demande une vidéo, un clip, un reel."),
         "input_schema": {"type": "object", "properties": {
             "brief": {"type": "string", "description": "La demande du patron, complète (sujet, durée, ton, public, ce qu'il veut montrer)."},

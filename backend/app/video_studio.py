@@ -37,6 +37,10 @@ MAX_ASK_TOKENS = 32000            # longueur de réponse de Claude pour un scén
 MAX_CHANGES, MAX_CHANGE_CHARS = 12, 2000   # fil des corrections d'un scénario : les plus récentes, chacune bornée
 MAX_CURRENT_CHARS = 60_000        # scénario actuel renvoyé à l'IA pour une correction
 MEMORY_CHARS = 1800               # ce que le patron a appris à UniC, rappelé au scénariste
+# Studio LIBRE (règle du patron) : des règles toujours rappelées ailleurs (marges, fixations, devis) n'entrent dans un scénario que si elles
+# parlent de vidéo ; les souvenirs trouvés pour CETTE demande restent.
+VIDEO_MEMORY = re.compile(r"vid[ée]o|studio|montage|sc[ée]nario|clip|reel|tiktok|instagram|youtube|musique|voix|sous-titre|"
+                          r"vertical|horizontal|format|ambiance|th[èe]me|couleur|police|logo|transition|effet|dur[ée]e", re.I)
 READ_CPS = 22                     # caractères lus par seconde à l'écran (lecture rapide d'un texte court)
 FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.html)
 # durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
@@ -801,7 +805,7 @@ def _memory(db: Session | None, query: str) -> str:
         return ""
     try:
         from app import memory as mem
-        return mem.block(db, query, limit_chars=MEMORY_CHARS)
+        return mem.block(db, query, limit_chars=MEMORY_CHARS, keep=lambda h: not h.always or bool(VIDEO_MEMORY.search(h.memory.text or "")))
     except Exception:       # noqa: BLE001 — la mémoire ne doit jamais empêcher d'écrire un scénario
         return ""
 
@@ -1079,6 +1083,8 @@ def save_zip(db: Session, zip_source, run: int, user_id: str | None) -> dict:
     except (zipfile.BadZipFile, ValueError, KeyError):
         path.unlink(missing_ok=True)
         raise repair.RepairError("Le fichier reçu n'est pas une vidéo MP4 valide.", 502)
-    art = store_artifact(db, path, "Video-UniC-Plaquiste.mp4", "video", str(run), f"video:{int(run)}", user_id, mime="video/mp4")
+    from datetime import datetime, timezone
+    name = f"Video-UniC-{datetime.now(timezone.utc).strftime('%Y-%m-%d-%Hh%M')}.mp4"   # toute vidéo, pas seulement un chantier
+    art = store_artifact(db, path, name, "video", str(run), f"video:{int(run)}", user_id, mime="video/mp4")
     db.commit()
     return {"id": art.id, "filename": art.filename, "size": art.size, "url": f"/api/artifacts/{art.id}/download"}
