@@ -1847,3 +1847,7 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .vs-media .btn { display: inline-flex; margin: .4rem 0; }
 .vs-media .vs-seen { display: block; margin: 1px 0 4px; font-size: 12px; line-height: 1.35; opacity: .75; }
 .f-clip-tag { font-size: calc(9cqw * var(--k)); color: var(--vac); }
+.f-img.f-half-l { right: 50%; width: 50%; }
+.f-img.f-half-r { left: 50%; width: 50%; }
+.f-split { position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: #f2c230; }
+.f-edits { position: relative; max-width: 100%; background: rgba(0, 0, 0, .6); color: #fff; }

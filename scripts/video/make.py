@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import spec as sp
+import edit
 
 PAGE_VIEW = {"vertical": {"w": 360, "h": 640, "scale": 3, "mobile": True}, "horizontal": {"w": 1280, "h": 720, "scale": 1.5, "mobile": False},
              "square": {"w": 540, "h": 540, "scale": 2, "mobile": True}}
@@ -56,15 +57,17 @@ try:
             (work / f"page{i}.json").write_text(json.dumps(sc, ensure_ascii=False))
             pages.append((i, subprocess.Popen(["node", str(here / "render.mjs"), str(work / f"page{i}.json"), str(d / "f"), json.dumps(PAGE_VIEW[cfg["format"]])], env=env)))
             segs.append({"kind": "page", "fdir": str(d / "f"), "out": str(d / "o"), "frames": 0, "labels": []})
-        elif sc["type"] == "clip":   # film d'IA : mis au format de la vidéo, image par image, pendant que la page se filme
+        elif sc["type"] == "clip":   # vrai film (patron ou IA) MONTÉ (edit.py) : vitesse, couleurs, cadrage, arrêt sur image, écran partagé
             src = work / f"clip{i}.mp4"
             fetch_media(sc["url"], src)
+            src2 = None
+            if sc.get("split"):
+                src2 = work / f"clip{i}b.mp4"
+                fetch_media(sc["split"]["url"], src2)
             n = round(sc["seconds"] * FPS); d.mkdir(parents=True, exist_ok=True)
-            ow, oh = w * 3, h * 3
-            clips.append((i, subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-ss", str(sc.get("start") or 0), "-i", str(src), "-an", "-vf",
-                                               f"scale={ow}:{oh}:force_original_aspect_ratio=increase,crop={ow}:{oh},fps={FPS},tpad=stop_mode=clone:stop_duration={sc['seconds']}",
-                                               "-frames:v", str(n), "-q:v", "2", "-start_number", "0", str(d / "%05d.jpg")])))
-            segs.append({"kind": "clip", "out": str(d), "frames": n, **({"overlay": sc["overlay"], "ovl": str(work / f"o{i}")} if sc.get("overlay") else {})})
+            clips.append((i, subprocess.Popen(edit.ffmpeg_args(sc, src, src2, w * 3, h * 3, FPS, n, str(d / "%05d.jpg")))))
+            segs.append({"kind": "clip", "out": str(d), "frames": n, **({"overlay": sc["overlay"], "ovl": str(work / f"o{i}")} if sc.get("overlay") else {}),
+                         **{k: sc[k] for k in ("zoom", "zoom_amount", "focus", "transition") if k in sc}})   # zoom et transitions : image par image (compose.py)
         else:
             segs.append({"kind": "html", "out": str(d), "frames": round(sc["seconds"] * FPS), "scene": sc})
     def run_scenes(only: str, n: int):

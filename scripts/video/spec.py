@@ -20,6 +20,10 @@ TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro",
 # Effets « cinéma » : texte tapé au clavier, titre dont le dernier mot arrive en or, liste cochée sur verre dépoli, titre néon, carte slogan.
 # Les quatre premiers peuvent aussi s'incruster sur un clip (clé « overlay » d'une scène clip) : le texte passe alors sur les images filmées.
 OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon")
+# Montage d'une scène « clip » (edit.py) : vitesse, étalonnage, cadrage, zoom, arrêt sur image, écran partagé, transition d'entrée.
+GRADES = ("cinema", "warm", "night", "crisp", "bw")
+ZOOMS = ("in", "out", "punch")
+TRANSITIONS = ("fade", "cut", "flash", "slide")
 # Garde-fous techniques seulement (pas un plafond métier) : la durée n'est limitée que par le temps de calcul GitHub. Au-delà, on coupe en tronçons (chunks()).
 MAX_SCENES, MAX_TOTAL = 5000, 43200.0
 
@@ -121,6 +125,32 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
     return out
 
 
+def _edits(s: dict, secs: float) -> dict:
+    """Montage d'un clip, seulement ce qui change quelque chose (valeurs bornées ; inconnu = ignoré)."""
+    e: dict = {}
+    speed = _secs(s.get("speed"), 0.25, 4, 1)
+    if speed != 1:
+        e["speed"] = speed
+    if s.get("grade") in GRADES:
+        e["grade"] = s["grade"]
+    f = s.get("focus")
+    if isinstance(f, dict):
+        x, y = _secs(f.get("x"), 0, 1, 0.5), _secs(f.get("y"), 0, 1, 0.5)
+        if (x, y) != (0.5, 0.5):
+            e["focus"] = {"x": x, "y": y}
+    if s.get("zoom") in ZOOMS:
+        e["zoom"], e["zoom_amount"] = s["zoom"], _secs(s.get("zoom_amount"), 1.05, 1.6, 1.2)
+    freeze = _secs(s.get("freeze"), 0, 3, 0)
+    if 0 < freeze <= secs - 1:
+        e["freeze"] = freeze
+    if s.get("transition") in TRANSITIONS and s["transition"] != "fade":
+        e["transition"] = s["transition"]
+    sl = s.get("split")
+    if isinstance(sl, dict) and sl.get("url"):     # écran partagé : second film (avant/après), même validation d'adresse
+        e["split"] = {"url": _media_url(sl["url"]), "start": _secs(sl.get("start"), 0, 36000, 0)}
+    return e
+
+
 def _scene(s: dict) -> dict:
     t = s.get("type")
     if t not in TYPES:
@@ -139,6 +169,7 @@ def _scene(s: dict) -> dict:
         ov = s.get("overlay")
         if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:   # texte incrusté sur le film : même durée que le clip
             out["overlay"] = {**_fx(ov, ov["type"], overlay=True), "seconds": out["seconds"]}
+        out.update(_edits(s, out["seconds"]))
         return out
     if t == "photo":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "src": _media_url(s.get("url")) if s.get("url") else _img(s.get("image")), "caption": _txt(s.get("caption"), 60),

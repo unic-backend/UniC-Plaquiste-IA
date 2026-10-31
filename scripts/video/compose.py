@@ -2,6 +2,8 @@
 import json, os, subprocess, sys
 from multiprocessing import Pool
 from PIL import Image
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import edit  # noqa: E402
 
 PLAN, OUT = sys.argv[1:3]
 P = json.load(open(PLAN)); OW, OH = P["view"]["w"] * 3, P["view"]["h"] * 3
@@ -14,17 +16,43 @@ for s in SEGS:
         s["m"] = json.load(open(s["fdir"] + "/meta.json")); s["act"] = set(json.load(open(s["out"] + "/list.json")))   # list.json : fusion des listes des Chrome (make.py)
 TASKS = [(i, f) for i, s in enumerate(SEGS) for f in range(s["frames"])]
 
+def clip_frame(i, f):
+    """Image f d'un film : zoom sous-pixel (edit.zoom_box) puis texte incrusté éventuel."""
+    s = SEGS[i]
+    im = Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB")
+    box = edit.zoom_box(s, f, s["frames"], FPS, OW, OH)
+    if box:
+        im = im.resize((OW, OH), Image.LANCZOS, box=box)
+    if s.get("overlay") and os.path.exists(f"{s['ovl']}/{f:05d}.png"):
+        im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['ovl']}/{f:05d}.png").convert("RGBA").resize((OW, OH))); im = im.convert("RGB")
+    return im
+
+
+def end_frame(i):
+    """Dernière image de la scène i (pour le glissé) ; None pour une page filmée."""
+    s = SEGS[i]
+    if s["kind"] == "clip":
+        return clip_frame(i, s["frames"] - 1)
+    if s["kind"] == "html":
+        return Image.open(f"{s['out']}/{s['frames'] - 1:05d}.jpg").convert("RGB")
+    return None
+
+
 def render(task):
     i, f = task; s = SEGS[i]
     if s["kind"] == "html":
         return Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB").tobytes()
-    if s["kind"] == "clip":   # film déjà mis au format (make.py) : texte incrusté éventuel, puis le fondu aux raccords
-        im = Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB")
-        if s.get("overlay") and os.path.exists(f"{s['ovl']}/{f:05d}.png"):
-            im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['ovl']}/{f:05d}.png").convert("RGBA").resize((OW, OH))); im = im.convert("RGB")
-        fade_frames = max(1, round(0.35 * FPS)); k = min(1.0, f / fade_frames, (s["frames"] - 1 - f) / fade_frames)
-        if k < 1.0:
-            im = Image.blend(Image.new("RGB", (OW, OH), ROYAL), im, max(0.0, k))
+    if s["kind"] == "clip":   # film déjà monté (make.py) : zoom, texte incrusté, puis la transition (edit.mix)
+        im = clip_frame(i, f)
+        m = edit.mix(s, SEGS[i + 1] if i + 1 < len(SEGS) else None, f, s["frames"], FPS, i > 0)
+        if m["slide"] is not None:   # glissé : le plan pousse la dernière image du précédent
+            prev = end_frame(i - 1) or Image.new("RGB", (OW, OH), ROYAL)
+            cut = round(m["slide"] * OW); canvas = Image.new("RGB", (OW, OH), ROYAL)
+            canvas.paste(prev, (-cut, 0)); canvas.paste(im, (OW - cut, 0)); im = canvas
+        if m["white"] < 1.0:
+            im = Image.blend(Image.new("RGB", (OW, OH), (255, 255, 255)), im, m["white"])
+        if m["dark"] < 1.0:
+            im = Image.blend(Image.new("RGB", (OW, OH), ROYAL), im, m["dark"])
         return im.tobytes()
     m = s["m"]; W, H, S = m["W"], m["H"], m["SCALE"]
     r, z = m["meta"][min(f, m["frames"] - 1)]
