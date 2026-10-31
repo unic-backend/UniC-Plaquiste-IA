@@ -42,8 +42,12 @@ FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.htm
 # durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
 SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
            "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12),
-           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10)}
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge")            # panneaux animés (motion design) : scène, incrustation ou haut d'un écran divisé
+           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10)}
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
+# Animations Lottie du moteur (scripts/video/lottie/, créées pour UniC) et leur sens ; le patron peut aussi envoyer les siennes (Mes médias).
+BUILTIN_LOTTIE = {"check": "coche qui se trace dans un cercle (validé, terminé, garanti)", "spark": "éclat lumineux (nouveauté, effet waouh)",
+                  "arrow": "flèche qui avance (étape suivante, avant → après)", "pin": "repère de lieu qui tombe (adresse, chantier, ville)",
+                  "pulse": "ondes radar (en direct, appel, signal)"}            # panneaux animés (motion design) : scène, incrustation ou haut d'un écran divisé
 FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan", *PANEL_TYPES)   # effets « cinéma » du moteur (scripts/video/scenes.html)
 OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon", *PANEL_TYPES)       # ce qu'on peut incruster sur un film (ou mettre en haut d'un écran divisé)
 MAX_PANELS = 400
@@ -79,7 +83,9 @@ _img_cache: dict = {"t": 0.0, "names": []}
 
 SCENE_PROPS = {
     "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip"]},
-    "media": {"type": "string", "description": "my_clip : identifiant EXACT d'une vidéo du patron (liste « Médias du patron »)."},
+    "media": {"type": "string", "description": "my_clip : identifiant EXACT d'une vidéo du patron ; lottie : identifiant EXACT d'une de SES animations (liste « Médias du patron »)."},
+    "anim": {"type": "string", "enum": list(BUILTIN_LOTTIE), "description": "lottie : animation du moteur — " + " ; ".join(f"{k} = {v}" for k, v in BUILTIN_LOTTIE.items()) + "."},
+    "loop": {"type": "boolean", "description": "lottie : rejouer l'animation en boucle (pulse, arrow) ; sinon elle s'arrête sur sa dernière image."},
     "start": {"type": "number", "description": "my_clip : seconde de la vidéo où commencer (choisis le meilleur passage), 0 par défaut."},
     "speed": {"type": "number", "description": "my_clip : vitesse (0.25 à 4) : 0.5 ralenti sur un geste précis, 2 à 4 accéléré (timelapse d'une pose longue) ; 1 par défaut."},
     "grade": {"type": "string", "enum": list(GRADES), "description": "my_clip : étalonnage : cinema (contraste, tons chauds/froids, vignettage), warm (intérieur chaleureux), "
@@ -101,7 +107,8 @@ SCENE_PROPS = {
                                                           "lines": {"type": "array", "items": {"type": "string"}}, "tag": {"type": "string"}, "place": {"type": "string"},
                                                           "heading": {"type": "string"}, "checks": {"type": "array", "items": {"type": "string"}},
                                                           "value": {"type": "number"}, "suffix": {"type": "string"}, "label": {"type": "string"},
-                                                          "steps": {"type": "array", "items": {"type": "string"}}}, "required": ["at", "type"]}},
+                                                          "steps": {"type": "array", "items": {"type": "string"}}, "anim": {"type": "string", "enum": list(BUILTIN_LOTTIE)},
+                                                          "media": {"type": "string"}, "loop": {"type": "boolean"}}, "required": ["at", "type"]}},
     "value": {"type": "number", "description": "counter : le nombre affiché (compte jusqu'à lui) : un prix, un total, une durée…"},
     "suffix": {"type": "string", "description": "counter : unité courte collée au nombre (€, %, +, FCFA, h…)."},
     "label": {"type": "string", "description": "counter : ce que mesure le nombre (28 car.)."},
@@ -176,7 +183,8 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo. Tu composes le scénario de N'I
           "EFFETS CINÉMA (pour un rendu moderne, à varier) : typewriter (texte tapé au clavier, idéal en ouverture ou pour une phrase forte), kinetic (grand titre mot par mot, le dernier mot en or : noms de lieux, messages clés), "
           "checklist (liste cochée une à une : prestations, étapes), neon (1-2 mots lumineux : un nom, un lieu), slogan (carte de fin : l1 blanche, l2 en or). "
           "PANNEAUX ANIMÉS (motion design) : counter (un nombre qui compte jusqu'à value, avec suffix et label), flow (2 à 4 étapes reliées A → B → C), "
-          "wave (onde sonore animée, lines = [légende, durée]), chat (bulle « … » puis réponse tapée, lines = [réponse, note]), badge (pastille + nom, lines = [nom, sous-titre]). "
+          "wave (onde sonore animée, lines = [légende, durée]), chat (bulle « … » puis réponse tapée, lines = [réponse, note]), badge (pastille + nom, lines = [nom, sous-titre]), "
+          "lottie (icône animée vectorielle : anim du moteur, ou media = une animation du patron ; lines = [légende, sous-titre]). "
           "typewriter, kinetic, checklist et neon peuvent avoir une photo du catalogue derrière (image) qui apparaît en points-pixels (reveal) ; sur un ai_clip, overlay incruste le même genre de texte sur le film. "
           "Rythme : une idée par scène, des textes courts et lisibles sur téléphone (titre : 18 caractères par ligne ; puces et légendes : 60) ; laisse le temps de lire (environ 1 seconde pour 20 caractères à l'écran, plus 1 seconde). "
           "Tu écris titres, textes, légendes, chiffres et citations à partir de la demande et de tes connaissances générales ; "
@@ -273,6 +281,8 @@ def _readable(sc: dict) -> float:
         shown, n = 1.6, len(sc.get("label") or "") + 4
     elif t == "flow":
         shown, n = .9 + .6 * len(sc["steps"]), sum(len(x) for x in sc["steps"])
+    elif t == "lottie":
+        shown, n = 1.6, sum(len(x) for x in sc.get("lines") or [])
     elif t in ("wave", "chat", "badge"):
         lines = sc.get("lines") or []
         shown, n = (1.5 + len(lines[0]) / TYPE_CPS + .9) if t == "chat" and lines else 1.4, sum(len(x) for x in lines)
@@ -346,7 +356,7 @@ def _page_scene(sc: dict) -> dict | None:
     return {"type": "page", "page": sc.get("page") or "portfolio", "url": cat["url"], "hero_seconds": 4.4, "chapters": ch} if ch else None
 
 
-def _fx_scene(sc: dict, t: str, ok_imgs: set) -> dict | None:
+def _fx_scene(sc: dict, t: str, ok_imgs: set, media: dict | None = None) -> dict | None:
     """Effet cinéma (forme du moteur) : textes coupés à la longueur affichable, photo seulement du catalogue ; None si vide.
     slogan + brand : nom, téléphone et site viennent de FACTS (jamais écrits par l'IA)."""
     secs = sc.get("seconds")
@@ -370,6 +380,11 @@ def _fx_scene(sc: dict, t: str, ok_imgs: set) -> dict | None:
     elif t == "flow":
         steps = [x for x in (_cut(v, 18) for v in (sc.get("steps") or []) if isinstance(v, str)) if x][:4]
         out = {"type": t, "seconds": _num(secs, lo, hi, round(1.2 + .8 * len(steps), 1)), "steps": steps} if len(steps) >= 2 else None
+    elif t == "lottie":           # animation du moteur (anim) ou du patron (media : une animation de Mes médias)
+        lines = [x for x in (_cut(v, 24) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
+        own = (media or {}).get(str(sc.get("media") or ""))
+        src = {"anim": sc["anim"]} if sc.get("anim") in BUILTIN_LOTTIE else {"media": own["id"]} if own and own["kind"] == "lottie" else None
+        out = {"type": t, "seconds": _num(secs, lo, hi, 2.5), **src, "lines": lines, "loop": sc.get("loop") is True} if src else None
     elif t in ("wave", "chat", "badge"):
         lines = [x for x in (_cut(v, 30 if t == "chat" else 24) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
         out = {"type": t, "seconds": _num(secs, lo, hi, 4 if t == "chat" else 3), "lines": lines} if lines or t == "wave" else None
@@ -450,7 +465,7 @@ def _dec(v, lo: float, hi: float, dflt: float) -> float:
     return round(min(hi, max(lo, f)), 2) if math.isfinite(f) else dflt
 
 
-def _jumpcut(sc: dict, it: dict, start: float, span: float) -> list[dict]:
+def _jumpcut(sc: dict, it: dict, start: float, span: float, media: dict | None = None) -> list[dict]:
     """Coupe des silences : un plan par passage sonore entre start et start + span, collés en coupe franche, avec le son.
     Le premier plan garde l'entrée, le texte incrusté et le zoom demandés ; tous gardent couleurs et cadrage."""
     end = start + span
@@ -465,7 +480,7 @@ def _jumpcut(sc: dict, it: dict, start: float, span: float) -> list[dict]:
     out = []
     for n, (a, b) in enumerate(cuts):
         piece = {"type": "my_clip", "media": it["id"], "start": round(a, 1), "seconds": round(b - round(a, 1), 1), **look}
-        piece.update(_clip_layout(sc, piece["start"], piece["seconds"]))     # écran divisé et animations : sur TOUS les plans, sans recommencer
+        piece.update(_clip_layout(sc, piece["start"], piece["seconds"], media))     # écran divisé et animations : sur TOUS les plans, sans recommencer
         if it.get("audio") is not False:
             piece["sound"] = True
         piece["transition"] = (sc.get("transition") if sc.get("transition") in TRANSITIONS and sc["transition"] != "fade" else None) if n == 0 else "cut"
@@ -476,7 +491,7 @@ def _jumpcut(sc: dict, it: dict, start: float, span: float) -> list[dict]:
                 piece["zoom"], piece["zoom_amount"] = sc["zoom"], _dec(sc.get("zoom_amount"), 1.05, 1.6, 1.2)
             ov = sc.get("overlay")
             if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
-                o = _fx_scene(ov, ov["type"], set())
+                o = _fx_scene(ov, ov["type"], set(), media)
                 if o:
                     o.pop("seconds", None)
                     piece["overlay"] = o
@@ -484,7 +499,7 @@ def _jumpcut(sc: dict, it: dict, start: float, span: float) -> list[dict]:
     return out
 
 
-def _clip_layout(sc: dict, start: float, span: float) -> dict:
+def _clip_layout(sc: dict, start: float, span: float, media: dict | None = None) -> dict:
     """Écran divisé et animations d'un plan. Les animations gardent leur instant DANS LE FICHIER (« at ») : un plan n'en garde que
     celles qui tombent pendant lui, plus celle en cours à son début (elle continue sans recommencer, même après une coupe des silences)."""
     e: dict = {}
@@ -499,7 +514,7 @@ def _clip_layout(sc: dict, start: float, span: float) -> dict:
             continue
         if not math.isfinite(at) or at < 0:
             continue
-        o = _fx_scene(p, p["type"], set())
+        o = _fx_scene(p, p["type"], set(), media)
         if o:
             o.pop("seconds", None)
             built.append({"at": at, **o})
@@ -569,7 +584,7 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                     clip = {"type": t, "seconds": int(_num(secs, 2, 30, 5)), "prompt": prompt}
                     ov = sc.get("overlay")
                     if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
-                        o = _fx_scene(ov, ov["type"], set())          # incrustation : jamais de photo derrière
+                        o = _fx_scene(ov, ov["type"], set(), media)          # incrustation : jamais de photo derrière
                         if o:
                             o.pop("seconds", None)
                             clip["overlay"] = o
@@ -616,22 +631,22 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                 freeze = _dec(sc.get("freeze"), 0, 3, 0)
                 room = (it["seconds"] - start) / speed + freeze         # le plan ne dépasse jamais ce que le fichier contient
                 if sc.get("jumpcut") is True and it.get("talk"):
-                    pieces = _jumpcut(sc, it, start, _num(secs, 0.5, it["seconds"] - start, it["seconds"] - start))
+                    pieces = _jumpcut(sc, it, start, _num(secs, 0.5, it["seconds"] - start, it["seconds"] - start), media)
                     if pieces:
                         out += pieces
                         continue
                 clip = {"type": t, "media": it["id"], "start": start, "seconds": _num(secs, 0.5, min(30.0, room), round(min(5.0, room), 1))}
                 clip.update(_clip_edits(sc, clip["seconds"], speed, freeze, media, it))
-                clip.update(_clip_layout(sc, start, (clip["seconds"] - clip.get("freeze", 0)) * speed))
+                clip.update(_clip_layout(sc, start, (clip["seconds"] - clip.get("freeze", 0)) * speed, media))
                 ov = sc.get("overlay")
                 if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
-                    o = _fx_scene(ov, ov["type"], set())
+                    o = _fx_scene(ov, ov["type"], set(), media)
                     if o:
                         o.pop("seconds", None)
                         clip["overlay"] = o
                 out.append(clip)
         elif t in FX_TYPES:
-            fx = _fx_scene(sc, t, ok_imgs)
+            fx = _fx_scene(sc, t, ok_imgs, media)
             if fx:
                 out.append(fx)
         elif t == "outro":

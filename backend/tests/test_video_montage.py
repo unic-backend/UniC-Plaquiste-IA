@@ -123,3 +123,26 @@ def test_panneaux_et_ecran_divise():
     assert ed.bottom_height(1920) == 1056 and "crop=1080:1056" in vf and "pad=1080:1920:0:864" in vf     # la personne en bas (55 %)
     box = ed.zoom_box({"zoom": "in", "zoom_amount": 1.2}, 89, 90, 30, 1080, 1056, 864)
     assert box[1] >= 864 and box[3] <= 1920                                                             # zoom seulement dans la partie filmée
+
+
+def test_animations_lottie_sures():
+    import json
+    assert set(sp.BUILTIN_LOTTIE) == {"check", "spark", "arrow", "pin", "pulse"}
+    for n in sp.BUILTIN_LOTTIE:                                                                            # animations du moteur : valides et sûres
+        d = json.loads((ROOT / "lottie" / f"{n}.json").read_text())
+        assert sp.sanitize_lottie(d)["layers"] and d["fr"] == 30
+    good = {"v": "5.7", "fr": 30, "ip": 0, "op": 60, "w": 200, "h": 200, "layers": [{"ty": 4}],
+            "fonts": {"list": [{"fPath": "https://evil.example/f.css"}]},
+            "assets": [{"id": "a", "p": "https://evil.example/x.png", "u": ""}, {"id": "b", "p": "data:image/png;base64,AAAA"}, {"id": "c", "layers": []},
+                       {"id": "d", "u": "images/", "p": "data:image/png;base64,AAAA"}]}
+    c = sp.sanitize_lottie(good)
+    assert [a["id"] for a in c["assets"]] == ["b", "c"] and "fonts" not in c                               # rien de l'extérieur
+    for bad in ({}, {**good, "layers": []}, {**good, "fr": 0}, {**good, "op": 99999}, "x"):
+        with pytest.raises(ValueError):
+            sp.sanitize_lottie(bad)
+    s = sp.clean({"scenes": [{"type": "lottie", "anim": "check", "lines": ["Validé"]}, {"type": "lottie", "url": "https://cdn.example.com/a.json", "loop": True}]})["scenes"]
+    assert s[0]["anim"] == "check" and s[1]["url"].endswith("a.json") and s[1]["loop"] is True and "bg" not in s[1]   # le lien n'est pas un fond
+    for bad in ({"type": "lottie"}, {"type": "lottie", "anim": "inconnue"}, {"type": "lottie", "url": "http://localhost/a.json"}):
+        with pytest.raises(ValueError):
+            sp.clean({"scenes": [bad]})
+    assert "lottie/lottie_light.min.js" in (ROOT / "scenes.html").read_text() and "eval(" not in (ROOT / "lottie" / "lottie_light.min.js").read_text()

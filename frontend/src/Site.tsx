@@ -8,12 +8,14 @@ type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
   typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo",
-  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge" };
+  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation" };
+const ANIM_FR: Record<string, string> = { check: "✓ Validé", spark: "✦ Éclat", arrow: "→ Flèche", pin: "📍 Lieu", pulse: "◉ Ondes" };
 /** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
 const panelText = (p: { [k: string]: unknown }) => {
   const L = Array.isArray(p.lines) ? (p.lines as unknown[]).map(String) : [];
   if (p.type === "counter") return `${statNumber(p.value)}${p.suffix ? (/^[+×]/.test(String(p.suffix)) ? "" : " ") + String(p.suffix) : ""}${p.label ? ` ${String(p.label)}` : ""}`;
   if (p.type === "flow") return (Array.isArray(p.steps) ? (p.steps as unknown[]).map(String) : []).join(" → ");
+  if (p.type === "lottie") return [p.anim ? ANIM_FR[String(p.anim)] || String(p.anim) : "Ton animation", ...L].join(" · ");
   if (p.type === "checklist") return [String(p.heading || ""), ...(Array.isArray(p.items) ? (p.items as unknown[]).map(String) : [])].filter(Boolean).join(" · ");
   return L.join(" · ");
 };
@@ -104,7 +106,7 @@ function SceneFrame({ s }: { s: VideoScene }) {
       {words && <span className="f-cap">{words}</span>}
     </>;
   }
-  if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge") {
+  if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge" || t === "lottie") {
     return <>{t === "counter" ? <b className="f-t1">{statNumber(s.value)}{s.suffix ? (/^[+×]/.test(String(s.suffix)) ? "" : " ") + String(s.suffix) : ""}</b> : <small className="f-chip">{SCENE_FR[t]}</small>}
       <b className="f-t2">{frText(t === "counter" ? String(s.label || "") : panelText(s))}</b></>;
   }
@@ -142,8 +144,8 @@ function Storyboard({ spec, onRemove, busy }: { spec: VideoPlan["spec"]; onRemov
   );
 }
 
-const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo de chantier", music: "Musique", voice: "Voix off" };
-const MEDIA_ACCEPT: Record<VideoMedia["kind"], string> = { clip: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm", music: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", voice: "audio/*,.mp3,.m4a,.aac,.wav,.ogg" };
+const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo de chantier", music: "Musique", voice: "Voix off", lottie: "Animation (Lottie)" };
+const MEDIA_ACCEPT: Record<VideoMedia["kind"], string> = { clip: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm", music: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", voice: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", lottie: "application/json,.json" };
 
 /** Médias du patron : ses vraies vidéos, sa musique et sa voix (ElevenLabs…). L'IA du Studio s'en sert ; rien n'est publié. */
 function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void> }) {
@@ -165,7 +167,7 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
   return (
     <details className="vs-media">
       <summary>Mes médias ({items.length}) — vidéos de chantier, musique, voix off</summary>
-      <p className="vs-note">L'IA met tes vraies vidéos dans le montage, ta musique en fond (baissée quand la voix parle) et place chaque phrase de ta voix sur sa scène. Les fichiers restent privés : GitHub les télécharge seulement quand tu lances la fabrication.</p>
+      <p className="vs-note">L'IA met tes vraies vidéos dans le montage, ta musique en fond (baissée quand la voix parle) et place chaque phrase de ta voix sur sa scène. Les fichiers restent privés : GitHub les télécharge seulement quand tu lances la fabrication. Animations : fichiers Lottie (.json) gratuits sur lottiefiles.com.</p>
       <div className="vs-fmt" role="radiogroup" aria-label="Type de média à envoyer">
         {(Object.keys(MEDIA_FR) as VideoMedia["kind"][]).map((k) => (
           <button key={k} role="radio" aria-checked={kind === k} className={`chip${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{MEDIA_FR[k]}</button>
