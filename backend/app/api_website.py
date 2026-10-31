@@ -191,7 +191,21 @@ def video_retry(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
 def video_media_list(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix (phrases repérées)."""
     from app import video_media
-    return {"items": video_media.listing(db)}
+    return {"items": video_media.listing(db), "auto_words": video_media.auto_words(db)}
+
+
+class AutoWordsIn(BaseModel):
+    on: bool
+
+
+@router.post("/video/media/auto-words")
+def video_media_auto_words(body: AutoWordsIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Réglage du patron : sous-titres créés automatiquement (crédit ElevenLabs) ou seulement au clic."""
+    from app import video_media
+    on = video_media.set_auto_words(db, body.on)
+    audit(db, user.id, "video_auto_words", "video_media", "auto", "oui" if on else "non")
+    db.commit()
+    return {"auto_words": on}
 
 
 @router.post("/video/media")

@@ -224,10 +224,11 @@ STT_MODELS = ("scribe_v2", "scribe_v1")   # transcription ElevenLabs ; le plus r
 MAX_STT_BYTES = 200 * 1024 * 1024
 
 
-def transcribe(db: Session, audio: bytes, filename: str = "son.mp3") -> dict:
-    """Clic du patron : mots dits dans un son, avec leurs instants (sous-titres mot à mot du Studio vidéo).
-    Langue détectée par ElevenLabs. Consomme du crédit ElevenLabs. Rend {"language": "fra", "words": [[début, fin, mot], …]}."""
-    key = api_key(db)
+def transcribe(db: Session | None, audio: bytes, filename: str = "son.mp3", key: str = "") -> dict:
+    """Mots dits dans un son, avec leurs instants (sous-titres mot à mot du Studio vidéo) : clic du patron, ou automatique
+    s'il l'a laissé activé. Langue détectée par ElevenLabs. Consomme du crédit ElevenLabs. `key` : clé déjà lue (appel hors de la base).
+    Rend {"language": "fra", "words": [[début, fin, mot], …]}."""
+    key = key or (api_key(db) if db is not None else "")
     if not key:
         raise VoiceError("ElevenLabs n'est pas connecté : ajoute ta clé dans Réglages → Voix pour créer des sous-titres.", 409)
     if not audio or len(audio) > MAX_STT_BYTES:

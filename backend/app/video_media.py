@@ -291,6 +291,16 @@ def transcribe(db: Session, mid: str) -> dict:
         raise MediaError("Cette vidéo n'a pas de son : rien à sous-titrer.")
     if float(it["seconds"]) > MAX_WORDS_SECONDS:
         raise MediaError("Son trop long pour les sous-titres (30 minutes au maximum).", 413)
+    got = _words_of(it, voice.api_key(db))
+    it["words"], it["lang"] = got["words"], got["language"]
+    it.pop("words_try", None)
+    _save(db, items)
+    return _public(it)
+
+
+def _words_of(it: dict, key: str) -> dict:
+    """Son du média (mono, compressé) -> mots datés par ElevenLabs. Sans base de données : utilisable hors du fil du serveur."""
+    from app import voice
     src = _dir() / f"{it['id']}{it['ext']}"
     try:
         audio = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", "-"],
@@ -300,14 +310,71 @@ def transcribe(db: Session, mid: str) -> dict:
     if not audio:
         raise MediaError("Son illisible : impossible de préparer la transcription.")
     try:
-        got = voice.transcribe(db, audio, f"{it['id']}.mp3")
+        got = voice.transcribe(None, audio, f"{it['id']}.mp3", key=key)
     except voice.VoiceError as exc:
         raise MediaError(str(exc), exc.status)
     if not got["words"]:
         raise MediaError("Aucun mot reconnu dans ce son.", 422)
-    it["words"], it["lang"] = got["words"], got["language"]
-    _save(db, items)
-    return _public(it)
+    return got
+
+
+AUTO_KEY = "video_auto_words"
+AUTO_MAX_SECONDS = 600                 # sous-titres automatiques : 10 minutes de son au plus par média (au-delà : bouton)
+AUTO_PER_PLAN = 3                      # médias transcrits au plus avant un scénario
+SPEAKING = re.compile(r"\bparl|face (à la )?cam|interview|explique|s'adresse|discours|présente", re.I)
+
+
+def auto_words(db: Session) -> bool:
+    """Sous-titres automatiques (réglage du patron, activé par défaut) : crédit ElevenLabs consommé sans clic."""
+    if db is None or not hasattr(db, "get"):
+        return False
+    row = db.get(AppSetting, AUTO_KEY)
+    return not (row and row.value == "0")
+
+
+def set_auto_words(db: Session, on: bool) -> bool:
+    row = db.get(AppSetting, AUTO_KEY)
+    if row is None:
+        db.add(AppSetting(key=AUTO_KEY, value="1" if on else "0"))
+    else:
+        row.value = "1" if on else "0"
+    db.flush()
+    return on
+
+
+def wants_words(it: dict) -> bool:
+    """Ce média mérite des sous-titres automatiques : une voix off, ou un film où quelqu'un PARLE (pauses entre des passages sonores,
+    ou l'IA a vu une personne qui parle) — jamais un film de chantier au bruit continu (crédit gaspillé)."""
+    if it.get("hidden") or it.get("words") or float(it.get("seconds") or 0) > AUTO_MAX_SECONDS:
+        return False
+    if it.get("kind") == "voice":
+        return True
+    return it.get("kind") == "clip" and bool(it.get("audio")) and (len(it.get("talk") or []) >= 2 or bool(SPEAKING.search(str(it.get("summary") or ""))))
+
+
+def ensure_words(db: Session, limit: int = AUTO_PER_PLAN) -> int:
+    """Avant un scénario (réglage activé) : sous-titres des médias parlés qui n'en ont pas encore. Un échec n'arrête rien (réessai 10 min plus tard)."""
+    from app import voice
+    if not auto_words(db):
+        return 0
+    key = voice.api_key(db)
+    if not key:
+        return 0
+    items, now, done = _load(db), time.time(), 0
+    todo = [it for it in items if wants_words(it) and now - float(it.get("words_try") or 0) > LOOK_RETRY_S][:limit]
+    for it in todo:
+        try:
+            got = _words_of(it, key)
+            it["words"], it["lang"] = got["words"], got["language"]
+            it.pop("words_try", None)
+            done += 1
+        except MediaError:
+            it["words_try"] = int(now)
+    if todo:
+        _save(db, items)
+        if hasattr(db, "commit"):
+            db.commit()
+    return done
 
 
 def scene_words(words: list, a: float, b: float, offset: float = 0.0) -> list[list]:
@@ -401,6 +468,15 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
                 it.update(got)
             else:
                 it["look_try"] = int(time.time())
+    if kind in ("clip", "voice") and auto_words(db) and wants_words(it):   # sous-titres automatiques (réglage du patron) : hors de la boucle du serveur
+        from app import voice
+        key = voice.api_key(db)
+        if key:
+            try:
+                got = await asyncio.to_thread(_words_of, it, key)
+                it["words"], it["lang"] = got["words"], got["language"]
+            except MediaError:
+                it["words_try"] = int(time.time())      # l'envoi réussit quand même ; réessai avant le prochain scénario
     items.append(it)
     _save(db, items)
     return _public(it)
