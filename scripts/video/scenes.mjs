@@ -39,7 +39,7 @@ const setMode = async m => {   // "html", "pill" ou "ovl" (texte incrusté sur u
 };
 const ONLY = process.env.ONLY || "";   // "html" : scènes seules (avant la fin des captures de pages) ; "pill" : pastilles seules
 for (const seg of PLAN.segments) {
-  if (seg.kind === "clip" && !seg.overlay) continue;   // film : déjà mis en images par make.py
+  if (seg.kind === "clip" && !seg.overlay && !seg.caps) continue;   // film : déjà mis en images par make.py
   const htmlLike = seg.kind === "html" || seg.kind === "clip";   // l'incrustation d'un clip ne dépend pas des pages
   if (ONLY && (ONLY === "html") !== htmlLike) continue;
   fs.mkdirSync(seg.out, { recursive: true });
@@ -49,7 +49,7 @@ for (const seg of PLAN.segments) {
     const end = Math.min(seg.frames, start + BLOCK);
     if (seg.kind === "clip") {   // texte incrusté : PNG transparents, posés sur les images du film par compose.py
       await setMode("ovl"); fs.mkdirSync(seg.ovl, { recursive: true });
-      if (!ready) { await p.evaluate(sc => window.setup(sc), seg.overlay); ready = true; }
+      if (!ready) { await p.evaluate(sc => window.setup(sc), { ...(seg.overlay || { type: "captions" }), caps: seg.caps || [] }); ready = true; }
       for (let f = start; f < end; f++) {
         await p.evaluate(a => window.draw(a[0], a[1]), [f / FPS, seg.frames / FPS]);
         fs.writeFileSync(`${seg.ovl}/${String(f).padStart(5, "0")}.png`, await p.screenshot({ omitBackground: true, type: "png" })); n++;

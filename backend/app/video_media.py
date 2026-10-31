@@ -276,6 +276,45 @@ def ensure_sound(db: Session) -> int:
     return done
 
 
+MAX_WORDS_SECONDS = 1800               # transcription : 30 minutes de son au plus par média (crédit ElevenLabs)
+
+
+def transcribe(db: Session, mid: str) -> dict:
+    """Clic du patron « Sous-titres » : les mots dits dans sa vidéo ou sa voix off, avec leurs instants (ElevenLabs).
+    Seul le son part chez ElevenLabs (mono, compressé), jamais l'image. Gardé : un média n'est transcrit qu'une fois."""
+    from app import voice
+    items = _load(db)
+    it = next((x for x in items if x["id"] == mid and not x.get("hidden")), None)
+    if not it or it["kind"] not in ("clip", "voice"):
+        raise MediaError("Média introuvable.", 404)
+    if it["kind"] == "clip" and it.get("audio") is False:
+        raise MediaError("Cette vidéo n'a pas de son : rien à sous-titrer.")
+    if float(it["seconds"]) > MAX_WORDS_SECONDS:
+        raise MediaError("Son trop long pour les sous-titres (30 minutes au maximum).", 413)
+    src = _dir() / f"{it['id']}{it['ext']}"
+    try:
+        audio = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-f", "mp3", "-"],
+                               capture_output=True, timeout=600).stdout
+    except (OSError, subprocess.SubprocessError):
+        audio = b""
+    if not audio:
+        raise MediaError("Son illisible : impossible de préparer la transcription.")
+    try:
+        got = voice.transcribe(db, audio, f"{it['id']}.mp3")
+    except voice.VoiceError as exc:
+        raise MediaError(str(exc), exc.status)
+    if not got["words"]:
+        raise MediaError("Aucun mot reconnu dans ce son.", 422)
+    it["words"], it["lang"] = got["words"], got["language"]
+    _save(db, items)
+    return _public(it)
+
+
+def scene_words(words: list, a: float, b: float, offset: float = 0.0) -> list[list]:
+    """Mots dits entre a et b (instants du fichier) -> instants dans la scène (offset : où commence le son dans la scène). Pure, testée."""
+    return [[round(w0 - a + offset, 2), round(w1 - a + offset, 2), txt] for w0, w1, txt in words or [] if w0 >= a - 0.05 and w0 < b]
+
+
 def frame_path(db: Session, mid: str, t: float) -> Path | None:
     """Vignette d'un passage (fichier en cache, arrondi à la demi-seconde) ; None si la vidéo n'existe pas ou est retirée."""
     it = items_by_id(db).get(mid)
@@ -290,6 +329,8 @@ def frame_path(db: Session, mid: str, t: float) -> Path | None:
 
 def _public(it: dict) -> dict:
     out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary") if k in it}
+    if it.get("words"):
+        out["words"] = len(it["words"])
     if it["kind"] == "clip":
         out["looks"] = [{"t": t, "text": x} for t, x in it.get("looks") or []]
         if "audio" in it:
@@ -386,7 +427,10 @@ def _sound_text(it: dict) -> str:
     if not talk:
         return " Son : ambiance seulement, aucun passage parlé net."
     shown = "; ".join(f"{a:.1f}–{b:.1f} s" for a, b in talk[:30]) + (" …" if len(talk) > 30 else "")
-    return f" Son : {len(talk)} passages sonores forts (parole probable, entre des silences) : {shown}."
+    said = ""
+    if it.get("words"):     # transcrit : l'IA sait CE QUI est dit, et quand
+        said = " Paroles (instant : mots) : " + " | ".join(f"{a:.1f} s {txt}" for a, _b, txt in it["words"][:400]) + (" …" if len(it["words"]) > 400 else "") + "."
+    return f" Son : {len(talk)} passages sonores forts (parole probable, entre des silences) : {shown}.{said}"
 
 
 def catalog_text(db: Session) -> str:
@@ -441,7 +485,7 @@ def to_engine(db: Session, spec: dict) -> dict:
     """Scénario du Studio -> forme du moteur : « my_clip » devient un clip avec lien secret, « phrases » un morceau de voix,
     « audio » la bande son. Les liens des médias utilisés s'ouvrent pour OPEN_HOURS (clic « Lancer » du patron en amont)."""
     if not any(s.get("type") == "my_clip" or s.get("phrases") for s in spec.get("scenes") or []) and not spec.get("audio"):
-        return spec
+        return {k: v for k, v in spec.items() if k != "captions"}
     items = _load(db)
     by_id = {it["id"]: it for it in items if not it.get("hidden")}
     base, used = _base_url(), set()
@@ -455,10 +499,15 @@ def to_engine(db: Session, spec: dict) -> dict:
 
     au = spec.get("audio") or {}
     voice = by_id.get(au.get("voice") or "")
+    caps = bool(spec.get("captions"))
     scenes = []
     for s in spec.get("scenes") or []:
         s = dict(s)
         ph = s.pop("phrases", None)
+        words = None
+        if caps and s.get("type") == "my_clip" and s.get("sound") and (by_id.get(s.get("media") or "") or {}).get("words"):   # parole du film
+            a = float(s.get("start") or 0)
+            words = scene_words(by_id[s["media"]]["words"], a, a + float(s["seconds"]) - float(s.get("freeze") or 0))
         if s.get("type") == "my_clip":   # plan monté par le moteur (scripts/video/edit.py)
             from app.video_studio import FOCUS
             eng = {"type": "clip", "url": link(s["media"], "clip"), "seconds": s["seconds"], "start": s.get("start", 0),
@@ -472,8 +521,12 @@ def to_engine(db: Session, spec: dict) -> dict:
         if ph and voice and voice.get("phrases"):
             i, j = ph
             s["voice"], s["voice_at"] = [voice["phrases"][i][0], voice["phrases"][j][1]], 0.25
+            if caps and voice.get("words") and not words:      # voix off : ses mots, calés sur le moment où elle parle dans la scène
+                words = scene_words(voice["words"], s["voice"][0], s["voice"][1], 0.25)
+        if words:
+            s["captions"] = words
         scenes.append(s)
-    out = {k: v for k, v in spec.items() if k not in ("scenes", "audio")}
+    out = {k: v for k, v in spec.items() if k not in ("scenes", "audio", "captions")}
     out["scenes"] = scenes
     if au:
         eng = {"keys": bool(au.get("keys", True)), "duck": au.get("duck") or "normal"}

@@ -258,6 +258,51 @@ def _voice_seg(sc: dict, raw: dict) -> dict:
     return sc
 
 
+CAP_WORDS, CAP_CHARS, CAP_PAUSE = 3, 16, 0.35     # sous-titres : 3 mots et 16 caractères au plus par carton ; une pause ouvre un nouveau carton
+MAX_CAP_WORDS = 4000
+
+
+def caption_groups(words, seconds: float) -> list[list]:
+    """Mots datés [[début, fin, mot], …] (instants dans la scène) -> cartons de sous-titres [[début, fin, texte], …].
+    Un carton : 1 à 3 mots dits ensemble ; il reste affiché jusqu'au suivant (sauf longue pause). Fonction pure, testée."""
+    if not isinstance(words, list) or seconds <= 0:
+        return []
+    ws = []
+    for w in words[:MAX_CAP_WORDS]:
+        if not (isinstance(w, (list, tuple)) and len(w) == 3):
+            continue
+        a, b, txt = _secs(w[0], 0, seconds, -1), _secs(w[1], 0, seconds, -1), _txt(w[2], 30)
+        if a >= 0 and b >= a and txt and a < seconds:
+            ws.append((a, max(b, a + 0.05), txt))
+    ws.sort(key=lambda x: x[0])
+    groups: list[list] = []
+    cur: list = []
+    for a, b, txt in ws:
+        if cur and (len(cur) >= CAP_WORDS or sum(len(x[2]) + 1 for x in cur) + len(txt) > CAP_CHARS
+                    or a - cur[-1][1] > CAP_PAUSE or cur[-1][2][-1] in ".!?,;:…"):
+            groups.append(cur)
+            cur = []
+        cur.append((a, b, txt))
+    if cur:
+        groups.append(cur)
+    out = []
+    for k, g in enumerate(groups):
+        t0, t1 = g[0][0], g[-1][1] + 0.25
+        if k + 1 < len(groups) and groups[k + 1][0][0] - g[-1][1] < 0.6:
+            t1 = groups[k + 1][0][0]                 # enchaîné : pas de clignotement entre deux cartons
+        out.append([round(t0, 2), round(min(seconds, t1), 2), " ".join(x[2] for x in g)])
+    return out
+
+
+def _caps(sc: dict, raw: dict) -> dict:
+    """Sous-titres mot à mot d'une scène (parole du film ou voix off), si fournis."""
+    if raw.get("captions") and sc["type"] != "page":
+        g = caption_groups(raw["captions"], scene_seconds(sc))
+        if g:
+            sc["caps"] = g
+    return sc
+
+
 def clean(raw: dict) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("scénario invalide")
@@ -272,7 +317,7 @@ def clean(raw: dict) -> dict:
         raise ValueError("liste de scènes invalide")
     if len(raw_scenes) > MAX_SCENES:
         raise ValueError(f"trop de scènes ({MAX_SCENES} au maximum)")
-    scenes = [_voice_seg(_scene(s), s) for s in raw_scenes if isinstance(s, dict)]
+    scenes = [_caps(_voice_seg(_scene(s), s), s) for s in raw_scenes if isinstance(s, dict)]
     if not scenes:
         raise ValueError("aucune scène")
     est = sum(scene_seconds(s) for s in scenes)

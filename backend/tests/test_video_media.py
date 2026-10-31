@@ -267,3 +267,74 @@ def test_coupe_des_silences_longue_parole():
     sc = vs.build_spec("vertical", [{"type": "my_clip", "media": it["id"], "jumpcut": True}], [], media={it["id"]: it})["scenes"]
     assert [(x["start"], x["seconds"]) for x in sc] == [(0.0, 30.0), (30.0, 30.0), (60.0, 5.0)]     # parole sans pause : plans de 30 s collés
     assert [x.get("transition") for x in sc] == [None, "cut", "cut"]
+
+
+def test_transcription_elevenlabs(monkeypatch, db):
+    import httpx
+    from app import voice
+    calls = []
+
+    def http(method, path, key, timeout=60, **kw):
+        calls.append(kw["data"]["model_id"])
+        if kw["data"]["model_id"] == "scribe_v2":
+            return httpx.Response(422, json={"detail": {"message": "Invalid model_id"}})
+        return httpx.Response(200, json={"language_code": "fra", "words": [
+            {"text": "Bonjour", "start": 0.1, "end": 0.5, "type": "word"}, {"text": " ", "start": 0.5, "end": 0.55, "type": "spacing"},
+            {"text": "<i>Dakar</i>", "start": 0.55, "end": 1.0, "type": "word"}, {"text": "(rires)", "start": 1, "end": 2, "type": "audio_event"},
+            {"text": "x", "start": "?", "end": 1, "type": "word"}]})
+    monkeypatch.setattr(voice, "api_key", lambda d: "cle")
+    monkeypatch.setattr(voice, "_http", http)
+    got = voice.transcribe(db, b"mp3")
+    assert calls == ["scribe_v2", "scribe_v1"] and got == {"language": "fra", "words": [[0.1, 0.5, "Bonjour"], [0.55, 1.0, "iDakar/i"]]}
+    monkeypatch.setattr(voice, "_http", lambda *a, **k: httpx.Response(401, json={"detail": "bad"}))
+    with pytest.raises(voice.VoiceError):
+        voice.transcribe(db, b"mp3")
+    monkeypatch.setattr(voice, "api_key", lambda d: "")
+    with pytest.raises(voice.VoiceError) as e:
+        voice.transcribe(db, b"mp3")
+    assert e.value.status == 409
+
+
+def test_mots_d_une_scene():
+    w = [[1.0, 1.4, "a"], [2.0, 2.4, "b"], [5.0, 5.5, "c"]]
+    assert vm.scene_words(w, 1.9, 5.0) == [[0.1, 0.5, "b"]] and vm.scene_words(w, 1.0, 9, 0.25) == [[0.25, 0.65, "a"], [1.25, 1.65, "b"], [4.25, 4.75, "c"]]
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_sous_titres_du_film_et_de_la_voix(db, tmp_path, monkeypatch):
+    from app import voice
+    talk = _sound(tmp_path / "t.mp4", ["-f", "lavfi", "-i", "testsrc=d=6:s=320x240:r=25", "-f", "lavfi", "-i", "sine=f=300:d=6", "-pix_fmt", "yuv420p", "-shortest"])
+    vo = _sound(tmp_path / "v.wav", ["-f", "lavfi", "-i", "sine=f=440:d=1.5", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-f", "lavfi", "-i", "sine=f=440:d=1.2",
+                                     "-filter_complex", "[1]atrim=0:0.8[s];[0][s][2]concat=n=3:v=0:a=1"])
+    c = asyncio.run(vm.add(db, _Up("parle.mp4", talk), "clip"))
+    v = asyncio.run(vm.add(db, _Up("voix.wav", vo), "voice", "Une phrase. Deux phrases."))
+    sent = []
+
+    def tr(d, audio, name):
+        sent.append(audio[:3])
+        return {"language": "fra", "words": [[0.2, 0.6, "Bonjour"], [0.7, 1.1, "Dakar"], [3.0, 3.4, "Merci"]]}
+    monkeypatch.setattr(voice, "transcribe", tr)
+    assert vm.transcribe(db, c["id"])["words"] == 3 and vm.transcribe(db, v["id"])["words"] == 3
+    assert all(x in (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") for x in sent)                    # seul le son part (mp3), jamais l'image
+    with pytest.raises(vm.MediaError):
+        vm.transcribe(db, "000000000000")
+    assert "Paroles (instant : mots) : 0.2 s Bonjour" in vm.catalog_text(db)
+    media = vm.items_by_id(db)
+    raw = [{"type": "my_clip", "media": c["id"], "start": 0.5, "seconds": 3, "sound": True}, {"type": "kinetic", "lines": ["Voix"], "phrases": [1, 1]}]
+    spec = vs.build_spec("vertical", raw, [], media=media, audio={"voice": v["id"]})
+    assert spec["captions"] is True                                                                   # mots disponibles : oui par défaut
+    off = vs.build_spec("vertical", spec["scenes"], [], media=media, audio=spec["audio"], captions=False)
+    assert off["captions"] is False and vs.build_spec("vertical", off["scenes"], [], media=media, audio=off["audio"], captions=off["captions"]) == off
+    assert "captions" not in vs.build_spec("vertical", [{"type": "kinetic", "lines": ["A"]}], [], media=media)   # rien à sous-titrer : pas d'option
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    eng = vm.to_engine(db, spec)
+    a, k = eng["scenes"]
+    assert a["captions"] == [[0.2, 0.6, "Dakar"], [2.5, 2.9, "Merci"]] and "captions" not in eng      # mots du passage choisi (0,5 s → 3,5 s)
+    ph = media[v["id"]]["phrases"][1]
+    assert k["captions"] == vm.scene_words(media[v["id"]]["words"], ph[0], ph[1], 0.25)              # voix off : calés sur sa phrase
+    assert all("captions" not in x for x in vm.to_engine(db, off)["scenes"])                          # coupés par le patron
+    p = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py"
+    mod = importlib.util.spec_from_file_location("video_spec_caps", p)
+    sp = importlib.util.module_from_spec(mod)
+    mod.loader.exec_module(sp)
+    assert sp.clean(eng)["scenes"][0]["caps"] == [[0.2, 0.85, "Dakar"], [2.5, 3.0, "Merci"]]            # cartons prêts (bornés à la scène)

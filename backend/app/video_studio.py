@@ -146,6 +146,7 @@ TOOL = {"name": "storyboard", "description": "Scénario de la vidéo, avec ce qu
                "(« YouTube » : horizontal ; « TikTok », « Reels », « statut » : vertical ; « carré » : square) ; sinon omets."},
     "theme": {"type": "string", "enum": ["unic", "night", "light", "earth", "ocean", "sunset"], "description": "Ambiance des couleurs : unic (bleu nuit et or, entreprise), night (noir et cyan : technologie, espace), light (crème : sobre, éducatif), earth (vert et ocre : nature, animaux, voyage), ocean (bleu-vert : mer, bien-être), sunset (bordeaux et orange : émotion, récit)."},
     "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Les scènes dans l’ordre.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}},
+    "captions": {"type": "boolean", "description": "Sous-titres mot à mot sur la parole (film parlé ou voix off déjà transcrits) : omets (oui par défaut) ; false seulement si le patron n'en veut pas."},
     "audio": {"type": "object", "description": "Bande son, seulement avec les médias du patron : musique (identifiant), départ dans la musique (music_start, s), voix (identifiant), "
               "clavier des textes tapés (keys), baisse de la musique sous la voix (duck).", "properties": {
         "music": {"type": "string"}, "music_start": {"type": "number"}, "voice": {"type": "string"}, "keys": {"type": "boolean"},
@@ -442,7 +443,7 @@ def without_catalog(scenes: list) -> list:
 
 
 def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: str = "unic", ai: dict | None = None,
-               media: dict | None = None, audio=None) -> dict:
+               media: dict | None = None, audio=None, captions=None) -> dict:
     """Scénario sûr (forme du moteur) à partir de scènes proposées par Claude ou renvoyées par l'appli. Ce qui sort du catalogue est écarté."""
     ok_imgs = set(names if names is not None else images())
     raw_scenes = scenes or []
@@ -565,7 +566,17 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
     spec = {"format": fmt if fmt in FORMATS else "vertical", "theme": theme if theme in THEMES else "unic", "scenes": out}
     if au:
         spec["audio"] = au
+    if _can_caption(out, au, media or {}):     # sous-titres mot à mot possibles : oui par défaut, le patron peut les couper
+        spec["captions"] = captions is not False
     return spec
+
+
+def _can_caption(scenes: list, au: dict | None, media: dict) -> bool:
+    """Des mots datés existent pour un son de cette vidéo : parole d'un film gardée, ou voix off placée sur des scènes."""
+    if any(sc.get("type") == "my_clip" and sc.get("sound") and (media.get(sc["media"]) or {}).get("words") for sc in scenes):
+        return True
+    voice = media.get((au or {}).get("voice") or "")
+    return bool(voice and voice.get("words") and any(sc.get("phrases") for sc in scenes))
 
 
 
@@ -671,7 +682,7 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
     if changes and isinstance(current, dict):
         try:
             cur = build_spec(str(current.get("format") or fmt), current.get("scenes") or [], names, str(current.get("theme") or "unic"),
-                             ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI}, media=media, audio=current.get("audio"))
+                             ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI}, media=media, audio=current.get("audio"), captions=current.get("captions"))
         except ValueError:
             cur = None
     if changes and cur is None and not brief:
@@ -722,7 +733,7 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
         got["scenes"] = without_catalog(got.get("scenes") or [])
     try:
         spec = build_spec(fmt_out, got.get("scenes") or [], names, forced or str(got.get("theme") or (cur or {}).get("theme") or "unic"), ai=ai,
-                          media=media, audio=got.get("audio"))
+                          media=media, audio=got.get("audio"), captions=got.get("captions", (cur or {}).get("captions")))
     except ValueError:
         raise repair.RepairError("Le scénario écrit par l'IA est inutilisable : reformule la demande ou réessaie.", 502)
     notes = ["Scénario corrigé par l'IA." if cur else "Scénario écrit par l'IA."]
@@ -809,7 +820,8 @@ def start(db: Session, spec: dict, user_id: str | None = None) -> dict:
     try:
         from app import video_media
         safe = build_spec((spec or {}).get("format", "vertical"), (spec or {}).get("scenes") or [], images(db), str((spec or {}).get("theme") or "unic"),
-                          ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI}, media=video_media.items_by_id(db), audio=(spec or {}).get("audio"))
+                          ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI}, media=video_media.items_by_id(db), audio=(spec or {}).get("audio"),
+                          captions=(spec or {}).get("captions"))
     except ValueError as exc:
         raise repair.RepairError(str(exc), 400)
     if sum(video_hybrid.ai_counts(safe)):

@@ -98,3 +98,18 @@ def test_son_du_film_garde_et_musique_baissee(tmp_path):
         return float(out.split("mean_volume: ")[1].split(" dB")[0])
     assert level(3.3, 1.4, 1000) > level(0.5, 1.5, 1000) + 30                                          # le son du film arrive à 3 s
     assert level(3.5, 1.2, 220) < level(0.5, 1.5, 220) - 4                                             # la musique baisse sous lui
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg absent")
+def test_parole_sans_musique(tmp_path):
+    """Son d'un film ou voix off SANS musique : le mélange ne doit pas échouer (sortie de baisse non branchée)."""
+    so = _load("sound")
+    film, voi = tmp_path / "f.mp4", tmp_path / "v.wav"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=d=3:s=160x120", "-f", "lavfi", "-i", "sine=frequency=1000:duration=3",
+                    "-shortest", "-pix_fmt", "yuv420p", str(film)], check=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660:duration=3", str(voi)], check=True)
+    a = so.build({"keys": False, "duck": "normal"}, [(0.0, 4.0, {"type": "clip"})], {}, 0, 4.0, tmp_path, False, False, [(0.5, film, 0.0, 2.0)])
+    b = so.build({"voice": {"volume": 1}, "keys": False}, [(0.0, 4.0, {"type": "kinetic", "voice": [0, 1.5]})], {"voice": voi}, 0, 4.0, tmp_path, False, False)
+    for wav in (a, b):
+        d = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(wav)], capture_output=True, text=True).stdout
+        assert abs(float(d) - 4.0) < 0.05

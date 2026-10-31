@@ -221,6 +221,22 @@ def video_media_frame(mid: str, t: float = 0, db: Session = Depends(get_db), use
     return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
+@router.post("/video/media/{mid}/words")
+def video_media_words(mid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Clic du patron « Sous-titres » : transcription mot à mot (ElevenLabs, son seulement), gardée pour les vidéos suivantes."""
+    from app import video_media
+    if not video_media.ID_RE.match(mid):
+        raise HTTPException(404, "Média introuvable.")
+    try:
+        it = video_media.transcribe(db, mid)
+    except video_media.MediaError as exc:
+        db.rollback()
+        raise HTTPException(exc.status, str(exc))
+    audit(db, user.id, "video_media_words", "video_media", mid, f"{it.get('words', 0)} mots")
+    db.commit()
+    return it
+
+
 @router.post("/video/media/{mid}/hide")
 def video_media_hide(mid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Retire un média de la liste (le fichier reste sur le serveur : aucune suppression)."""

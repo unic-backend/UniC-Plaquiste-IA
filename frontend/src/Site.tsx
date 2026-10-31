@@ -166,6 +166,11 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
               <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}
               {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}
                 {m.audio === false ? " · Sans son." : m.talk ? ` · Son : ${m.talk} passage${m.talk > 1 ? "s" : ""} parlé${m.talk > 1 ? "s" : ""} ; silences repérés.` : ""}</small>}
+              {(m.kind === "voice" || (m.kind === "clip" && m.audio !== false)) && (m.words
+                ? <small className="vs-seen">Sous-titres prêts : {m.words} mots.</small>
+                : <button type="button" className="btn btn-line btn-small vs-words" disabled={busy}
+                    onClick={() => { if (window.confirm(`Créer les sous-titres de « ${m.name} » ? Le son part chez ElevenLabs pour être transcrit (ton crédit ElevenLabs, environ ${Math.max(1, Math.ceil(m.seconds / 60))} min de son).`))
+                      run(async () => { await net.videoMediaWords(m.id); await load(); }, "Sous-titres prêts : l'IA les placera mot à mot."); }}>Créer les sous-titres</button>)}
               {" "}<button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer de la liste"
                 onClick={() => run(async () => { await net.videoMediaHide(m.id); await load(); }, "Média retiré de la liste.")}>×</button>
             </li>
@@ -306,6 +311,11 @@ export function VideoStudio({ say }: { say: Say }) {
               <p className="vs-note">{plan.note}</p>
               {plan.ai && plan.ai.clips + plan.ai.images > 0 && (
                 <p className="vs-status">⚠️ {plan.ai.clips} clip(s) et {plan.ai.images} image(s) générés par l'IA : <b>crédits Higgsfield payants</b>, un média à la fois. Les films IA sont muets dans le montage. Tu peux fermer l'application pendant la génération.</p>
+              )}
+              {typeof shown.captions === "boolean" && (
+                <label className="vs-check"><input type="checkbox" checked={shown.captions} disabled={busy}
+                  onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, captions: on } }); }} />
+                  Sous-titres mot à mot sur la parole</label>
               )}
               <Storyboard spec={shown} onRemove={removeScene} busy={busy} />
               <p className="vs-h">Corriger le scénario</p>
