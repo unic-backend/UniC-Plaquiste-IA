@@ -43,7 +43,7 @@ def clean(svg, fmt: str = "vertical") -> str | None:
     if "xmlns=" not in src[:400]:
         src = re.sub(r"^<svg\b", f'<svg xmlns="{SVG_NS}"', src, count=1)
     try:
-        root = ET.fromstring(src)
+        root = ET.fromstring(src)  # nosec B314 - DOCTYPE/ENTITY refusés plus haut (ni entité ni DTD : ni XXE ni « billion laughs »)
     except ET.ParseError:
         return None
     if _local(root.tag) != "svg":
