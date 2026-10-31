@@ -9,9 +9,11 @@ import { applyTheme } from "./theme";
 import { syncDesktopWorker } from "./api";
 import { Capacitor } from "@capacitor/core";
 import { wakeApi } from "./phone";
+import { installKeyboardInset } from "./keyboard";
 
 applyTheme();
 syncDesktopWorker();
+installKeyboardInset();
 
 /** Ouvert par « Hey UniC » : on arrive directement sur UniC vocal, qui démarre tout seul. */
 async function detectWake(): Promise<void> {

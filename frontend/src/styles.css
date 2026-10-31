@@ -1896,3 +1896,12 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .vs-opts .vs-check { margin: 10px 0; }
 .vs-opts .btn { margin-top: 6px; }
 @media (prefers-reduced-motion: reduce) { .card-box .vs-drop-btn { transition: none; } .vs-drop.on .vs-drop-btn { transform: none; } }
+
+/* Clavier du téléphone (--kb et --vvh posés par keyboard.ts) : les fenêtres plein écran s'arrêtent au-dessus du clavier,
+   les feuilles défilent si elles sont plus hautes que la partie visible ; tout revient à 0 quand le clavier se ferme. */
+.sheet-back, .app-lock, .interp, .unic-voice, .preview-back, .lightbox { bottom: var(--kb, 0px); }
+.sheet-back .sheet { max-height: calc(var(--vvh, 100dvh) - 24px); overflow-y: auto; overscroll-behavior: contain; }
+.sheet-back .contact-sheet { max-height: min(82vh, calc(var(--vvh, 100dvh) - 24px)); }
+.toast.toast-global { bottom: calc(86px + env(safe-area-inset-bottom, 0px) + var(--kb, 0px)); }
+.kb-open .composer-wrap { padding-bottom: 10px; }
+.kb-open .sheet { padding-bottom: 16px; }
