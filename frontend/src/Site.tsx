@@ -7,7 +7,16 @@ import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from
 type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
-  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo" };
+  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo",
+  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge" };
+/** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
+const panelText = (p: { [k: string]: unknown }) => {
+  const L = Array.isArray(p.lines) ? (p.lines as unknown[]).map(String) : [];
+  if (p.type === "counter") return `${statNumber(p.value)}${p.suffix ? (/^[+×]/.test(String(p.suffix)) ? "" : " ") + String(p.suffix) : ""}${p.label ? ` ${String(p.label)}` : ""}`;
+  if (p.type === "flow") return (Array.isArray(p.steps) ? (p.steps as unknown[]).map(String) : []).join(" → ");
+  if (p.type === "checklist") return [String(p.heading || ""), ...(Array.isArray(p.items) ? (p.items as unknown[]).map(String) : [])].filter(Boolean).join(" · ");
+  return L.join(" · ");
+};
 /** Montage d'un plan de la vidéo du patron, en mots (vignette, liste des scènes). */
 const GRADE_FR: Record<string, string> = { cinema: "Cinéma", warm: "Chaud", night: "Nuit", crisp: "Net", bw: "Noir et blanc" };
 const GRADE_CSS: Record<string, string> = { cinema: "contrast(1.1) saturate(1.18)", warm: "sepia(.18) saturate(1.2)", night: "brightness(1.12) saturate(1.05) hue-rotate(-8deg)",
@@ -22,6 +31,8 @@ const clipEdits = (c: { [k: string]: unknown }) => {
   if (typeof c.zoom === "string" && ZOOM_FR[c.zoom]) out.push(ZOOM_FR[c.zoom]);
   if (typeof c.grade === "string" && GRADE_FR[c.grade]) out.push(GRADE_FR[c.grade]);
   if (c.split_media) out.push("Avant | après");
+  if (c.layout === "split") out.push("Écran divisé");
+  if (Array.isArray(c.panels) && c.panels.length) out.push(`${c.panels.length} animation${c.panels.length > 1 ? "s" : ""}`);
   if (Number(c.freeze) > 0) out.push("Arrêt sur image");
   if (typeof c.transition === "string" && TRANS_FR[c.transition]) out.push(TRANS_FR[c.transition]);
   return out;
@@ -41,7 +52,7 @@ const items = (s: VideoScene, k: string) => (Array.isArray(s[k]) ? (s[k] as unkn
 const clipFrames = new Map<string, Promise<string>>();
 
 /** Vraie image du passage choisi dans la vidéo du patron (servie avec le code d'accès) ; cadre « Ma vidéo » si elle ne vient pas. */
-function ClipThumb({ id, start, half, grade }: { id: string; start: number; half?: "l" | "r"; grade?: string }) {
+function ClipThumb({ id, start, half, grade }: { id: string; start: number; half?: "l" | "r" | "b"; grade?: string }) {
   const key = `${id}@${Math.round(start * 2) / 2}`;
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -83,13 +94,19 @@ function SceneFrame({ s }: { s: VideoScene }) {
     const ov = (s.overlay || {}) as { lines?: unknown[] };
     const words = (ov.lines || []).map((x) => frText(x)).filter(Boolean).join(" ");
     const grade = typeof s.grade === "string" ? s.grade : undefined, split = typeof s.split_media === "string" ? s.split_media : "";
-    const eds = clipEdits(s);
+    const eds = clipEdits(s), stack = s.layout === "split";
+    const first = Array.isArray(s.panels) && s.panels.length ? (s.panels[0] as { [k: string]: unknown }) : null;
     return <>
-      <ClipThumb id={String(s.media || "")} start={Number(s.start) || 0} half={split ? "l" : undefined} grade={grade} />
+      {stack && <span className="f-top">{first ? <><small className="f-chip">{SCENE_FR[String(first.type)] || String(first.type)}</small><b className="f-t2">{frText(panelText(first))}</b></> : null}</span>}
+      <ClipThumb id={String(s.media || "")} start={Number(s.start) || 0} half={stack ? "b" : split ? "l" : undefined} grade={grade} />
       {split && <><ClipThumb id={split} start={Number(s.split_start) || 0} half="r" grade={grade} /><i className="f-split" aria-hidden /></>}
       {!!eds.length && <small className="f-chip f-edits">{eds.join(" · ")}</small>}
       {words && <span className="f-cap">{words}</span>}
     </>;
+  }
+  if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge") {
+    return <>{t === "counter" ? <b className="f-t1">{statNumber(s.value)}{s.suffix ? (/^[+×]/.test(String(s.suffix)) ? "" : " ") + String(s.suffix) : ""}</b> : <small className="f-chip">{SCENE_FR[t]}</small>}
+      <b className="f-t2">{frText(t === "counter" ? String(s.label || "") : panelText(s))}</b></>;
   }
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
   const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;

@@ -16,10 +16,16 @@ IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.(webp|jpg|jpeg|png)$")
 IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
-TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan")
+TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
+         "counter", "flow", "wave", "chat", "badge")
+# Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge ; en scène, en incrustation ou en haut d'un écran divisé.
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge")
+FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan", *PANEL_TYPES)
+LAYOUTS = ("full", "split")      # split : la personne filmée en bas, les animations en haut (sous-titres à la jonction)
+MAX_PANELS = 400
 # Effets « cinéma » : texte tapé au clavier, titre dont le dernier mot arrive en or, liste cochée sur verre dépoli, titre néon, carte slogan.
 # Les quatre premiers peuvent aussi s'incruster sur un clip (clé « overlay » d'une scène clip) : le texte passe alors sur les images filmées.
-OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon")
+OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon", *PANEL_TYPES)
 # Montage d'une scène « clip » (edit.py) : vitesse, étalonnage, cadrage, zoom, arrêt sur image, écran partagé, transition d'entrée.
 GRADES = ("cinema", "warm", "night", "crisp", "bw")
 ZOOMS = ("in", "out", "punch")
@@ -113,6 +119,21 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
         if not lines:
             raise ValueError("néon : texte vide")
         out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 8, 3), "lines": lines, "tag": _txt(s.get("tag"), 12).upper()}
+    elif t == "counter":
+        v = stat_value(s.get("value"))
+        if v is None:
+            raise ValueError("compteur : nombre manquant")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 1.5, 10, 3), "value": v, "suffix": _txt(s.get("suffix"), 6), "label": _txt(s.get("label"), 28).upper()}
+    elif t == "flow":
+        steps = _lines_of(s.get("steps"), 18, 4)
+        if len(steps) < 2:
+            raise ValueError("schéma : au moins 2 étapes")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 12, 1.2 + 0.8 * len(steps)), "steps": steps}
+    elif t in ("wave", "chat", "badge"):
+        lines = _lines_of(s.get("lines"), 30 if t == "chat" else 24, 2)
+        if t != "wave" and not lines:
+            raise ValueError(f"{t} : texte vide")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 1.5, 10, 4 if t == "chat" else 3), "lines": lines}
     else:   # slogan (carte de fin, jamais en incrustation)
         l1, l2 = _txt(s.get("l1"), 30).upper(), _txt(s.get("l2"), 30).upper()
         if not (l1 or l2):
@@ -123,6 +144,25 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
         out["bg"] = _media_url(s.get("url")) if s.get("url") else _img(s.get("image"))
         out["reveal"] = "dots" if s.get("reveal") == "dots" else ""
     return out
+
+
+def _panels(raw, secs: float) -> list:
+    """Suite d'animations sur un film : [[début dans la scène, avance dans l'animation, animation], …], triée.
+    « avance » : une animation commencée avant ce plan (coupe des silences) reprend où elle en était, sans recommencer."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for p in raw[:MAX_PANELS]:
+        if not (isinstance(p, (list, tuple)) and len(p) == 3 and isinstance(p[2], dict) and p[2].get("type") in OVERLAY_TYPES):
+            continue
+        try:
+            fx = _fx(p[2], p[2]["type"], overlay=True)
+        except ValueError:
+            continue
+        a = _secs(p[0], 0, secs, -1)
+        if 0 <= a < secs:
+            out.append([a, _secs(p[1], 0, 3600, 0), fx])
+    return sorted(out, key=lambda x: x[0])
 
 
 def _edits(s: dict, secs: float) -> dict:
@@ -157,7 +197,7 @@ def _scene(s: dict) -> dict:
     t = s.get("type")
     if t not in TYPES:
         raise ValueError(f"type de scène inconnu : {str(t)[:20]}")
-    if t in ("typewriter", "kinetic", "checklist", "neon", "slogan"):
+    if t in FX_TYPES:
         return _fx(s, t)
     if t == "title":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "l1": _txt(s.get("l1"), 24).upper(), "l2": _txt(s.get("l2"), 24).upper(), "sub": _txt(s.get("sub"), 40).upper()}
@@ -172,6 +212,12 @@ def _scene(s: dict) -> dict:
         if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:   # texte incrusté sur le film : même durée que le clip
             out["overlay"] = {**_fx(ov, ov["type"], overlay=True), "seconds": out["seconds"]}
         out.update(_edits(s, out["seconds"]))
+        panels = _panels(s.get("panels"), out["seconds"])
+        if panels:
+            out["panels"] = panels
+        if s.get("layout") == "split":           # écran divisé : jamais avec l'avant | après (deux découpages de l'image)
+            out["layout"] = "split"
+            out.pop("split", None)
         return out
     if t == "photo":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "src": _media_url(s.get("url")) if s.get("url") else _img(s.get("image")), "caption": _txt(s.get("caption"), 60),

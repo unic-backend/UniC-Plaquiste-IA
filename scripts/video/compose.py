@@ -20,9 +20,15 @@ def clip_frame(i, f):
     """Image f d'un film : zoom sous-pixel (edit.zoom_box) puis texte incrusté éventuel."""
     s = SEGS[i]
     im = Image.open(f"{s['out']}/{f:05d}.jpg").convert("RGB")
-    box = edit.zoom_box(s, f, s["frames"], FPS, OW, OH)
-    if box:
-        im = im.resize((OW, OH), Image.LANCZOS, box=box)
+    if s.get("layout") == "split":   # écran divisé : seul le bas (la personne filmée) est zoomé
+        hb = edit.bottom_height(OH)
+        box = edit.zoom_box(s, f, s["frames"], FPS, OW, hb, OH - hb)
+        if box:
+            im.paste(im.resize((OW, hb), Image.LANCZOS, box=box), (0, OH - hb))
+    else:
+        box = edit.zoom_box(s, f, s["frames"], FPS, OW, OH)
+        if box:
+            im = im.resize((OW, OH), Image.LANCZOS, box=box)
     if s.get("ovl") and os.path.exists(f"{s['ovl']}/{f:05d}.png"):   # texte incrusté et/ou sous-titres
         im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['ovl']}/{f:05d}.png").convert("RGBA").resize((OW, OH))); im = im.convert("RGB")
     return im

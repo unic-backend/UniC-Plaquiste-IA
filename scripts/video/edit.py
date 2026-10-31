@@ -1,6 +1,7 @@
 """Montage des vraies vidéos (scènes « clip ») : le moteur TRAVAILLE le film, il ne se contente pas de le recadrer.
 
-- ffmpeg (make.py) : vitesse (ralenti, accéléré), étalonnage des couleurs, cadrage sur le sujet, arrêt sur image, écran partagé avant/après.
+- ffmpeg (make.py) : vitesse (ralenti, accéléré), étalonnage des couleurs, cadrage sur le sujet, arrêt sur image, écran partagé avant/après,
+  écran divisé (la personne en bas, les animations en haut).
 - image par image (compose.py) : zoom (avant, arrière, coup de zoom) en caméra sous-pixel, transitions entre plans (fondu, coupe franche, flash, glissé).
 
 Fonctions pures, testées sans rendu. Les valeurs arrivent déjà validées par spec.py (scénario non fiable : jamais utilisé tel quel ici).
@@ -16,6 +17,8 @@ GRADE_VF = {
     "bw": "hue=s=0,eq=contrast=1.15",
 }
 DIVIDER = "0xF2C230"                     # trait doré entre les deux moitiés d'un écran partagé
+SPLIT_TOP = 0.45                         # écran divisé : animations en haut (45 %), la personne filmée en bas (55 %)
+SPLIT_BG = "0x101114"
 FADE_S, FLASH_S, SLIDE_S = 0.35, 0.25, 0.40
 PUNCH_AT, PUNCH_S = 0.35, 0.18          # coup de zoom : à 35 % du plan, en 0,18 s
 
@@ -52,6 +55,10 @@ def ffmpeg_args(sc: dict, src, src2, ow: int, oh: int, fps: int, n: int, pattern
     tail = (f",{grade}" if grade else "") + f",tpad=stop_mode=clone:stop_duration={float(sc['seconds']):g}"
     args = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{float(sc.get('start') or 0):g}", "-t", need, "-i", str(src)]
     split = sc.get("split")
+    if sc.get("layout") == "split":                  # la personne en bas ; le haut (fond sombre) reçoit les animations (compose.py)
+        hb = bottom_height(oh)
+        return args + ["-vf", _fit(ow, hb, fx, fy, speed, fps) + f",pad={ow}:{oh}:0:{oh - hb}:color={SPLIT_BG}" + tail,
+                       "-an", "-frames:v", str(n), "-q:v", "2", "-start_number", "0", str(pattern)]
     if split and src2:
         hw = ow // 4 * 2                               # moitié gauche (paire), la droite prend le reste
         args += ["-ss", f"{float(split.get('start') or 0):g}", "-t", need, "-i", str(src2), "-filter_complex",
@@ -60,6 +67,11 @@ def ffmpeg_args(sc: dict, src, src2, ow: int, oh: int, fps: int, n: int, pattern
     else:
         args += ["-vf", _fit(ow, oh, fx, fy, speed, fps) + tail]
     return args + ["-an", "-frames:v", str(n), "-q:v", "2", "-start_number", "0", str(pattern)]
+
+
+def bottom_height(oh: int) -> int:
+    """Hauteur (paire) de la partie filmée d'un écran divisé."""
+    return int(round(oh * (1 - SPLIT_TOP))) // 2 * 2
 
 
 def zoom_factor(sc: dict, f: int, frames: int, fps: int) -> float:
@@ -73,14 +85,15 @@ def zoom_factor(sc: dict, f: int, frames: int, fps: int) -> float:
     return 1.0
 
 
-def zoom_box(sc: dict, f: int, frames: int, fps: int, w: int, h: int) -> tuple[float, float, float, float] | None:
-    """Fenêtre (sous-pixel) à agrandir pour l'image f, centrée sur le point de cadrage ; None sans zoom."""
+def zoom_box(sc: dict, f: int, frames: int, fps: int, w: int, h: int, top: float = 0.0) -> tuple[float, float, float, float] | None:
+    """Fenêtre (sous-pixel) à agrandir pour l'image f, centrée sur le point de cadrage ; None sans zoom.
+    `top` : la zone zoomée commence à cette hauteur (écran divisé : seulement la partie filmée, w × h)."""
     z = zoom_factor(sc, f, frames, fps)
     if z <= 1.0005:
         return None
     fx, fy = focus(sc)
     cw, ch = w / z, h / z
-    x0, y0 = (w - cw) * fx, (h - ch) * fy
+    x0, y0 = (w - cw) * fx, top + (h - ch) * fy
     return (x0, y0, x0 + cw, y0 + ch)
 
 

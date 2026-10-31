@@ -593,6 +593,14 @@ def to_engine(db: Session, spec: dict) -> dict:
                 eng["focus"] = {"x": FOCUS[s["focus"]][0], "y": FOCUS[s["focus"]][1]}
             if s.get("split_media"):
                 eng["split"] = {"url": link(s["split_media"], "clip"), "start": s.get("split_start", 0)}
+            if s.get("layout") == "split":
+                eng["layout"] = "split"
+            if s.get("panels"):        # instants du fichier -> instants dans le plan (+ avance d'une animation commencée avant)
+                sp_, st = float(s.get("speed") or 1), float(s.get("start") or 0)
+                eng["panels"] = [[round(max(0.0, p["at"] - st) / sp_, 2), round(max(0.0, st - p["at"]) / sp_, 2), {k: v for k, v in p.items() if k != "at"}]
+                                 for p in s["panels"]]
+                if s.get("overlay") and eng["panels"][0][0] > 0:
+                    eng["panels"].insert(0, [0, 0, s["overlay"]])
             s = eng
         if ph and voice and voice.get("phrases"):
             i, j = ph

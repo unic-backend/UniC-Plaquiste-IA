@@ -368,3 +368,24 @@ def test_sous_titres_automatiques(db, tmp_path, monkeypatch):
     items[2]["words_try"] = 0
     vm._save(db, items)
     assert vm.ensure_words(db) == 1 and vm.listing(db)[2]["words"] == 1
+
+
+def test_animations_calees_sur_le_fichier_et_coupes(monkeypatch):
+    it = {"id": "c" * 12, "kind": "clip", "seconds": 20.0, "audio": True, "talk": [[1.0, 4.0], [6.0, 9.0]], "ext": ".mp4", "token": "t" * 32}
+    raw = [{"type": "my_clip", "media": it["id"], "jumpcut": True, "layout": "split",
+            "overlay": {"type": "kinetic", "lines": ["Titre"]}, "panels": [
+        {"at": 1.2, "type": "badge", "lines": ["Opus 5.5"]}, {"at": 3.0, "type": "wave", "lines": ["Ta voix"]},
+        {"at": 7.5, "type": "counter", "value": 0, "suffix": "€", "label": "gratuit"}, {"at": 15, "type": "chat", "lines": ["21"]},
+        {"at": "?", "type": "badge", "lines": ["x"]}, {"at": 2, "type": "flow", "steps": ["une seule"]}]}]
+    a, b = vs.build_spec("vertical", raw, [], media={it["id"]: it})["scenes"]
+    assert a["layout"] == b["layout"] == "split"
+    assert [p["at"] for p in a["panels"]] == [1.2, 3.0] and [p["at"] for p in b["panels"]] == [3.0, 7.5]   # b reprend l'onde en cours puis le compteur
+    assert vs.build_spec("vertical", [a, b], [], media={it["id"]: it})["scenes"] == [a, b]                 # aller-retour stable
+    monkeypatch.setattr(vm, "_load", lambda d: [dict(it)])
+    monkeypatch.setattr(vm, "_save", lambda d, items: None)
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    ea, eb = vm.to_engine(object(), {"format": "vertical", "theme": "unic", "scenes": [a, b]})["scenes"]
+    assert [[p[0], p[1], p[2]["type"]] for p in ea["panels"]] == [[0, 0, "kinetic"], [0.2, 0.0, "badge"], [2.0, 0.0, "wave"]]   # texte d'ouverture d'abord
+    assert [[p[0], p[1], p[2]["type"]] for p in eb["panels"]] == [[0.0, 3.0, "wave"], [1.5, 0.0, "counter"]]   # l'onde continue (avance 3 s), le compteur à 1,5 s
+    assert eb["layout"] == "split" and "at" not in eb["panels"][1][2]
+    assert vs._readable({"type": "chat", "lines": ["21"]}) > 2 and vs._readable({"type": "flow", "steps": ["A", "B", "C"]}) > 2

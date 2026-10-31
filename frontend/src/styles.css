@@ -1851,5 +1851,10 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .f-clip-tag { font-size: calc(9cqw * var(--k)); color: var(--vac); }
 .f-img.f-half-l { right: 50%; width: 50%; }
 .f-img.f-half-r { left: 50%; width: 50%; }
+.f-img.f-half-b { top: 45%; height: 55%; }
+.vs-frame > .f-top { margin-top: 0; }
+.f-top { position: absolute; left: 0; right: 0; top: 0; height: 45%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2cqw; padding: 4cqw;
+  background: radial-gradient(60% 60% at 30% 20%, var(--vg1) 0, transparent 70%), var(--vbg); }
+.f-top .f-t2 { font-size: calc(7.5cqw * var(--k)); text-align: center; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .f-split { position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: #f2c230; }
 .f-edits { position: relative; max-width: 100%; background: rgba(0, 0, 0, .6); color: #fff; }
