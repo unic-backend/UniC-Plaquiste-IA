@@ -322,7 +322,7 @@ def test_la_memoire_du_patron_guide_le_scenario(monkeypatch):
     seen = {}
     monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
     monkeypatch.setattr(vs, "images", lambda db=None: NAMES)
-    monkeypatch.setattr(mem, "block", lambda db, query="", limit_chars=0: f"MÉMOIRE UNIC\n- Mes vidéos finissent toujours par « Le plafond de vos rêves » [{query[:12]}]")
+    monkeypatch.setattr(mem, "block", lambda db, query="", limit_chars=0, keep=None: f"MÉMOIRE UNIC\n- Mes vidéos finissent toujours par « Le plafond de vos rêves » [{query[:12]}]")
     monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(user=user) or _story())
     vs.plan(object(), "Promo de fin d'année", "vertical")
     assert "Le plafond de vos rêves" in seen["user"] and "[vidéo Promo" in seen["user"]

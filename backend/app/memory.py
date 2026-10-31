@@ -345,9 +345,12 @@ def conflicts(db: Session, only: set[str] | None = None) -> list[dict]:
     return out
 
 
-def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS) -> str:
-    """Texte injecté dans le prompt : ce que le patron a appris à l'IA, avec nature et conflits."""
+def block(db: Session, query: str = "", limit_chars: int = BLOCK_CHARS, keep=None) -> str:
+    """Texte injecté dans le prompt : ce que le patron a appris à l'IA, avec nature et conflits. `keep(hit)` : filtre facultatif
+    (le Studio vidéo écarte les règles toujours rappelées qui ne parlent pas de vidéo, comme les marges d'un devis)."""
     hits = retrieve(db, query, limit_chars)
+    if keep is not None:
+        hits = [h for h in hits if keep(h)]
     if not hits:
         return ""
     clash: dict[str, str] = {}

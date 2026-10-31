@@ -99,10 +99,12 @@ def describe_image(path: Path) -> str:
 
 
 FRAMES_PROMPT = (
-    "Ces images sont extraites, dans l'ordre du temps, d'une vidéo filmée par un plaquiste (BA13, faux plafonds, cloisons) à Dakar.\n"
-    "Pour CHAQUE image, une ligne qui commence par « #numéro : » puis ce qu'on voit, 18 mots au plus : lieu (stade, salle, bureau, couloir…), "
-    "plan (vue large, détail, équipe au travail), action, et qualité si elle gêne (flou, sombre, bougé, vide).\n"
-    "Recopie le texte lisible à l'écran (panneau, nom de lieu). N'invente rien : un lieu non reconnaissable reste « intérieur en chantier ».\n"
+    "Ces images sont extraites, dans l'ordre du temps, d'une vidéo (ou d'une photo) sur N'IMPORTE QUEL sujet : personnes, animaux, nature, ville, "
+    "événement, sport, produit, écran, travail, chantier… Ne suppose aucun sujet à l'avance : décris ce qui est là.\n"
+    "Pour CHAQUE image, une ligne qui commence par « #numéro : » puis ce qu'on voit, 22 mots au plus : sujet et lieu, plan (vue large, "
+    "plan moyen, gros plan), action ou mouvement, ambiance (lumière, couleurs, émotion), et qualité si elle gêne (flou, sombre, bougé, vide).\n"
+    "Recopie le texte lisible à l'écran (panneau, titre, nom de lieu). N'invente rien : ne nomme une personne ou un lieu que si un texte "
+    "visible le dit ; sinon « lieu non identifié », « une personne ».\n"
     "Termine par une ligne « Résumé : » en une phrase. Pas d'introduction."
 )
 
