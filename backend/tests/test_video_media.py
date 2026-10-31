@@ -449,3 +449,44 @@ def test_animation_lottie_du_patron(db, monkeypatch):
     assert e0["url"].startswith("https://unic.example.com/api/public/video-media/") and "media" not in e0 and e1["anim"] == "pin"
     assert e2["panels"][0][2]["url"] == e0["url"] and e2["panels"][1][2]["anim"] == "spark"                    # même lien secret, ouvert pour la fabrication
     assert vm.media_type(pathlib.Path("x.json")) == "application/json"
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_depose_tout_ici_photos_et_type_reconnu(db, tmp_path, monkeypatch):
+    from PIL import Image
+    from app import vision
+    buf = io.BytesIO()
+    img = Image.new("RGB", (4000, 3000), (200, 120, 40))
+    exif = img.getexif()
+    exif[0x0112] = 6                                                                                   # photo prise en portrait (à tourner)
+    exif[0x8825] = {2: (14.0, 41.0, 0.0)}                                                              # position GPS du téléphone
+    img.save(buf, "JPEG", exif=exif)
+    monkeypatch.setattr(vision, "disponible", lambda: True)
+    monkeypatch.setattr(vision, "describe_frames", lambda frames: "#0 : Plafond BA13 fini dans un salon\nRésumé : Salon au plafond BA13 terminé.")
+    p = asyncio.run(vm.add(db, _Up("IMG_2031.JPG", buf.getvalue()), "auto"))
+    assert p["kind"] == "photo" and p["dims"] == [1920, 2560] and p["summary"] == "Salon au plafond BA13 terminé."   # tournée, réduite
+    saved = Image.open(vm._dir() / f"{p['id']}.jpg")
+    assert not saved.getexif().get(0x8825) and not saved.getexif().get(0x0112)                        # plus de position GPS
+    assert vm.frame_path(db, p["id"], 0).read_bytes()[:2] == b"\xff\xd8"
+    assert "photo " + p["id"] in vm.catalog_text(db) and "Salon au plafond BA13" in vm.catalog_text(db)
+    with pytest.raises(vm.MediaError):
+        asyncio.run(vm.add(db, _Up("x.heic", b"....ftypheic"), "auto"))                               # format non reconnu
+    with pytest.raises(vm.MediaError):
+        asyncio.run(vm.add(db, _Up("x.jpg", b"pas une image"), "auto"))
+    voice = _sound(tmp_path / "v.wav", ["-f", "lavfi", "-i", "aevalsrc='0.5*sin(2*PI*220*t)*lt(mod(t,1.4),1.0)':d=8:s=44100"])
+    music = _sound(tmp_path / "m.wav", ["-f", "lavfi", "-i", "sine=f=330:d=8"])
+    clip = _sound(tmp_path / "c.mp4", ["-f", "lavfi", "-i", "testsrc=d=3:s=320x240:r=25", "-pix_fmt", "yuv420p"])
+    assert asyncio.run(vm.add(db, _Up("enregistrement.wav", voice), "auto"))["kind"] == "voice"        # des pauses : une voix
+    m = asyncio.run(vm.add(db, _Up("fond.wav", music), "auto"))
+    assert m["kind"] == "music" and asyncio.run(vm.add(db, _Up("Voix ElevenLabs.wav", music), "auto"))["kind"] == "voice"   # le nom compte
+    assert asyncio.run(vm.add(db, _Up("chantier.MP4", clip), "auto"))["kind"] == "clip"
+    v = vm.set_kind(db, m["id"], "voice")
+    assert v["kind"] == "voice" and "phrases" in v and vm.set_kind(db, m["id"], "music")["kind"] == "music"
+    with pytest.raises(vm.MediaError):
+        vm.set_kind(db, p["id"], "music")                                                              # une photo ne devient pas un son
+    spec = vs.build_spec("vertical", [{"type": "my_photo", "media": p["id"], "caption": "Salon fini", "seconds": 4},
+                                      {"type": "my_photo", "media": m["id"]}], [], media=vm.items_by_id(db))
+    assert spec["scenes"] == [{"type": "my_photo", "media": p["id"], "seconds": 4.0, "caption": "Salon fini"}]   # un son n'est pas une photo
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    e = vm.to_engine(db, spec)["scenes"][0]
+    assert e["type"] == "photo" and e["url"].startswith("https://unic.example.com/api/public/video-media/") and e["direction"] == "in"

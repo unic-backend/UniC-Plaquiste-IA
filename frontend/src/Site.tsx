@@ -1,13 +1,13 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { api, downloadAuth, fetchBlobUrl, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
+import { downloadAuth, fetchBlobUrl, net, shareDocument, type Post, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
 import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from "./videoBoard";
 
 type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
-  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo",
+  typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo", my_photo: "Ma photo",
   counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation" };
 const ANIM_FR: Record<string, string> = { check: "✓ Validé", spark: "✦ Éclat", arrow: "→ Flèche", pin: "📍 Lieu", pulse: "◉ Ondes" };
 /** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
@@ -110,6 +110,7 @@ function SceneFrame({ s }: { s: VideoScene }) {
     return <>{t === "counter" ? <b className="f-t1">{statNumber(s.value)}{s.suffix ? (/^[+×]/.test(String(s.suffix)) ? "" : " ") + String(s.suffix) : ""}</b> : <small className="f-chip">{SCENE_FR[t]}</small>}
       <b className="f-t2">{frText(t === "counter" ? String(s.label || "") : panelText(s))}</b></>;
   }
+  if (t === "my_photo") return <><ClipThumb id={String(s.media || "")} start={0} />{txt(s, "caption") && <span className="f-cap">{txt(s, "caption")}</span>}</>;
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
   const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;
   const L = items(s, "lines").map(frText).filter(Boolean);
@@ -144,67 +145,47 @@ function Storyboard({ spec, onRemove, busy }: { spec: VideoPlan["spec"]; onRemov
   );
 }
 
-const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo de chantier", music: "Musique", voice: "Voix off", lottie: "Animation (Lottie)" };
-const MEDIA_ACCEPT: Record<VideoMedia["kind"], string> = { clip: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm", music: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", voice: "audio/*,.mp3,.m4a,.aac,.wav,.ogg", lottie: "application/json,.json" };
+const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo", photo: "Photo", music: "Musique", voice: "Voix off", lottie: "Animation" };
+const MEDIA_ICON: Record<VideoMedia["kind"], string> = { clip: "🎬", photo: "📷", music: "🎵", voice: "🎙️", lottie: "✨" };
+const ACCEPT_ALL = "video/*,image/jpeg,image/png,image/webp,audio/*,application/json,.mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.mp3,.m4a,.aac,.wav,.ogg,.json";
 
-/** Médias du patron : ses vraies vidéos, sa musique et sa voix (ElevenLabs…). L'IA du Studio s'en sert ; rien n'est publié. */
-function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void> }) {
-  const [items, setItems] = useState<VideoMedia[]>([]);
-  const [kind, setKind] = useState<VideoMedia["kind"]>("clip");
-  const [script, setScript] = useState("");
-  const [sending, setSending] = useState("");
-  const [autoWords, setAutoWords] = useState(true);
-  const load = () => net.videoMedia().then((r) => { setItems(r.items); setAutoWords(r.auto_words !== false); }).catch(() => {});
-  useEffect(() => { load(); }, []);
-  const send = async (files: FileList | null) => {
-    if (!files?.length) return;
-    for (const f of Array.from(files)) {
-      setSending(f.name);
-      try { await net.videoMediaAdd(f, kind, kind === "voice" ? script : ""); } catch (e: any) { say(`${f.name} : ${e.message || "envoi impossible"}`); }
-    }
-    setSending(""); if (kind === "voice") setScript(""); load();
-  };
+/** Un média du patron en vignette : vraie image (vidéo, photo) ou icône (son, animation), ce que l'IA en sait, et les gestes utiles. */
+function MediaTile({ m, busy, run, reload }: { m: VideoMedia; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; reload: () => Promise<void> }) {
+  const visual = m.kind === "clip" || m.kind === "photo";
+  const info = m.kind === "photo" ? (m.summary || (m.dims ? `${m.dims[0]}×${m.dims[1]}` : ""))
+    : m.kind === "clip" ? [duration(m.seconds), m.audio === false ? "sans son" : (m.talk || 0) >= 2 ? `${m.talk} passages parlés` : "avec son", m.summary || ""].filter(Boolean).join(" · ")
+    : m.kind === "music" ? [duration(m.seconds), m.bpm ? `${Math.round(m.bpm)} BPM` : ""].filter(Boolean).join(" · ")
+    : m.kind === "voice" ? [duration(m.seconds), m.phrases ? `${m.phrases.length} phrases` : ""].filter(Boolean).join(" · ")
+    : duration(m.seconds);
+  const canWords = (m.kind === "voice" || (m.kind === "clip" && m.audio !== false && (m.talk || 0) >= 2)) && !m.words;   // un bruit de chantier continu n'a rien à sous-titrer
   return (
-    <details className="vs-media">
-      <summary>Mes médias ({items.length}) — vidéos de chantier, musique, voix off</summary>
-      <p className="vs-note">L'IA met tes vraies vidéos dans le montage, ta musique en fond (baissée quand la voix parle) et place chaque phrase de ta voix sur sa scène. Les fichiers restent privés : GitHub les télécharge seulement quand tu lances la fabrication. Animations : fichiers Lottie (.json) gratuits sur lottiefiles.com.</p>
-      <div className="vs-fmt" role="radiogroup" aria-label="Type de média à envoyer">
-        {(Object.keys(MEDIA_FR) as VideoMedia["kind"][]).map((k) => (
-          <button key={k} role="radio" aria-checked={kind === k} className={`chip${kind === k ? " on" : ""}`} onClick={() => setKind(k)}>{MEDIA_FR[k]}</button>
-        ))}
+    <li className="vs-tile">
+      <div className={`vs-thumb is-${m.kind}`}>
+        {visual ? <ClipThumb id={m.id} start={m.kind === "clip" ? (m.looks?.[0]?.t ?? 0) : 0} /> : <span className="vs-ico" aria-hidden>{MEDIA_ICON[m.kind]}</span>}
+        <span className="vs-kind">{MEDIA_ICON[m.kind]} {MEDIA_FR[m.kind]}</span>
+        {!!m.words && <span className="vs-cc" title={`Sous-titres prêts : ${m.words} mots`}>CC</span>}
+        <button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer"
+          onClick={() => run(async () => { await net.videoMediaHide(m.id); await reload(); }, "Média retiré.")}>×</button>
       </div>
-      {kind === "voice" && <textarea rows={3} value={script} onChange={(e) => setScript(e.target.value)} maxLength={6000}
-        placeholder="Facultatif : colle le texte de ta voix off (une phrase par ligne) pour que chaque morceau reçoive sa phrase." aria-label="Texte de la voix off" />}
-      <label className="vs-check"><input type="checkbox" checked={autoWords} disabled={busy}
-        onChange={(e) => { const on = e.target.checked; run(async () => { setAutoWords((await net.videoMediaAutoWords(on)).auto_words); }, on ? "Sous-titres automatiques activés." : "Sous-titres seulement au clic."); }} />
-        Sous-titres automatiques (vidéos parlées et voix off, crédit ElevenLabs)</label>
-      <label className="btn btn-line btn-small">
-        {sending ? `Envoi de ${sending}…` : `Envoyer : ${MEDIA_FR[kind].toLowerCase()}`}
-        <input type="file" hidden multiple={kind === "clip"} accept={MEDIA_ACCEPT[kind]} disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />
-      </label>
-      {!!items.length && (
-        <ul className="vs-list">
-          {items.map((m) => (
-            <li key={m.id}>
-              <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}{m.kind === "music" && m.bpm ? ` · ${Math.round(m.bpm)} BPM` : ""}
-              {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}
-                {m.audio === false ? " · Sans son." : m.talk ? ` · Son : ${m.talk} passage${m.talk > 1 ? "s" : ""} parlé${m.talk > 1 ? "s" : ""} ; silences repérés.` : ""}</small>}
-              {(m.kind === "voice" || (m.kind === "clip" && m.audio !== false)) && (m.words
-                ? <small className="vs-seen">Sous-titres prêts : {m.words} mots.</small>
-                : <button type="button" className="btn btn-line btn-small vs-words" disabled={busy}
-                    onClick={() => { if (window.confirm(`Créer les sous-titres de « ${m.name} » ? Le son part chez ElevenLabs pour être transcrit (ton crédit ElevenLabs, environ ${Math.max(1, Math.ceil(m.seconds / 60))} min de son).`))
-                      run(async () => { await net.videoMediaWords(m.id); await load(); }, "Sous-titres prêts : l'IA les placera mot à mot."); }}>Créer les sous-titres</button>)}
-              {" "}<button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer de la liste"
-                onClick={() => run(async () => { await net.videoMediaHide(m.id); await load(); }, "Média retiré de la liste.")}>×</button>
-            </li>
-          ))}
-        </ul>
+      <b className="vs-name" title={m.name}>{m.name}</b>
+      {info && <small className="vs-info">{info}</small>}
+      {(m.kind === "music" || m.kind === "voice") && (
+        <button type="button" className="vs-mini" disabled={busy}
+          title={m.kind === "music" ? "C'est en fait une voix off" : "C'est en fait une musique"}
+          onClick={() => run(async () => { await net.videoMediaKind(m.id, m.kind === "music" ? "voice" : "music"); await reload(); }, "Type corrigé.")}>
+          ↔ {m.kind === "music" ? "Voix off" : "Musique"}</button>
       )}
-    </details>
+      {canWords && (
+        <button type="button" className="vs-mini" disabled={busy}
+          onClick={() => { if (window.confirm(`Créer les sous-titres de « ${m.name} » ? Le son part chez ElevenLabs (ton crédit, environ ${Math.max(1, Math.ceil(m.seconds / 60))} min de son).`))
+            run(async () => { await net.videoMediaWords(m.id); await reload(); }, "Sous-titres prêts."); }}>Sous-titres</button>
+      )}
+    </li>
   );
 }
 
-/** Studio vidéo : montage déterministe long via GitHub et clips courts générés par Higgsfield, sans publication automatique. */
+/** Studio vidéo : on dépose ses médias (le type est reconnu tout seul), on dit ce qu'on veut si on veut, et l'IA monte la vidéo.
+ *  Montage seulement : les outils IA payants ont été retirés du Studio (décision du patron). Rien n'est publié. */
 export function VideoStudio({ say }: { say: Say }) {
   const [brief, setBrief] = useState("");
   const [fmt, setFmt] = useState("vertical");
@@ -215,59 +196,47 @@ export function VideoStudio({ say }: { say: Say }) {
   const [planning, setPlanning] = useState(false);
   const [vid, setVid] = useState<VideoState | null>(null);
   const [got, setGot] = useState<{ url: string; filename: string } | null>(null);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiDuration, setAiDuration] = useState(5);
-  const [aiAudio, setAiAudio] = useState(true);
-  const [longPromptsText, setLongPromptsText] = useState("");
-  const [longDuration, setLongDuration] = useState(60);
-  const [aiClip, setAiClip] = useState<VideoAIClip | null>(null);
-  const [hf, setHf] = useState<HiggsfieldStatus | null>(null);
-  const [mode, setMode] = useState<"montage" | "clip" | "long">("montage");
   const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<VideoMedia[]>([]);
+  const [autoWords, setAutoWords] = useState(true);
+  const [sending, setSending] = useState<{ n: number; of: number; name: string } | null>(null);
+  const [drag, setDrag] = useState(false);
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
     try { await fn(); if (ok) say(ok); } catch (e: any) { say(e.message || "Erreur"); } finally { setBusy(false); }
   };
+  const reload = () => net.videoMedia().then((r) => { setItems(r.items); setAutoWords(r.auto_words !== false); }).catch(() => {});
   useEffect(() => {
     let alive = true;
-    api.higgsfield().then((s) => { if (alive) setHf(s); }).catch(() => {});
-    net.videoAiStatus().then((s) => { if (alive && s.state !== "idle") setAiClip(s); }).catch(() => {});
+    reload();
     net.videoDraft().then((d) => {   // scénario préparé dans le chat (outil plan_video) : ouvert une fois, prêt à relire et lancer
       if (!alive || !d.plan || !d.at) return;
       try { if (localStorage.getItem("unic.video.draft") === d.at) return; localStorage.setItem("unic.video.draft", d.at); } catch { /* ignoré */ }
-      setMode("montage"); setBrief(d.brief || ""); setPlan(d.plan); setChanges(d.plan.changes ?? []);
+      setBrief(d.brief || ""); setPlan(d.plan); setChanges(d.plan.changes ?? []);
       if (d.plan.spec?.format) setFmt(d.plan.spec.format);
       say("Scénario préparé dans le chat : relis-le, corrige si besoin, puis « Lancer la fabrication ».");
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
   const vidState = vid?.state;
-  useEffect(() => {   // le montage (et la génération IA qui le précède) se suit tout seul : plus besoin d'appuyer sur « Où en est la vidéo ? »
+  useEffect(() => {   // la fabrication se suit toute seule
     if (vidState !== "building") return;
     let cancelled = false;
     const timer = setInterval(() => { net.videoStatus().then((s) => { if (!cancelled) setVid(s); }).catch(() => {}); }, 10000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [vidState]);
-  const aiState = aiClip?.state;
-  useEffect(() => {
-    if (!aiState || !["submitting", "queued", "processing", "assembling"].includes(aiState)) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const next = await net.videoAiStatus();
-        if (cancelled) return;
-        setAiClip(next);
-        if (["submitting", "queued", "processing", "assembling"].includes(next.state)) timer = setTimeout(poll, 5000);
-        else api.higgsfield().then((s) => { if (!cancelled) setHf(s); }).catch(() => {});
-      } catch {
-        if (!cancelled) timer = setTimeout(poll, 10000);
-      }
-    };
-    timer = setTimeout(poll, 5000);
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [aiState]);
-  const running = !!aiClip && ["submitting", "queued", "processing", "assembling"].includes(aiClip.state);
+  /** « Dépose tout ici » : plusieurs fichiers d'un coup, le serveur reconnaît le type de chacun. */
+  const send = async (list: FileList | File[] | null) => {
+    const files = Array.from(list || []);
+    if (!files.length || sending) return;
+    let ok = 0;
+    for (const [i, f] of files.entries()) {
+      setSending({ n: i + 1, of: files.length, name: f.name });
+      try { await net.videoMediaAdd(f, "auto"); ok++; } catch (e: any) { say(`${f.name} : ${e.message || "envoi impossible"}`); }
+    }
+    setSending(null); await reload();
+    if (ok) say(ok > 1 ? `${ok} médias ajoutés.` : "Média ajouté.");
+  };
   // le scénario tel qu'il partira : format et ambiance choisis maintenant (un changement de puce s'applique sans réécrire le scénario)
   const shown = plan ? { ...plan.spec, format: fmt, theme: theme === "auto" ? plan.spec.theme || "unic" : theme } : null;
   const propose = (correction?: string) => run(async () => {
@@ -284,169 +253,101 @@ export function VideoStudio({ say }: { say: Say }) {
     const scenes = p.spec.scenes.filter((_, j) => j !== i);
     return { ...p, spec: { ...p.spec, scenes }, seconds: totalSeconds(scenes), note: "Scène retirée : la durée est recalculée. « Corriger » pour aller plus loin." };
   });
-  const longLines = longPromptsText.split("\n").map((l) => l.trim()).filter(Boolean);
-  const clipsNeeded = longDuration / 30;
-  const fmtName = fmt === "vertical" ? "vertical 9:16" : fmt === "horizontal" ? "horizontal 16:9" : "carré 1:1";
+  const counts = items.reduce((a, m) => { a[m.kind] = (a[m.kind] || 0) + 1; return a; }, {} as Record<string, number>);
   return (
-    <section className="card-box vs">
+    <section className="card-box vs vs2">
       <label>Studio vidéo</label>
-      <p className="hint">Décris n'importe quelle vidéo : histoire, tutoriel, annonce, promo, récit, animaux, voyage… Rien n'est publié : la vidéo arrive dans tes documents.</p>
+      <p className="hint">Ajoute tes médias, dis ce que tu veux (ou rien) : l'IA regarde tout et monte la vidéo. Rien n'est publié.</p>
 
-      <div className="seg" role="tablist" aria-label="Type de vidéo">
-        {([["montage", "Montage", "gratuit"], ["clip", "Clip IA", "payant"], ["long", "Vidéo IA longue", "payant"]] as const).map(([k, name, tag]) => (
-          <button key={k} role="tab" aria-selected={mode === k} className={mode === k ? "on" : ""} onClick={() => setMode(k)}>
-            <span>{name}<small className="vs-tag"> {tag}</small></span>
-          </button>
-        ))}
+      <div className={`vs-drop${drag ? " on" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); send(e.dataTransfer.files); }}>
+        <label className="vs-drop-btn">
+          <span className="vs-drop-ico" aria-hidden>📥</span>
+          <b>{sending ? `Envoi ${sending.n}/${sending.of}…` : "Dépose tout ici"}</b>
+          <small>{sending ? sending.name : "Vidéos, photos, musique, voix off, animations — plusieurs à la fois"}</small>
+          <input type="file" hidden multiple accept={ACCEPT_ALL} disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />
+        </label>
       </div>
+      {!!items.length && (
+        <>
+          <p className="vs-count">{(Object.keys(MEDIA_FR) as VideoMedia["kind"][]).filter((k) => counts[k]).map((k) => `${MEDIA_ICON[k]} ${counts[k]}`).join("  ")}</p>
+          <ul className="vs-tiles">{items.map((m) => <MediaTile key={m.id} m={m} busy={busy} run={run} reload={reload} />)}</ul>
+        </>
+      )}
 
+      <textarea className="vs-brief" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} aria-label="Ce que tu veux (facultatif)"
+        placeholder="Dis ce que tu veux (facultatif). Ex. Pub de 30 s pour les JOJ avec mes vidéos, slogan à la fin." />
       <div className="vs-fmt" role="radiogroup" aria-label="Format de la vidéo">
-        {([["vertical", "Vertical 9:16"], ["horizontal", "Horizontal 16:9"], ["square", "Carré 1:1"]] as const).map(([k, name]) => (
-          <button key={k} role="radio" aria-checked={fmt === k} className={`chip${fmt === k ? " on" : ""}`} onClick={() => setFmt(k)}>{name}</button>
+        {([["vertical", "📱 9:16", "WhatsApp, TikTok, Reels"], ["horizontal", "🖥️ 16:9", "YouTube, écran"], ["square", "⬛ 1:1", "Facebook, Instagram"]] as const).map(([k, name, hint]) => (
+          <button key={k} role="radio" aria-checked={fmt === k} title={hint} className={`chip${fmt === k ? " on" : ""}`} onClick={() => setFmt(k)}>{name}</button>
         ))}
       </div>
-      <p className="vs-note">Vertical : WhatsApp, TikTok, Reels · Horizontal : YouTube, écran · Carré : Facebook, Instagram.</p>
+      <button className="btn btn-copper vs-go" disabled={busy || !!sending} onClick={() => propose()}>{planning ? "L'IA écrit le scénario…" : plan ? "🔄 Refaire le scénario" : "🎬 Créer ma vidéo"}</button>
+      {planning && <p className="vs-status" role="status">L'IA regarde tes médias et écrit le scénario… Souvent moins d'une minute.</p>}
 
-      {mode === "montage" && (
-        <>
-          <textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={20000} placeholder="Ex. Une vidéo de 40 secondes qui raconte l’histoire de Dakar, avec des chiffres clés et une citation" aria-label="Description de la vidéo" />
-          <p className="vs-note">Montage gratuit : titres, textes, chiffres, citations, photos du site et ambiances de couleurs (l'IA choisit celle du sujet). Il ne crée pas d'images ni de films : pour un lion qui court, utilise « Clip IA ». Pas de limite de durée : une longue vidéo est coupée en tronçons rendus en parallèle. {brief.length.toLocaleString("fr-FR")} / 20 000 caractères.</p>
-          <div className="vs-fmt" role="radiogroup" aria-label="Ambiance de la vidéo">
-            {["auto", ...Object.keys(THEMES)].map((k) => (
-              <button key={k} role="radio" aria-checked={theme === k} className={`chip${theme === k ? " on" : ""}`} onClick={() => setTheme(k)}>
-                {k !== "auto" && <i className="vs-dot" style={{ background: THEMES[k].bg, boxShadow: `inset 0 0 0 3px ${THEMES[k].accent}` }} aria-hidden />}
-                {k === "auto" ? "Ambiance auto" : THEMES[k].name}
-              </button>
-            ))}
-          </div>
-          <MediaPanel say={say} busy={busy} run={run} />
+      <details className="vs-opts">
+        <summary>Options</summary>
+        <p className="vs-h">Ambiance des couleurs</p>
+        <div className="vs-fmt" role="radiogroup" aria-label="Ambiance de la vidéo">
+          {["auto", ...Object.keys(THEMES)].map((k) => (
+            <button key={k} role="radio" aria-checked={theme === k} className={`chip${theme === k ? " on" : ""}`} onClick={() => setTheme(k)}>
+              {k !== "auto" && <i className="vs-dot" style={{ background: THEMES[k].bg, boxShadow: `inset 0 0 0 3px ${THEMES[k].accent}` }} aria-hidden />}
+              {k === "auto" ? "Auto" : THEMES[k].name}
+            </button>
+          ))}
+        </div>
+        <label className="vs-check"><input type="checkbox" checked={autoWords} disabled={busy}
+          onChange={(e) => { const on = e.target.checked; run(async () => { setAutoWords((await net.videoMediaAutoWords(on)).auto_words); }, on ? "Sous-titres automatiques activés." : "Sous-titres seulement au clic."); }} />
+          Sous-titres automatiques (vidéos parlées et voix off, crédit ElevenLabs)</label>
+        <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
+      </details>
+
+      {plan && shown && (
+        <div className="vs-plan">
+          {plan.understood && <div className="vs-understood"><b>Ce que j'ai compris</b>{plan.understood}</div>}
+          {!!plan.assumptions?.length && (<><p className="vs-h">J'ai supposé — corrige-moi si c'est faux</p><ul className="vs-list">{plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
+          {!!plan.limits?.length && (<><p className="vs-h">Ce que le montage ne sait pas faire</p><ul className="vs-list">{plan.limits.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
+          <p className="vs-sum"><b>{shown.scenes.length} scènes</b> · environ {duration(plan.seconds)}</p>
+          <p className="vs-note">{plan.note}</p>
+          {typeof shown.audio?.beat === "boolean" && (
+            <label className="vs-check"><input type="checkbox" checked={shown.audio.beat} disabled={busy}
+              onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, audio: { ...(p.spec.audio || {}), beat: on } } }); }} />
+              Coupes au rythme de la musique</label>
+          )}
+          {typeof shown.captions === "boolean" && (
+            <label className="vs-check"><input type="checkbox" checked={shown.captions} disabled={busy}
+              onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, captions: on } }); }} />
+              Sous-titres mot à mot sur la parole</label>
+          )}
+          <Storyboard spec={shown} onRemove={removeScene} busy={busy} />
+          <p className="vs-h">Corriger le scénario</p>
+          <textarea className="vs-fix" rows={2} value={fix} onChange={(e) => setFix(e.target.value)} maxLength={2000} aria-label="Corriger le scénario"
+            placeholder="Ex. plus court, change la scène 3, mets la musique plus tôt…" />
           <div className="row-actions">
-            <button className="btn btn-copper btn-small" disabled={busy} onClick={() => propose()}>{plan ? "Nouveau scénario" : "Proposer un scénario"}</button>
-            <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
+            <button className="btn btn-line btn-small" disabled={busy || !fix.trim()} onClick={() => propose(fix.trim())}>Corriger</button>
           </div>
-          {planning && <p className="vs-status" role="status">UniC lit ta demande et écrit le scénario… Souvent moins d'une minute ; plus pour une longue vidéo.</p>}
-          {plan && shown && (
-            <div className="vs-plan">
-              {plan.understood && <div className="vs-understood"><b>Ce que j'ai compris</b>{plan.understood}</div>}
-              {!!plan.assumptions?.length && (<><p className="vs-h">J'ai supposé — corrige-moi si c'est faux</p><ul className="vs-list">{plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
-              {!!plan.limits?.length && (<><p className="vs-h">Ce que le montage ne sait pas faire</p><ul className="vs-list">{plan.limits.map((a, i) => <li key={i}>{a}</li>)}</ul></>)}
-              <p className="vs-sum"><b>{shown.scenes.length} scènes</b> · environ {duration(plan.seconds)}</p>
-              <p className="vs-note">{plan.note}</p>
-              {plan.ai && plan.ai.clips + plan.ai.images > 0 && (
-                <p className="vs-status">⚠️ {plan.ai.clips} clip(s) et {plan.ai.images} image(s) générés par l'IA : <b>crédits Higgsfield payants</b>, un média à la fois. Les films IA sont muets dans le montage. Tu peux fermer l'application pendant la génération.</p>
-              )}
-              {typeof shown.audio?.beat === "boolean" && (
-                <label className="vs-check"><input type="checkbox" checked={shown.audio.beat} disabled={busy}
-                  onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, audio: { ...(p.spec.audio || {}), beat: on } } }); }} />
-                  Coupes au rythme de la musique</label>
-              )}
-              {typeof shown.captions === "boolean" && (
-                <label className="vs-check"><input type="checkbox" checked={shown.captions} disabled={busy}
-                  onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, captions: on } }); }} />
-                  Sous-titres mot à mot sur la parole</label>
-              )}
-              <Storyboard spec={shown} onRemove={removeScene} busy={busy} />
-              <p className="vs-h">Corriger le scénario</p>
-              <textarea className="vs-fix" rows={3} value={fix} onChange={(e) => setFix(e.target.value)} maxLength={2000} aria-label="Corriger le scénario"
-                placeholder="Ex. plus court, change la scène 3, ajoute une citation…" />
-              <div className="row-actions">
-                <button className="btn btn-line btn-small" disabled={busy || !fix.trim()} onClick={() => propose(fix.trim())}>Corriger</button>
-              </div>
-              {changes.length > 0 && <p className="vs-note">Corrections appliquées : {changes.map((c, i) => `${i + 1}. ${c}`).join(" · ")}</p>}
-              <button className="btn btn-copper" disabled={busy}
-                onClick={() => {
-                  const paid = plan.ai ? plan.ai.clips + plan.ai.images : 0;
-                  const msg = paid > 0
-                    ? `Lancer la fabrication ? Elle génère ${plan.ai!.clips} clip(s) et ${plan.ai!.images} image(s) avec Higgsfield : ${paid} génération(s) payante(s) (crédits). Le montage part ensuite tout seul.`
-                    : "Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps.";
-                  if (window.confirm(msg)) run(async () => { const r = await net.videoStart(shown); setPlan(null); setChanges([]); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée.");
-                }}>{plan.ai && plan.ai.clips + plan.ai.images > 0 ? "Lancer (génération IA payante)" : "Lancer la fabrication"}</button>
-            </div>
-          )}
-          {vid && <p className="vs-status" role="status">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
-          {vid?.state === "failed" && vid.can_retry && (
-            <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoRetry(); setVid({ state: r.ok ? "building" : "failed", detail: r.note }); }, "Montage relancé (aucun nouveau crédit).")}>Relancer le montage (sans nouveau crédit)</button>
-          )}
-          {vid?.state === "ready" && !got && (
-            <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
-          )}
-          {got && (
-            <div className="row-actions">
-              <button className="btn btn-copper btn-small" onClick={() => downloadAuth(got.url, got.filename).catch(() => {})}>Télécharger</button>
-              <button className="btn btn-line btn-small" onClick={() => shareDocument(got.url, got.filename).catch((e) => say(e.message))}>Partager</button>
-            </div>
-          )}
-        </>
-      )}
-
-      {mode !== "montage" && (
-        <p className="vs-note">{hf?.connected
-          ? `Higgsfield · Wan 3.0 Prime · 720p. Clips IA restants aujourd'hui : ${hf.video_left_today}/${hf.video_per_day}. Chaque clip consomme des crédits payants ; rien n'est lancé sans ta confirmation.`
-          : "Higgsfield n'est pas connecté : colle tes clés dans Plus › Higgsfield pour activer ces deux modes."}</p>
-      )}
-
-      {mode === "clip" && (
-        <>
-          <textarea rows={4} value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} maxLength={1500}
-            placeholder="Ex. Travelling cinématographique dans un salon moderne avec faux plafond BA13 et éclairage indirect chaleureux."
-            aria-label="Consigne du clip vidéo IA" />
-          <div className="vs-row">
-            <label className="vs-field">Durée
-              <select value={aiDuration} onChange={(e) => setAiDuration(Number(e.target.value))} aria-label="Durée du clip IA">
-                <option value={5}>5 secondes</option><option value={10}>10 secondes</option><option value={15}>15 secondes</option><option value={30}>30 secondes</option>
-              </select>
-            </label>
-            <label className="vs-check"><input type="checkbox" checked={aiAudio} onChange={(e) => setAiAudio(e.target.checked)} /> <span>Son généré par l'IA</span></label>
-          </div>
-          <button className="btn btn-copper" disabled={busy || running || !hf || !hf.connected || hf.video_left_today <= 0 || aiPrompt.trim().length < 8}
+          {changes.length > 0 && <p className="vs-note">Corrections appliquées : {changes.map((c, i) => `${i + 1}. ${c}`).join(" · ")}</p>}
+          <button className="btn btn-copper vs-go" disabled={busy}
             onClick={() => {
-              if (!window.confirm(`Générer un clip de ${aiDuration} secondes avec Higgsfield ? Cette action consomme des crédits payants (coût variable selon la durée et ton compte). Plafond : ${hf?.video_per_day ?? 20} clips par jour.`)) return;
-              run(async () => {
-                try {
-                  const result = await net.videoAiStart(aiPrompt, aiDuration, fmt, aiAudio);
-                  setAiClip(result);
-                } finally {
-                  api.higgsfield().then(setHf).catch(() => {});
-                }
-              }, "Génération du clip IA lancée.");
-            }}>{running ? "Génération en cours…" : "Générer un clip IA"}</button>
-        </>
-      )}
-
-      {mode === "long" && (
-        <>
-          <label className="vs-field">Durée finale
-            <select value={longDuration} onChange={(e) => setLongDuration(Number(e.target.value))} aria-label="Durée de la vidéo IA longue">
-              <option value={30}>30 secondes · 1 clip</option><option value={60}>1 minute · 2 clips</option><option value={120}>2 minutes · 4 clips</option>
-              <option value={300}>5 minutes · 10 clips</option><option value={600}>10 minutes · 20 clips</option>
-            </select>
-          </label>
-          <textarea rows={7} value={longPromptsText} onChange={(e) => setLongPromptsText(e.target.value)} maxLength={30000}
-            placeholder={"Une consigne par ligne, une scène de 30 secondes chacune. Exemple :\nPlan cinématographique d’un salon contemporain avec faux plafond BA13...\nGros plan sur l’éclairage indirect et les finitions..."}
-            aria-label="Consignes des scènes de la vidéo IA longue" />
-          <p className={`vs-note${longLines.length === clipsNeeded ? " ok" : ""}`}>{longLines.length} / {clipsNeeded} consignes · {clipsNeeded} clips payants. Le son suit le réglage du mode « Clip IA ».</p>
-          <button className="btn btn-copper" disabled={busy || !hf?.connected || hf.video_left_today < clipsNeeded || longLines.length !== clipsNeeded ||
-            longPromptsText.split("\n").some((l) => l.trim().length > 0 && l.trim().length < 8) || running}
-            onClick={() => {
-              if (!window.confirm(`Créer une vidéo IA de ${longDuration / 60} minute(s) avec ${longLines.length} clips Higgsfield ? Chaque clip consomme des crédits payants, soit jusqu’à ${longLines.length} générations. Le traitement peut prendre longtemps. Continuer ?`)) return;
-              run(async () => { const result = await net.videoAiLongStart(longLines, longDuration, fmt, aiAudio); setAiClip(result); api.higgsfield().then(setHf).catch(() => {}); },
-                "Génération de la vidéo IA longue lancée.");
-            }}>Générer la vidéo IA longue</button>
-        </>
-      )}
-
-      {mode !== "montage" && aiClip && aiClip.state !== "idle" && (
-        <p className="vs-status" role="status">
-          {aiClip.kind === "long" && running ? `Progression : ${aiClip.completed_clips || 0}/${aiClip.total_clips || 0} clips terminés. ` : ""}{aiClip.detail}
-        </p>
-      )}
-      {mode !== "montage" && aiClip?.state === "ready" && aiClip.artifact && (
-        <div className="row-actions">
-          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(aiClip.artifact!.url, aiClip.artifact!.filename).catch(() => {})}>{aiClip.kind === "long" ? "Télécharger la vidéo IA longue" : "Télécharger le clip IA"}</button>
-          <button className="btn btn-line btn-small" onClick={() => shareDocument(aiClip.artifact!.url, aiClip.artifact!.filename).catch((e) => say(e.message))}>Partager</button>
+              if (window.confirm("Lancer la fabrication de la vidéo ? Le temps dépend de sa durée ; une vidéo longue peut prendre beaucoup plus longtemps."))
+                run(async () => { const r = await net.videoStart(shown); setPlan(null); setChanges([]); setVid({ state: "building", detail: r.note }); }, "Fabrication lancée.");
+            }}>▶️ Lancer la fabrication</button>
         </div>
       )}
-      <p className="vs-note">Si un moteur ne sait pas réaliser une demande, UniC te le signale au lieu d'en changer à ta place.</p>
+      {vid && <p className="vs-status" role="status">{vid.detail} {vid.url && <a href={vid.url} target="_blank" rel="noopener noreferrer">Détail</a>}</p>}
+      {vid?.state === "failed" && vid.can_retry && (
+        <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoRetry(); setVid({ state: r.ok ? "building" : "failed", detail: r.note }); }, "Montage relancé.")}>Relancer le montage</button>
+      )}
+      {vid?.state === "ready" && !got && (
+        <button className="btn btn-copper" disabled={busy} onClick={() => run(async () => { const r = await net.videoFetch(); setGot({ url: r.url, filename: r.filename }); }, "Vidéo rangée dans tes documents.")}>Récupérer la vidéo</button>
+      )}
+      {got && (
+        <div className="row-actions">
+          <button className="btn btn-copper btn-small" onClick={() => downloadAuth(got.url, got.filename).catch(() => {})}>Télécharger</button>
+          <button className="btn btn-line btn-small" onClick={() => shareDocument(got.url, got.filename).catch((e) => say(e.message))}>Partager</button>
+        </div>
+      )}
     </section>
   );
 }

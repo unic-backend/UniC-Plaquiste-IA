@@ -59,7 +59,8 @@ def test_les_scenes_ia_ne_passent_que_si_autorisees_et_dans_les_quotas():
     assert vh.ai_counts(spec) == (1, 1)
 
 
-def test_le_plan_n_offre_les_scenes_ia_que_si_higgsfield_est_connecte(monkeypatch):
+def test_le_studio_n_offre_plus_de_scenes_ia_payantes(monkeypatch):
+    """Décision du patron : plus de scènes IA payantes (Higgsfield) dans le Studio, même si Higgsfield est connecté."""
     monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle")
     seen = {}
 
@@ -67,12 +68,11 @@ def test_le_plan_n_offre_les_scenes_ia_que_si_higgsfield_est_connecte(monkeypatc
         seen.update(system=system, user=user, types=tool["input_schema"]["properties"]["scenes"]["items"]["properties"]["type"]["enum"])
         return {"theme": "earth", "scenes": [{"type": "ai_clip", "seconds": 6, "prompt": "Un lion court dans la savane"}, {"type": "title", "l1": "LION"}]}
     monkeypatch.setattr(vs, "_ask", ask)
-    monkeypatch.setattr(hf, "status", lambda db: {"connected": False})
-    p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
-    assert "ai_clip" not in seen["types"] and "SCÈNES IA" not in seen["system"] and p["ai"] == {"clips": 0, "images": 0}      # non connecté : rien d'IA, scène écartée
-    monkeypatch.setattr(hf, "status", lambda db: {"connected": True, "video_left_today": 3, "left_today": 2})
-    p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
-    assert "ai_clip" in seen["types"] and "SCÈNES IA" in seen["system"] and "3 clip" in seen["user"] and p["ai"] == {"clips": 1, "images": 0}
+    for st in ({"connected": False}, {"connected": True, "video_left_today": 3, "left_today": 2}):
+        monkeypatch.setattr(hf, "status", lambda db, st=st: st)
+        p = vs.plan(FakeDB(), "Un lion qui court", "vertical")
+        assert "ai_clip" not in seen["types"] and "SCÈNES IA" not in seen["system"] and p["ai"] == {"clips": 0, "images": 0}
+        assert [s["type"] for s in p["spec"]["scenes"]] == ["title"]                       # une scène IA renvoyée quand même : écartée
 
 
 def test_demarrage_refuse_hors_quota_ou_sans_connexion(monkeypatch, world):

@@ -33,8 +33,12 @@ KINDS = {   # (taille maximale en Mo, extensions acceptées)
     "music": (40, (".mp3", ".m4a", ".aac", ".wav", ".ogg")),
     "voice": (40, (".mp3", ".m4a", ".aac", ".wav", ".ogg")),
     "lottie": (3, (".json",)),                 # animation vectorielle (LottieFiles…), jouée par le moteur
+    "photo": (25, (".jpg", ".jpeg", ".png", ".webp")),   # photo du patron (ré-enregistrée en JPEG, sans données de position)
 }
-KIND_FR = {"clip": "Vidéo", "music": "Musique", "voice": "Voix", "lottie": "Animation"}
+KIND_FR = {"clip": "Vidéo", "music": "Musique", "voice": "Voix", "lottie": "Animation", "photo": "Photo"}
+PHOTO_SIDE = 2560                      # photo gardée à 2560 px au plus (bien assez pour du 1080×1920)
+VOICE_NAME = re.compile(r"voi[xc]|voice|eleven|narrat|speech|parole|commentaire", re.I)
+MUSIC_NAME = re.compile(r"musi|song|chanson|instru|remix|official|\bfeat\b|\bbeat\b", re.I)
 MAX_LIBRARY_BYTES = 3 * 1024 ** 3      # garde-fou du disque (5 Go sur Render)
 MAX_ITEMS = 300
 OPEN_HOURS = 72                        # durée d'ouverture d'un lien après le lancement d'une fabrication
@@ -80,6 +84,39 @@ def _save(db: Session, items: list[dict]) -> None:
     else:
         row.value = value
     db.flush()
+
+
+def guess_kind(name: str) -> str | None:
+    """Type d'un fichier d'après son extension (dépôt « tout ici ») : clip, photo, lottie, ou « audio » (musique ou voix : décidé à l'écoute)."""
+    ext = Path(name).suffix.lower()
+    for k in ("clip", "photo", "lottie"):
+        if ext in KINDS[k][1]:
+            return k
+    return "audio" if ext in KINDS["music"][1] else None
+
+
+def classify_audio(path: Path, secs: float, name: str) -> str:
+    """Musique ou voix off ? Le nom d'abord (« voix », « ElevenLabs »…), sinon l'écoute : une voix fait des pauses entre ses phrases,
+    une musique joue sans interruption. Le patron peut corriger d'un appui (set_kind)."""
+    if VOICE_NAME.search(name):
+        return "voice"
+    if MUSIC_NAME.search(name):
+        return "music"
+    ph = detect_phrases(path, secs)
+    spoken = sum(b - a for a, b in ph)
+    return "voice" if len(ph) >= 3 and secs > 0 and (secs - spoken) / secs >= 0.08 else "music"
+
+
+def _photo(src: Path, mid: str) -> tuple[Path, int, int]:
+    """Photo ré-enregistrée en JPEG : tournée à l'endroit, 2560 px au plus, SANS les données EXIF (position GPS du téléphone)."""
+    from PIL import Image, ImageOps
+    with Image.open(src) as img:
+        img.draft("RGB", (PHOTO_SIDE, PHOTO_SIDE))
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img.thumbnail((PHOTO_SIDE, PHOTO_SIDE))
+        dest = _dir() / f"{mid}.jpg"
+        img.save(dest, "JPEG", quality=90, optimize=True)
+        return dest, img.width, img.height
 
 
 def lottie_seconds(path: Path) -> float:
@@ -313,12 +350,12 @@ def _describe(frames: list[tuple[float, Path]]) -> dict | None:
     return {"looks": looks, "summary": summary} if looks else None
 
 
-def look(src: Path, mid: str, seconds: float) -> dict | None:
-    """L'IA REGARDE la vidéo : images extraites puis décrites (vision Claude). None si impossible (pas de clé, échec) : on réessaiera."""
+def look(src: Path, mid: str, seconds: float, kind: str = "clip") -> dict | None:
+    """L'IA REGARDE la vidéo (images extraites) ou la photo, puis la décrit (vision Claude). None si impossible (pas de clé, échec) : on réessaiera."""
     from app import vision
     if not vision.disponible():
         return None
-    return _describe(_frames(src, mid, seconds))
+    return _describe([(0.0, src)] if kind == "photo" else _frames(src, mid, seconds))
 
 
 def ensure_looks(db: Session, limit: int = LOOK_MAX_PER_CALL) -> int:
@@ -328,11 +365,12 @@ def ensure_looks(db: Session, limit: int = LOOK_MAX_PER_CALL) -> int:
     if not vision.disponible():
         return 0
     items, now = _load(db), time.time()
-    todo = [it for it in items if it.get("kind") == "clip" and not it.get("hidden") and "looks" not in it
+    todo = [it for it in items if it.get("kind") in ("clip", "photo") and not it.get("hidden") and "looks" not in it
             and now - float(it.get("look_try") or 0) > LOOK_RETRY_S and (_dir() / f"{it['id']}{it['ext']}").exists()][:limit]
     if not todo:
         return 0
-    frames = [_frames(_dir() / f"{it['id']}{it['ext']}", it["id"], float(it["seconds"])) for it in todo]   # une vidéo après l'autre (mémoire)
+    frames = [[(0.0, _dir() / f"{it['id']}{it['ext']}")] if it["kind"] == "photo" else _frames(_dir() / f"{it['id']}{it['ext']}", it["id"], float(it["seconds"]))
+              for it in todo]   # une vidéo après l'autre (mémoire)
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=len(todo)) as pool:      # appels vision en parallèle (réseau) ; la base reste dans ce fil
         got = list(pool.map(_describe, frames))
@@ -346,6 +384,25 @@ def ensure_looks(db: Session, limit: int = LOOK_MAX_PER_CALL) -> int:
     if hasattr(db, "commit"):
         db.commit()      # gardé même si le scénario échoue ensuite : la vidéo n'est pas regardée (et payée) deux fois
     return sum(1 for g in got if g)
+
+
+def set_kind(db: Session, mid: str, kind: str) -> dict:
+    """Le patron corrige le type d'un son d'un appui : musique <-> voix off (rythme ou phrases recalculés)."""
+    if kind not in ("music", "voice"):
+        raise MediaError("Seul un son peut passer de musique à voix off (et inversement).")
+    items = _load(db)
+    it = next((x for x in items if x["id"] == mid and not x.get("hidden")), None)
+    if not it or it["kind"] not in ("music", "voice"):
+        raise MediaError("Son introuvable.", 404)
+    if it["kind"] != kind:
+        src = _dir() / f"{it['id']}{it['ext']}"
+        it["kind"] = kind
+        if kind == "voice":
+            it["phrases"], it["texts"], it["script"] = detect_phrases(src, float(it["seconds"])), [], ""
+        else:
+            it["bpm"], it["beats"] = detect_beats(src)
+        _save(db, items)
+    return _public(it)
 
 
 def ensure_beats(db: Session) -> int:
@@ -486,8 +543,19 @@ def scene_words(words: list, a: float, b: float, offset: float = 0.0) -> list[li
 
 
 def frame_path(db: Session, mid: str, t: float) -> Path | None:
-    """Vignette d'un passage (fichier en cache, arrondi à la demi-seconde) ; None si la vidéo n'existe pas ou est retirée."""
+    """Vignette d'un passage de vidéo (fichier en cache, arrondi à la demi-seconde) ou d'une photo ; None si le média n'existe pas ou est retiré."""
     it = items_by_id(db).get(mid)
+    if it and it["kind"] == "photo":
+        f = _frame_file(mid, -1)
+        if not f.exists():
+            try:
+                from PIL import Image
+                with Image.open(_dir() / f"{mid}{it['ext']}") as img:
+                    img.thumbnail((FRAME_SIDE, FRAME_SIDE))
+                    img.convert("RGB").save(f, "JPEG", quality=82)
+            except Exception:      # noqa: BLE001
+                return None
+        return f
     if not it or it["kind"] != "clip" or not math.isfinite(float(t)):
         return None
     t = round(min(max(0.0, float(t)), max(0.0, float(it["seconds"]) - 0.2)) * 2) / 2
@@ -498,7 +566,7 @@ def frame_path(db: Session, mid: str, t: float) -> Path | None:
 
 
 def _public(it: dict) -> dict:
-    out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary", "bpm") if k in it}
+    out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary", "bpm", "dims") if k in it}
     if it.get("words"):
         out["words"] = len(it["words"])
     if it["kind"] == "clip":
@@ -522,11 +590,17 @@ def items_by_id(db: Session) -> dict[str, dict]:
 
 async def add(db: Session, upload, kind: str, script: str = "") -> dict:
     """Enregistre un média envoyé par le patron (lu par morceaux, jamais entier en mémoire)."""
-    if kind not in KINDS:
-        raise MediaError("Type de média inconnu (vidéo, musique ou voix).")
-    max_mb, exts = KINDS[kind]
     name = Path(str(getattr(upload, "filename", "") or "media")).name[:120]
     ext = Path(name).suffix.lower()
+    auto_audio = False
+    if kind == "auto":         # « dépose tout ici » : le type vient du fichier
+        g = guess_kind(name)
+        if not g:
+            raise MediaError(f"{name} : format non reconnu. Vidéo (.mp4, .mov), photo (.jpg, .png), son (.mp3, .m4a, .wav) ou animation Lottie (.json).")
+        auto_audio, kind = g == "audio", "music" if g == "audio" else g
+    if kind not in KINDS:
+        raise MediaError("Type de média inconnu (vidéo, photo, musique, voix ou animation).")
+    max_mb, exts = KINDS[kind]
     if ext not in exts:
         raise MediaError(f"{KIND_FR[kind]} : formats acceptés {', '.join(exts)}.")
     items = _load(db)
@@ -549,13 +623,25 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
                 raise MediaError(f"{KIND_FR[kind]} trop volumineuse ({max_mb} Mo maximum)." if size > limit
                                  else "Espace des médias plein (3 Go) : retire des médias avant d'en ajouter.", 413)
             f.write(chunk)
-    secs = lottie_seconds(dest) if kind == "lottie" else probe_seconds(dest)
-    if secs <= 0:
+    dims = None
+    if kind == "photo":
+        try:
+            photo, w, h = _photo(dest, mid)
+        except Exception:      # noqa: BLE001 — format illisible (HEIC…), image corrompue
+            dest.unlink(missing_ok=True)       # envoi refusé : jamais enregistré
+            raise MediaError(f"{name} : photo illisible. Sur le téléphone, choisis le format JPEG (pas HEIC).")
+        if photo != dest:
+            dest.unlink(missing_ok=True)       # l'original (PNG, WEBP, avec EXIF) est remplacé par la copie propre
+        dest, ext, size, dims = photo, ".jpg", photo.stat().st_size, [w, h]
+    secs = 0.0 if kind == "photo" else lottie_seconds(dest) if kind == "lottie" else probe_seconds(dest)
+    if auto_audio and secs > 0:
+        kind = classify_audio(dest, secs, name)
+    if secs <= 0 and kind != "photo":
         dest.unlink(missing_ok=True)           # fichier illisible : jamais enregistré
         raise MediaError("Animation illisible : envoie un fichier Lottie (.json) de LottieFiles." if kind == "lottie"
                          else "Fichier illisible : envoie une vraie vidéo ou un vrai fichier audio.")
     it = {"id": mid, "kind": kind, "name": name, "ext": ext, "size": size, "seconds": secs, "at": int(time.time()),
-          "token": secrets.token_urlsafe(24), "open_until": 0}
+          "token": secrets.token_urlsafe(24), "open_until": 0, **({"dims": dims} if dims else {})}
     if kind == "music":      # rythme : les coupes du montage tombent sur les temps forts
         it["bpm"], it["beats"] = detect_beats(dest)
     if kind == "voice":
@@ -566,10 +652,10 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
     if kind == "clip":      # son du film : parole repérée pour garder la voix et couper les silences
         it["audio"] = has_audio(dest)
         it["talk"] = detect_talk(dest, secs) if it["audio"] else []
-    if kind == "clip":      # l'IA regarde la vidéo dès l'envoi (hors de la boucle du serveur) ; en cas d'échec, avant le prochain scénario
+    if kind in ("clip", "photo"):      # l'IA regarde la vidéo ou la photo dès l'envoi (hors de la boucle du serveur) ; en cas d'échec, avant le prochain scénario
         from app import vision
         if vision.disponible():
-            got = await asyncio.to_thread(look, dest, mid, secs)
+            got = await asyncio.to_thread(look, dest, mid, secs, kind)
             if got:
                 it.update(got)
             else:
@@ -628,6 +714,10 @@ def catalog_text(db: Session) -> str:
                          + (f" Résumé : {it['summary']}." if it.get("summary") else "")
                          + (f" Ce qu'on voit (instant : image) : {seen}" if seen else " (pas encore regardée : contenu inconnu)")
                          + _sound_text(it))
+        elif it["kind"] == "photo":
+            seen = " | ".join(x for _t, x in it.get("looks") or [])
+            lines.append(f"- photo {it['id']} : « {it['name']} »" + (f" ({it['dims'][0]}×{it['dims'][1]})" if it.get("dims") else "")
+                         + (f". Ce qu'on voit : {it.get('summary') or seen}" if (it.get("summary") or seen) else " (pas encore regardée)"))
         elif it["kind"] == "lottie":
             lines.append(f"- animation {it['id']} : « {Path(it['name']).stem} », {it['seconds']:.1f} s (Lottie : type lottie, media = cet identifiant)")
         elif it["kind"] == "music":
@@ -654,7 +744,7 @@ def public_path(db: Session, token: str) -> Path | None:
 
 
 def media_type(path: Path) -> str:
-    return {".json": "application/json", ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+    return {".jpg": "image/jpeg", ".json": "application/json", ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
             ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg"}.get(path.suffix.lower(), "application/octet-stream")
 
 
@@ -674,7 +764,7 @@ def _has_own_lottie(s: dict) -> bool:
 def to_engine(db: Session, spec: dict) -> dict:
     """Scénario du Studio -> forme du moteur : « my_clip » devient un clip avec lien secret, « phrases » un morceau de voix,
     « audio » la bande son. Les liens des médias utilisés s'ouvrent pour OPEN_HOURS (clic « Lancer » du patron en amont)."""
-    if not any(s.get("type") == "my_clip" or s.get("phrases") or _has_own_lottie(s) for s in spec.get("scenes") or []) and not spec.get("audio"):
+    if not any(s.get("type") in ("my_clip", "my_photo") or s.get("phrases") or _has_own_lottie(s) for s in spec.get("scenes") or []) and not spec.get("audio"):
         return {k: v for k, v in spec.items() if k != "captions"}
     items = _load(db)
     by_id = {it["id"]: it for it in items if not it.get("hidden")}
@@ -716,6 +806,8 @@ def to_engine(db: Session, spec: dict) -> dict:
                 if s.get("overlay") and eng["panels"][0][0] > 0:
                     eng["panels"].insert(0, [0, 0, s["overlay"]])
             s = eng
+        elif s.get("type") == "my_photo":   # photo du patron : scène photo (zoom lent, sans panoramique), lien secret
+            s = {"type": "photo", "url": link(s["media"], "photo"), "seconds": s["seconds"], "caption": s.get("caption", ""), "direction": "in"}
         if ph and voice and voice.get("phrases"):
             i, j = ph
             s["voice"], s["voice_at"] = [voice["phrases"][i][0], voice["phrases"][j][1]], 0.25

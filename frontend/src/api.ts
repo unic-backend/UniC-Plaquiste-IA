@@ -221,7 +221,7 @@ export type VideoPlan = {
   spec: { format: string; theme?: string; scenes: VideoScene[]; captions?: boolean; audio?: { beat?: boolean; [k: string]: unknown } }; seconds: number; note: string; ai?: { clips: number; images: number };
   understood?: string; assumptions?: string[]; limits?: string[]; target?: number | null; changes?: string[];   // ce que l'IA a compris, et le fil des corrections
 };
-export type VideoMedia = { id: string; kind: "clip" | "music" | "voice" | "lottie"; name: string; seconds: number; size: number; at: number;
+export type VideoMedia = { id: string; kind: "clip" | "music" | "voice" | "lottie" | "photo"; dims?: [number, number]; name: string; seconds: number; size: number; at: number;
   phrases?: { i: number; start: number; end: number; text: string | null }[];
   summary?: string; looks?: { t: number; text: string }[]; audio?: boolean; talk?: number; words?: number; bpm?: number };   // vidéo : ce que l'IA a vu (vision), instant par instant
 export type VideoState = { state: string; detail: string; url?: string; can_retry?: boolean; ai?: { done: number; total: number } };
@@ -262,11 +262,12 @@ export const net = {
   /** Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix off (phrases repérées). */
   videoMedia: () => request<{ items: VideoMedia[]; auto_words?: boolean }>("/api/website/video/media"),
   videoMediaAutoWords: (on: boolean) => request<{ auto_words: boolean }>("/api/website/video/media/auto-words", { method: "POST", body: JSON.stringify({ on }) }),
-  videoMediaAdd: (file: File, kind: VideoMedia["kind"], script = "") => {
+  videoMediaAdd: (file: File, kind: VideoMedia["kind"] | "auto", script = "") => {
     const fd = new FormData();
     fd.append("kind", kind); fd.append("script", script); fd.append("file", file, file.name);
     return request<VideoMedia>("/api/website/video/media", { method: "POST", body: fd });
   },
+  videoMediaKind: (id: string, kind: "music" | "voice") => request<VideoMedia>(`/api/website/video/media/${id}/kind`, { method: "POST", body: JSON.stringify({ kind }) }),
   videoMediaWords: (id: string) => request<VideoMedia>(`/api/website/video/media/${id}/words`, { method: "POST" }),
   videoMediaHide: (id: string) => request<{ ok: boolean }>(`/api/website/video/media/${id}/hide`, { method: "POST" }),
   videoDraft: () => request<{ at?: string; brief?: string; plan?: VideoPlan }>("/api/website/video/draft"),
