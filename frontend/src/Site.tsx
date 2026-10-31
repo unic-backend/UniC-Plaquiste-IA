@@ -18,6 +18,7 @@ const clipEdits = (c: { [k: string]: unknown }) => {
   const sp = Number(c.speed) || 1, out: string[] = [];
   const x = (n: number) => `×${String(n).replace(".", ",")}`;
   if (sp < 1) out.push(`Ralenti ${x(sp)}`); else if (sp > 1) out.push(`Accéléré ${x(sp)}`);
+  if (c.sound === true) out.push("Son du film");
   if (typeof c.zoom === "string" && ZOOM_FR[c.zoom]) out.push(ZOOM_FR[c.zoom]);
   if (typeof c.grade === "string" && GRADE_FR[c.grade]) out.push(GRADE_FR[c.grade]);
   if (c.split_media) out.push("Avant | après");
@@ -163,7 +164,8 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
           {items.map((m) => (
             <li key={m.id}>
               <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}
-              {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}</small>}
+              {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}
+                {m.audio === false ? " · Sans son." : m.talk ? ` · Son : ${m.talk} passage${m.talk > 1 ? "s" : ""} parlé${m.talk > 1 ? "s" : ""} ; silences repérés.` : ""}</small>}
               {" "}<button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer de la liste"
                 onClick={() => run(async () => { await net.videoMediaHide(m.id); await load(); }, "Média retiré de la liste.")}>×</button>
             </li>

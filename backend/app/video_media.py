@@ -43,6 +43,9 @@ LOOK_FRAMES = 8                        # images regardées par vidéo (un seul a
 LOOK_MAX_PER_CALL = 6                  # vidéos regardées au plus avant un scénario (délai borné)
 LOOK_RETRY_S = 600                     # vision échouée : on réessaie au plus toutes les 10 minutes
 FRAME_SIDE = 512                       # taille des images extraites (côté le plus long, en pixels)
+TALK_PAD, TALK_GAP, TALK_MIN = 0.12, 0.30, 0.5   # coupe des silences : marge autour des mots, pause gardée, plan le plus court (s)
+TALK_SILENCE_S = 0.35                  # un silence plus long que ça est coupé
+MAX_CUTS = 200                         # plans au plus par coupe des silences
 
 
 class MediaError(ValueError):
@@ -88,10 +91,10 @@ def probe_seconds(path: Path) -> float:
         return 0.0
 
 
-def detect_phrases(path: Path, total: float) -> list[list[float]]:
+def detect_phrases(path: Path, total: float, noise: float = SILENCE_DB, gap: float = SILENCE_S) -> list[list[float]]:
     """Morceaux parlés d'une voix, séparés par les silences : [[début, fin], …] en secondes."""
     try:
-        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af", f"silencedetect=noise={SILENCE_DB}dB:d={SILENCE_S}",
+        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-vn", "-af", f"silencedetect=noise={noise:g}dB:d={gap:g}",
                               "-f", "null", "-"], capture_output=True, text=True, timeout=300).stderr
     except (OSError, subprocess.SubprocessError):
         return [[0.0, total]] if total else []
@@ -110,6 +113,47 @@ def phrases_from_log(log: str, total: float) -> list[list[float]]:
     if total - cur > 0.15:
         out.append([round(cur, 2), round(total, 2)])
     return out
+
+
+def has_audio(path: Path) -> bool:
+    """Le film a-t-il une piste son ?"""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(out.strip())
+
+
+def mean_volume(path: Path) -> float | None:
+    """Niveau moyen du son (dB) : sert à régler le seuil de silence d'un film (chantier bruyant ou pièce calme)."""
+    try:
+        err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True, timeout=300).stderr
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"mean_volume: (-?[\d.]+) dB", err)
+    return float(m.group(1)) if m else None
+
+
+def merge_talk(parts: list[list[float]], total: float, pad: float = TALK_PAD, gap: float = TALK_GAP, shortest: float = TALK_MIN) -> list[list[float]]:
+    """Passages parlés -> plans à garder pour une coupe des silences : un peu de marge (aucun mot coupé), passages très proches
+    réunis, bribes trop courtes écartées. Fonction pure, testée."""
+    out: list[list[float]] = []
+    for a, b in parts:
+        a, b = max(0.0, a - pad), min(total, b + pad)
+        if out and a - out[-1][1] < gap:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [[round(a, 1), round(b, 1)] for a, b in out if b - a >= shortest]
+
+
+def detect_talk(path: Path, total: float) -> list[list[float]]:
+    """Passages où l'on entend quelqu'un parler (ou un son fort) dans un film : le reste est du silence à couper."""
+    mv = mean_volume(path)
+    noise = SILENCE_DB if mv is None else min(-25.0, max(-50.0, mv - 14))
+    return merge_talk(detect_phrases(path, total, noise, TALK_SILENCE_S), total)
 
 
 def split_script(text: str) -> list[str]:
@@ -216,6 +260,22 @@ def ensure_looks(db: Session, limit: int = LOOK_MAX_PER_CALL) -> int:
     return sum(1 for g in got if g)
 
 
+def ensure_sound(db: Session) -> int:
+    """Films envoyés avant le repérage du son : piste son et passages parlés calculés maintenant (une seule fois, un film après l'autre)."""
+    items, done = _load(db), 0
+    for it in items:
+        src = _dir() / f"{it['id']}{it.get('ext', '')}"
+        if it.get("kind") == "clip" and not it.get("hidden") and "audio" not in it and src.exists():
+            it["audio"] = has_audio(src)
+            it["talk"] = detect_talk(src, float(it["seconds"])) if it["audio"] else []
+            done += 1
+    if done:
+        _save(db, items)
+        if hasattr(db, "commit"):
+            db.commit()
+    return done
+
+
 def frame_path(db: Session, mid: str, t: float) -> Path | None:
     """Vignette d'un passage (fichier en cache, arrondi à la demi-seconde) ; None si la vidéo n'existe pas ou est retirée."""
     it = items_by_id(db).get(mid)
@@ -232,6 +292,8 @@ def _public(it: dict) -> dict:
     out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary") if k in it}
     if it["kind"] == "clip":
         out["looks"] = [{"t": t, "text": x} for t, x in it.get("looks") or []]
+        if "audio" in it:
+            out["audio"], out["talk"] = bool(it["audio"]), len(it.get("talk") or [])
     if it["kind"] == "voice":
         texts = it.get("texts") or []
         out["phrases"] = [{"i": i, "start": a, "end": b, "text": texts[i] if i < len(texts) else None} for i, (a, b) in enumerate(it.get("phrases") or [])]
@@ -287,6 +349,9 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
         lines = split_script(script)
         it["texts"] = lines if len(lines) == len(it["phrases"]) else []
         it["script"] = " ".join(lines)[:6000]
+    if kind == "clip":      # son du film : parole repérée pour garder la voix et couper les silences
+        it["audio"] = has_audio(dest)
+        it["talk"] = detect_talk(dest, secs) if it["audio"] else []
     if kind == "clip":      # l'IA regarde la vidéo dès l'envoi (hors de la boucle du serveur) ; en cas d'échec, avant le prochain scénario
         from app import vision
         if vision.disponible():
@@ -312,6 +377,18 @@ def hide(db: Session, mid: str) -> None:
     raise MediaError("Média introuvable.", 404)
 
 
+def _sound_text(it: dict) -> str:
+    if "audio" not in it:
+        return ""
+    if not it["audio"]:
+        return " Son : aucun (film muet)."
+    talk = it.get("talk") or []
+    if not talk:
+        return " Son : ambiance seulement, aucun passage parlé net."
+    shown = "; ".join(f"{a:.1f}–{b:.1f} s" for a, b in talk[:30]) + (" …" if len(talk) > 30 else "")
+    return f" Son : {len(talk)} passages sonores forts (parole probable, entre des silences) : {shown}."
+
+
 def catalog_text(db: Session) -> str:
     """Ce que l'IA du Studio peut utiliser (identifiants exacts), ou "" s'il n'y a rien."""
     items = items_by_id(db)
@@ -323,7 +400,8 @@ def catalog_text(db: Session) -> str:
             seen = " | ".join(f"{t:.1f} s : {x}" for t, x in it.get("looks") or [])
             lines.append(f"- vidéo {it['id']} : « {it['name']} », {it['seconds']:.1f} s."
                          + (f" Résumé : {it['summary']}." if it.get("summary") else "")
-                         + (f" Ce qu'on voit (instant : image) : {seen}" if seen else " (pas encore regardée : contenu inconnu)"))
+                         + (f" Ce qu'on voit (instant : image) : {seen}" if seen else " (pas encore regardée : contenu inconnu)")
+                         + _sound_text(it))
         elif it["kind"] == "music":
             lines.append(f"- musique {it['id']} : « {it['name']} », {it['seconds']:.0f} s")
         else:
@@ -384,7 +462,7 @@ def to_engine(db: Session, spec: dict) -> dict:
         if s.get("type") == "my_clip":   # plan monté par le moteur (scripts/video/edit.py)
             from app.video_studio import FOCUS
             eng = {"type": "clip", "url": link(s["media"], "clip"), "seconds": s["seconds"], "start": s.get("start", 0),
-                   **{k: s[k] for k in ("speed", "grade", "zoom", "zoom_amount", "freeze", "transition") if k in s},
+                   **{k: s[k] for k in ("speed", "grade", "zoom", "zoom_amount", "freeze", "transition", "sound") if k in s},
                    **({"overlay": s["overlay"]} if s.get("overlay") else {})}
             if s.get("focus") in FOCUS:
                 eng["focus"] = {"x": FOCUS[s["focus"]][0], "y": FOCUS[s["focus"]][1]}

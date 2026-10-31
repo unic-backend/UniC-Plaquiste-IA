@@ -220,3 +220,50 @@ def test_l_ia_monte_ses_films_et_laisse_les_photos(db, tmp_path, monkeypatch):
     assert "Photos (noms exacts)" not in seen["user"] and "MONTE ses films" in seen["system"]
     p2 = vs.plan(db, "Pub JOJ avec mes vidéos et quelques photos du site", "vertical")
     assert "Photos (noms exacts)" in seen["user"] and "my_clip" in [s["type"] for s in p2["spec"]["scenes"]]   # demandées : permises
+
+
+def test_passages_parles_a_garder():
+    assert vm.merge_talk([[1.0, 2.0], [2.2, 3.0], [5.0, 5.2], [7.0, 9.95]], 10.0) == [[0.9, 3.1], [6.9, 10.0]]   # pause courte gardée, bribe écartée
+    assert vm.merge_talk([], 5.0) == []
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_son_du_film_et_coupe_des_silences(db, tmp_path, monkeypatch):
+    talk = _sound(tmp_path / "t.mp4", ["-f", "lavfi", "-i", "testsrc=d=6:s=320x240:r=25", "-f", "lavfi", "-i",
+                                       "aevalsrc='if(lt(t,1.5)+between(t,3,5),0.5*sin(2*PI*300*t),0)':d=6:s=44100", "-pix_fmt", "yuv420p", "-shortest"])
+    mute = _sound(tmp_path / "m.mp4", ["-f", "lavfi", "-i", "testsrc=d=4:s=320x240:r=25", "-pix_fmt", "yuv420p"])
+    t = asyncio.run(vm.add(db, _Up("parle.mp4", talk), "clip"))
+    m = asyncio.run(vm.add(db, _Up("muet.mp4", mute), "clip"))
+    assert t["audio"] is True and t["talk"] == 2 and m["audio"] is False and m["talk"] == 0
+    media = vm.items_by_id(db)
+    assert media[t["id"]]["talk"] == [[0.0, 1.6], [2.9, 5.1]]
+    cat = vm.catalog_text(db)
+    assert "2 passages sonores forts" in cat and "0.0–1.6 s" in cat and "Son : aucun (film muet)" in cat
+
+    raw = [{"type": "my_clip", "media": t["id"], "jumpcut": True, "grade": "warm", "transition": "flash", "zoom": "in",
+            "overlay": {"type": "kinetic", "lines": ["Bonjour"]}},
+           {"type": "my_clip", "media": m["id"], "sound": True, "seconds": 2},                      # film muet : pas de son demandé au moteur
+           {"type": "my_clip", "media": t["id"], "sound": True, "speed": 0.5, "seconds": 2}]          # ralenti : jamais de son
+    sc = vs.build_spec("vertical", raw, [], media=media)["scenes"]
+    a, b = sc[0], sc[1]
+    assert [(x["start"], x["seconds"]) for x in sc[:2]] == [(0.0, 1.6), (2.9, 2.2)]                  # les silences ont disparu
+    assert a["sound"] and b["sound"] and a["transition"] == "flash" and b["transition"] == "cut" and a["grade"] == b["grade"] == "warm"
+    assert "overlay" in a and "overlay" not in b and a["zoom"] == "in" and "zoom" not in b
+    assert "sound" not in sc[2] and "sound" not in sc[3] and sc[3]["speed"] == 0.5
+    assert vs.build_spec("vertical", sc, [], media=media)["scenes"] == sc                            # aller-retour stable
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    eng = vm.to_engine(db, {"format": "vertical", "theme": "unic", "scenes": sc})["scenes"]
+    assert eng[0]["sound"] is True and eng[1]["transition"] == "cut"
+
+    items = vm._load(db)                                                                             # film envoyé avant cette fonction
+    for it in items:
+        it.pop("audio", None), it.pop("talk", None)
+    vm._save(db, items)
+    assert vm.ensure_sound(db) == 2 and vm.ensure_sound(db) == 0 and vm.items_by_id(db)[t["id"]]["talk"] == [[0.0, 1.6], [2.9, 5.1]]
+
+
+def test_coupe_des_silences_longue_parole():
+    it = {"id": "a" * 12, "kind": "clip", "seconds": 70.0, "audio": True, "talk": [[0.0, 65.0]]}
+    sc = vs.build_spec("vertical", [{"type": "my_clip", "media": it["id"], "jumpcut": True}], [], media={it["id"]: it})["scenes"]
+    assert [(x["start"], x["seconds"]) for x in sc] == [(0.0, 30.0), (30.0, 30.0), (60.0, 5.0)]     # parole sans pause : plans de 30 s collés
+    assert [x.get("transition") for x in sc] == [None, "cut", "cut"]

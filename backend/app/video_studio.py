@@ -50,6 +50,7 @@ THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")
 GRADES = ("cinema", "warm", "night", "crisp", "bw")
 ZOOMS = ("in", "out", "punch")
 TRANSITIONS = ("fade", "cut", "flash", "slide")
+MAX_JUMPCUTS = 200                # plans au plus pour une coupe des silences
 FOCUS = {"center": (0.5, 0.5), "top": (0.5, 0.2), "bottom": (0.5, 0.8), "left": (0.2, 0.5), "right": (0.8, 0.5),
          "top_left": (0.2, 0.2), "top_right": (0.8, 0.2), "bottom_left": (0.2, 0.8), "bottom_right": (0.8, 0.8)}
 WANTS_CATALOG = re.compile(r"\bphotos?\b|\bimages? du site\b|galerie|portfolio|d[ée]filement|page du site", re.I)
@@ -86,6 +87,9 @@ SCENE_PROPS = {
     "freeze": {"type": "number", "description": "my_clip : arrêt sur image à la fin du plan, en secondes (0.5 à 2), pour laisser lire un texte fort."},
     "transition": {"type": "string", "enum": list(TRANSITIONS), "description": "my_clip : comment ce plan ENTRE : fade (fondu), cut (coupe franche, même lieu), "
                    "flash (éclair blanc, changement fort), slide (pousse le plan précédent)."},
+    "sound": {"type": "boolean", "description": "my_clip : true = garder le son du film (la personne qui parle, l'ambiance) ; seulement à vitesse normale. La musique baisse toute seule dessous."},
+    "jumpcut": {"type": "boolean", "description": "my_clip : true = couper les silences : de start à start + seconds, ne garde que les passages sonores (liste « Son » de la vidéo), "
+                "collés en coupe franche, avec le son. Pour une personne qui parle face caméra."},
     "split_media": {"type": "string", "description": "my_clip : écran partagé AVANT | APRÈS : identifiant d'une 2e vidéo du patron, affichée à droite (ex. chantier brut | fini)."},
     "split_start": {"type": "number", "description": "my_clip : seconde de départ dans la 2e vidéo de l'écran partagé."},
     "phrases": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
@@ -173,6 +177,9 @@ SYSTEM_MEDIA = (" MÉDIAS DU PATRON disponibles (liste fournie) : ses VRAIES vid
                 "warm pour un intérieur, crisp pour un film terne ; focus sur le sujet décrit ; zoom punch sur un détail fort, in lent sur une vue large ; "
                 "transition cut entre deux plans du même lieu, flash pour changer de lieu, slide pour enchaîner, fade pour ouvrir et fermer ; "
                 "split_media pour un avant | après côte à côte ; freeze en fin de plan sous un texte important. Varie : pas deux plans de suite avec les mêmes réglages. "
+                "SON DES FILMS : une vidéo où quelqu'un PARLE face caméra (d'après « ce qu'on voit » et sa liste « Son ») se monte avec sound = true "
+                "et jumpcut = true (silences coupés, plans collés), sans voix off par-dessus ; les textes incrustés reprennent ses mots-clés. "
+                "Un film d'ambiance (chantier, machines) : sound = true seulement si le bruit sert la scène, sinon muet sous la musique. "
                 "Avec une voix : mets audio.voice, répartis TOUTES ses phrases dans l'ordre sur les scènes (phrases = [première, dernière]) et donne à chaque scène au moins la durée de ses phrases ; "
                 "les textes à l'écran complètent la voix sans la répéter mot pour mot. Avec une musique : audio.music (music_start pour démarrer au bon moment). "
                 "audio.keys = true quand il y a du texte tapé. N'utilise que les identifiants de la liste.")
@@ -368,11 +375,46 @@ def _dec(v, lo: float, hi: float, dflt: float) -> float:
     return round(min(hi, max(lo, f)), 2) if math.isfinite(f) else dflt
 
 
-def _clip_edits(sc: dict, secs: float, speed: float, freeze: float, media: dict | None) -> dict:
+def _jumpcut(sc: dict, it: dict, start: float, span: float) -> list[dict]:
+    """Coupe des silences : un plan par passage sonore entre start et start + span, collés en coupe franche, avec le son.
+    Le premier plan garde l'entrée, le texte incrusté et le zoom demandés ; tous gardent couleurs et cadrage."""
+    end = start + span
+    cuts = []
+    for a, b in it.get("talk") or []:
+        a, b = max(a, start), min(b, end)
+        while b - a >= 0.5:                      # passage de plus de 30 s (on parle sans pause) : plans de 30 s collés, sans saut
+            cuts.append((a, min(b, a + 30.0)))
+            a += 30.0
+    cuts = cuts[:MAX_JUMPCUTS]
+    look = {k: sc[k] for k in ("grade", "focus") if (k == "grade" and sc.get(k) in GRADES) or (k == "focus" and sc.get(k) in FOCUS and sc[k] != "center")}
+    out = []
+    for n, (a, b) in enumerate(cuts):
+        piece = {"type": "my_clip", "media": it["id"], "start": round(a, 1), "seconds": round(b - round(a, 1), 1), **look}
+        if it.get("audio") is not False:
+            piece["sound"] = True
+        piece["transition"] = (sc.get("transition") if sc.get("transition") in TRANSITIONS and sc["transition"] != "fade" else None) if n == 0 else "cut"
+        if not piece["transition"]:
+            piece.pop("transition")
+        if n == 0:
+            if sc.get("zoom") in ZOOMS:
+                piece["zoom"], piece["zoom_amount"] = sc["zoom"], _dec(sc.get("zoom_amount"), 1.05, 1.6, 1.2)
+            ov = sc.get("overlay")
+            if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
+                o = _fx_scene(ov, ov["type"], set())
+                if o:
+                    o.pop("seconds", None)
+                    piece["overlay"] = o
+        out.append(piece)
+    return out
+
+
+def _clip_edits(sc: dict, secs: float, speed: float, freeze: float, media: dict | None, it: dict | None = None) -> dict:
     """Montage d'un plan de la vidéo du patron, seulement ce qui change quelque chose (valeurs bornées, inconnu ignoré)."""
     e: dict = {}
     if speed != 1:
         e["speed"] = speed
+    elif sc.get("sound") is True and (it or {}).get("audio") is not False:   # son du film gardé (jamais au ralenti : voix déformée)
+        e["sound"] = True
     if 0 < freeze <= secs - 1:
         e["freeze"] = freeze
     if sc.get("grade") in GRADES:
@@ -470,8 +512,13 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                 speed = _dec(sc.get("speed"), 0.25, 4, 1)
                 freeze = _dec(sc.get("freeze"), 0, 3, 0)
                 room = (it["seconds"] - start) / speed + freeze         # le plan ne dépasse jamais ce que le fichier contient
-                clip = {"type": t, "media": it["id"], "start": start, "seconds": _num(secs, 1, min(30.0, room), round(min(5.0, room), 1))}
-                clip.update(_clip_edits(sc, clip["seconds"], speed, freeze, media))
+                if sc.get("jumpcut") is True and it.get("talk"):
+                    pieces = _jumpcut(sc, it, start, _num(secs, 0.5, it["seconds"] - start, it["seconds"] - start))
+                    if pieces:
+                        out += pieces
+                        continue
+                clip = {"type": t, "media": it["id"], "start": start, "seconds": _num(secs, 0.5, min(30.0, room), round(min(5.0, room), 1))}
+                clip.update(_clip_edits(sc, clip["seconds"], speed, freeze, media, it))
                 ov = sc.get("overlay")
                 if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
                     o = _fx_scene(ov, ov["type"], set())
@@ -660,6 +707,7 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
               f"Avis réels : {', '.join(QUOTES)}\nChapitres de la page portfolio : {', '.join(PAGES['portfolio']['chapters'])}",
               f"Quotas IA du jour : {ai['clips']} clip(s), {ai['images']} image(s)." if ai else "Scènes IA indisponibles (Higgsfield non connecté) : n'utilise que les scènes de montage."]
     if own:
+        video_media.ensure_sound(db)      # son et passages parlés des films envoyés avant cette fonction
         video_media.ensure_looks(db)      # vidéos pas encore regardées (envoyées avant, ou vision en échec) : regardées maintenant
     no_catalog = own and not WANTS_CATALOG.search(" ".join([brief, *changes]))
     if no_catalog:      # ses vidéos d'abord : les photos du site ne sont pas proposées (elles reviennent s'il les demande)

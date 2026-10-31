@@ -75,3 +75,26 @@ def test_mixage_ffmpeg(tmp_path):
     assert abs(float(d) - 6.0) < 0.05                                                                # la musique va jusqu'au bout, même après la voix
     silent = so.build({"keys": True}, [(0.0, 2.0, {"type": "kinetic"})], {}, 0, 2.0, tmp_path, False, False)
     assert silent.exists()                                                                           # rien à jouer : piste muette (assemblage sans ré-encodage)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg absent")
+def test_son_du_film_garde_et_musique_baissee(tmp_path):
+    so, sp = _load("sound"), _load("spec")
+    assert sp.clean({"scenes": [{"type": "clip", "url": "https://cdn.example.com/a.mp4", "sound": True}]})["scenes"][0]["sound"] is True
+    assert "sound" not in sp.clean({"scenes": [{"type": "clip", "url": "https://cdn.example.com/a.mp4", "sound": True, "speed": 2}]})["scenes"][0]
+    assert sp.clean({"scenes": [{"type": "clip", "url": "https://cdn.example.com/a.mp4", "seconds": 0.6}]})["scenes"][0]["seconds"] == 0.6   # plan court d'une coupe
+    mus, film, mute = tmp_path / "m.wav", tmp_path / "f.mp4", tmp_path / "x.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=8", str(mus)], check=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=d=5:s=160x120", "-f", "lavfi", "-i", "sine=frequency=1000:duration=5",
+                    "-shortest", "-pix_fmt", "yuv420p", str(film)], check=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=d=2:s=160x120", "-pix_fmt", "yuv420p", str(mute)], check=True)
+    assert so.has_audio(film) and not so.has_audio(mute)
+    wav = so.build({"music": {"start": 0, "volume": 1}, "keys": False, "duck": "strong"}, [(0.0, 6.0, {"type": "clip"})], {"music": mus}, 0, 6.0,
+                   tmp_path, False, False, [(3.0, film, 1.0, 2.0)])
+
+    def level(a, d, hz):    # niveau (dB) d'une fréquence dans un passage
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-ss", str(a), "-t", str(d), "-i", str(wav), "-af", f"bandpass=f={hz}:w=60,volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True).stderr
+        return float(out.split("mean_volume: ")[1].split(" dB")[0])
+    assert level(3.3, 1.4, 1000) > level(0.5, 1.5, 1000) + 30                                          # le son du film arrive à 3 s
+    assert level(3.5, 1.2, 220) < level(0.5, 1.5, 220) - 4                                             # la musique baisse sous lui

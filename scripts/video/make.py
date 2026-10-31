@@ -31,6 +31,8 @@ def fetch_media(url: str, dest: Path) -> None:
 args = sys.argv[1:]
 raw = args[0]
 cfg = sp.clean(json.load(open(raw)))
+if not cfg.get("audio") and any(s.get("type") == "clip" and s.get("sound") for s in cfg["scenes"]):
+    cfg["audio"] = {"keys": False, "duck": "normal"}   # son d'un film gardé : bande son pour TOUS les tronçons (assemblage sans ré-encodage)
 if "--plan" in args:   # plan des tronçons (GitHub Actions) : {"chunks": N, "matrix": [0..N-1], "seconds": total}
     parts = sp.chunks(cfg["scenes"], float(os.environ.get("CHUNK_SECONDS", "90")))
     print(json.dumps({"chunks": len(parts), "matrix": list(range(len(parts))), "seconds": round(sum(sp.scene_seconds(s) for s in cfg["scenes"]))}))
@@ -104,11 +106,13 @@ try:
             if au.get(key):
                 files[key] = work / f"{key}.audio"
                 fetch_media(au[key]["url"], files[key])
-        timeline, t = [], 0.0
-        for sc, sg in zip(cfg["scenes"], segs):
+        timeline, t, kept = [], 0.0, []
+        for i, (sc, sg) in enumerate(zip(cfg["scenes"], segs)):
             secs = sg["frames"] / FPS
+            if sc["type"] == "clip" and sc.get("sound") and sound.has_audio(work / f"clip{i}.mp4"):   # parole ou ambiance du film
+                kept.append((t, work / f"clip{i}.mp4", float(sc.get("start") or 0), edit.play_seconds(sc)))
             timeline.append((t, secs, sc)); t += secs
-        wav = sound.build(au, timeline, files, CHUNK_OFFSET, t, work, os.environ.get("FADE_IN", "1") == "1", os.environ.get("FADE_OUT", "1") == "1")
+        wav = sound.build(au, timeline, files, CHUNK_OFFSET, t, work, os.environ.get("FADE_IN", "1") == "1", os.environ.get("FADE_OUT", "1") == "1", kept)
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", silent, "-i", str(wav), "-map", "0:v", "-map", "1:a", "-c:v", "copy",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-shortest", "-movflags", "+faststart", out], check=True)
 finally:
