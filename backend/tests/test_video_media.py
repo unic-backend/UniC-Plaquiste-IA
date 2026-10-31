@@ -1,5 +1,6 @@
 """Médias du patron dans le Studio vidéo : envoi, phrases d'une voix, liens secrets ouverts au lancement seulement, scénario -> moteur."""
 import asyncio
+import json
 import importlib.util
 import io
 import pathlib
@@ -170,7 +171,7 @@ def test_l_ia_regarde_la_video_et_s_en_sert(db, tmp_path, monkeypatch):
     monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user) or {
         "scenes": [{"type": "my_clip", "media": new["id"], "start": 2.5, "seconds": 3}, {"type": "my_clip", "media": new["id"], "start": 6, "seconds": 2}]})
     p = vs.plan(db, "", "vertical")                                                              # case vide + vidéos : SES vidéos, pas le modèle fixe
-    assert "montage de ses vidéos" in seen["user"] and "mire de couleurs numéro 3" in seen["user"] and "CŒUR du montage" in seen["system"]
+    assert "regarde et écoute ses médias" in seen["user"] and "mire de couleurs numéro 3" in seen["user"] and "matière de la vidéo" in seen["system"]
     assert [s["type"] for s in p["spec"]["scenes"]] == ["my_clip", "my_clip"] and p["spec"]["scenes"][1]["start"] == 6
 
 
@@ -217,7 +218,7 @@ def test_l_ia_monte_ses_films_et_laisse_les_photos(db, tmp_path, monkeypatch):
     monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user) or story)
     p1 = vs.plan(db, "Pub JOJ de 30 s avec mes vidéos", "vertical")
     assert [s["type"] for s in p1["spec"]["scenes"]] == ["kinetic", "my_clip"] and "image" not in p1["spec"]["scenes"][0]   # ni photos ni galerie du site
-    assert "Photos (noms exacts)" not in seen["user"] and "MONTE ses films" in seen["system"]
+    assert "Photos (noms exacts)" not in seen["user"] and "LIBRE" in seen["system"] and "aucune photo, aucun chiffre" in seen["user"]
     p2 = vs.plan(db, "Pub JOJ avec mes vidéos et quelques photos du site", "vertical")
     assert "Photos (noms exacts)" in seen["user"] and "my_clip" in [s["type"] for s in p2["spec"]["scenes"]]   # demandées : permises
 
@@ -490,3 +491,22 @@ def test_depose_tout_ici_photos_et_type_reconnu(db, tmp_path, monkeypatch):
     monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
     e = vm.to_engine(db, spec)["scenes"][0]
     assert e["type"] == "photo" and e["url"].startswith("https://unic.example.com/api/public/video-media/") and e["direction"] == "in"
+
+
+def test_l_ia_ne_met_que_ce_que_le_patron_donne_ou_demande(monkeypatch):
+    from app import higgsfield
+    seen = {}
+    story = {"scenes": [{"type": "title", "l1": "CHANTIER"}, {"type": "stats", "facts": ["chantiers"], "items": [{"value": 3, "label": "Pièces"}, {"value": 2, "label": "Jours"}]},
+                        {"type": "quote", "quote": "avis_khadige"}, {"type": "photo", "image": "hero-01.webp"}, {"type": "outro", "brand": True}]}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(vs, "images", lambda db=None: ["hero-01.webp", "hero-02.webp"])
+    monkeypatch.setattr(higgsfield, "status", lambda d: {"connected": False})
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(user=user) or json.loads(json.dumps(story)))
+    p = vs.plan(None, "Une vidéo sur la rénovation de ma cuisine avec mes photos", "vertical")
+    assert [s["type"] for s in p["spec"]["scenes"]] == ["title", "stats"]                                  # ni avis, ni photo du site, ni carte de marque
+    assert p["spec"]["scenes"][1]["items"] == [{"value": 3, "suffix": "", "label": "Pièces"}, {"value": 2, "suffix": "", "label": "Jours"}]   # ses chiffres, pas ceux de l'entreprise
+    assert "Chiffres vrais" not in seen["user"] and "Photos (noms exacts)" not in seen["user"] and "+221" not in json.dumps(p["spec"])
+    p = vs.plan(None, "Pub avec 2 photos du site, mes chiffres et mon téléphone à la fin", "vertical")
+    assert [s["type"] for s in p["spec"]["scenes"]] == ["title", "stats", "quote", "photo", "outro"] and vs.FACTS["phone"] in p["spec"]["scenes"][-1]["lines"]
+    assert "Chiffres vrais" in seen["user"] and "Photos (noms exacts)" in seen["user"]                     # demandé : permis
+    assert vm.frame_times(200) == [round((i + 0.5) * 200 / 24, 1) for i in range(24)] and len(vm.frame_times(60)) == 12   # une longue vidéo : regardée de plus près

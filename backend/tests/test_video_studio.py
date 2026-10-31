@@ -10,12 +10,13 @@ from app import repair, video_studio as vs
 NAMES = ["ref-dakar-arena.webp", "realis-01-plafond.webp", "realis-02-cloisons.webp"]
 
 
-def test_scenario_standard_sans_cle(monkeypatch):
-    monkeypatch.setattr(vs.settings, "anthropic_api_key", "")
-    p = vs.plan(None, "", "horizontal")
-    types = [s["type"] for s in p["spec"]["scenes"]]
-    assert types[0] == "title" and types[-1] == "outro" and "page" in types and p["spec"]["format"] == "horizontal" and 20 <= p["seconds"] <= 60
-    assert vs.FACTS["phone"] in p["spec"]["scenes"][-1]["lines"]            # sans consigne : présentation de l'entreprise
+def test_rien_donne_pas_de_video_toute_faite(monkeypatch):
+    """Décision du patron : l'IA n'est pas programmée sur une vidéo type. Sans médias ni demande, on le lui dit (plus de « présentation standard »)."""
+    for key in ("", "cle-de-test"):
+        monkeypatch.setattr(vs.settings, "anthropic_api_key", key)
+        with pytest.raises(repair.RepairError) as e:
+            vs.plan(None, "", "horizontal")
+        assert e.value.status == 400 and "dépose tes vidéos" in str(e.value)
 
 
 def test_un_sujet_quelconque_ne_donne_jamais_une_video_d_entreprise(monkeypatch):
@@ -201,7 +202,7 @@ def test_routes_protegees(monkeypatch):
         assert c.post("/api/website/video/ai/start", json={"prompt": "Un clip vidéo test", "duration": 5, "format": "vertical"}).status_code == 401
         assert c.get("/api/website/video/ai/status").status_code == 401
         r = c.post("/api/website/video/plan", json={"brief": ""}, headers={"x-access-code": "s3cret-code"})
-        assert r.status_code == 200 and r.json()["spec"]["scenes"]
+        assert r.status_code == 400 and "dépose tes vidéos" in r.json()["detail"]          # avec le code : la route répond (rien donné : on le dit)
 
 
 def _engine(name="video_spec_rendu"):
@@ -269,7 +270,7 @@ def test_le_scenariste_comprend_et_le_dit(monkeypatch):
     monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user, tool=tool) or _story(target_seconds=30, format="horizontal"))
     p = vs.plan(None, "Une vidéo de 30 secondes pour YouTube\nsur l'histoire de Dakar", "vertical")
     assert "30 secondes pour YouTube\nsur l'histoire" in seen["user"]               # retours à la ligne gardés : les mots ne se collent plus
-    assert "COMPRENDS D'ABORD" in seen["system"] and "understood" in seen["tool"]["input_schema"]["properties"]
+    assert "REGARDE et ÉCOUTE" in seen["system"] and "COMPRENDS" in seen["system"] and "understood" in seen["tool"]["input_schema"]["properties"]
     assert p["understood"].startswith("Une vidéo de 30 s") and p["assumptions"] == ["Public : grand public"] and p["limits"] == []
     assert p["spec"]["format"] == "horizontal" and "Format horizontal 16:9 appliqué" in p["note"]
     assert p["target"] == 30 and abs(p["seconds"] - 30) <= 2 and "Durée demandée : 30 s" in p["note"]

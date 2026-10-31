@@ -44,7 +44,8 @@ MAX_ITEMS = 300
 OPEN_HOURS = 72                        # durée d'ouverture d'un lien après le lancement d'une fabrication
 SILENCE_DB, SILENCE_S = -38, 0.28      # repérage des phrases d'une voix
 ID_RE = re.compile(r"^[a-f0-9]{12}$")
-LOOK_FRAMES = 8                        # images regardées par vidéo (un seul appel vision : coût borné)
+LOOK_FRAMES = 8                        # images regardées par vidéo, au moins (un seul appel vision : coût borné)
+LOOK_MAX_FRAMES = 24                   # au plus, pour une longue vidéo
 LOOK_MAX_PER_CALL = 6                  # vidéos regardées au plus avant un scénario (délai borné)
 LOOK_RETRY_S = 600                     # vision échouée : on réessaie au plus toutes les 10 minutes
 FRAME_SIDE = 512                       # taille des images extraites (côté le plus long, en pixels)
@@ -287,10 +288,13 @@ def split_script(text: str) -> list[str]:
     return [" ".join(p.split())[:200] for p in parts if p and p.strip()]
 
 
-def frame_times(seconds: float, n: int = LOOK_FRAMES) -> list[float]:
-    """Instants regardés dans une vidéo : n images réparties au milieu de n parts égales (jamais la toute première ni la dernière image)."""
+def frame_times(seconds: float, n: int | None = None) -> list[float]:
+    """Instants regardés dans une vidéo : n images réparties au milieu de n parts égales (jamais la toute première ni la dernière image).
+    Sans n : une image toutes les 5 secondes environ (8 au moins, 24 au plus) — une longue vidéo est regardée de plus près."""
     if seconds <= 0:
         return []
+    if n is None:
+        n = min(LOOK_MAX_FRAMES, max(LOOK_FRAMES, round(seconds / 5)))
     n = max(1, min(n, int(seconds * 2) or 1))     # vidéo très courte : moins d'images
     return [round((i + 0.5) * seconds / n, 1) for i in range(n)]
 
