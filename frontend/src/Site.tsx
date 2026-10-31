@@ -8,7 +8,7 @@ type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
   typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo", my_photo: "Ma photo",
-  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation" };
+  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation", motion: "Animation libre" };
 const ANIM_FR: Record<string, string> = { check: "✓ Validé", spark: "✦ Éclat", arrow: "→ Flèche", pin: "📍 Lieu", pulse: "◉ Ondes" };
 /** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
 const panelText = (p: { [k: string]: unknown }) => {
@@ -109,6 +109,9 @@ function SceneFrame({ s }: { s: VideoScene }) {
   if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge" || t === "lottie") {
     return <>{t === "counter" ? <b className="f-t1">{statNumber(s.value)}{s.suffix ? (/^[+×]/.test(String(s.suffix)) ? "" : " ") + String(s.suffix) : ""}</b> : <small className="f-chip">{SCENE_FR[t]}</small>}
       <b className="f-t2">{frText(t === "counter" ? String(s.label || "") : panelText(s))}</b></>;
+  }
+  if (t === "motion" && typeof s.svg === "string") {   // dessin animé de l'IA (SVG nettoyé par le serveur) : vu en image, ses animations jouent, aucun script
+    return <img className="f-img" src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(s.svg)} alt="Animation libre dessinée par l'IA" />;
   }
   if (t === "my_photo") return <><ClipThumb id={String(s.media || "")} start={0} />{txt(s, "caption") && <span className="f-cap">{txt(s, "caption")}</span>}</>;
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
