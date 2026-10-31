@@ -156,6 +156,80 @@ def detect_talk(path: Path, total: float) -> list[list[float]]:
     return merge_talk(detect_phrases(path, total, noise, TALK_SILENCE_S), total)
 
 
+BEAT_SR, BEAT_HOP = 11025, 256         # rythme : son ramené à 11 kHz, une mesure d'énergie toutes les 23 ms
+BEAT_BPM = (70.0, 180.0)               # tempos cherchés (au-delà : moitié ou double)
+MAX_BEATS = 2000
+
+
+def onset_envelope(path: Path, max_seconds: float = 600) -> tuple[list[float], float]:
+    """Attaques du son (hausses d'énergie), image par image : ce que l'oreille entend comme des coups. Bibliothèque standard + ffmpeg."""
+    import array
+    try:
+        pcm = subprocess.run(["ffmpeg", "-v", "error", "-t", f"{max_seconds:g}", "-i", str(path), "-vn", "-ac", "1", "-ar", str(BEAT_SR), "-f", "s16le", "-"],
+                             capture_output=True, timeout=300).stdout
+    except (OSError, subprocess.SubprocessError):
+        return [], 0.0
+    a = array.array("h")
+    a.frombytes(pcm[: len(pcm) // 2 * 2])
+    energy = []
+    for i in range(0, len(a) - BEAT_HOP, BEAT_HOP):
+        e = 0
+        for v in a[i:i + BEAT_HOP]:
+            e += v * v
+        energy.append(math.log1p(e / BEAT_HOP))
+    onsets = [0.0] + [max(0.0, energy[i] - energy[i - 1]) for i in range(1, len(energy))]
+    for i in range(min(5, len(onsets))):    # le tout début du fichier (silence -> son) n'est pas un temps fort
+        onsets[i] = 0.0
+    return onsets, BEAT_SR / BEAT_HOP
+
+
+def beats_from_onsets(env: list[float], fps: float) -> tuple[float, list[float]]:
+    """Tempo (BPM) et temps forts (s) à partir des attaques. Fonction pure, testée.
+    1. Tempo : autocorrélation des attaques (préférence douce autour de 120 BPM contre les erreurs de double/moitié), affinée entre
+       deux images. 2. Temps forts : programmation dynamique (méthode d'Ellis, celle de librosa) — chaque temps tombe sur une attaque
+       ET garde un écart régulier, au lieu de dériver."""
+    n = len(env)
+    if n < fps * 4:
+        return 0.0, []
+    mean = sum(env) / n
+    x = [v - mean for v in env]
+    sd = math.sqrt(sum(v * v for v in x) / n)
+    if sd <= 0:
+        return 0.0, []
+    lo_l, hi_l = max(2, int(fps * 60 / BEAT_BPM[1])), int(fps * 60 / BEAT_BPM[0]) + 1
+    ac = {L: sum(x[i] * x[i + L] for i in range(n - L)) / (n - L) for L in range(lo_l - 1, hi_l + 2)}
+    score = {L: ac[L] * math.exp(-0.5 * (math.log2(60 * fps / L / 120)) ** 2) for L in range(lo_l, hi_l + 1)}
+    L = max(score, key=score.get)
+    a, b, c = ac[L - 1], ac[L], ac[L + 1]
+    den = a - 2 * b + c
+    period = L + (0.5 * (a - c) / den if den < 0 else 0.0)        # sommet entre deux images
+    o = [v / sd for v in env]
+    total, back = [0.0] * n, [-1] * n
+    for t in range(n):
+        best, bi = 0.0, -1
+        for prev in range(max(0, t - int(round(2 * period))), t - int(round(period / 2)) + 1):
+            v = total[prev] - 100.0 * math.log((t - prev) / period) ** 2
+            if v > best:
+                best, bi = v, prev
+        total[t], back[t] = o[t] + best, bi
+    tail = range(max(0, n - int(round(period))), n)
+    k = max(tail, key=lambda i: total[i])
+    frames = []
+    while k >= 0 and len(frames) < MAX_BEATS:
+        frames.append(k)
+        k = back[k]
+    frames.reverse()
+    if len(frames) < 3:
+        return 0.0, []
+    gaps = sorted(q - p for p, q in zip(frames, frames[1:]))
+    return round(60 * fps / ((frames[-1] - frames[0]) / (len(frames) - 1) if gaps else period), 1), [round(f / fps, 2) for f in frames]
+
+
+def detect_beats(path: Path) -> tuple[float, list[float]]:
+    env, fps = onset_envelope(path)
+    return beats_from_onsets(env, fps) if fps else (0.0, [])
+
+
 def split_script(text: str) -> list[str]:
     """Phrases d'un texte de voix off (coupure après . ! ? … et aux retours à la ligne)."""
     parts = re.split(r"(?<=[.!?…])\s+|\n+", str(text or ""))
@@ -258,6 +332,21 @@ def ensure_looks(db: Session, limit: int = LOOK_MAX_PER_CALL) -> int:
     if hasattr(db, "commit"):
         db.commit()      # gardé même si le scénario échoue ensuite : la vidéo n'est pas regardée (et payée) deux fois
     return sum(1 for g in got if g)
+
+
+def ensure_beats(db: Session) -> int:
+    """Musiques envoyées avant le repérage du rythme : temps forts calculés maintenant (une fois)."""
+    items, done = _load(db), 0
+    for it in items:
+        src = _dir() / f"{it['id']}{it.get('ext', '')}"
+        if it.get("kind") == "music" and not it.get("hidden") and "beats" not in it and src.exists():
+            it["bpm"], it["beats"] = detect_beats(src)
+            done += 1
+    if done:
+        _save(db, items)
+        if hasattr(db, "commit"):
+            db.commit()
+    return done
 
 
 def ensure_sound(db: Session) -> int:
@@ -395,7 +484,7 @@ def frame_path(db: Session, mid: str, t: float) -> Path | None:
 
 
 def _public(it: dict) -> dict:
-    out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary") if k in it}
+    out = {k: it[k] for k in ("id", "kind", "name", "seconds", "size", "at", "summary", "bpm") if k in it}
     if it.get("words"):
         out["words"] = len(it["words"])
     if it["kind"] == "clip":
@@ -452,6 +541,8 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
         raise MediaError("Fichier illisible : envoie une vraie vidéo ou un vrai fichier audio.")
     it = {"id": mid, "kind": kind, "name": name, "ext": ext, "size": size, "seconds": secs, "at": int(time.time()),
           "token": secrets.token_urlsafe(24), "open_until": 0}
+    if kind == "music":      # rythme : les coupes du montage tombent sur les temps forts
+        it["bpm"], it["beats"] = detect_beats(dest)
     if kind == "voice":
         it["phrases"] = detect_phrases(dest, secs)
         lines = split_script(script)
@@ -523,7 +614,7 @@ def catalog_text(db: Session) -> str:
                          + (f" Ce qu'on voit (instant : image) : {seen}" if seen else " (pas encore regardée : contenu inconnu)")
                          + _sound_text(it))
         elif it["kind"] == "music":
-            lines.append(f"- musique {it['id']} : « {it['name']} », {it['seconds']:.0f} s")
+            lines.append(f"- musique {it['id']} : « {it['name']} », {it['seconds']:.0f} s" + (f", {it['bpm']:g} BPM (coupes calées sur ses temps forts)" if it.get("bpm") else ""))
         else:
             ph = it.get("phrases") or []
             texts = it.get("texts") or []

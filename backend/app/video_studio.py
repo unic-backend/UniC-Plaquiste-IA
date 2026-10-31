@@ -166,6 +166,7 @@ TOOL = {"name": "storyboard", "description": "Scénario de la vidéo, avec ce qu
     "audio": {"type": "object", "description": "Bande son, seulement avec les médias du patron : musique (identifiant), départ dans la musique (music_start, s), voix (identifiant), "
               "clavier des textes tapés (keys), baisse de la musique sous la voix (duck).", "properties": {
         "music": {"type": "string"}, "music_start": {"type": "number"}, "voice": {"type": "string"}, "keys": {"type": "boolean"},
+        "beat": {"type": "boolean", "description": "Coupes calées sur les temps forts de la musique : omets (oui par défaut) ; false seulement si le patron n'en veut pas."},
         "duck": {"type": "string", "enum": ["light", "normal", "strong"]}}}}, "required": ["understood", "scenes"]}}
 SYSTEM = ("Tu es réalisateur et monteur vidéo. Tu composes le scénario de N'IMPORTE QUEL sujet demandé par le patron : documentaire, conte, récit, humour, tutoriel, éducatif, voyage, sport, animaux, histoire, annonce, promo… "
           "COMPRENDS D'ABORD la demande : sujet, but (informer, vendre, raconter, faire rire, expliquer), public, ton, durée, format, langue ; écris-le dans « understood », et ce que tu as dû supposer dans « assumptions ». "
@@ -402,7 +403,42 @@ def _audio_spec(raw, media: dict) -> dict | None:
         return None
     out["keys"] = raw.get("keys") is not False
     out["duck"] = raw.get("duck") if raw.get("duck") in ("light", "normal", "strong") else "normal"
+    if out.get("music") and m.get("beats"):      # montage au rythme : oui par défaut, coupé si le patron (ou l'IA) dit non
+        out["beat"] = raw.get("beat") is not False
     return out
+
+
+BEAT_SHIFT = 0.4     # une coupe bouge d'au plus 0,4 s pour tomber sur un temps fort
+
+
+def snap_to_beats(scenes: list, beats: list, music_start: float, media: dict) -> None:
+    """Montage au rythme : chaque coupe (fin de scène) glisse sur le temps fort le plus proche de la musique, sans rendre une scène
+    illisible ni plus longue que son film. Les scènes parlées (son du film, voix off) ne bougent jamais : la parole reste entière."""
+    import bisect
+    t = 0.0
+    for sc in scenes:
+        if sc["type"] == "page":
+            return                              # durée réelle connue seulement à la capture : la suite n'est plus calable
+        if sc["type"] == "ai_clip":             # secondes entières imposées par Higgsfield : ne bouge pas
+            t += sc["seconds"]
+            continue
+        end = t + sc["seconds"]
+        if not (sc.get("sound") or sc.get("phrases")):
+            m = music_start + end
+            i = bisect.bisect_left(beats, m)
+            near = min((b for b in beats[max(0, i - 1):i + 1]), key=lambda b: abs(b - m), default=None)
+            if near is not None and abs(near - m) <= BEAT_SHIFT:
+                if sc["type"] == "my_clip":
+                    it = media.get(sc["media"]) or {}
+                    lo, hi = 0.5, min(30.0, (float(it.get("seconds") or 0) - sc["start"]) / sc.get("speed", 1) + sc.get("freeze", 0))
+                else:
+                    lo, hi = SECONDS.get(sc["type"], (0.5, 30))
+                    lo = max(lo, _readable(sc) if sc["type"] in SECONDS else lo)
+                new = round(near - music_start - t, 1)
+                if lo <= new <= hi:
+                    sc["seconds"] = new
+                    end = t + new
+        t = end
 
 
 def _dec(v, lo: float, hi: float, dflt: float) -> float:
@@ -628,6 +664,8 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                         hi = min(hi, (media[sc["media"]]["seconds"] - sc["start"]) / sc.get("speed", 1) + sc.get("freeze", 0))
                     if sc["type"] != "page":
                         sc["seconds"] = round(min(hi, max(sc["seconds"], need)), 1)
+    if au and au.get("beat"):       # après les durées de lecture et de voix : les coupes tombent sur les temps forts
+        snap_to_beats(out, (media or {})[au["music"]]["beats"], au.get("music_start", 0), media or {})
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
         raise ValueError(f"vidéo trop longue (garde-fou technique : {MAX_TOTAL_SECONDS // 3600} heures au maximum)")
     spec = {"format": fmt if fmt in FORMATS else "vertical", "theme": theme if theme in THEMES else "unic", "scenes": out}
@@ -787,6 +825,8 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
     if own:
         video_media.ensure_sound(db)      # son et passages parlés des films envoyés avant cette fonction
         video_media.ensure_looks(db)      # vidéos pas encore regardées (envoyées avant, ou vision en échec) : regardées maintenant
+    if db is not None and any(it["kind"] == "music" for it in media.values()):
+        video_media.ensure_beats(db)      # rythme des musiques envoyées avant cette fonction
     if db is not None and media:
         video_media.ensure_words(db)      # sous-titres automatiques des médias parlés (réglage du patron)
     no_catalog = own and not WANTS_CATALOG.search(" ".join([brief, *changes]))

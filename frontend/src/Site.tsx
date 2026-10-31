@@ -184,7 +184,7 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
         <ul className="vs-list">
           {items.map((m) => (
             <li key={m.id}>
-              <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}
+              <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}{m.kind === "music" && m.bpm ? ` · ${Math.round(m.bpm)} BPM` : ""}
               {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}
                 {m.audio === false ? " · Sans son." : m.talk ? ` · Son : ${m.talk} passage${m.talk > 1 ? "s" : ""} parlé${m.talk > 1 ? "s" : ""} ; silences repérés.` : ""}</small>}
               {(m.kind === "voice" || (m.kind === "clip" && m.audio !== false)) && (m.words
@@ -332,6 +332,11 @@ export function VideoStudio({ say }: { say: Say }) {
               <p className="vs-note">{plan.note}</p>
               {plan.ai && plan.ai.clips + plan.ai.images > 0 && (
                 <p className="vs-status">⚠️ {plan.ai.clips} clip(s) et {plan.ai.images} image(s) générés par l'IA : <b>crédits Higgsfield payants</b>, un média à la fois. Les films IA sont muets dans le montage. Tu peux fermer l'application pendant la génération.</p>
+              )}
+              {typeof shown.audio?.beat === "boolean" && (
+                <label className="vs-check"><input type="checkbox" checked={shown.audio.beat} disabled={busy}
+                  onChange={(e) => { const on = e.target.checked; setPlan((p) => p && { ...p, spec: { ...p.spec, audio: { ...(p.spec.audio || {}), beat: on } } }); }} />
+                  Coupes au rythme de la musique</label>
               )}
               {typeof shown.captions === "boolean" && (
                 <label className="vs-check"><input type="checkbox" checked={shown.captions} disabled={busy}
