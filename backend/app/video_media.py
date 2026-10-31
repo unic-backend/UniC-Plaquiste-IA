@@ -381,9 +381,16 @@ def to_engine(db: Session, spec: dict) -> dict:
     for s in spec.get("scenes") or []:
         s = dict(s)
         ph = s.pop("phrases", None)
-        if s.get("type") == "my_clip":
-            s = {"type": "clip", "url": link(s["media"], "clip"), "seconds": s["seconds"], "start": s.get("start", 0),
-                 **({"overlay": s["overlay"]} if s.get("overlay") else {})}
+        if s.get("type") == "my_clip":   # plan monté par le moteur (scripts/video/edit.py)
+            from app.video_studio import FOCUS
+            eng = {"type": "clip", "url": link(s["media"], "clip"), "seconds": s["seconds"], "start": s.get("start", 0),
+                   **{k: s[k] for k in ("speed", "grade", "zoom", "zoom_amount", "freeze", "transition") if k in s},
+                   **({"overlay": s["overlay"]} if s.get("overlay") else {})}
+            if s.get("focus") in FOCUS:
+                eng["focus"] = {"x": FOCUS[s["focus"]][0], "y": FOCUS[s["focus"]][1]}
+            if s.get("split_media"):
+                eng["split"] = {"url": link(s["split_media"], "clip"), "start": s.get("split_start", 0)}
+            s = eng
         if ph and voice and voice.get("phrases"):
             i, j = ph
             s["voice"], s["voice_at"] = [voice["phrases"][i][0], voice["phrases"][j][1]], 0.25

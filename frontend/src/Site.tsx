@@ -8,10 +8,28 @@ type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
   typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo" };
+/** Montage d'un plan de la vidéo du patron, en mots (vignette, liste des scènes). */
+const GRADE_FR: Record<string, string> = { cinema: "Cinéma", warm: "Chaud", night: "Nuit", crisp: "Net", bw: "Noir et blanc" };
+const GRADE_CSS: Record<string, string> = { cinema: "contrast(1.1) saturate(1.18)", warm: "sepia(.18) saturate(1.2)", night: "brightness(1.12) saturate(1.05) hue-rotate(-8deg)",
+  crisp: "contrast(1.08) saturate(1.1)", bw: "grayscale(1) contrast(1.15)" };
+const ZOOM_FR: Record<string, string> = { in: "Zoom avant", out: "Zoom arrière", punch: "Coup de zoom" };
+const TRANS_FR: Record<string, string> = { cut: "Coupe franche", flash: "Flash", slide: "Glissé" };
+const clipEdits = (c: { [k: string]: unknown }) => {
+  const sp = Number(c.speed) || 1, out: string[] = [];
+  const x = (n: number) => `×${String(n).replace(".", ",")}`;
+  if (sp < 1) out.push(`Ralenti ${x(sp)}`); else if (sp > 1) out.push(`Accéléré ${x(sp)}`);
+  if (typeof c.zoom === "string" && ZOOM_FR[c.zoom]) out.push(ZOOM_FR[c.zoom]);
+  if (typeof c.grade === "string" && GRADE_FR[c.grade]) out.push(GRADE_FR[c.grade]);
+  if (c.split_media) out.push("Avant | après");
+  if (Number(c.freeze) > 0) out.push("Arrêt sur image");
+  if (typeof c.transition === "string" && TRANS_FR[c.transition]) out.push(TRANS_FR[c.transition]);
+  return out;
+};
 const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown }) => {
   const d = c.type === "title" || c.type === "slogan" ? [c.l1, c.l2].filter(Boolean).join(" ") : c.type === "text" || c.type === "checklist" ? String(c.heading || "")
     : ["typewriter", "kinetic", "neon"].includes(c.type) && Array.isArray(c.lines) ? (c.lines as unknown[]).map(String).join(" ") : c.type === "ai_clip" || c.type === "ai_image" ? String(c.prompt || "").slice(0, 60) : c.caption ? String(c.caption) : "";
-  return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
+  const ed = c.type === "my_clip" ? clipEdits(c).join(", ") : "";
+  return `${SCENE_FR[c.type] || c.type}${d ? ` · ${d}` : ""}${ed ? ` · ${ed}` : ""}${c.seconds ? ` · ${c.seconds} s` : ""}`;
 };
 
 const IMG_BASE = "https://www.unicplaquiste.com/images/";
@@ -22,7 +40,7 @@ const items = (s: VideoScene, k: string) => (Array.isArray(s[k]) ? (s[k] as unkn
 const clipFrames = new Map<string, Promise<string>>();
 
 /** Vraie image du passage choisi dans la vidéo du patron (servie avec le code d'accès) ; cadre « Ma vidéo » si elle ne vient pas. */
-function ClipThumb({ id, start }: { id: string; start: number }) {
+function ClipThumb({ id, start, half, grade }: { id: string; start: number; half?: "l" | "r"; grade?: string }) {
   const key = `${id}@${Math.round(start * 2) / 2}`;
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -35,7 +53,7 @@ function ClipThumb({ id, start }: { id: string; start: number }) {
     return () => { live = false; };
   }, [key, id, start]);
   if (failed || !src) return failed ? <b className="f-clip-tag">Ma vidéo</b> : null;
-  return <img className="f-img" src={src} alt="" />;
+  return <img className={`f-img${half ? ` f-half-${half}` : ""}`} src={src} alt="" style={grade && GRADE_CSS[grade] ? { filter: GRADE_CSS[grade] } : undefined} />;
 }
 
 /** Vignette d'une scène : son image finale en petit, aux couleurs de l'ambiance (un aperçu fidèle au contenu, pas le rendu exact du moteur). */
@@ -63,7 +81,14 @@ function SceneFrame({ s }: { s: VideoScene }) {
   if (t === "my_clip") {   // vraie vidéo du patron : texte incrusté éventuel
     const ov = (s.overlay || {}) as { lines?: unknown[] };
     const words = (ov.lines || []).map((x) => frText(x)).filter(Boolean).join(" ");
-    return <><ClipThumb id={String(s.media || "")} start={Number(s.start) || 0} />{words && <span className="f-cap">{words}</span>}</>;
+    const grade = typeof s.grade === "string" ? s.grade : undefined, split = typeof s.split_media === "string" ? s.split_media : "";
+    const eds = clipEdits(s);
+    return <>
+      <ClipThumb id={String(s.media || "")} start={Number(s.start) || 0} half={split ? "l" : undefined} grade={grade} />
+      {split && <><ClipThumb id={split} start={Number(s.split_start) || 0} half="r" grade={grade} /><i className="f-split" aria-hidden /></>}
+      {!!eds.length && <small className="f-chip f-edits">{eds.join(" · ")}</small>}
+      {words && <span className="f-cap">{words}</span>}
+    </>;
   }
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
   const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;

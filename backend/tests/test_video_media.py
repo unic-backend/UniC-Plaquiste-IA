@@ -180,3 +180,43 @@ def test_route_vignette(db):
     with TestClient(main.app) as cl:
         assert cl.get("/api/website/video/media/000000000000/frame?t=1").status_code in (401, 403, 404)
         assert cl.get("/api/website/video/media/..%2Fx/frame").status_code in (401, 403, 404)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_l_ia_monte_ses_films_et_laisse_les_photos(db, tmp_path, monkeypatch):
+    from app import higgsfield
+    clip = _sound(tmp_path / "c.mp4", ["-f", "lavfi", "-i", "testsrc=d=10:s=320x240:r=25", "-pix_fmt", "yuv420p"])
+    a = asyncio.run(vm.add(db, _Up("avant.mp4", clip), "clip"))
+    b = asyncio.run(vm.add(db, _Up("apres.mp4", clip), "clip"))
+    media = vm.items_by_id(db)
+    raw = [{"type": "my_clip", "media": a["id"], "start": 6, "seconds": 30, "speed": 0.25, "grade": "night", "focus": "top", "zoom": "punch", "zoom_amount": 7,
+            "freeze": 1, "transition": "flash", "split_media": b["id"], "split_start": 99},
+           {"type": "my_clip", "media": a["id"], "speed": 3, "grade": "sepia", "focus": "nulle-part", "transition": "fondu", "split_media": "000000000000"}]
+    one, two = vs.build_spec("vertical", raw, [], media=media)["scenes"]
+    assert one["seconds"] == 17.0                                                                     # 4 s de film ×4 au ralenti + 1 s figée : jamais au-delà du fichier
+    assert (one["speed"], one["grade"], one["focus"], one["zoom"], one["zoom_amount"], one["freeze"], one["transition"]) == (0.25, "night", "top", "punch", 1.6, 1.0, "flash")
+    assert one["split_media"] == b["id"] and one["split_start"] == 9.0
+    assert two["speed"] == 3 and not {"grade", "focus", "transition", "split_media"} & set(two)          # inconnu : ignoré
+    spec = {"format": "vertical", "theme": "unic", "scenes": [one, two]}
+    assert vs.build_spec("vertical", spec["scenes"], [], media=media)["scenes"] == spec["scenes"]       # aller-retour stable (appli -> serveur)
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    eng = vm.to_engine(db, spec)["scenes"][0]
+    assert eng["focus"] == {"x": 0.5, "y": 0.2} and eng["split"]["url"].startswith("https://unic.example.com/api/public/video-media/") and eng["split"]["start"] == 9.0
+    p = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "spec.py"
+    mod = importlib.util.spec_from_file_location("video_spec_montage_studio", p)
+    sp = importlib.util.module_from_spec(mod)
+    mod.loader.exec_module(sp)
+    out = sp.clean(vm.to_engine(db, spec))["scenes"][0]                                                # le moteur accepte tout le montage
+    assert (out["speed"], out["grade"], out["zoom"], out["freeze"], out["transition"]) == (0.25, "night", "punch", 1.0, "flash") and out["split"]["start"] == 9.0
+
+    seen = {}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(higgsfield, "status", lambda d: {"connected": False})
+    story = {"scenes": [{"type": "photo", "image": "hero-01.webp"}, {"type": "gallery", "images": ["hero-01.webp", "hero-02.webp"]},
+                        {"type": "kinetic", "lines": ["Dakar"], "image": "hero-01.webp", "reveal": True}, {"type": "my_clip", "media": a["id"], "seconds": 3}]}
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user) or story)
+    p1 = vs.plan(db, "Pub JOJ de 30 s avec mes vidéos", "vertical")
+    assert [s["type"] for s in p1["spec"]["scenes"]] == ["kinetic", "my_clip"] and "image" not in p1["spec"]["scenes"][0]   # ni photos ni galerie du site
+    assert "Photos (noms exacts)" not in seen["user"] and "MONTE ses films" in seen["system"]
+    p2 = vs.plan(db, "Pub JOJ avec mes vidéos et quelques photos du site", "vertical")
+    assert "Photos (noms exacts)" in seen["user"] and "my_clip" in [s["type"] for s in p2["spec"]["scenes"]]   # demandées : permises

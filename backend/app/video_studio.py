@@ -46,6 +46,13 @@ FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan")   # effets �
 OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon")         # textes qu'on peut incruster sur un clip IA
 TYPE_CPS = 14                                                         # machine à écrire : 14 caractères/s (scenes.html)
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")
+# Montage des vidéos du patron (moteur : scripts/video/edit.py) : l'IA TRAVAILLE ses films (vitesse, couleurs, cadrage, zoom, transitions…).
+GRADES = ("cinema", "warm", "night", "crisp", "bw")
+ZOOMS = ("in", "out", "punch")
+TRANSITIONS = ("fade", "cut", "flash", "slide")
+FOCUS = {"center": (0.5, 0.5), "top": (0.5, 0.2), "bottom": (0.5, 0.8), "left": (0.2, 0.5), "right": (0.8, 0.5),
+         "top_left": (0.2, 0.2), "top_right": (0.8, 0.2), "bottom_left": (0.2, 0.8), "bottom_right": (0.8, 0.8)}
+WANTS_CATALOG = re.compile(r"\bphotos?\b|\bimages? du site\b|galerie|portfolio|d[ée]filement|page du site", re.I)
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.webp$")
@@ -70,6 +77,17 @@ SCENE_PROPS = {
     "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip"]},
     "media": {"type": "string", "description": "my_clip : identifiant EXACT d'une vidéo du patron (liste « Médias du patron »)."},
     "start": {"type": "number", "description": "my_clip : seconde de la vidéo où commencer (choisis le meilleur passage), 0 par défaut."},
+    "speed": {"type": "number", "description": "my_clip : vitesse (0.25 à 4) : 0.5 ralenti sur un geste précis, 2 à 4 accéléré (timelapse d'une pose longue) ; 1 par défaut."},
+    "grade": {"type": "string", "enum": list(GRADES), "description": "my_clip : étalonnage : cinema (contraste, tons chauds/froids, vignettage), warm (intérieur chaleureux), "
+              "night (relève une vidéo de nuit), crisp (vidéo terne ou floue : plus nette), bw (noir et blanc, souvenir)."},
+    "focus": {"type": "string", "enum": list(FOCUS), "description": "my_clip : où est le sujet dans le film (d'après « ce qu'on voit ») : le cadre et le zoom se placent dessus."},
+    "zoom": {"type": "string", "enum": list(ZOOMS), "description": "my_clip : in = zoom avant lent, out = zoom arrière lent, punch = coup de zoom rapide sur un détail (finition)."},
+    "zoom_amount": {"type": "number", "description": "my_clip : force du zoom, 1.1 à 1.5 (1.2 par défaut)."},
+    "freeze": {"type": "number", "description": "my_clip : arrêt sur image à la fin du plan, en secondes (0.5 à 2), pour laisser lire un texte fort."},
+    "transition": {"type": "string", "enum": list(TRANSITIONS), "description": "my_clip : comment ce plan ENTRE : fade (fondu), cut (coupe franche, même lieu), "
+                   "flash (éclair blanc, changement fort), slide (pousse le plan précédent)."},
+    "split_media": {"type": "string", "description": "my_clip : écran partagé AVANT | APRÈS : identifiant d'une 2e vidéo du patron, affichée à droite (ex. chantier brut | fini)."},
+    "split_start": {"type": "number", "description": "my_clip : seconde de départ dans la 2e vidéo de l'écran partagé."},
     "phrases": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
                 "description": "Voix off : [première, dernière] phrase (numéros #) dites pendant CETTE scène ; chaque phrase une seule fois, dans l'ordre ; la scène dure au moins le temps des phrases."},
     "prompt": {"type": "string", "description": "ai_clip / ai_image : description visuelle détaillée de ce qu'on doit voir (sujet, décor, lumière, mouvement de caméra), 8 à 1500 caractères, sans texte écrit dans l'image."},
@@ -92,7 +110,7 @@ SCENE_PROPS = {
     "place": {"type": "string", "description": "kinetic : texte à côté de l'étiquette (ex. un lieu, 28 car.)."},
     "checks": {"type": "array", "items": {"type": "string"}, "description": "checklist : 1 à 5 éléments cochés un à un sur verre dépoli (40 car.)."},
     "reveal": {"type": "boolean", "description": "typewriter / kinetic / checklist / neon avec une photo (image) derrière : la photo apparaît en points-pixels."},
-    "overlay": {"type": "object", "description": "ai_clip : texte incrusté SUR le film (type typewriter, kinetic, checklist ou neon, avec ses champs lines / tag / place / heading / checks).",
+    "overlay": {"type": "object", "description": "ai_clip / my_clip : texte incrusté SUR le film (type typewriter, kinetic, checklist ou neon, avec ses champs lines / tag / place / heading / checks).",
                 "properties": {"type": {"type": "string", "enum": list(OVERLAY_TYPES)}, "lines": {"type": "array", "items": {"type": "string"}}, "tag": {"type": "string"},
                                "place": {"type": "string"}, "heading": {"type": "string"}, "checks": {"type": "array", "items": {"type": "string"}}}, "required": ["type"]},
     "brand": {"type": "boolean", "description": "outro / slogan : true pour la carte de l'entreprise UniC Plaquiste (nom, téléphone, site) — seulement si le sujet la concerne."},
@@ -150,6 +168,11 @@ SYSTEM_MEDIA = (" MÉDIAS DU PATRON disponibles (liste fournie) : ses VRAIES vid
                 "un passage net qui montre le sujet, jamais flou, sombre ou vide ; une longue vidéo peut fournir PLUSIEURS scènes my_clip à des instants différents. "
                 "Ses vidéos sont le CŒUR du montage : la majorité des scènes montrent ses vidéos, titres incrustés dessus (overlay) ; "
                 "les photos du catalogue ne viennent qu'en complément, jamais pour un lieu que ses vidéos montrent déjà. "
+                "MONTE ses films comme un monteur professionnel, jamais un simple panoramique : plans courts (2 à 4 s) pris à des instants différents ; "
+                "speed 0.5 sur un geste précis (pose d'une plaque, finition), 2 à 4 pour résumer une longue pose ; grade cinema par défaut, night pour la nuit, "
+                "warm pour un intérieur, crisp pour un film terne ; focus sur le sujet décrit ; zoom punch sur un détail fort, in lent sur une vue large ; "
+                "transition cut entre deux plans du même lieu, flash pour changer de lieu, slide pour enchaîner, fade pour ouvrir et fermer ; "
+                "split_media pour un avant | après côte à côte ; freeze en fin de plan sous un texte important. Varie : pas deux plans de suite avec les mêmes réglages. "
                 "Avec une voix : mets audio.voice, répartis TOUTES ses phrases dans l'ordre sur les scènes (phrases = [première, dernière]) et donne à chaque scène au moins la durée de ses phrases ; "
                 "les textes à l'écran complètent la voix sans la répéter mot pour mot. Avec une musique : audio.music (music_start pour démarrer au bon moment). "
                 "audio.keys = true quand il y a du texte tapé. N'utilise que les identifiants de la liste.")
@@ -336,6 +359,46 @@ def _audio_spec(raw, media: dict) -> dict | None:
     return out
 
 
+def _dec(v, lo: float, hi: float, dflt: float) -> float:
+    """Comme _num, au centième (vitesse 0,25 ne devient pas 0,2)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return dflt
+    return round(min(hi, max(lo, f)), 2) if math.isfinite(f) else dflt
+
+
+def _clip_edits(sc: dict, secs: float, speed: float, freeze: float, media: dict | None) -> dict:
+    """Montage d'un plan de la vidéo du patron, seulement ce qui change quelque chose (valeurs bornées, inconnu ignoré)."""
+    e: dict = {}
+    if speed != 1:
+        e["speed"] = speed
+    if 0 < freeze <= secs - 1:
+        e["freeze"] = freeze
+    if sc.get("grade") in GRADES:
+        e["grade"] = sc["grade"]
+    if sc.get("focus") in FOCUS and sc["focus"] != "center":
+        e["focus"] = sc["focus"]
+    if sc.get("zoom") in ZOOMS:
+        e["zoom"], e["zoom_amount"] = sc["zoom"], _dec(sc.get("zoom_amount"), 1.05, 1.6, 1.2)
+    if sc.get("transition") in TRANSITIONS and sc["transition"] != "fade":
+        e["transition"] = sc["transition"]
+    two = (media or {}).get(str(sc.get("split_media") or ""))
+    if two and two["kind"] == "clip" and two["seconds"] >= 1:
+        e["split_media"], e["split_start"] = two["id"], _num(sc.get("split_start"), 0, max(0.0, two["seconds"] - 1), 0)
+    return e
+
+
+def without_catalog(scenes: list) -> list:
+    """Le patron a envoyé SES vidéos et n'a pas demandé de photos : ni photos du site, ni galerie, ni défilement de page ; pas de photo derrière les textes."""
+    out = []
+    for sc in scenes or []:
+        if not isinstance(sc, dict) or sc.get("type") in ("photo", "gallery", "page"):
+            continue
+        out.append({k: v for k, v in sc.items() if k not in ("image", "reveal")})
+    return out
+
+
 def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: str = "unic", ai: dict | None = None,
                media: dict | None = None, audio=None) -> dict:
     """Scénario sûr (forme du moteur) à partir de scènes proposées par Claude ou renvoyées par l'appli. Ce qui sort du catalogue est écarté."""
@@ -404,7 +467,11 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
             it = (media or {}).get(str(sc.get("media") or ""))
             if it and it["kind"] == "clip" and it["seconds"] >= 1:
                 start = _num(sc.get("start"), 0, max(0.0, it["seconds"] - 1), 0)
-                clip = {"type": t, "media": it["id"], "start": start, "seconds": _num(secs, 1, min(30.0, it["seconds"] - start), min(5.0, it["seconds"] - start))}
+                speed = _dec(sc.get("speed"), 0.25, 4, 1)
+                freeze = _dec(sc.get("freeze"), 0, 3, 0)
+                room = (it["seconds"] - start) / speed + freeze         # le plan ne dépasse jamais ce que le fichier contient
+                clip = {"type": t, "media": it["id"], "start": start, "seconds": _num(secs, 1, min(30.0, room), round(min(5.0, room), 1))}
+                clip.update(_clip_edits(sc, clip["seconds"], speed, freeze, media))
                 ov = sc.get("overlay")
                 if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:
                     o = _fx_scene(ov, ov["type"], set())
@@ -443,7 +510,7 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
                     need = round(ph[j][1] - ph[i][0] + 0.6, 1)
                     hi = SECONDS[sc["type"]][1] if sc["type"] in SECONDS else 30
                     if sc["type"] == "my_clip":
-                        hi = min(hi, media[sc["media"]]["seconds"] - sc["start"])
+                        hi = min(hi, (media[sc["media"]]["seconds"] - sc["start"]) / sc.get("speed", 1) + sc.get("freeze", 0))
                     if sc["type"] != "page":
                         sc["seconds"] = round(min(hi, max(sc["seconds"], need)), 1)
     if _duration({"scenes": out}) > MAX_TOTAL_SECONDS:
@@ -594,11 +661,17 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
               f"Quotas IA du jour : {ai['clips']} clip(s), {ai['images']} image(s)." if ai else "Scènes IA indisponibles (Higgsfield non connecté) : n'utilise que les scènes de montage."]
     if own:
         video_media.ensure_looks(db)      # vidéos pas encore regardées (envoyées avant, ou vision en échec) : regardées maintenant
+    no_catalog = own and not WANTS_CATALOG.search(" ".join([brief, *changes]))
+    if no_catalog:      # ses vidéos d'abord : les photos du site ne sont pas proposées (elles reviennent s'il les demande)
+        parts = [x for x in parts if not x.startswith("Photos (noms exacts)")]
+        parts.append("Photos du catalogue et défilement du site : NON (le patron a envoyé ses vidéos et ne les demande pas).")
     cat = video_media.catalog_text(db) if db is not None else ""
     if cat:
         parts.append("[Médias du patron — identifiants exacts]\n" + cat)
     got = _ask(SYSTEM + (SYSTEM_AI if ai else "") + (SYSTEM_MEDIA if cat else ""), "\n".join(parts), _tool(bool(ai)))
     fmt_out = got.get("format") if got.get("format") in FORMATS else fmt
+    if no_catalog:
+        got["scenes"] = without_catalog(got.get("scenes") or [])
     try:
         spec = build_spec(fmt_out, got.get("scenes") or [], names, forced or str(got.get("theme") or (cur or {}).get("theme") or "unic"), ai=ai,
                           media=media, audio=got.get("audio"))
