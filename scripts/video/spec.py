@@ -131,6 +131,8 @@ def _edits(s: dict, secs: float) -> dict:
     speed = _secs(s.get("speed"), 0.25, 4, 1)
     if speed != 1:
         e["speed"] = speed
+    elif s.get("sound") is True:      # son du film (parole, ambiance) : seulement à vitesse normale (un ralenti parlé serait déformé)
+        e["sound"] = True
     if s.get("grade") in GRADES:
         e["grade"] = s["grade"]
     f = s.get("focus")
@@ -165,7 +167,7 @@ def _scene(s: dict) -> dict:
             raise ValueError("scène texte sans contenu")
         return {"type": t, "seconds": _secs(s.get("seconds"), 3, 10, 5), "heading": _txt(s.get("heading"), 40), "bullets": b}
     if t == "clip":
-        out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 30, 5), "url": _media_url(s.get("url")), "start": _secs(s.get("start"), 0, 36000, 0)}
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 0.5, 30, 5), "url": _media_url(s.get("url")), "start": _secs(s.get("start"), 0, 36000, 0)}   # 0,5 s : plans collés d'une coupe des silences
         ov = s.get("overlay")
         if isinstance(ov, dict) and ov.get("type") in OVERLAY_TYPES:   # texte incrusté sur le film : même durée que le clip
             out["overlay"] = {**_fx(ov, ov["type"], overlay=True), "seconds": out["seconds"]}

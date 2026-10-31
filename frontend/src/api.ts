@@ -223,7 +223,7 @@ export type VideoPlan = {
 };
 export type VideoMedia = { id: string; kind: "clip" | "music" | "voice"; name: string; seconds: number; size: number; at: number;
   phrases?: { i: number; start: number; end: number; text: string | null }[];
-  summary?: string; looks?: { t: number; text: string }[] };   // vidéo : ce que l'IA a vu (vision), instant par instant
+  summary?: string; looks?: { t: number; text: string }[]; audio?: boolean; talk?: number };   // vidéo : ce que l'IA a vu (vision), instant par instant
 export type VideoState = { state: string; detail: string; url?: string; can_retry?: boolean; ai?: { done: number; total: number } };
 export type VideoAIClip = {
   state: string; detail: string; duration?: number; format?: string; kind?: string;

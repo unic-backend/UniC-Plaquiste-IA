@@ -1,4 +1,5 @@
-"""Bande son d'un tronçon : musique (baissée automatiquement sous la voix), voix découpée scène par scène, son du clavier des textes tapés.
+"""Bande son d'un tronçon : musique (baissée automatiquement sous la voix et sous la parole filmée), voix découpée scène par scène,
+son gardé des films, son du clavier des textes tapés.
 
 Pas de dépendance en plus : ffmpeg pour le mélange, la bibliothèque standard pour le clavier. Le clavier suit EXACTEMENT le rythme
 des scènes « machine à écrire » de scenes.html (14 caractères/s, 0,3 s entre deux lignes) : le son tombe sur chaque lettre affichée.
@@ -101,36 +102,54 @@ def voice_pieces(scenes: list[tuple[float, float, dict]], audio: dict, chunk_off
     return [(0.0, -local, 3600.0)]
 
 
+def has_audio(path: Path) -> bool:
+    """Le fichier a-t-il une piste son ? (un film sans son ne doit pas faire échouer le mélange)"""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(out.strip())
+
+
 def build(audio: dict, scenes: list[tuple[float, float, dict]], files: dict, chunk_offset: float, total: float,
-          work: Path, fade_in: bool, fade_out: bool) -> Path:
-    """Fabrique la bande son WAV du tronçon. `files` : chemins locaux téléchargés {"music": ..., "voice": ...}."""
+          work: Path, fade_in: bool, fade_out: bool, clips: list[tuple[float, Path, float, float]] | None = None) -> Path:
+    """Fabrique la bande son WAV du tronçon. `files` : chemins locaux téléchargés {"music": ..., "voice": ...}.
+    `clips` : son gardé des films [(instant dans le tronçon, fichier, début dans le fichier, durée)] ; mélangé avec la voix :
+    la musique baisse aussi sous la parole filmée."""
     inputs, chains, mix = [], [], []
     if files.get("music"):
         m = audio["music"]
         inputs += ["-ss", f"{float(m.get('start') or 0) + chunk_offset:.3f}", "-t", f"{total + 0.5:.3f}", "-i", str(files["music"])]
         chains.append(f"[{inputs.count('-i') - 1}:a]aformat=sample_rates={SR}:channel_layouts=stereo,volume={0.45 * float(m.get('volume', 1)):.3f}[mus]")
     pieces = voice_pieces(scenes, audio, chunk_offset, total) if files.get("voice") else []
-    vin = None
+    labels = []
     if pieces:
         inputs += ["-i", str(files["voice"])]
         vin = inputs.count("-i") - 1
         vol = float(audio["voice"].get("volume", 1))
-        labels = []
         for k, (at, a, b) in enumerate(pieces):
             ms = int(round(at * 1000))
             chains.append(f"[{vin}:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,aformat=sample_rates={SR}:channel_layouts=stereo,"
                           f"afade=t=in:d=0.03,adelay={ms}|{ms},volume={vol:.3f}[v{k}]")
             labels.append(f"[v{k}]")
+    for k, (at, path, a, dur) in enumerate(clips or []):     # son des films : fondus très courts aux coupes (pas de clic)
+        inputs += ["-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(path)]
+        ms = int(round(at * 1000))
+        chains.append(f"[{inputs.count('-i') - 1}:a]aformat=sample_rates={SR}:channel_layouts=stereo,afade=t=in:d=0.04,"
+                      f"afade=t=out:st={max(0.0, dur - 0.06):.3f}:d=0.06,adelay={ms}|{ms}[c{k}]")
+        labels.append(f"[c{k}]")
+    if labels:
         chains.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0,asplit=2[vox][sc0]")
         chains.append("[sc0]apad[sc]")   # sans fin : sinon la musique s'arrêterait avec la dernière phrase
     if files.get("music"):
-        if pieces:
+        if labels:
             ratio = DUCK.get(audio.get("duck", "normal"), 6)
             chains.append(f"[mus][sc]sidechaincompress=threshold=0.02:ratio={ratio}:attack=40:release=450[mduck]")
             mix.append("[mduck]")
         else:
             mix.append("[mus]")
-    if pieces:
+    if labels:
         mix.append("[vox]")
     times = [t for start, secs, sc in scenes for t in key_times(sc, start, secs)] if audio.get("keys") else []
     if times:
