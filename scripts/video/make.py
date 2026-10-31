@@ -74,6 +74,23 @@ try:
                          **{k: sc[k] for k in ("zoom", "zoom_amount", "focus", "transition", "layout") if k in sc}})   # zoom, transitions, écran divisé : compose.py
         else:
             segs.append({"kind": "html", "out": str(d), "frames": round(sc["seconds"] * FPS), "scene": sc})
+    def lottie_data(fx: dict, tag: str) -> None:   # animation Lottie : données lues ici (moteur ou lien du patron), nettoyées, puis passées à Chrome
+        if fx.get("type") != "lottie":
+            return
+        if fx.get("anim"):
+            data = json.load(open(os.path.join(sp.LOTTIE_DIR, fx["anim"] + ".json")))
+        else:
+            f = work / f"lottie-{tag}.json"
+            fetch_media(fx["url"], f)
+            if f.stat().st_size > sp.MAX_LOTTIE_BYTES:
+                raise SystemExit("animation Lottie trop lourde (3 Mo au plus)")
+            data = json.load(open(f))
+        fx["data"] = sp.sanitize_lottie(data)
+    for i, (sc, sg) in enumerate(zip(cfg["scenes"], segs)):
+        if sg["kind"] == "html":
+            lottie_data(sg["scene"], str(i))
+        for j, pnl in enumerate(sg.get("panels") or []):
+            lottie_data(pnl[2], f"{i}-{j}")
     def run_scenes(only: str, n: int):
         procs = [subprocess.Popen(["node", str(here / "scenes.mjs"), str(work / "plan.json")], env={**env, "ONLY": only, "WORKER": str(k), "WORKERS": str(n)}) for k in range(n)]
         if any([p.wait() for p in procs]):

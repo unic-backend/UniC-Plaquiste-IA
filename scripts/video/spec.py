@@ -17,9 +17,13 @@ IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
-         "counter", "flow", "wave", "chat", "badge")
+         "counter", "flow", "wave", "chat", "badge", "lottie")
 # Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge ; en scène, en incrustation ou en haut d'un écran divisé.
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge")
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
+# Animations vectorielles Lottie (lottie-web « light », sans expressions) : celles du moteur (dossier lottie/) ou celles du patron (lien https).
+LOTTIE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lottie")
+BUILTIN_LOTTIE = tuple(sorted(f[:-5] for f in os.listdir(LOTTIE_DIR) if f.endswith(".json"))) if os.path.isdir(LOTTIE_DIR) else ()
+MAX_LOTTIE_BYTES = 3 * 1024 * 1024
 FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan", *PANEL_TYPES)
 LAYOUTS = ("full", "split")      # split : la personne filmée en bas, les animations en haut (sous-titres à la jonction)
 MAX_PANELS = 400
@@ -129,6 +133,14 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
         if len(steps) < 2:
             raise ValueError("schéma : au moins 2 étapes")
         out = {"type": t, "seconds": _secs(s.get("seconds"), 2, 12, 1.2 + 0.8 * len(steps)), "steps": steps}
+    elif t == "lottie":
+        if s.get("anim") in BUILTIN_LOTTIE:
+            src = {"anim": s["anim"]}
+        elif s.get("url"):
+            src = {"url": _media_url(s["url"])}
+        else:
+            raise ValueError("animation : ni animation du moteur ni lien")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 1.5, 10, 2.5), **src, "lines": _lines_of(s.get("lines"), 24, 2), "loop": s.get("loop") is True}
     elif t in ("wave", "chat", "badge"):
         lines = _lines_of(s.get("lines"), 30 if t == "chat" else 24, 2)
         if t != "wave" and not lines:
@@ -140,9 +152,34 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
             raise ValueError("slogan vide")
         out = {"type": t, "seconds": _secs(s.get("seconds"), 4, 12, 7), "l1": l1, "l2": l2, "brand": _txt(s.get("brand"), 30).upper(),
                "lines": _lines_of(s.get("lines"), 40, 4)}
-    if not overlay and t != "slogan" and (s.get("url") or s.get("image")):
+    if not overlay and t not in ("slogan", "lottie") and (s.get("url") or s.get("image")):   # le lien d'une animation n'est pas un fond
         out["bg"] = _media_url(s.get("url")) if s.get("url") else _img(s.get("image"))
         out["reveal"] = "dots" if s.get("reveal") == "dots" else ""
+    return out
+
+
+def sanitize_lottie(d) -> dict:
+    """Animation Lottie sûre pour le rendu : structure vérifiée, AUCUNE ressource externe (images par lien, polices distantes) ;
+    seules les images intégrées (data:) et les compositions internes restent. Les expressions ne s'exécutent pas (lottie « light »)."""
+    if not isinstance(d, dict) or not isinstance(d.get("layers"), list) or not d["layers"] or len(d["layers"]) > 500:
+        raise ValueError("animation Lottie invalide")
+    try:
+        fr, ip, op, w, h = (float(d[k]) for k in ("fr", "ip", "op", "w", "h"))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("animation Lottie invalide")
+    if not (1 <= fr <= 120 and 0 < op - ip <= fr * 120 and 0 < w <= 8000 and 0 < h <= 8000):
+        raise ValueError("animation Lottie hors limites")
+    out = dict(d)
+    assets = []
+    for a in d.get("assets") or []:
+        if not isinstance(a, dict):
+            continue
+        if "layers" in a:                                   # composition interne
+            assets.append(a)
+        elif str(a.get("p") or "").startswith("data:image/") and not a.get("u"):
+            assets.append(a)                                # image intégrée ; un lien vers l'extérieur est écarté
+    out["assets"] = assets
+    out.pop("fonts", None)                                  # polices distantes : jamais chargées
     return out
 
 

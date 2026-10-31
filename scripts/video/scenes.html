@@ -1,5 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Barlow:wght@500;600&family=Special+Elite&display=block">
+<script src="lottie/lottie_light.min.js"></script>
 <style>
 /* Thèmes : couleur de fond (--royal), texte (--fg), accent (--gold), nuances (--soft), halos (--g1, --g2), cartes de chiffres (--cardbg/--cardfg) */
 :root,[data-theme="unic"]{--royal:#02083a;--fg:#fff;--soft:#ffefa3;--gold:#ffc400;--g1:#14307f;--g2:#3a2d00;--cardbg:#ffefa3;--cardfg:#02083a;--u:calc(min(100vw,100vh)/360)}
@@ -112,6 +113,10 @@ html.split #cap{top:45%;transform:translateY(-50%)}
 .pnb .ci{position:relative;display:flex;align-items:center;justify-content:center;width:calc(var(--u)*96);height:calc(var(--u)*96);border-radius:50%;background:var(--gold);color:var(--royal);font-family:Anton,Impact,sans-serif}
 .pnb .ci s{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold);text-decoration:none}
 .pnb b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
+.pnl{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*8);width:100%}
+.pnl .lt{flex:none}
+.pnl b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
+.pnl small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--soft);text-transform:uppercase}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
   border-radius:calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 93%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
@@ -158,6 +163,7 @@ const capDraw = (t, u) => {
 };
 
 window.setup = sc => {
+  if (LOT) { LOT.destroy(); LOT = null; }
   S = sc; A = []; CAPS = Array.isArray(sc.caps) ? sc.caps : []; $("#cap").style.display = "none";
   SPLIT = sc.layout === "split"; document.documentElement.classList.toggle("split", SPLIT); const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
   const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
@@ -187,7 +193,7 @@ window.setup = sc => {
     A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`;
       const mins = { e1: 34, e2: 20, e4: 14 }, k = Object.keys(mins).find(c => e.classList.contains(c));
       if (k) fitLine(e, W() - 48 * u, mins[k] * u); else fit(e, W() - 48 * u); }); fitH(box, u);
-  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan", "counter", "flow", "wave", "chat", "badge"].includes(T)) {
+  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan", "counter", "flow", "wave", "chat", "badge", "lottie"].includes(T)) {
     fxSetup(sc, root, u);
   }
 };
@@ -330,7 +336,8 @@ function fxDraw(sc, t, dur, u) {
     A.hr.style.transform = `scaleX(${eo(ramp(t, 1.6, 2.2))})`; if (A.br) A.br.style.opacity = eo(ramp(t, 1.9, 2.4)); }
 }
 // ---------- panneaux animés (motion design) ----------
-const PANELS = ["counter", "flow", "wave", "chat", "badge"];
+const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie"];
+let LOT = null;   // animation Lottie en cours (une à la fois ; détruite à chaque nouvelle scène)
 const sfx = x => x ? (/^[+×]/.test(x) ? x : "\u00a0" + x) : "";   // « 0 € », « 98 % », mais « 180+ »
 const prng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };   // déterministe : même image à chaque rendu
 function panelSetup(sc, box, u) {
@@ -353,6 +360,13 @@ function panelSetup(sc, box, u) {
     const h = el("div", "pnh", "", box), bu = el("div", "bu", "", h); A.pn.dots = [0, 1, 2].map(() => el("i", "", "", bu)); A.pn.bu = bu;
     const inp = el("div", "in", "", h); inp.style.fontSize = 24 * u + "px"; A.pn.tx = el("em", "", "", inp); A.pn.ok = el("span", "", "➤", inp); A.pn.inp = inp;
     A.pn.nt = L[1] ? el("div", "nt", fr(L[1]), h) : null; if (A.pn.nt) A.pn.nt.style.fontSize = 14 * u + "px";
+  } else if (T === "lottie") {   // animation vectorielle : données nettoyées par make.py (aucune ressource externe), image choisie par le temps
+    const w = el("div", "pnl", "", box), c = el("div", "lt", "", w), side = Math.min(W() * .62, H() * .6);
+    c.style.width = c.style.height = side + "px";
+    if (window.lottie && sc.data) { LOT = lottie.loadAnimation({ container: c, renderer: "svg", loop: false, autoplay: false, animationData: JSON.parse(JSON.stringify(sc.data)),
+      rendererSettings: { preserveAspectRatio: "xMidYMid meet" } }); A.pn.n = Math.max(1, sc.data.op - sc.data.ip); A.pn.fr = sc.data.fr; }
+    A.pn.w = w; A.pn.t = L[0] ? el("b", "", fr(L[0]), w) : null; if (A.pn.t) { A.pn.t.style.fontSize = 34 * u + "px"; fit(A.pn.t, W() - 48 * u); }
+    A.pn.s = L[1] ? el("small", "", fr(L[1]), w) : null; if (A.pn.s) { A.pn.s.style.fontSize = 14 * u + "px"; fit(A.pn.s, W() - 48 * u); }
   } else if (T === "badge") {
     const b = el("div", "pnb", "", box), ci = el("div", "ci", "", b); ci.style.fontSize = 50 * u + "px"; ci.textContent = [...(L[0] || "?").trim()][0].toUpperCase();
     A.pn.rings = [0, 1].map(() => el("s", "", "", ci)); A.pn.ci = ci;
@@ -383,6 +397,10 @@ function panelDraw(sc, t, dur, u) {
     const msg = L[0] || "", nch = cl(Math.floor((t - .8) * CPS), 0, msg.length); P.tx.textContent = msg.slice(0, nch);
     const sent = t >= .8 + msg.length / CPS + .35; P.ok.textContent = sent ? "✓" : "➤"; P.ok.style.color = sent ? "var(--gold)" : "var(--fg)";
     if (P.nt) { const a = .8 + msg.length / CPS + .55, kn = eo(ramp(t, a, a + .35)); fx(P.nt, kn, (1 - kn) * 10 * u, .9 + .1 * kn); }
+  } else if (T === "lottie") {
+    if (LOT) { const f = t * P.fr; LOT.goToAndStop(sc.loop ? f % P.n : Math.min(P.n - 1, f), true); }
+    if (P.t) { const k = eo(ramp(t, .35, .8)); fx(P.t, k, (1 - k) * 14 * u); }
+    if (P.s) { const k = eo(ramp(t, .55, 1)); fx(P.s, k, (1 - k) * 10 * u); }
   } else if (T === "badge") {
     const k = eo(ramp(t, .05, .45)); fx(P.ci, k, 0, .4 + .6 * k);
     P.rings.forEach((r, i) => { const p = ((t - .3 - i * .6) % 1.2 + 1.2) % 1.2 / 1.2; r.style.transform = `scale(${1 + p * .8})`; r.style.opacity = t < .3 + i * .6 ? 0 : (1 - p) * .8; });

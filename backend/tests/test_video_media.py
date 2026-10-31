@@ -423,3 +423,29 @@ def test_coupes_sur_les_temps_forts():
     assert off["audio"]["beat"] is False and [s["seconds"] for s in off["scenes"]] == [3.0, 2.9, 3.0, 4.0]
     plain = {**music, "beats": []}
     assert "beat" not in vs.build_spec("vertical", raw, [], media={**media, music["id"]: plain}, audio={"music": music["id"]})["audio"]
+
+
+def test_animation_lottie_du_patron(db, monkeypatch):
+    lot = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "video" / "lottie" / "check.json").read_bytes()
+    a = asyncio.run(vm.add(db, _Up("validé.json", lot), "lottie"))
+    assert a["kind"] == "lottie" and a["seconds"] == 1.5
+    with pytest.raises(vm.MediaError):
+        asyncio.run(vm.add(db, _Up("x.json", b'{"pas": "lottie"}'), "lottie"))
+    assert "animation " + a["id"] in vm.catalog_text(db) and "« validé »" in vm.catalog_text(db)
+    assert set(vs.BUILTIN_LOTTIE) == {"check", "spark", "arrow", "pin", "pulse"}
+    clip = {"id": "c" * 12, "kind": "clip", "seconds": 10.0, "audio": True, "ext": ".mp4", "token": "t" * 32}
+    media = {**vm.items_by_id(db), clip["id"]: clip}
+    raw = [{"type": "lottie", "media": a["id"], "lines": ["Devis validé"]}, {"type": "lottie", "anim": "pin", "loop": True},
+           {"type": "lottie", "media": "000000000000"},                                                           # inconnue : écartée
+           {"type": "my_clip", "media": clip["id"], "seconds": 4, "layout": "split", "panels": [{"at": 1, "type": "lottie", "media": a["id"]}, {"at": 2, "type": "lottie", "anim": "spark"}]}]
+    spec = vs.build_spec("vertical", raw, [], media=media)
+    s0, s1, s2 = spec["scenes"]
+    assert s0["media"] == a["id"] and s1["anim"] == "pin" and s1["loop"] is True and [p.get("media") or p.get("anim") for p in s2["panels"]] == [a["id"], "spark"]
+    assert vs.build_spec("vertical", spec["scenes"], [], media=media)["scenes"] == spec["scenes"]
+    items = vm._load(db) + [clip]
+    monkeypatch.setattr(vm, "_load", lambda d: items)
+    monkeypatch.setattr(vm.settings, "unic_public_url", "https://unic.example.com")
+    e0, e1, e2 = vm.to_engine(db, spec)["scenes"]
+    assert e0["url"].startswith("https://unic.example.com/api/public/video-media/") and "media" not in e0 and e1["anim"] == "pin"
+    assert e2["panels"][0][2]["url"] == e0["url"] and e2["panels"][1][2]["anim"] == "spark"                    # même lien secret, ouvert pour la fabrication
+    assert vm.media_type(pathlib.Path("x.json")) == "application/json"

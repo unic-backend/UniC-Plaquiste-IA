@@ -32,8 +32,9 @@ KINDS = {   # (taille maximale en Mo, extensions acceptées)
     "clip": (250, (".mp4", ".mov", ".m4v", ".webm")),
     "music": (40, (".mp3", ".m4a", ".aac", ".wav", ".ogg")),
     "voice": (40, (".mp3", ".m4a", ".aac", ".wav", ".ogg")),
+    "lottie": (3, (".json",)),                 # animation vectorielle (LottieFiles…), jouée par le moteur
 }
-KIND_FR = {"clip": "Vidéo", "music": "Musique", "voice": "Voix"}
+KIND_FR = {"clip": "Vidéo", "music": "Musique", "voice": "Voix", "lottie": "Animation"}
 MAX_LIBRARY_BYTES = 3 * 1024 ** 3      # garde-fou du disque (5 Go sur Render)
 MAX_ITEMS = 300
 OPEN_HOURS = 72                        # durée d'ouverture d'un lien après le lancement d'une fabrication
@@ -79,6 +80,19 @@ def _save(db: Session, items: list[dict]) -> None:
     else:
         row.value = value
     db.flush()
+
+
+def lottie_seconds(path: Path) -> float:
+    """Durée d'une animation Lottie, si c'en est une vraie et sûre (aucune ressource externe, structure valide) ; 0 sinon."""
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+        fr, ip, op = float(d["fr"]), float(d["ip"]), float(d["op"])
+        w, h = float(d["w"]), float(d["h"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return 0.0
+    if not (isinstance(d.get("layers"), list) and d["layers"] and len(d["layers"]) <= 500 and 1 <= fr <= 120 and 0 < op - ip <= fr * 120 and 0 < w <= 8000 and 0 < h <= 8000):
+        return 0.0
+    return round((op - ip) / fr, 2)
 
 
 def probe_seconds(path: Path) -> float:
@@ -535,10 +549,11 @@ async def add(db: Session, upload, kind: str, script: str = "") -> dict:
                 raise MediaError(f"{KIND_FR[kind]} trop volumineuse ({max_mb} Mo maximum)." if size > limit
                                  else "Espace des médias plein (3 Go) : retire des médias avant d'en ajouter.", 413)
             f.write(chunk)
-    secs = probe_seconds(dest)
+    secs = lottie_seconds(dest) if kind == "lottie" else probe_seconds(dest)
     if secs <= 0:
         dest.unlink(missing_ok=True)           # fichier illisible : jamais enregistré
-        raise MediaError("Fichier illisible : envoie une vraie vidéo ou un vrai fichier audio.")
+        raise MediaError("Animation illisible : envoie un fichier Lottie (.json) de LottieFiles." if kind == "lottie"
+                         else "Fichier illisible : envoie une vraie vidéo ou un vrai fichier audio.")
     it = {"id": mid, "kind": kind, "name": name, "ext": ext, "size": size, "seconds": secs, "at": int(time.time()),
           "token": secrets.token_urlsafe(24), "open_until": 0}
     if kind == "music":      # rythme : les coupes du montage tombent sur les temps forts
@@ -613,6 +628,8 @@ def catalog_text(db: Session) -> str:
                          + (f" Résumé : {it['summary']}." if it.get("summary") else "")
                          + (f" Ce qu'on voit (instant : image) : {seen}" if seen else " (pas encore regardée : contenu inconnu)")
                          + _sound_text(it))
+        elif it["kind"] == "lottie":
+            lines.append(f"- animation {it['id']} : « {Path(it['name']).stem} », {it['seconds']:.1f} s (Lottie : type lottie, media = cet identifiant)")
         elif it["kind"] == "music":
             lines.append(f"- musique {it['id']} : « {it['name']} », {it['seconds']:.0f} s" + (f", {it['bpm']:g} BPM (coupes calées sur ses temps forts)" if it.get("bpm") else ""))
         else:
@@ -637,7 +654,7 @@ def public_path(db: Session, token: str) -> Path | None:
 
 
 def media_type(path: Path) -> str:
-    return {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+    return {".json": "application/json", ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
             ".aac": "audio/aac", ".wav": "audio/wav", ".ogg": "audio/ogg"}.get(path.suffix.lower(), "application/octet-stream")
 
 
@@ -648,10 +665,16 @@ def _base_url() -> str:
     return base
 
 
+def _has_own_lottie(s: dict) -> bool:
+    """Une animation du patron (envoyée dans Mes médias) dans cette scène, son incrustation ou ses panneaux du Studio ?"""
+    fx = [s, s.get("overlay"), *(s.get("panels") or [])]
+    return any(isinstance(f, dict) and f.get("type") == "lottie" and f.get("media") for f in fx)
+
+
 def to_engine(db: Session, spec: dict) -> dict:
     """Scénario du Studio -> forme du moteur : « my_clip » devient un clip avec lien secret, « phrases » un morceau de voix,
     « audio » la bande son. Les liens des médias utilisés s'ouvrent pour OPEN_HOURS (clic « Lancer » du patron en amont)."""
-    if not any(s.get("type") == "my_clip" or s.get("phrases") for s in spec.get("scenes") or []) and not spec.get("audio"):
+    if not any(s.get("type") == "my_clip" or s.get("phrases") or _has_own_lottie(s) for s in spec.get("scenes") or []) and not spec.get("audio"):
         return {k: v for k, v in spec.items() if k != "captions"}
     items = _load(db)
     by_id = {it["id"]: it for it in items if not it.get("hidden")}
@@ -701,6 +724,17 @@ def to_engine(db: Session, spec: dict) -> dict:
         if words:
             s["captions"] = words
         scenes.append(s)
+    def lot(fx):        # animation du patron (scène, incrustation ou panneau) : lien secret, comme ses vidéos
+        if isinstance(fx, dict) and fx.get("type") == "lottie" and fx.get("media"):
+            fx = {**{k: v for k, v in fx.items() if k != "media"}, "url": link(fx["media"], "lottie")}
+        return fx
+    for k, s in enumerate(scenes):
+        scenes[k] = s = lot(s)
+        if s.get("overlay"):
+            s["overlay"] = lot(s["overlay"])
+        for p in s.get("panels") or []:
+            if isinstance(p, list) and len(p) == 3:
+                p[2] = lot(p[2])
     out = {k: v for k, v in spec.items() if k not in ("scenes", "audio", "captions")}
     out["scenes"] = scenes
     if au:
