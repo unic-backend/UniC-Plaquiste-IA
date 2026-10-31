@@ -68,7 +68,8 @@ try:
                 fetch_media(sc["split"]["url"], src2)
             n = round(sc["seconds"] * FPS); d.mkdir(parents=True, exist_ok=True)
             clips.append((i, subprocess.Popen(edit.ffmpeg_args(sc, src, src2, w * 3, h * 3, FPS, n, str(d / "%05d.jpg")))))
-            segs.append({"kind": "clip", "out": str(d), "frames": n, **({"overlay": sc["overlay"], "ovl": str(work / f"o{i}")} if sc.get("overlay") else {}),
+            segs.append({"kind": "clip", "out": str(d), "frames": n, **({"overlay": sc["overlay"]} if sc.get("overlay") else {}),
+                         **({"ovl": str(work / f"o{i}")} if sc.get("overlay") or sc.get("caps") else {}), **({"caps": sc["caps"]} if sc.get("caps") else {}),
                          **{k: sc[k] for k in ("zoom", "zoom_amount", "focus", "transition") if k in sc}})   # zoom et transitions : image par image (compose.py)
         else:
             segs.append({"kind": "html", "out": str(d), "frames": round(sc["seconds"] * FPS), "scene": sc})

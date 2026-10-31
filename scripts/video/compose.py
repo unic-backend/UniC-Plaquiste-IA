@@ -23,7 +23,7 @@ def clip_frame(i, f):
     box = edit.zoom_box(s, f, s["frames"], FPS, OW, OH)
     if box:
         im = im.resize((OW, OH), Image.LANCZOS, box=box)
-    if s.get("overlay") and os.path.exists(f"{s['ovl']}/{f:05d}.png"):
+    if s.get("ovl") and os.path.exists(f"{s['ovl']}/{f:05d}.png"):   # texte incrusté et/ou sous-titres
         im = im.convert("RGBA"); im.alpha_composite(Image.open(f"{s['ovl']}/{f:05d}.png").convert("RGBA").resize((OW, OH))); im = im.convert("RGB")
     return im
 

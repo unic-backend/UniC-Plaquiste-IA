@@ -1845,6 +1845,8 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .vs-media { margin: .6rem 0; }
 .vs-media summary { cursor: pointer; font-weight: 700; padding: .3rem 0; }
 .vs-media .btn { display: inline-flex; margin: .4rem 0; }
+.vs-media .vs-words { margin: 2px 0 4px; }
+.vs-check { display: flex; align-items: center; gap: .5rem; margin: .4rem 0; font-weight: 600; }
 .vs-media .vs-seen { display: block; margin: 1px 0 4px; font-size: 12px; line-height: 1.35; opacity: .75; }
 .f-clip-tag { font-size: calc(9cqw * var(--k)); color: var(--vac); }
 .f-img.f-half-l { right: 50%; width: 50%; }

@@ -48,9 +48,9 @@ def api_key(db: Session) -> str:
     return getattr(settings, "elevenlabs_api_key", "") or ""
 
 
-def _http(method: str, path: str, key: str, **kw) -> httpx.Response:
+def _http(method: str, path: str, key: str, timeout: float = 60, **kw) -> httpx.Response:
     try:
-        with httpx.Client(timeout=60) as client:
+        with httpx.Client(timeout=timeout) as client:
             return client.request(method, API + path, headers={"xi-api-key": key}, **kw)
     except httpx.HTTPError:
         raise VoiceError("Impossible de joindre ElevenLabs depuis le serveur. Réessaie dans un instant.", 502)
@@ -218,3 +218,41 @@ def speak(db: Session, text: str, voice_id: str = "") -> bytes:
     if r.status_code != 200:
         raise _explain(r)
     return r.content
+
+
+STT_MODELS = ("scribe_v2", "scribe_v1")   # transcription ElevenLabs ; le plus récent d'abord
+MAX_STT_BYTES = 200 * 1024 * 1024
+
+
+def transcribe(db: Session, audio: bytes, filename: str = "son.mp3") -> dict:
+    """Clic du patron : mots dits dans un son, avec leurs instants (sous-titres mot à mot du Studio vidéo).
+    Langue détectée par ElevenLabs. Consomme du crédit ElevenLabs. Rend {"language": "fra", "words": [[début, fin, mot], …]}."""
+    key = api_key(db)
+    if not key:
+        raise VoiceError("ElevenLabs n'est pas connecté : ajoute ta clé dans Réglages → Voix pour créer des sous-titres.", 409)
+    if not audio or len(audio) > MAX_STT_BYTES:
+        raise VoiceError("Son vide ou trop long pour la transcription.", 413)
+    r = None
+    for model in STT_MODELS:
+        r = _http("POST", "/speech-to-text", key, timeout=600, files={"file": (filename, audio, "audio/mpeg")},
+                  data={"model_id": model, "timestamps_granularity": "word", "tag_audio_events": "false"})
+        if r.status_code == 200 or r.status_code not in (400, 422) or "model" not in r.text.lower():
+            break          # un modèle inconnu de ce compte : on essaie le suivant ; toute autre réponse est la bonne
+    if r.status_code != 200:
+        raise _explain(r)
+    try:
+        d = r.json()
+    except ValueError:
+        raise VoiceError("Réponse illisible d'ElevenLabs.", 502)
+    words = []
+    for w in d.get("words") or []:
+        if not isinstance(w, dict) or w.get("type", "word") != "word":
+            continue
+        txt = re.sub(r"[\x00-\x1f\x7f<>]", "", str(w.get("text") or "")).strip()[:30]
+        try:
+            a, b = round(float(w.get("start")), 2), round(float(w.get("end")), 2)
+        except (TypeError, ValueError):
+            continue
+        if txt and 0 <= a <= b:
+            words.append([a, b, txt])
+    return {"language": str(d.get("language_code") or "")[:8], "words": words}

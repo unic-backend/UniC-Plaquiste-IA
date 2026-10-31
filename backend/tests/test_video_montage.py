@@ -92,3 +92,16 @@ def test_rendu_reel_ralenti_partage_et_arret_sur_image(tmp_path):
     assert ImageChops.difference(Image.open(files[0]).convert("RGB"), Image.open(files[30]).convert("RGB")).getbbox() is not None  # avant : ça bouge
     px = Image.open(files[10]).convert("RGB").getpixel((179, 320))
     assert px[0] > 180 and px[1] > 140 and px[2] < 120                                                   # trait doré au milieu de l'écran partagé
+
+
+def test_cartons_de_sous_titres():
+    w = [[0.0, 0.3, "Il"], [0.3, 0.6, "vient"], [0.6, 0.9, "de"], [0.9, 1.4, "sortir."], [1.5, 1.8, "Opus"], [1.8, 2.1, "5.5"],
+         [3.5, 3.9, "Incroyablement"], [3.9, 4.4, "puissant"], [9.0, 9.5, "hors"], ["x", 1, "bad"], [1, 2]]
+    g = sp.caption_groups(w, 5.0)
+    assert [x[2] for x in g] == ["Il vient de", "sortir.", "Opus 5.5", "Incroyablement", "puissant"]   # 3 mots, ponctuation, pause, 16 caractères
+    assert g[0][:2] == [0.0, 0.9] and g[1][1] == 1.5 and g[2][1] == 2.35                                # enchaîné ; sinon +0,25 s après le dernier mot
+    assert sp.caption_groups("pas une liste", 5) == [] and sp.caption_groups(w, 0) == []
+    c = sp.clean({"scenes": [{"type": "clip", "url": URL, "seconds": 4, "captions": [[0.1, 0.5, "<b>Salut</b>"]]},
+                             {"type": "kinetic", "lines": ["A"], "captions": [[0.2, 0.6, "Voix"]]}]})["scenes"]
+    assert c[0]["caps"] == [[0.1, 0.75, "bSalut/b"]] and c[1]["caps"][0][2] == "Voix"                  # jamais de balise ; voix off sur une scène texte aussi
+    assert "caps" not in sp.clean({"scenes": [{"type": "clip", "url": URL, "captions": []}]})["scenes"][0]

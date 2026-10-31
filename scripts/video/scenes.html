@@ -87,9 +87,14 @@ html.ovl #bg,html.ovl #sweep{display:none}
 #pill .n{font-family:Anton,Impact,sans-serif;font-size:calc(var(--u)*22);color:var(--gold);line-height:1}
 #pill .b{width:2px;height:calc(var(--u)*22);background:var(--gold);opacity:.7}
 #pill .t{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:calc(var(--u)*17);letter-spacing:.16em;color:var(--fg);text-transform:uppercase;white-space:nowrap}
+/* sous-titres mot à mot (parole du film ou voix off) : cartons de 1 à 3 mots, au tiers bas, au-dessus de tout */
+#cap{position:absolute;left:0;right:0;top:69%;display:none;justify-content:center;pointer-events:none;z-index:5}
+#cap b{display:inline-block;max-width:88vw;font-family:Anton,Impact,sans-serif;font-weight:400;text-transform:uppercase;letter-spacing:.02em;line-height:1.08;text-align:center;white-space:nowrap;
+  font-size:calc(var(--u)*27);color:#0b0b0b;background:#ffd400;padding:calc(var(--u)*5) calc(var(--u)*12) calc(var(--u)*4);border-radius:calc(var(--u)*7);box-shadow:0 calc(var(--u)*6) calc(var(--u)*18) rgba(0,0,0,.38)}
 </style></head><body>
 <div id="root"><div id="bg"></div><div id="sc"></div><div id="sweep"></div></div>
 <div id="pill"><span class="n"></span><span class="b"></span><span class="t"></span></div>
+<div id="cap"><b></b></div>
 <script>
 const $ = (s, r = document) => r.querySelector(s), cl = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const eo = x => 1 - Math.pow(1 - cl(x), 4), eio = x => { x = cl(x); return x < .5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2; };
@@ -109,10 +114,18 @@ const decs = v => { const m = /\.(\d+)/.exec(String(v)); return m ? Math.min(2, 
 const num = (v, d) => (v < 0 ? "\u2212" : "") + Math.abs(v).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: Math.abs(v) >= 1e4 });
 // un bloc trop haut pour l'image (texte long en 16:9 ou en carré) est réduit au lieu d'être coupé en haut et en bas
 const fitH = (box, u) => { const avail = innerHeight - 56 * u, h = box.scrollHeight; if (h > avail) box.style.zoom = String(Math.max(.45, avail / h)); };
-let S = null, A = [];   // scène courante et éléments animés
+let S = null, A = [], CAPS = [];   // scène courante, éléments animés, cartons de sous-titres
+// sous-titres : le carton du moment, entrée rapide (0,12 s) ; texte via textContent, réduit s'il est trop large
+const capDraw = (t, u) => {
+  const c = $("#cap"), g = CAPS.find(x => t >= x[0] && t < x[1]);
+  if (!g) { c.style.display = "none"; return; }
+  c.style.display = "flex"; const b = $("b", c);
+  if (b.textContent !== g[2]) { b.textContent = g[2]; b.style.fontSize = ""; fit(b, W() - 36 * u); }
+  const k = eo(ramp(t, g[0], g[0] + .12)); fx(b, k, (1 - k) * 8 * u, .86 + .14 * k);
+};
 
 window.setup = sc => {
-  S = sc; A = []; const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
+  S = sc; A = []; CAPS = Array.isArray(sc.caps) ? sc.caps : []; $("#cap").style.display = "none"; const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
   const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
   if (T === "title") {
     const r1 = el("div", "row an gold", "", root), r2 = el("div", "row an", "", root); r1.style.fontSize = 76 * u + "px"; r2.style.fontSize = 44 * u + "px";
@@ -190,6 +203,7 @@ window.draw = (t, dur) => {
   else if (A.fx) fxDraw(sc, t, dur, u);
   // fondu enchaîné via la couleur de fond (entrée 0,35 s, sortie 0,35 s)
   root.style.opacity = eio(ramp(t, 0, .35)) * (1 - eio(ramp(t, dur - .35, dur)));
+  capDraw(t, u);
 };
 
 
@@ -277,7 +291,7 @@ function fxDraw(sc, t, dur, u) {
 // incrustation sur un clip : fond transparent, seul le texte est rendu
 window.overlayMode = on => { document.documentElement.classList.toggle("ovl", !!on); };
 // pastille de chapitre : mode incrustation (fond transparent)
-window.pillMode = () => { $("#root").style.display = "none"; document.documentElement.style.background = document.body.style.background = "transparent"; };
+window.pillMode = () => { $("#root").style.display = "none"; $("#cap").style.display = "none"; document.documentElement.style.background = document.body.style.background = "transparent"; };
 window.pill = (on, t) => {
   const p = $("#pill"); if (!on) { p.style.display = "none"; return; }
   p.style.display = "flex"; const u = Math.min(innerWidth, innerHeight) / 360; $(".n", p).textContent = on.n; $(".t", p).textContent = on.label;

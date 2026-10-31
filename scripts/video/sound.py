@@ -139,9 +139,11 @@ def build(audio: dict, scenes: list[tuple[float, float, dict]], files: dict, chu
         chains.append(f"[{inputs.count('-i') - 1}:a]aformat=sample_rates={SR}:channel_layouts=stereo,afade=t=in:d=0.04,"
                       f"afade=t=out:st={max(0.0, dur - 0.06):.3f}:d=0.06,adelay={ms}|{ms}[c{k}]")
         labels.append(f"[c{k}]")
-    if labels:
+    if labels and files.get("music"):    # la parole commande la baisse de la musique
         chains.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0,asplit=2[vox][sc0]")
         chains.append("[sc0]apad[sc]")   # sans fin : sinon la musique s'arrêterait avec la dernière phrase
+    elif labels:                         # sans musique : rien à baisser (une sortie [sc] non branchée ferait échouer ffmpeg)
+        chains.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:dropout_transition=0[vox]")
     if files.get("music"):
         if labels:
             ratio = DUCK.get(audio.get("duck", "normal"), 6)
