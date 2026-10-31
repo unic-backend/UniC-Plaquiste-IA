@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { downloadAuth, fetchBlobUrl, net, shareDocument, type Post, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
+import { api, downloadAuth, fetchBlobUrl, net, shareDocument, type HiggsfieldStatus, type Post, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
 import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from "./videoBoard";
 
 type Say = (m: string) => void;
@@ -147,7 +147,9 @@ function Storyboard({ spec, onRemove, busy }: { spec: VideoPlan["spec"]; onRemov
 
 const MEDIA_FR: Record<VideoMedia["kind"], string> = { clip: "Vidéo", photo: "Photo", music: "Musique", voice: "Voix off", lottie: "Animation" };
 const MEDIA_ICON: Record<VideoMedia["kind"], string> = { clip: "🎬", photo: "📷", music: "🎵", voice: "🎙️", lottie: "✨" };
-const ACCEPT_ALL = "video/*,image/jpeg,image/png,image/webp,audio/*,application/json,.mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.mp3,.m4a,.aac,.wav,.ogg,.json";
+/** Un bouton par type : sur Android, un seul sélecteur qui mélange vidéos, photos et sons n'ouvrait que la galerie des vidéos. */
+const PICKS: [VideoMedia["kind"], string, string][] = [
+  ["clip", "🎬 Vidéos", "video/*"], ["photo", "🖼️ Photos", "image/*"], ["voice", "🎙️ Voix off", "audio/*"], ["music", "🎵 Musique", "audio/*"]];
 
 /** Un média du patron en vignette : vraie image (vidéo, photo) ou icône (son, animation), ce que l'IA en sait, et les gestes utiles. */
 function MediaTile({ m, busy, run, reload }: { m: VideoMedia; busy: boolean; run: (fn: () => Promise<unknown>, ok?: string) => Promise<void>; reload: () => Promise<void> }) {
@@ -199,13 +201,18 @@ export function VideoStudio({ say }: { say: Say }) {
   const [busy, setBusy] = useState(false);
   const [items, setItems] = useState<VideoMedia[]>([]);
   const [autoWords, setAutoWords] = useState(true);
+  const [aiScenes, setAiScenes] = useState(true);   // scènes IA payantes (Higgsfield), plafonnées par jour
+  const [hf, setHf] = useState<HiggsfieldStatus | null>(null);
   const [sending, setSending] = useState<{ n: number; of: number; name: string } | null>(null);
   const [drag, setDrag] = useState(false);
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
     try { await fn(); if (ok) say(ok); } catch (e: any) { say(e.message || "Erreur"); } finally { setBusy(false); }
   };
-  const reload = () => net.videoMedia().then((r) => { setItems(r.items); setAutoWords(r.auto_words !== false); }).catch(() => {});
+  const reload = () => {
+    api.higgsfield().then(setHf).catch(() => {});
+    return net.videoMedia().then((r) => { setItems(r.items); setAutoWords(r.auto_words !== false); setAiScenes(r.ai_scenes !== false); }).catch(() => {});
+  };
   useEffect(() => {
     let alive = true;
     reload();
@@ -226,13 +233,13 @@ export function VideoStudio({ say }: { say: Say }) {
     return () => { cancelled = true; clearInterval(timer); };
   }, [vidState]);
   /** « Dépose tout ici » : plusieurs fichiers d'un coup, le serveur reconnaît le type de chacun. */
-  const send = async (list: FileList | File[] | null) => {
+  const send = async (list: FileList | File[] | null, kind: VideoMedia["kind"] | "auto" = "auto") => {
     const files = Array.from(list || []);
     if (!files.length || sending) return;
     let ok = 0;
     for (const [i, f] of files.entries()) {
       setSending({ n: i + 1, of: files.length, name: f.name });
-      try { await net.videoMediaAdd(f, "auto"); ok++; } catch (e: any) { say(`${f.name} : ${e.message || "envoi impossible"}`); }
+      try { await net.videoMediaAdd(f, kind); ok++; } catch (e: any) { say(`${f.name} : ${e.message || "envoi impossible"}`); }
     }
     setSending(null); await reload();
     if (ok) say(ok > 1 ? `${ok} médias ajoutés.` : "Média ajouté.");
@@ -266,8 +273,15 @@ export function VideoStudio({ say }: { say: Say }) {
           <span className="vs-drop-ico" aria-hidden>📥</span>
           <b>{sending ? `Envoi ${sending.n}/${sending.of}…` : "Dépose tout ici"}</b>
           <small>{sending ? sending.name : "Vidéos, photos, musique, voix off, animations — plusieurs à la fois"}</small>
-          <input type="file" hidden multiple accept={ACCEPT_ALL} disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />
+          <input type="file" hidden multiple disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />
         </label>
+      </div>
+      <div className="vs-pick" role="group" aria-label="Ajouter un type de média précis">
+        {PICKS.map(([k, name, accept]) => (
+          <label key={k} className={`chip${busy || sending ? " off" : ""}`}>{name}
+            <input type="file" hidden multiple accept={accept} disabled={busy || !!sending} onChange={(e) => { send(e.target.files, k); e.currentTarget.value = ""; }} />
+          </label>
+        ))}
       </div>
       {!!items.length && (
         <>
@@ -300,6 +314,11 @@ export function VideoStudio({ say }: { say: Say }) {
         <label className="vs-check"><input type="checkbox" checked={autoWords} disabled={busy}
           onChange={(e) => { const on = e.target.checked; run(async () => { setAutoWords((await net.videoMediaAutoWords(on)).auto_words); }, on ? "Sous-titres automatiques activés." : "Sous-titres seulement au clic."); }} />
           Sous-titres automatiques (vidéos parlées et voix off, crédit ElevenLabs)</label>
+        <label className="vs-check"><input type="checkbox" checked={aiScenes} disabled={busy}
+          onChange={(e) => { const on = e.target.checked; run(async () => { setAiScenes((await net.videoAiScenes(on)).ai_scenes); }, on ? "Scènes IA activées (plafond du jour)." : "Scènes IA coupées : montage seulement."); }} />
+          Scènes IA payantes (Higgsfield : personnages, 3D, paysages) — {hf?.connected
+            ? `plafond du jour : ${hf.video_left_today}/${hf.video_per_day} films, ${hf.left_today}/${hf.per_day} images`
+            : "Higgsfield non connecté"}</label>
         <button className="btn btn-line btn-small" disabled={busy} onClick={() => run(async () => { setVid(await net.videoStatus()); })}>Où en est la vidéo ?</button>
       </details>
 

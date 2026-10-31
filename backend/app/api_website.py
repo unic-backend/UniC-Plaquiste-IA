@@ -191,11 +191,22 @@ def video_retry(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
 def video_media_list(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix (phrases repérées)."""
     from app import video_media
-    return {"items": video_media.listing(db), "auto_words": video_media.auto_words(db)}
+    from app import video_studio
+    return {"items": video_media.listing(db), "auto_words": video_media.auto_words(db), "ai_scenes": video_studio.ai_enabled(db)}
 
 
 class AutoWordsIn(BaseModel):
     on: bool
+
+
+@router.post("/video/ai-scenes")
+def video_ai_scenes(body: AutoWordsIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Réglage du patron : scènes IA payantes (Higgsfield) dans le Studio, plafonnées par les quotas du jour."""
+    from app import video_studio
+    on = video_studio.set_ai_enabled(db, body.on)
+    audit(db, user.id, "video_ai_scenes", "video_studio", "ai", "oui" if on else "non")
+    db.commit()
+    return {"ai_scenes": on}
 
 
 @router.post("/video/media/auto-words")

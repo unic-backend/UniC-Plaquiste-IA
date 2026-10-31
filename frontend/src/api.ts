@@ -260,7 +260,8 @@ export const net = {
   videoStart: (spec: VideoPlan["spec"]) => request<{ ok: boolean; note: string }>("/api/website/video/start", { method: "POST", body: JSON.stringify({ spec }) }),
   videoStatus: () => request<VideoState>("/api/website/video/status"),
   /** Médias du patron pour le Studio : ses vidéos de chantier, sa musique, sa voix off (phrases repérées). */
-  videoMedia: () => request<{ items: VideoMedia[]; auto_words?: boolean }>("/api/website/video/media"),
+  videoMedia: () => request<{ items: VideoMedia[]; auto_words?: boolean; ai_scenes?: boolean }>("/api/website/video/media"),
+  videoAiScenes: (on: boolean) => request<{ ai_scenes: boolean }>("/api/website/video/ai-scenes", { method: "POST", body: JSON.stringify({ on }) }),
   videoMediaAutoWords: (on: boolean) => request<{ auto_words: boolean }>("/api/website/video/media/auto-words", { method: "POST", body: JSON.stringify({ on }) }),
   videoMediaAdd: (file: File, kind: VideoMedia["kind"] | "auto", script = "") => {
     const fd = new FormData();
