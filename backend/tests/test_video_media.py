@@ -389,3 +389,37 @@ def test_animations_calees_sur_le_fichier_et_coupes(monkeypatch):
     assert [[p[0], p[1], p[2]["type"]] for p in eb["panels"]] == [[0.0, 3.0, "wave"], [1.5, 0.0, "counter"]]   # l'onde continue (avance 3 s), le compteur à 1,5 s
     assert eb["layout"] == "split" and "at" not in eb["panels"][1][2]
     assert vs._readable({"type": "chat", "lines": ["21"]}) > 2 and vs._readable({"type": "flow", "steps": ["A", "B", "C"]}) > 2
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+@pytest.mark.parametrize("bpm", [120, 90])
+def test_rythme_de_la_musique(tmp_path, bpm):
+    p = 60 / bpm
+    _sound(tmp_path / "m.wav", ["-f", "lavfi", "-i", f"aevalsrc='0.8*sin(2*PI*900*t)*exp(-40*mod(t-0.13,{p}))*gte(mod(t-0.13,{p}),0)+0.02*sin(2*PI*110*t)':d=20:s=44100"])
+    got, beats = vm.detect_beats(tmp_path / "m.wav")
+    assert abs(got - bpm) <= 2
+    gaps = [b - a for a, b in zip(beats, beats[1:])]
+    assert len(beats) >= 20 / p - 3 and all(abs(g - p) < 0.05 for g in gaps)
+    assert all(abs(((b - 0.13) / p) - round((b - 0.13) / p)) * p < 0.04 for b in beats)        # calés sur les coups
+    assert vm.beats_from_onsets([0.0] * 10, 43) == (0.0, [])
+
+
+def test_coupes_sur_les_temps_forts():
+    beats = [round(0.26 + 0.5 * k, 2) for k in range(200)]
+    music = {"id": "m" * 12, "kind": "music", "seconds": 100.0, "beats": beats, "bpm": 120.0}
+    clip = {"id": "c" * 12, "kind": "clip", "seconds": 20.0, "audio": True}
+    raw = [{"type": "kinetic", "lines": ["UNE PHRASE"], "seconds": 3.0}, {"type": "my_clip", "media": clip["id"], "start": 2, "seconds": 2.9},
+           {"type": "my_clip", "media": clip["id"], "start": 8, "seconds": 3.0, "sound": True}, {"type": "title", "l1": "FIN", "seconds": 4.0}]
+    media = {music["id"]: music, clip["id"]: clip}
+    spec = vs.build_spec("vertical", raw, [], media=media, audio={"music": music["id"], "music_start": 1.0})
+    assert spec["audio"]["beat"] is True
+    secs = [s["seconds"] for s in spec["scenes"]]
+    ends = [round(sum(secs[:i + 1]), 2) for i in range(len(secs))]
+    assert any(abs(1.0 + ends[0] - b) < 0.06 for b in beats) and any(abs(1.0 + ends[1] - b) < 0.06 for b in beats)   # coupes sur un temps fort
+    assert secs[2] == 3.0                                                                              # film parlé : jamais raccourci ni allongé
+    assert all(abs(a - b) <= 0.45 for a, b in zip(secs, [3.0, 2.9, 3.0, 4.0]))                        # glissements courts
+    assert vs.build_spec("vertical", spec["scenes"], [], media=media, audio=spec["audio"]) == spec     # aller-retour stable
+    off = vs.build_spec("vertical", raw, [], media=media, audio={"music": music["id"], "music_start": 1.0, "beat": False})
+    assert off["audio"]["beat"] is False and [s["seconds"] for s in off["scenes"]] == [3.0, 2.9, 3.0, 4.0]
+    plain = {**music, "beats": []}
+    assert "beat" not in vs.build_spec("vertical", raw, [], media={**media, music["id"]: plain}, audio={"music": music["id"]})["audio"]
