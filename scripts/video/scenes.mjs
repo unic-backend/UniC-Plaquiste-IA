@@ -39,7 +39,7 @@ const setMode = async m => {   // "html", "pill" ou "ovl" (texte incrusté sur u
 };
 const ONLY = process.env.ONLY || "";   // "html" : scènes seules (avant la fin des captures de pages) ; "pill" : pastilles seules
 for (const seg of PLAN.segments) {
-  if (seg.kind === "clip" && !seg.overlay && !seg.caps) continue;   // film : déjà mis en images par make.py
+  if (seg.kind === "clip" && !seg.panels && !seg.caps && seg.layout !== "split") continue;   // film : déjà mis en images par make.py
   const htmlLike = seg.kind === "html" || seg.kind === "clip";   // l'incrustation d'un clip ne dépend pas des pages
   if (ONLY && (ONLY === "html") !== htmlLike) continue;
   fs.mkdirSync(seg.out, { recursive: true });
@@ -49,9 +49,13 @@ for (const seg of PLAN.segments) {
     const end = Math.min(seg.frames, start + BLOCK);
     if (seg.kind === "clip") {   // texte incrusté : PNG transparents, posés sur les images du film par compose.py
       await setMode("ovl"); fs.mkdirSync(seg.ovl, { recursive: true });
-      if (!ready) { await p.evaluate(sc => window.setup(sc), { ...(seg.overlay || { type: "captions" }), caps: seg.caps || [] }); ready = true; }
+      // animations les unes après les autres (panels : [début, avance, animation]) ; sous-titres sur toute la scène
+      const P = seg.panels || [], dur = seg.frames / FPS; let cur = -2;
       for (let f = start; f < end; f++) {
-        await p.evaluate(a => window.draw(a[0], a[1]), [f / FPS, seg.frames / FPS]);
+        const t = f / FPS; let k = -1; for (let j = 0; j < P.length; j++) if (P[j][0] <= t + 1e-6) k = j;
+        if (k !== cur || !ready) { await p.evaluate(sc => window.setup(sc), { ...(k >= 0 ? P[k][2] : { type: "captions" }), caps: seg.caps || [], layout: seg.layout || "full" }); cur = k; ready = true; }
+        const a = k >= 0 ? P[k][0] : 0, adv = k >= 0 ? P[k][1] : 0, b = k >= 0 && k + 1 < P.length ? P[k + 1][0] : dur;
+        await p.evaluate(x => window.draw(x[0], x[1], x[2], x[3]), [t - a + adv, b - a + adv, t, k + 1 < P.length]);
         fs.writeFileSync(`${seg.ovl}/${String(f).padStart(5, "0")}.png`, await p.screenshot({ omitBackground: true, type: "png" })); n++;
       }
     } else if (seg.kind === "html") {

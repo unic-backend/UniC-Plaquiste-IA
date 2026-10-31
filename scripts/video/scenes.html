@@ -81,6 +81,37 @@ html,body{margin:0;width:100vw;height:100vh;overflow:hidden;background:var(--roy
 .sl2{margin-top:calc(var(--u)*18);text-align:center;width:100%}
 html.ovl,html.ovl body{background:transparent!important}
 html.ovl #bg,html.ovl #sweep{display:none}
+/* écran divisé : les animations dans le haut (45 %), la personne filmée en bas ; fond de la marque + trame de points discrète */
+html.split #root{bottom:55%}
+html.ovl.split #bg{display:block}
+html.split #root::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.22;background-image:radial-gradient(circle,rgba(255,255,255,.5) 1px,transparent 1.4px);background-size:calc(var(--u)*14) calc(var(--u)*14)}
+html.split #cap{top:45%;transform:translateY(-50%)}
+/* panneaux animés : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge */
+.pnc{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*6);width:100%}
+.pnc b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--gold);line-height:1;white-space:nowrap;text-shadow:0 calc(var(--u)*6) calc(var(--u)*24) rgba(0,0,0,.45)}
+.pnc small,.pnw .lb,.pnb small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--fg);text-transform:uppercase;text-align:center}
+.pnf{display:flex;align-items:center;justify-content:center;width:100%}
+.pnf .nd{flex:none;display:flex;align-items:center;justify-content:center;text-align:center;aspect-ratio:1;border-radius:calc(var(--u)*16);color:var(--fg);
+  border:2px solid color-mix(in srgb,var(--fg) 22%,transparent);background:color-mix(in srgb,var(--royal) 82%,#fff 7%);font-family:"Barlow Condensed",sans-serif;font-weight:700;
+  text-transform:uppercase;line-height:1.05;padding:calc(var(--u)*6);overflow-wrap:anywhere}
+.pnf .ln{flex:1 1 0;height:2px;margin:0 calc(var(--u)*4);background:var(--gold);transform-origin:left center}
+.pnw{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*12);width:100%}
+.pnw .tm{font-family:Anton,Impact,sans-serif;color:var(--fg);line-height:1}
+.pnw .bars{display:flex;align-items:center;justify-content:center;gap:calc(var(--u)*3);height:calc(var(--u)*92);width:100%}
+.pnw .bars i{display:block;flex:none;width:calc(var(--u)*4);border-radius:calc(var(--u)*2);background:var(--fg)}
+.pnw .lb{color:var(--gold)}
+.pnh{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*14);width:100%}
+.pnh .bu{display:flex;gap:calc(var(--u)*6);align-items:center;justify-content:center;width:calc(var(--u)*64);height:calc(var(--u)*52);border-radius:50%;background:#fff;position:relative}
+.pnh .bu::after{content:"";position:absolute;left:18%;bottom:calc(var(--u)*-6);border:calc(var(--u)*8) solid transparent;border-top-color:#fff;border-left-width:0;transform:skewX(-12deg)}
+.pnh .bu i{width:calc(var(--u)*8);height:calc(var(--u)*8);border-radius:50%;background:#1a1a1a}
+.pnh .in{display:flex;align-items:center;justify-content:space-between;gap:calc(var(--u)*10);width:78%;padding:calc(var(--u)*10) calc(var(--u)*16);border-radius:999px;
+  border:2px solid color-mix(in srgb,var(--gold) 70%,transparent);background:color-mix(in srgb,var(--royal) 70%,#000 20%);font-family:Anton,Impact,sans-serif;color:var(--fg)}
+.pnh .in em{font-style:normal;color:var(--gold)}
+.pnh .nt{font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--royal);background:var(--gold);padding:calc(var(--u)*6) calc(var(--u)*12);border-radius:calc(var(--u)*8)}
+.pnb{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*12);width:100%}
+.pnb .ci{position:relative;display:flex;align-items:center;justify-content:center;width:calc(var(--u)*96);height:calc(var(--u)*96);border-radius:50%;background:var(--gold);color:var(--royal);font-family:Anton,Impact,sans-serif}
+.pnb .ci s{position:absolute;inset:0;border-radius:50%;border:2px solid var(--gold);text-decoration:none}
+.pnb b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
   border-radius:calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 93%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
@@ -113,7 +144,9 @@ const fr = v => String(v || "").replace(/\s+([:;!?»%])/g, "\u00a0$1").replace(/
 const decs = v => { const m = /\.(\d+)/.exec(String(v)); return m ? Math.min(2, m[1].length) : 0; };
 const num = (v, d) => (v < 0 ? "\u2212" : "") + Math.abs(v).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: Math.abs(v) >= 1e4 });
 // un bloc trop haut pour l'image (texte long en 16:9 ou en carré) est réduit au lieu d'être coupé en haut et en bas
-const fitH = (box, u) => { const avail = innerHeight - 56 * u, h = box.scrollHeight; if (h > avail) box.style.zoom = String(Math.max(.45, avail / h)); };
+let SPLIT = false;   // écran divisé : la scène n'a que le haut de l'image
+const H = () => innerHeight * (SPLIT ? .45 : 1);
+const fitH = (box, u) => { const avail = H() - 56 * u, h = box.scrollHeight; if (h > avail) box.style.zoom = String(Math.max(.45, avail / h)); };
 let S = null, A = [], CAPS = [];   // scène courante, éléments animés, cartons de sous-titres
 // sous-titres : le carton du moment, entrée rapide (0,12 s) ; texte via textContent, réduit s'il est trop large
 const capDraw = (t, u) => {
@@ -125,7 +158,8 @@ const capDraw = (t, u) => {
 };
 
 window.setup = sc => {
-  S = sc; A = []; CAPS = Array.isArray(sc.caps) ? sc.caps : []; $("#cap").style.display = "none"; const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
+  S = sc; A = []; CAPS = Array.isArray(sc.caps) ? sc.caps : []; $("#cap").style.display = "none";
+  SPLIT = sc.layout === "split"; document.documentElement.classList.toggle("split", SPLIT); const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
   const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
   if (T === "title") {
     const r1 = el("div", "row an gold", "", root), r2 = el("div", "row an", "", root); r1.style.fontSize = 76 * u + "px"; r2.style.fontSize = 44 * u + "px";
@@ -153,7 +187,7 @@ window.setup = sc => {
     A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`;
       const mins = { e1: 34, e2: 20, e4: 14 }, k = Object.keys(mins).find(c => e.classList.contains(c));
       if (k) fitLine(e, W() - 48 * u, mins[k] * u); else fit(e, W() - 48 * u); }); fitH(box, u);
-  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan"].includes(T)) {
+  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan", "counter", "flow", "wave", "chat", "badge"].includes(T)) {
     fxSetup(sc, root, u);
   }
 };
@@ -175,7 +209,8 @@ const kb = (p, t, dur, dir, i = 0) => {   // Ken Burns : zoom lent + dérive
   p.im.style.transform = `translate3d(${dx}%,${lerp(1, -1, k)}%,0) scale(${z})`; };
 
 // t = temps dans la scène (s) ; dur = durée de la scène (s)
-window.draw = (t, dur) => {
+// tAbs : temps dans la scène pour les sous-titres (une scène peut enchaîner plusieurs animations) ; cont : une autre animation suit (pas de fondu de sortie)
+window.draw = (t, dur, tAbs, cont) => {
   const sc = S, T = sc.type, u = Math.min(innerWidth, innerHeight) / 360, root = $("#root");
   $("#bg").style.transform = `translate3d(${Math.sin(t * .5) * 2}%,${Math.cos(t * .4) * 2}%,0) scale(1.1)`;
   $("#sweep").style.opacity = 0;
@@ -202,8 +237,9 @@ window.draw = (t, dur) => {
   }
   else if (A.fx) fxDraw(sc, t, dur, u);
   // fondu enchaîné via la couleur de fond (entrée 0,35 s, sortie 0,35 s)
-  root.style.opacity = eio(ramp(t, 0, .35)) * (1 - eio(ramp(t, dur - .35, dur)));
-  capDraw(t, u);
+  const vis = eio(ramp(t, 0, .35)) * (cont ? 1 : 1 - eio(ramp(t, dur - .35, dur)));
+  if (SPLIT) { root.style.opacity = 1; $("#sc").style.opacity = vis; } else { root.style.opacity = vis; $("#sc").style.opacity = 1; }   // écran divisé : le fond du haut reste, seul le contenu change
+  capDraw(tAbs ?? t, u);
 };
 
 
@@ -229,7 +265,7 @@ function kWords(parent, lines, size, u) {   // titre animé : un mot = un span ;
 }
 function fxSetup(sc, root, u) {
   A.fx = true; root.style.padding = "0"; fxBg(sc, root); const T = sc.type, box = el("div", "fxbox", "", root);
-  const low = sc.bg || document.documentElement.classList.contains("ovl");   // texte en bas quand il y a une image derrière
+  const low = (sc.bg || document.documentElement.classList.contains("ovl")) && !SPLIT;   // texte en bas quand il y a une image derrière (pas en écran divisé : le haut a son fond)
   if (T === "typewriter") {
     box.style.alignItems = "center"; box.style.textAlign = "center"; box.style.top = low ? "56%" : "40%";
     A.tw = sc.lines.map((l, i) => { const d = el("div", "tw", "", box); d.style.fontSize = (i ? 22 : 30) * u + "px"; return d; });
@@ -244,6 +280,10 @@ function fxSetup(sc, root, u) {
       sv.setAttribute("viewBox", "0 0 24 24"); sv.innerHTML = CHECK; sv.style.color = getComputedStyle(document.documentElement).getPropertyValue("--gold"); r.appendChild(sv);   // CHECK est une constante du moteur, jamais un texte du scénario
       sv.querySelector(".p").style.stroke = getComputedStyle(document.documentElement).getPropertyValue("--royal"); el("span", "", fr(it), r); return { r, sv }; });
     A.glass = g;
+  } else if (PANELS.includes(T)) {
+    box.style.top = "50%"; box.style.transform = "translateY(-50%)"; box.style.alignItems = "center"; box.style.textAlign = "center";
+    if (low) { box.style.top = "auto"; box.style.bottom = "16%"; box.style.transform = ""; }
+    panelSetup(sc, box, u);
   } else if (T === "slogan") {
     box.style.top = "30%"; const c = el("div", "slog", "", box);
     A.s1 = sc.l1 ? el("div", "s1", sc.l1, c) : null; A.s2 = sc.l2 ? el("div", "s2", sc.l2, c) : null;
@@ -254,6 +294,7 @@ function fxSetup(sc, root, u) {
 }
 function fxDraw(sc, t, dur, u) {
   const T = sc.type;
+  if (A.pn) panelDraw(sc, t, dur, u);
   if (A.bg) { const k = ramp(t, 0, dur); A.bg.style.transform = `translate3d(0,${lerp(1, -1, k)}%,0) scale(${lerp(1.04, 1.14, k)})`; }
   if (A.dots) {   // apparition en points : trame de points qui grossissent jusqu'à l'image entière
     const k = eio(ramp(t, .2, 1.8)), cell = 7 * u, r = lerp(.18, .75, k) * cell;
@@ -287,6 +328,66 @@ function fxDraw(sc, t, dur, u) {
   if (A.card) { const k = eo(ramp(t, .1, .6)); fx(A.card, k, (1 - k) * 30 * u);
     [A.s1, A.s2].forEach((e, i) => { if (!e) return; const a = .45 + i * .7, q = eo(ramp(t, a, a + .5)); e.style.clipPath = `inset(0 ${(1 - q) * 100}% 0 0)`; });
     A.hr.style.transform = `scaleX(${eo(ramp(t, 1.6, 2.2))})`; if (A.br) A.br.style.opacity = eo(ramp(t, 1.9, 2.4)); }
+}
+// ---------- panneaux animés (motion design) ----------
+const PANELS = ["counter", "flow", "wave", "chat", "badge"];
+const sfx = x => x ? (/^[+×]/.test(x) ? x : "\u00a0" + x) : "";   // « 0 € », « 98 % », mais « 180+ »
+const prng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };   // déterministe : même image à chaque rendu
+function panelSetup(sc, box, u) {
+  const T = sc.type, L = sc.lines || []; A.pn = {};
+  if (T === "counter") {
+    const c = el("div", "pnc", "", box), b = el("b", "", "", c); b.style.fontSize = 104 * u + "px";
+    b.textContent = num(sc.value, decs(sc.value)) + sfx(sc.suffix); fit(b, W() - 48 * u);   // taille réglée sur le chiffre final
+    const s = sc.label ? el("small", "", fr(sc.label), c) : null; if (s) { s.style.fontSize = 17 * u + "px"; fit(s, W() - 48 * u); }
+    Object.assign(A.pn, { c, b, s, d: decs(sc.value) });
+  } else if (T === "flow") {
+    const f = el("div", "pnf", "", box), n = sc.steps.length, side = Math.min(92 * u, (W() - 40 * u - (n - 1) * 26 * u) / n);
+    A.pn.nd = []; A.pn.ln = [];
+    sc.steps.forEach((x, i) => { if (i) A.pn.ln.push(el("i", "ln", "", f)); const d = el("div", "nd", fr(x), f); d.style.width = side + "px"; d.style.fontSize = Math.max(11, side / 5.6) + "px"; A.pn.nd.push(d); });
+  } else if (T === "wave") {
+    const w = el("div", "pnw", "", box); A.pn.tm = L[1] ? el("div", "tm", L[1], w) : null; if (A.pn.tm) A.pn.tm.style.fontSize = 40 * u + "px";
+    const bars = el("div", "bars", "", w), r = prng(7); A.pn.bars = []; A.pn.hs = [];
+    for (let i = 0; i < 44; i++) { A.pn.bars.push(el("i", "", "", bars)); A.pn.hs.push(.25 + .75 * r()); }
+    A.pn.lb = L[0] ? el("div", "lb", fr(L[0]), w) : null; if (A.pn.lb) A.pn.lb.style.fontSize = 18 * u + "px";
+  } else if (T === "chat") {
+    const h = el("div", "pnh", "", box), bu = el("div", "bu", "", h); A.pn.dots = [0, 1, 2].map(() => el("i", "", "", bu)); A.pn.bu = bu;
+    const inp = el("div", "in", "", h); inp.style.fontSize = 24 * u + "px"; A.pn.tx = el("em", "", "", inp); A.pn.ok = el("span", "", "➤", inp); A.pn.inp = inp;
+    A.pn.nt = L[1] ? el("div", "nt", fr(L[1]), h) : null; if (A.pn.nt) A.pn.nt.style.fontSize = 14 * u + "px";
+  } else if (T === "badge") {
+    const b = el("div", "pnb", "", box), ci = el("div", "ci", "", b); ci.style.fontSize = 50 * u + "px"; ci.textContent = [...(L[0] || "?").trim()][0].toUpperCase();
+    A.pn.rings = [0, 1].map(() => el("s", "", "", ci)); A.pn.ci = ci;
+    A.pn.t = el("b", "", fr(L[0]), b); A.pn.t.style.fontSize = 38 * u + "px"; fit(A.pn.t, W() - 48 * u);
+    A.pn.s = L[1] ? el("small", "", fr(L[1]), b) : null; if (A.pn.s) { A.pn.s.style.fontSize = 15 * u + "px"; fit(A.pn.s, W() - 48 * u); }
+  }
+}
+function panelDraw(sc, t, dur, u) {
+  const T = sc.type, P = A.pn, L = sc.lines || [];
+  if (T === "counter") {
+    const k = eo(ramp(t, .05, .4)); fx(P.c, k, (1 - k) * 24 * u, .85 + .15 * k);
+    const v = sc.value * eo(ramp(t, .2, 1.3)); P.b.textContent = num(Math.abs(sc.value) < 1e-9 ? 0 : v, P.d) + sfx(sc.suffix);
+    const pop = 1 + .12 * Math.sin(Math.PI * ramp(t, 1.3, 1.6)); P.b.style.transform = `scale(${pop})`;
+    if (P.s) { const ks = eo(ramp(t, .5, .9)); fx(P.s, ks, (1 - ks) * 10 * u); }
+  } else if (T === "flow") {
+    const n = P.nd.length, step = Math.max(.35, Math.min(.8, (dur - .8) / n));
+    P.nd.forEach((d, i) => { const a = .15 + i * step, k = eo(ramp(t, a, a + .35)); fx(d, k, 0, .7 + .3 * k); d.classList.toggle("on", t >= a + .2); });
+    P.ln.forEach((l, i) => { const a = .15 + i * step + .25; l.style.transform = `scaleX(${eo(ramp(t, a, a + step - .1))})`; });
+  } else if (T === "wave") {
+    const k = eo(ramp(t, .05, .45)); P.bars.forEach((b, i) => { const m = .55 + .45 * Math.sin(t * 7 + i * .55) * Math.sin(t * 3.1 + i * .23);
+      b.style.height = Math.max(4 * u, P.hs[i] * m * 92 * u * k) + "px"; b.style.opacity = .55 + .45 * P.hs[i]; });
+    if (P.tm) { const kt = eo(ramp(t, .1, .5)); fx(P.tm, kt, (1 - kt) * 12 * u); }
+    if (P.lb) { const kl = eo(ramp(t, .4, .8)); fx(P.lb, kl, (1 - kl) * 10 * u); }
+  } else if (T === "chat") {
+    const kb = eo(ramp(t, .05, .4)); fx(P.bu, kb, (1 - kb) * 16 * u, .7 + .3 * kb);
+    P.dots.forEach((d, i) => { d.style.transform = `translateY(${-Math.max(0, Math.sin((t * 6) - i * .9)) * 5 * u}px)`; });
+    const ki = eo(ramp(t, .35, .7)); fx(P.inp, ki, (1 - ki) * 14 * u);
+    const msg = L[0] || "", nch = cl(Math.floor((t - .8) * CPS), 0, msg.length); P.tx.textContent = msg.slice(0, nch);
+    const sent = t >= .8 + msg.length / CPS + .35; P.ok.textContent = sent ? "✓" : "➤"; P.ok.style.color = sent ? "var(--gold)" : "var(--fg)";
+    if (P.nt) { const a = .8 + msg.length / CPS + .55, kn = eo(ramp(t, a, a + .35)); fx(P.nt, kn, (1 - kn) * 10 * u, .9 + .1 * kn); }
+  } else if (T === "badge") {
+    const k = eo(ramp(t, .05, .45)); fx(P.ci, k, 0, .4 + .6 * k);
+    P.rings.forEach((r, i) => { const p = ((t - .3 - i * .6) % 1.2 + 1.2) % 1.2 / 1.2; r.style.transform = `scale(${1 + p * .8})`; r.style.opacity = t < .3 + i * .6 ? 0 : (1 - p) * .8; });
+    const kt = eo(ramp(t, .35, .8)); fx(P.t, kt, (1 - kt) * 16 * u); if (P.s) { const ks = eo(ramp(t, .55, 1)); fx(P.s, ks, (1 - ks) * 10 * u); }
+  }
 }
 // incrustation sur un clip : fond transparent, seul le texte est rendu
 window.overlayMode = on => { document.documentElement.classList.toggle("ovl", !!on); };

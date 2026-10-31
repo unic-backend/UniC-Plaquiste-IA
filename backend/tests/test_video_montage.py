@@ -105,3 +105,21 @@ def test_cartons_de_sous_titres():
                              {"type": "kinetic", "lines": ["A"], "captions": [[0.2, 0.6, "Voix"]]}]})["scenes"]
     assert c[0]["caps"] == [[0.1, 0.75, "bSalut/b"]] and c[1]["caps"][0][2] == "Voix"                  # jamais de balise ; voix off sur une scène texte aussi
     assert "caps" not in sp.clean({"scenes": [{"type": "clip", "url": URL, "captions": []}]})["scenes"][0]
+
+
+def test_panneaux_et_ecran_divise():
+    c = sp.clean({"scenes": [{"type": "clip", "url": URL, "seconds": 6, "layout": "split", "split": {"url": "https://cdn.example.com/b.mp4"},
+                              "panels": [[3, 0, {"type": "counter", "value": 0, "suffix": "€", "label": "gratuit"}], [0, 1.5, {"type": "badge", "lines": ["Opus"]}],
+                                         [1, 0, {"type": "flow", "steps": ["seule"]}], [9, 0, {"type": "chat", "lines": ["21"]}], [2, 0, {"type": "inconnu"}]]}]})["scenes"][0]
+    assert c["layout"] == "split" and "split" not in c                                                 # jamais écran divisé ET avant | après
+    assert [(p[0], p[1], p[2]["type"]) for p in c["panels"]] == [(0, 1.5, "badge"), (3, 0, "counter")]   # triés ; invalides et hors du plan écartés
+    assert c["panels"][1][2]["label"] == "GRATUIT"
+    for t, extra in (("counter", {"value": 12.5, "suffix": "%"}), ("flow", {"steps": ["A", "B", "C"]}), ("wave", {}), ("chat", {"lines": ["21", "Guide"]}), ("badge", {"lines": ["Opus"]})):
+        assert sp.clean({"scenes": [{"type": t, **extra}]})["scenes"][0]["type"] == t                  # aussi en scène entière
+    with pytest.raises(ValueError):
+        sp.clean({"scenes": [{"type": "counter", "value": "beaucoup"}]})
+    a = ed.ffmpeg_args({**c, "seconds": 6}, "a.mp4", None, 1080, 1920, 30, 180, "o/%05d.jpg")
+    vf = a[a.index("-vf") + 1]
+    assert ed.bottom_height(1920) == 1056 and "crop=1080:1056" in vf and "pad=1080:1920:0:864" in vf     # la personne en bas (55 %)
+    box = ed.zoom_box({"zoom": "in", "zoom_amount": 1.2}, 89, 90, 30, 1080, 1056, 864)
+    assert box[1] >= 864 and box[3] <= 1920                                                             # zoom seulement dans la partie filmée
