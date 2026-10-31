@@ -98,6 +98,39 @@ def describe_image(path: Path) -> str:
         return ""
 
 
+FRAMES_PROMPT = (
+    "Ces images sont extraites, dans l'ordre du temps, d'une vidéo filmée par un plaquiste (BA13, faux plafonds, cloisons) à Dakar.\n"
+    "Pour CHAQUE image, une ligne qui commence par « #numéro : » puis ce qu'on voit, 18 mots au plus : lieu (stade, salle, bureau, couloir…), "
+    "plan (vue large, détail, équipe au travail), action, et qualité si elle gêne (flou, sombre, bougé, vide).\n"
+    "Recopie le texte lisible à l'écran (panneau, nom de lieu). N'invente rien : un lieu non reconnaissable reste « intérieur en chantier ».\n"
+    "Termine par une ligne « Résumé : » en une phrase. Pas d'introduction."
+)
+
+
+def describe_frames(frames: list[tuple[float, Path]]) -> str:
+    """Images d'une vidéo [(instant en s, fichier JPEG), …] regardées d'un seul appel : une ligne « #n : … » par image + « Résumé : ».
+    Chaîne vide si vision impossible (l'appelant réessaiera plus tard)."""
+    if not disponible() or not frames:
+        return ""
+    try:
+        from PIL import Image
+
+        from app.ai import ClaudeAIProvider
+
+        content: list[dict] = []
+        for i, (t, p) in enumerate(frames):
+            with Image.open(p) as img:
+                b64 = _jpeg_b64(img)
+            content += [{"type": "text", "text": f"Image #{i} — à {t:.1f} s"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}}]
+        content.append({"type": "text", "text": FRAMES_PROMPT})
+        res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=1500, model=settings.anthropic_fast_model)
+        return res.text.strip() if res.available else ""
+    except Exception as exc:
+        logger.warning("Vision vidéo impossible : %s", exc)
+        return ""
+
+
 def describe_pdf_page(path: Path, index: int) -> str:
     """Même lecture pour une page PDF sans texte (plan scanné)."""
     if not disponible():

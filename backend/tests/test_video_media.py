@@ -120,3 +120,63 @@ def test_route_publique_fermee(db):
     from app import main
     with TestClient(main.app) as cl:
         assert cl.get("/api/public/video-media/nimportequoi").status_code == 404
+
+
+def test_instants_regardes_et_lecture_de_la_vision():
+    assert vm.frame_times(80, 8) == [5.0, 15.0, 25.0, 35.0, 45.0, 55.0, 65.0, 75.0]
+    assert vm.frame_times(1.0, 8) == [0.2, 0.8] and vm.frame_times(0) == []                       # vidéo très courte : moins d'images
+    txt = ("**#0 :** Vue large du Stade Abdoulaye Wade, panneau « DAKAR 2026 »\n#1 - Équipe posant des plaques BA13, net\n"
+           "#1 : doublon ignoré\n#9 : hors liste\n2) Couloir <script>sombre</script>\nRésumé : Chantier BA13 au stade, équipe au travail.")
+    looks, summary = vm.parse_looks(txt, [5.0, 15.0, 25.0])
+    assert [t for t, _ in looks] == [5.0, 15.0, 25.0]
+    assert looks[0][1].startswith("Vue large du Stade Abdoulaye Wade") and "<" not in looks[2][1]
+    assert summary == "Chantier BA13 au stade, équipe au travail."
+    assert vm.parse_looks("", [1.0]) == ([], "")
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_l_ia_regarde_la_video_et_s_en_sert(db, tmp_path, monkeypatch):
+    from app import higgsfield, vision
+    clip = _sound(tmp_path / "c.mp4", ["-f", "lavfi", "-i", "testsrc=d=8:s=320x240:r=25", "-pix_fmt", "yuv420p"])
+    calls = []
+
+    def describe(frames):
+        calls.append(len(frames))
+        assert all(p.exists() and p.stat().st_size > 0 for _, p in frames)                     # vraies images extraites
+        return "\n".join(f"#{i} : mire de couleurs numéro {i}" for i in range(len(frames))) + "\nRésumé : Mire de test."
+
+    monkeypatch.setattr(vision, "disponible", lambda: False)
+    old = asyncio.run(vm.add(db, _Up("ancienne.mp4", clip), "clip"))                            # envoyée sans vision : pas regardée
+    assert old["looks"] == [] and "pas encore regardée" in vm.catalog_text(db)
+    monkeypatch.setattr(vision, "disponible", lambda: True)
+    monkeypatch.setattr(vision, "describe_frames", describe)
+    new = asyncio.run(vm.add(db, _Up("stade.mp4", clip), "clip"))                                # regardée dès l'envoi
+    assert new["summary"] == "Mire de test." and len(new["looks"]) == vm.LOOK_FRAMES and new["looks"][0] == {"t": 0.5, "text": "mire de couleurs numéro 0"}
+    assert vm.ensure_looks(db) == 1 and calls == [8, 8] and vm.ensure_looks(db) == 0              # l'ancienne rattrapée, une seule fois
+    cat = vm.catalog_text(db)
+    assert "0.5 s : mire de couleurs numéro 0" in cat and "Résumé : Mire de test." in cat and "pas encore regardée" not in cat
+
+    monkeypatch.setattr(vision, "describe_frames", lambda frames: "")                           # vision en panne : réessai plus tard, pas en boucle
+    third = asyncio.run(vm.add(db, _Up("x.mp4", clip), "clip"))
+    assert third["looks"] == [] and vm.ensure_looks(db) == 0
+
+    f = vm.frame_path(db, new["id"], 3.3)
+    assert f and f.read_bytes()[:2] == b"\xff\xd8" and f.name.endswith("-35.jpg")                # vraie image JPEG, arrondie à la demi-seconde
+    assert vm.frame_path(db, new["id"], float("nan")) is None and vm.frame_path(db, "000000000000", 1) is None
+
+    seen = {}
+    monkeypatch.setattr(vs.settings, "anthropic_api_key", "cle-de-test")
+    monkeypatch.setattr(higgsfield, "status", lambda d: {"connected": False})
+    monkeypatch.setattr(vs, "_ask", lambda system, user, tool: seen.update(system=system, user=user) or {
+        "scenes": [{"type": "my_clip", "media": new["id"], "start": 2.5, "seconds": 3}, {"type": "my_clip", "media": new["id"], "start": 6, "seconds": 2}]})
+    p = vs.plan(db, "", "vertical")                                                              # case vide + vidéos : SES vidéos, pas le modèle fixe
+    assert "montage de ses vidéos" in seen["user"] and "mire de couleurs numéro 3" in seen["user"] and "CŒUR du montage" in seen["system"]
+    assert [s["type"] for s in p["spec"]["scenes"]] == ["my_clip", "my_clip"] and p["spec"]["scenes"][1]["start"] == 6
+
+
+def test_route_vignette(db):
+    from fastapi.testclient import TestClient
+    from app import main
+    with TestClient(main.app) as cl:
+        assert cl.get("/api/website/video/media/000000000000/frame?t=1").status_code in (401, 403, 404)
+        assert cl.get("/api/website/video/media/..%2Fx/frame").status_code in (401, 403, 404)

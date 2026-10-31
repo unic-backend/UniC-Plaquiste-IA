@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import * as I from "./Icons";
-import { api, downloadAuth, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
+import { api, downloadAuth, fetchBlobUrl, net, shareDocument, type HiggsfieldStatus, type Post, type VideoAIClip, type VideoMedia, type VideoPlan, type VideoScene, type VideoState } from "./api";
 import { duration, frText, sceneSeconds, statNumber, THEMES, totalSeconds } from "./videoBoard";
 
 type Say = (m: string) => void;
@@ -17,6 +17,26 @@ const sceneLabel = (c: { type: string; seconds?: number; [k: string]: unknown })
 const IMG_BASE = "https://www.unicplaquiste.com/images/";
 const txt = (s: VideoScene, k: string) => (typeof s[k] === "string" ? frText(s[k]) : "");
 const items = (s: VideoScene, k: string) => (Array.isArray(s[k]) ? (s[k] as unknown[]) : []);
+
+/** Images des vidéos du patron, gardées le temps de la page : une vignette n'est téléchargée qu'une fois. */
+const clipFrames = new Map<string, Promise<string>>();
+
+/** Vraie image du passage choisi dans la vidéo du patron (servie avec le code d'accès) ; cadre « Ma vidéo » si elle ne vient pas. */
+function ClipThumb({ id, start }: { id: string; start: number }) {
+  const key = `${id}@${Math.round(start * 2) / 2}`;
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setSrc(null); setFailed(false);
+    if (!/^[a-f0-9]{12}$/.test(id)) { setFailed(true); return; }
+    if (!clipFrames.has(key)) clipFrames.set(key, fetchBlobUrl(`/api/website/video/media/${id}/frame?t=${encodeURIComponent(String(start))}`));
+    clipFrames.get(key)!.then((u) => { if (live) setSrc(u); }).catch(() => { clipFrames.delete(key); if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [key, id, start]);
+  if (failed || !src) return failed ? <b className="f-clip-tag">Ma vidéo</b> : null;
+  return <img className="f-img" src={src} alt="" />;
+}
 
 /** Vignette d'une scène : son image finale en petit, aux couleurs de l'ambiance (un aperçu fidèle au contenu, pas le rendu exact du moteur). */
 function SceneFrame({ s }: { s: VideoScene }) {
@@ -42,7 +62,8 @@ function SceneFrame({ s }: { s: VideoScene }) {
   if (t === "page") return <><b className="f-h">Le site défile</b>{items(s, "chapters").slice(0, 6).map((c, i) => <small key={i} className="f-chip">{frText((c as { label?: string })?.label)}</small>)}</>;
   if (t === "my_clip") {   // vraie vidéo du patron : texte incrusté éventuel
     const ov = (s.overlay || {}) as { lines?: unknown[] };
-    return <div className="f-ai"><b>Ma vidéo</b><small>{(ov.lines || []).map((x) => frText(x)).join(" ")}</small></div>;
+    const words = (ov.lines || []).map((x) => frText(x)).filter(Boolean).join(" ");
+    return <><ClipThumb id={String(s.media || "")} start={Number(s.start) || 0} />{words && <span className="f-cap">{words}</span>}</>;
   }
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;
   const bg = typeof s.image === "string" && s.image ? <img className="f-img" src={IMG_BASE + s.image} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null;
@@ -117,6 +138,7 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
           {items.map((m) => (
             <li key={m.id}>
               <b>{MEDIA_FR[m.kind]}</b> · {m.name} · {duration(m.seconds)}{m.kind === "voice" && m.phrases ? ` · ${m.phrases.length} phrases` : ""}
+              {m.kind === "clip" && <small className="vs-seen">{m.summary ? `L'IA a vu : ${m.summary}` : m.looks?.length ? `L'IA a vu ${m.looks.length} moments.` : "Pas encore regardée : l'IA la regardera au prochain scénario."}</small>}
               {" "}<button type="button" className="vs-x" disabled={busy} aria-label={`Retirer ${m.name}`} title="Retirer de la liste"
                 onClick={() => run(async () => { await net.videoMediaHide(m.id); await load(); }, "Média retiré de la liste.")}>×</button>
             </li>

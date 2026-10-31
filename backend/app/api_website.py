@@ -209,6 +209,18 @@ async def video_media_add(kind: str = Form(...), script: str = Form(""), file: U
     return it
 
 
+@router.get("/video/media/{mid}/frame")
+def video_media_frame(mid: str, t: float = 0, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Vignette d'un passage de la vidéo du patron (scénario du Studio) : la vraie image, pas un cadre vide."""
+    from fastapi.responses import FileResponse
+
+    from app import video_media
+    p = video_media.frame_path(db, mid, t) if video_media.ID_RE.match(mid) else None
+    if p is None:
+        raise HTTPException(404, "Image introuvable.")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @router.post("/video/media/{mid}/hide")
 def video_media_hide(mid: str, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     """Retire un média de la liste (le fichier reste sur le serveur : aucune suppression)."""
