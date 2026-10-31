@@ -822,6 +822,44 @@ def _memory(db: Session | None, query: str) -> str:
         return ""
 
 
+AI_KEY = "video_ai_scenes"
+
+
+def ai_enabled(db: Session | None) -> bool:
+    """Scènes IA payantes (Higgsfield) dans le Studio : réglage du patron, activé par défaut ; plafonné par les quotas du jour de higgsfield.py."""
+    if db is None or not hasattr(db, "get"):
+        return False
+    from app.models import AppSetting
+    row = db.get(AppSetting, AI_KEY)
+    return not (row and row.value == "0")
+
+
+def set_ai_enabled(db: Session, on: bool) -> bool:
+    from app.models import AppSetting
+    row = db.get(AppSetting, AI_KEY)
+    if row is None:
+        db.add(AppSetting(key=AI_KEY, value="1" if on else "0"))
+    else:
+        row.value = "1" if on else "0"
+    db.flush()
+    return on
+
+
+def _ai_quotas(db: Session | None) -> dict:
+    """Ce que le scénariste peut demander aujourd'hui : rien si le patron a coupé les scènes IA ou si Higgsfield n'est pas connecté."""
+    if not ai_enabled(db):
+        return {}
+    try:
+        from app import higgsfield
+        hs = higgsfield.status(db)
+    except Exception:       # noqa: BLE001 — l'état Higgsfield ne doit jamais empêcher d'écrire un scénario de montage
+        return {}
+    if not hs.get("connected"):
+        return {}
+    q = {"clips": int(hs.get("video_left_today") or 0), "images": int(hs.get("left_today") or 0)}
+    return q if q["clips"] or q["images"] else {}      # plafond du jour atteint : plus de scène IA aujourd'hui
+
+
 def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str = "auto", current: dict | None = None, changes: list | None = None) -> dict:
     """Propose un scénario pour une demande libre, sur N'IMPORTE QUEL sujet, ou CORRIGE le scénario actuel (`current`) selon la dernière des
     `changes` (les précédentes rappellent ce qui a déjà été demandé). `theme` : ambiance imposée par le patron, ou « auto » (l'IA choisit).
@@ -845,13 +883,14 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
     if changes and isinstance(current, dict):
         try:
             cur = build_spec(str(current.get("format") or fmt), current.get("scenes") or [], names, str(current.get("theme") or "unic"),
-                             ai={}, media=media, audio=current.get("audio"), captions=current.get("captions"))
+                             ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI} if ai_enabled(db) else {},
+                             media=media, audio=current.get("audio"), captions=current.get("captions"))
         except ValueError:
             cur = None
     if changes and cur is None and not brief:
         raise repair.RepairError("Rien à corriger : propose d'abord un scénario.", 400)
     hints = "; ".join(f"{k}* = {v}" for k, v in IMAGE_HINTS.items())
-    ai: dict = {}            # décision du patron : plus de scènes IA payantes (Higgsfield) dans le Studio, seulement le montage et ses médias
+    ai = _ai_quotas(db)      # scènes IA payantes (Higgsfield) : réglage du patron + quotas du jour (plafond)
     empty = "(pas de demande écrite : regarde et écoute ses médias, comprends ce qu'ils racontent, et fais-en la meilleure vidéo possible)"
     parts = [f"Demande du patron (donnée) : {brief or empty}", f"Format indiqué : {FORMATS[fmt]}"]
     if forced:
@@ -877,7 +916,8 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
                   f"Avis réels : {', '.join(QUOTES)}", "Carte de fin avec téléphone et site web : outro ou slogan avec brand = true."]
     if not catalog_ok and not company_ok:
         parts.append("Rien d'autre que ses médias et sa demande : aucune photo, aucun chiffre, aucun avis, aucun contact enregistrés (il ne les a pas demandés).")
-    parts.append("Pas de scènes IA payantes : n'utilise que les scènes de montage et les médias du patron.")
+    parts.append(f"Quotas IA du jour (plafond) : {ai['clips']} film(s) IA, {ai['images']} image(s) IA." if ai
+                 else "Scènes IA indisponibles (coupées, non connectées ou plafond du jour atteint) : n'utilise que les scènes de montage et les médias du patron.")
     if own:
         video_media.ensure_sound(db)      # son et passages parlés des films envoyés avant cette fonction
         video_media.ensure_looks(db)      # vidéos pas encore regardées (envoyées avant, ou vision en échec) : regardées maintenant
@@ -978,13 +1018,21 @@ def dispatch(db: Session, engine_spec: dict) -> dict:
 
 def start(db: Session, spec: dict, user_id: str | None = None) -> dict:
     """Clic du patron : lance la fabrication. Le scénario est reconstruit ici depuis les catalogues (jamais transmis tel que le client l'envoie).
-    Décision du patron : plus de scènes IA payantes (Higgsfield) dans le Studio — une scène IA renvoyée par l'appli est écartée."""
+    Scènes IA (payantes, Higgsfield) : seulement si le patron les a laissées activées ; elles sont générées d'abord (quotas du jour vérifiés
+    par video_hybrid), puis le montage part tout seul. Coupées : une scène IA renvoyée par l'appli est écartée."""
     from app import video_hybrid, video_media
+    on = ai_enabled(db)
     try:
         safe = build_spec((spec or {}).get("format", "vertical"), (spec or {}).get("scenes") or [], images(db), str((spec or {}).get("theme") or "unic"),
-                          ai={}, media=video_media.items_by_id(db), audio=(spec or {}).get("audio"), captions=(spec or {}).get("captions"))
+                          ai={"clips": video_hybrid.MAX_AI, "images": video_hybrid.MAX_AI} if on else {}, media=video_media.items_by_id(db),
+                          audio=(spec or {}).get("audio"), captions=(spec or {}).get("captions"))
     except ValueError as exc:
         raise repair.RepairError(str(exc), 400)
+    if on and sum(video_hybrid.ai_counts(safe)):
+        try:
+            return video_hybrid.start(db, safe, user_id)
+        except video_hybrid.HybridError as exc:
+            raise repair.RepairError(str(exc), exc.status)
     video_hybrid.clear(db)
     return dispatch(db, safe)
 
