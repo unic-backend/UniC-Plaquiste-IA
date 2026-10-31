@@ -134,7 +134,8 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
   const [kind, setKind] = useState<VideoMedia["kind"]>("clip");
   const [script, setScript] = useState("");
   const [sending, setSending] = useState("");
-  const load = () => net.videoMedia().then((r) => setItems(r.items)).catch(() => {});
+  const [autoWords, setAutoWords] = useState(true);
+  const load = () => net.videoMedia().then((r) => { setItems(r.items); setAutoWords(r.auto_words !== false); }).catch(() => {});
   useEffect(() => { load(); }, []);
   const send = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -155,6 +156,9 @@ function MediaPanel({ say, busy, run }: { say: Say; busy: boolean; run: (fn: () 
       </div>
       {kind === "voice" && <textarea rows={3} value={script} onChange={(e) => setScript(e.target.value)} maxLength={6000}
         placeholder="Facultatif : colle le texte de ta voix off (une phrase par ligne) pour que chaque morceau reçoive sa phrase." aria-label="Texte de la voix off" />}
+      <label className="vs-check"><input type="checkbox" checked={autoWords} disabled={busy}
+        onChange={(e) => { const on = e.target.checked; run(async () => { setAutoWords((await net.videoMediaAutoWords(on)).auto_words); }, on ? "Sous-titres automatiques activés." : "Sous-titres seulement au clic."); }} />
+        Sous-titres automatiques (vidéos parlées et voix off, crédit ElevenLabs)</label>
       <label className="btn btn-line btn-small">
         {sending ? `Envoi de ${sending}…` : `Envoyer : ${MEDIA_FR[kind].toLowerCase()}`}
         <input type="file" hidden multiple={kind === "clip"} accept={MEDIA_ACCEPT[kind]} disabled={busy || !!sending} onChange={(e) => { send(e.target.files); e.currentTarget.value = ""; }} />

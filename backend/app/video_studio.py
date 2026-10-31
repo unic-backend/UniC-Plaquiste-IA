@@ -720,6 +720,8 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
     if own:
         video_media.ensure_sound(db)      # son et passages parlés des films envoyés avant cette fonction
         video_media.ensure_looks(db)      # vidéos pas encore regardées (envoyées avant, ou vision en échec) : regardées maintenant
+    if db is not None and media:
+        video_media.ensure_words(db)      # sous-titres automatiques des médias parlés (réglage du patron)
     no_catalog = own and not WANTS_CATALOG.search(" ".join([brief, *changes]))
     if no_catalog:      # ses vidéos d'abord : les photos du site ne sont pas proposées (elles reviennent s'il les demande)
         parts = [x for x in parts if not x.startswith("Photos (noms exacts)")]

@@ -310,10 +310,11 @@ def test_sous_titres_du_film_et_de_la_voix(db, tmp_path, monkeypatch):
     v = asyncio.run(vm.add(db, _Up("voix.wav", vo), "voice", "Une phrase. Deux phrases."))
     sent = []
 
-    def tr(d, audio, name):
+    def tr(d, audio, name, key=""):
         sent.append(audio[:3])
         return {"language": "fra", "words": [[0.2, 0.6, "Bonjour"], [0.7, 1.1, "Dakar"], [3.0, 3.4, "Merci"]]}
     monkeypatch.setattr(voice, "transcribe", tr)
+    monkeypatch.setattr(voice, "api_key", lambda d: "cle")
     assert vm.transcribe(db, c["id"])["words"] == 3 and vm.transcribe(db, v["id"])["words"] == 3
     assert all(x in (b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") for x in sent)                    # seul le son part (mp3), jamais l'image
     with pytest.raises(vm.MediaError):
@@ -338,3 +339,32 @@ def test_sous_titres_du_film_et_de_la_voix(db, tmp_path, monkeypatch):
     sp = importlib.util.module_from_spec(mod)
     mod.loader.exec_module(sp)
     assert sp.clean(eng)["scenes"][0]["caps"] == [[0.2, 0.85, "Dakar"], [2.5, 3.0, "Merci"]]            # cartons prêts (bornés à la scène)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg absent")
+def test_sous_titres_automatiques(db, tmp_path, monkeypatch):
+    from app import voice
+    talk = _sound(tmp_path / "t.mp4", ["-f", "lavfi", "-i", "testsrc=d=6:s=320x240:r=25", "-f", "lavfi", "-i",
+                                       "aevalsrc='if(lt(t,1.5)+between(t,3,5),0.5*sin(2*PI*300*t),0)':d=6:s=44100", "-pix_fmt", "yuv420p", "-shortest"])
+    noise = _sound(tmp_path / "n.mp4", ["-f", "lavfi", "-i", "testsrc=d=4:s=320x240:r=25", "-f", "lavfi", "-i", "anoisesrc=d=4:a=0.3", "-pix_fmt", "yuv420p", "-shortest"])
+    calls = []
+    monkeypatch.setattr(voice, "api_key", lambda d: "cle")
+    monkeypatch.setattr(voice, "transcribe", lambda d, audio, name, key="": calls.append(key) or {"language": "fra", "words": [[0.2, 0.6, "Salut"]]})
+    t = asyncio.run(vm.add(db, _Up("parle.mp4", talk), "clip"))
+    n = asyncio.run(vm.add(db, _Up("chantier.mp4", noise), "clip"))
+    assert t["words"] == 1 and "words" not in n and calls == ["cle"]                       # parlé : sous-titré sans clic ; bruit continu : rien (crédit gardé)
+    assert vm.wants_words({"kind": "clip", "audio": True, "talk": [[0, 4]], "seconds": 4, "summary": "Un homme parle face caméra."})
+    assert not vm.wants_words({"kind": "voice", "seconds": 4000})                           # trop long : bouton seulement
+    vm.set_auto_words(db, False)
+    assert vm.auto_words(db) is False
+    t2 = asyncio.run(vm.add(db, _Up("parle2.mp4", talk), "clip"))
+    assert "words" not in t2 and vm.ensure_words(db) == 0 and len(calls) == 1               # réglage coupé : jamais sans clic
+    vm.set_auto_words(db, True)
+    monkeypatch.setattr(voice, "transcribe", lambda d, audio, name, key="": (_ for _ in ()).throw(voice.VoiceError("quota", 429)))
+    assert vm.ensure_words(db) == 0 and vm._load(db)[2].get("words_try")                     # échec : noté, réessai plus tard, rien ne casse
+    monkeypatch.setattr(voice, "transcribe", lambda d, audio, name, key="": {"language": "fra", "words": [[0.1, 0.4, "Re"]]})
+    assert vm.ensure_words(db) == 0                                                          # pas avant 10 minutes
+    items = vm._load(db)
+    items[2]["words_try"] = 0
+    vm._save(db, items)
+    assert vm.ensure_words(db) == 1 and vm.listing(db)[2]["words"] == 1
