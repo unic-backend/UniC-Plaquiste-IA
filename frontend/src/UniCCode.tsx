@@ -58,6 +58,13 @@ export function UniCCode() {
   if (!d) return <div className="page"><div className="page-inner"><h1>UniC Code</h1><p className="hint">{msg || "Chargement…"}</p></div></div>;
   const connected = !!d.github?.connected;
   const ready = connected && ask.trim().length >= 10 && !busy;
+  const budgetPick = (
+    <label className="code-budget">Plafond de dépense Claude
+      <select value={budget} onChange={(e) => setBudget(e.target.value)}>
+        {(d.budgets || ["2", "5", "10"]).map((b: string) => <option key={b} value={b}>{b} $</option>)}
+      </select>
+    </label>
+  );
 
   const projectCard = (p: any) => {
     const isOpen = open === p.id;
@@ -172,11 +179,7 @@ export function UniCCode() {
                 {IDEAS.map((x) => <button key={x} className="chip" onClick={() => setAsk(x)}>{short(x, 44)}</button>)}
               </div>
             )}
-            <label className="code-budget">Plafond de dépense
-              <select value={budget} onChange={(e) => setBudget(e.target.value)}>
-                {(d.budgets || ["2", "5", "10"]).map((b: string) => <option key={b} value={b}>{b} $</option>)}
-              </select>
-            </label>
+            {budgetPick}
             <div className="row-actions">
               <button className="btn btn-copper btn-small" disabled={!ready}
                 onClick={() => act("go", () => api.codeStart({ request: ask, budget, parent_id: parent?.id || "" }),
@@ -188,13 +191,14 @@ export function UniCCode() {
         ) : (
           <section className="card-box">
             <h3>Améliorer mon IA</h3>
-            <p className="hint">Claude Code lit tout le code d'UniC AI, le modifie et lance les tests. Proposition à fusionner d'un clic, tests verts.</p>
+            <p className="hint">Claude Code a accès à tout le dépôt d'UniC AI : il modifie et lance les tests. Proposition à fusionner d'un clic, tests verts. Les zones protégées (sécurité, secrets, déploiement) restent à toi.</p>
             <textarea rows={4} value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Ex. : ajoute le nom du chantier en haut de chaque facture" />
+            {budgetPick}
             <div className="row-actions">
               <button className="btn btn-copper btn-small" disabled={!ready}
-                onClick={() => act("feat", () => api.codeApp({ kind: "feature", request: ask }), () => { setAsk(""); return "Claude Code code la fonction (5 à 30 min)."; })}>Nouvelle fonction</button>
+                onClick={() => act("feat", () => api.codeApp({ kind: "feature", request: ask, budget }), () => { setAsk(""); return "Claude Code code la fonction (5 à 30 min)."; })}>Nouvelle fonction</button>
               <button className="btn btn-line btn-small" disabled={!ready}
-                onClick={() => act("fix", () => api.codeApp({ kind: "fix", request: ask }), () => { setAsk(""); return "Claude Code cherche et corrige (5 à 30 min)."; })}>Corriger un bug</button>
+                onClick={() => act("fix", () => api.codeApp({ kind: "fix", request: ask, budget }), () => { setAsk(""); return "Claude Code cherche et corrige (5 à 30 min)."; })}>Corriger un bug</button>
             </div>
           </section>
         )}
