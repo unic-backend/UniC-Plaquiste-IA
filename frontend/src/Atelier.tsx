@@ -203,8 +203,14 @@ function Evals({ onMsg }: { onMsg: (m: string) => void }) {
       )}
       {last && (
         <>
-          <p className={last.passed === last.total ? "hint ic" : "error"}><b>{last.passed}/{last.total} réussis · {String(last.score).replace(".", ",")} %</b>
-            <span className="hint"> — {new Date(last.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></p>
+          {last.error ? (
+            <p className="error"><b>Examen impossible</b> : {last.error}
+              <span className="hint"> — {new Date(last.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></p>
+          ) : (
+            <p className={last.passed === last.total ? "hint ic" : "error"}><b>{last.passed}/{last.total} réussis · {String(last.score).replace(".", ",")} %</b>
+              {last.unanswered > 0 && <span className="hint"> · {last.unanswered} sans réponse de Claude (non notés)</span>}
+              <span className="hint"> — {new Date(last.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span></p>
+          )}
           {fails.length > 0 && <button className="btn btn-line btn-small" onClick={() => setOpen(!open)}>{open ? "Masquer" : `Voir les ${fails.length} échec(s)`}</button>}
           {open && fails.map((r: any) => (
             <div key={r.id} className="at-item"><b>{r.id}</b>{r.problems.map((p: string) => <p key={p} className="hint">• {p}</p>)}</div>

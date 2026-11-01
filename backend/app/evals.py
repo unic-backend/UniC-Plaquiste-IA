@@ -101,6 +101,10 @@ CASES: list[dict[str, Any]] = [
 ]
 
 
+# Réponses de Claude qui comptent comme une réponse de l'IA (notée) ; toute autre erreur = Claude injoignable (crédit, quota, clé, réseau)
+ANSWERED_ERRORS = ("empty", "refusal")
+
+
 def _close(a: Any, b: Any) -> bool:
     if isinstance(b, bool) or isinstance(a, bool):
         return a is b or a == b
@@ -175,6 +179,11 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
             res = complete([{"role": "system", "content": system}, {"role": "user", "content": case["message"]}],
                            tools=agent.TOOLS, tool_handler=handler, max_tokens=4000, effort="high" if deep else "medium",
                            model=settings.anthropic_model if deep else settings.anthropic_fast_model)
+            err = str(getattr(res, "error", "") or "")
+            if not calls and err and err not in ANSWERED_ERRORS and not (getattr(res, "text", "") or ""):
+                # Claude n'a pas répondu (crédit, quota, clé, réseau) : ce n'est pas l'IA qui se trompe, rien n'est noté pour ce cas
+                results.append({"id": case["id"], "ok": False, "unanswered": True, "problems": [f"Claude n'a pas répondu : {err[:200]}"]})
+                continue
             scored = score_case(case, calls)
             phantom = claims.unbacked(getattr(res, "text", "") or "", [n for n, _ in calls])
             if phantom:   # « j'ai créé… » sans l'outil : une action inventée compte comme une invention
@@ -184,12 +193,19 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
         except Exception as exc:   # un cas en panne ne fausse pas les autres
             logger.warning("cas %s en échec : %s", case["id"], exc)
             results.append({"id": case["id"], "ok": False, "problems": [f"Erreur : {type(exc).__name__}"]})
-    passed = sum(1 for r in results if r["ok"])
-    report = {"at": datetime.now(timezone.utc).isoformat(), "passed": passed, "total": len(results),
-              "score": round(100 * passed / len(results), 1) if results else 0.0, "results": results}
+    answered = [r for r in results if not r.get("unanswered")]
+    passed = sum(1 for r in answered if r["ok"])
+    report = {"at": datetime.now(timezone.utc).isoformat(), "passed": passed, "total": len(answered),
+              "unanswered": len(results) - len(answered),
+              "score": round(100 * passed / len(answered), 1) if answered else 0.0, "results": results}
+    if results and not answered:   # panne de Claude, pas une mauvaise note : rien dans la tendance, rien comparé à l'examen précédent
+        first = next(r["problems"][0] for r in results if r.get("unanswered"))
+        report["error"] = (f"{first} — sur les {len(results)} cas : l'IA n'est pas notée. Vérifie le crédit Claude "
+                           "(menu › Coût de Claude) et la clé, puis relance.")
     _put(db, SETTING_KEY, json.dumps(report, ensure_ascii=False))
-    hist = (history(db) + [{"at": report["at"], "score": report["score"], "passed": passed, "total": len(results)}])[-HISTORY_MAX:]
-    _put(db, HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    if answered:
+        hist = (history(db) + [{"at": report["at"], "score": report["score"], "passed": passed, "total": len(answered)}])[-HISTORY_MAX:]
+        _put(db, HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
     db.flush()
     return report
 
@@ -227,10 +243,12 @@ def set_weekly(db: Session, on: bool) -> None:
 def regressions(prev: dict | None, now: dict) -> list[str]:
     """Ce qui a empiré depuis l'examen précédent : note en baisse, cas qui passait et échoue, invention. Vide = rien à signaler."""
     out: list[str] = []
+    if now.get("error"):   # Claude n'a pas répondu : ce n'est pas une régression de l'IA (la panne est signalée à part)
+        return out
     if prev and now["score"] < prev.get("score", 0):
         out.append(f"note en baisse : {now['score']} % (avant {prev.get('score')} %)")
     before = {r["id"] for r in (prev or {}).get("results", []) if r.get("ok")}
-    broke = [r["id"] for r in now["results"] if not r["ok"] and r["id"] in before]
+    broke = [r["id"] for r in now["results"] if not r["ok"] and not r.get("unanswered") and r["id"] in before]
     if broke:
         out.append("cas qui passaient et échouent : " + ", ".join(broke))
     invented = [r["id"] for r in now["results"] if any("invent" in p.lower() for p in r.get("problems", []))]
@@ -288,6 +306,10 @@ def start_background(weekly: bool = False) -> None:
             report = run(session)
             session.commit()
             worse = regressions(prev, report) if weekly else []
+            if weekly and report.get("error"):   # examen de la semaine impossible : le patron le sait (sinon l'alerte ne viendrait jamais)
+                from app import selfcare
+                year, week, _ = datetime.now(timezone.utc).isocalendar()
+                selfcare.report(f"examen IA {year}-S{week:02d}", "Examen de l'IA impossible : " + report["error"], kind="check")
             if worse:   # un seul incident par semaine (la semaine est dans la source : l'alerte de la semaine suivante repart)
                 from app import selfcare
                 year, week, _ = datetime.now(timezone.utc).isocalendar()
