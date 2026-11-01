@@ -672,7 +672,7 @@ function Chat({ initialId }: { initialId?: string }) {
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<{ status: string; text: string }>({ status: "", text: "" });
   const [pending, setPending] = useState<File[]>([]);
-  const [deep, setDeep] = useState(true);   // « Profond » par défaut (choix du patron) ; « Normal » reste possible pour une question simple
+  const [deep, setDeep] = useState(false);   // « Normal » par défaut (Profond = Opus, environ 0,20 $ le message) ; le patron l'active au besoin
   const [rec, setRec] = useState(false);
   const dictation = useRef<AbortController | null>(null);   // dictée native en cours : l'abandonner l'arrête tout de suite
   useEffect(() => () => dictation.current?.abort(), []);   // on quitte l'écran : le micro se referme
@@ -830,7 +830,7 @@ function Chat({ initialId }: { initialId?: string }) {
         else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
       }, abort.signal);
       if (turn.current !== my) return;   // la reprise après coupure a déjà affiché la réponse
-      setDeep(true);   // la réflexion profonde reste le réglage par défaut après chaque envoi
+      setDeep(false);   // après chaque envoi, retour à « Normal » (la réflexion profonde se choisit message par message)
       if (!cid) {
         setCid(out.conversation_id);
         justCreated.current = out.conversation_id;
