@@ -941,6 +941,40 @@ def _mail_row(m: InboxMessage) -> dict:
             "extrait": m.body[:300], "brouillon_existant": bool(m.reply_draft_id)}
 
 
+# Outils de UniC Code (le maître) : s'ajoutent à TOUS les outils ci-dessus, uniquement dans les travaux de UniC Code.
+CODE_TOOLS: list[dict] = [
+    {
+        "name": "code_app",
+        "description": ("DÉVELOPPEUR : modifie UniC AI LUI-MÊME avec Claude Code, qui lit TOUT le dépôt (serveur, écrans, outils, tests), "
+                        "modifie, lance les tests et propose le changement (brouillon à fusionner d'un clic par le patron quand les tests sont verts). "
+                        "Pour toute correction ou fonction de l'appli. En fond, 5 à 30 minutes. Le développeur NE VOIT PAS cette conversation : "
+                        "écris une demande COMPLÈTE (quoi, où, comment ça doit marcher, ce que le patron a dit)."),
+        "input_schema": {"type": "object", "properties": {
+            "request": {"type": "string", "description": "La demande complète pour le développeur."},
+            "kind": {"type": "string", "enum": ["fix", "feature"], "description": "fix = problème à corriger ; feature = nouvelle fonction."}},
+            "required": ["request"], "additionalProperties": False},
+    },
+    {
+        "name": "code_project",
+        "description": ("DÉVELOPPEUR : crée un projet À PART avec Claude Code (site web, jeu, application, script, outil, document), dans un dossier "
+                        "vide SANS accès à l'appli ni aux données de l'entreprise. Livré en ZIP avec un aperçu à ouvrir sur le téléphone. En fond, "
+                        "5 à 40 minutes. Demande COMPLÈTE obligatoire (le développeur ne voit pas la conversation). continue_from = id d'un projet "
+                        "déjà livré pour le poursuivre."),
+        "input_schema": {"type": "object", "properties": {
+            "request": {"type": "string", "description": "Ce qu'il faut créer ou changer, avec tous les détails."},
+            "continue_from": {"type": "string", "description": "Id du projet livré à poursuivre (facultatif)."}},
+            "required": ["request"], "additionalProperties": False},
+    },
+    {
+        "name": "mail_cleanup_propose",
+        "description": ("COURRIER : repère les mails inutiles (notifications GitHub terminées, pubs, newsletters) SANS rien supprimer. Rend le nombre "
+                        "et des exemples, et affiche au patron une carte « Mettre à la corbeille » : seul SON clic envoie à la corbeille "
+                        "(récupérable 30 jours). Jamais de devis, facture, paiement ni chantier."),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+]
+
+
 SELF_EDIT = re.compile(
     r"atelier|am[ée]liore[ -]?toi|corrige[ -]?toi|modifie[ -]?toi|r[ée]pare[ -]?toi|ajoute[ -]?toi|ton code|"
     r"(modifie|corrige|am[ée]liore|change|r[ée]pare)\w*\s+(l'|ton |votre |notre )?(appli\b|application|programme)|nouvelle fonction",
@@ -952,6 +986,8 @@ SELF_EDIT = re.compile(
 # ne suffit jamais, quoi que le modèle en pense.
 UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan", "weather"}
 OWNER_ASK = {
+    "code_app": re.compile(r"corrig|modifi|chang|ajout|cr[ée]|fais|fait|mets|met |am[ée]lior|d[ée]velopp|r[ée]par|retire|supprim|bug|fonction|appli|code", re.I),
+    "code_project": re.compile(r"cr[ée]|fais|fait|d[ée]velopp|programm|site|jeu|appli|script|outil|document|projet|continue|ajout|modifi|chang", re.I),
     "forget_memory": re.compile(r"oubli|retire|supprime|efface|enl[eè]ve|m[ée]moire", re.I),
     "generate_visual": re.compile(r"visuel|image|photo|illustr|affiche|dessin|g[ée]n[èe]re|higgsfield|rendu|cr[ée]e", re.I),
     "create_agent": re.compile(r"\bagents?\b|automati|tous les (jours|matins|soirs)|chaque (jour|matin|semaine)", re.I),
@@ -1003,6 +1039,8 @@ class AgentSession:
         self.images: list[dict] = []   # schémas dessinés à afficher dans la conversation
         self.files: list[dict] = []   # fichiers modifiés à proposer (téléchargement, partage)
         self.changes: list[str] = []   # ce que l'assistant a modifié dans les documents (sert à tirer une leçon d'une correction)
+        self.jobs: list[dict] = []   # travaux de développement lancés (UniC Code) : {"type": "app"|"project", "id": …}
+        self.cleanup: dict = {}   # nettoyage du courrier proposé (carte à valider d'un clic)
         self.used: list[str] = []
         self.succeeded: list[str] = []   # outils qui ont RÉUSSI (sans erreur) : base du contrôle des actions affirmées (claims.py)
         self.results: list[tuple[str, str]] = []   # (outil, résultat) réussis : la relecture vérifie les chiffres de la réponse contre eux
@@ -2180,6 +2218,44 @@ class AgentSession:
         from app import selfcare
         rows = selfcare.incidents(self.db, status if status in ("open", "fixing", "fixed", "ignored", "all") else "open", 20)
         return {"incidents": rows, "nombre": len(rows)}
+
+    def _t_code_app(self, request: str, kind: str = "") -> dict:
+        from app import code_tasks, repair
+        text = (request or "").strip()
+        try:
+            job = repair.start_job(self.db, kind if kind in ("fix", "feature") else code_tasks.job_kind(text), text, "", True, code_tasks.BUDGET_DEFAULT)
+        except repair.RepairError as exc:
+            raise ConnectorError(str(exc), exc.status)
+        job.conv_id = str(self.state.get("conv_id") or "")
+        self.db.commit()
+        self.jobs.append({"type": "app", "id": job.id})
+        return {"ok": True, "travail": job.id, "statut": "en cours (5 à 30 minutes, en fond)",
+                "note": ("Dis au patron en une phrase ce que le développeur fait. Le résultat (proposition testée, à fusionner d'un clic) "
+                         "s'affichera tout seul sous ta réponse : ne le décris pas à l'avance.")}
+
+    def _t_code_project(self, request: str, continue_from: str = "") -> dict:
+        from app import code_tasks
+        try:
+            task = code_tasks.start(self.db, request, code_tasks.BUDGET_DEFAULT, continue_from or "", str(self.state.get("conv_id") or ""))
+        except code_tasks.CodeError as exc:
+            raise ConnectorError(str(exc), exc.status)
+        self.jobs.append({"type": "project", "id": task.id})
+        return {"ok": True, "travail": task.id, "statut": "en cours (5 à 40 minutes, en fond)",
+                "note": ("Dis au patron en une phrase ce que le développeur crée. L'aperçu et le ZIP s'afficheront tout seuls sous ta réponse.")}
+
+    def _t_mail_cleanup_propose(self) -> dict:
+        from app import mail_cleanup
+        cands = mail_cleanup.candidates(self.db)
+        if not cands:
+            return {"nombre": 0, "note": "Aucun mail à nettoyer : rien d'inutile n'a été repéré (les mails de travail sont toujours gardés)."}
+        by: dict[str, int] = {}
+        for c in cands:
+            by[c["category"]] = by.get(c["category"], 0) + 1
+        self.cleanup = {"ids": [c["id"] for c in cands], "count": len(cands), "by": by,
+                        "examples": [{"from": c["from_addr"], "subject": c["subject"], "reason": c["reason"]} for c in cands[:6]]}
+        return {"nombre": len(cands), "par_categorie": by, "exemples": self.cleanup["examples"],
+                "note": ("RIEN n'est supprimé : une carte « Mettre à la corbeille » s'affiche pour le patron, seul son clic envoie à la corbeille "
+                         "(récupérable 30 jours). Annonce le nombre et les catégories, sans prétendre avoir supprimé.")}
 
     def _t_improve_myself(self, kind: str, request: str = "", incident_id: str = "") -> dict:
         from app import repair

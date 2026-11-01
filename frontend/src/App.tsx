@@ -350,7 +350,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
 }
 
 /** Un message ne se redessine que si SON contenu change : appuyer sur « + », saisir du texte ou ouvrir un menu ne reparcourt plus toute la conversation. */
-const MessageRow = memo(MessageView);
+export const MessageRow = memo(MessageView);   // aussi utilisé par UniC Code (même rendu que le chat : documents, fichiers, images, brouillons)
 
 type Gate = "loading" | "connect" | "error" | "ok";
 
@@ -664,7 +664,7 @@ function Chat({ initialId }: { initialId?: string }) {
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<{ status: string; text: string }>({ status: "", text: "" });
   const [pending, setPending] = useState<File[]>([]);
-  const [deep, setDeep] = useState(false);
+  const [deep, setDeep] = useState(true);   // « Profond » par défaut (choix du patron) ; « Normal » reste possible pour une question simple
   const [rec, setRec] = useState(false);
   const dictation = useRef<AbortController | null>(null);   // dictée native en cours : l'abandonner l'arrête tout de suite
   useEffect(() => () => dictation.current?.abort(), []);   // on quitte l'écran : le micro se referme
@@ -822,7 +822,7 @@ function Chat({ initialId }: { initialId?: string }) {
         else if (ev.t === "reset") setLive((l) => ({ ...l, text: "" }));
       }, abort.signal);
       if (turn.current !== my) return;   // la reprise après coupure a déjà affiché la réponse
-      setDeep(false);
+      setDeep(true);   // la réflexion profonde reste le réglage par défaut après chaque envoi
       if (!cid) {
         setCid(out.conversation_id);
         justCreated.current = out.conversation_id;

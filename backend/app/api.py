@@ -203,6 +203,7 @@ class ChatIn(BaseModel):
     voice: bool = False  # mode vocal UniC : réponses parlées, courtes, sans Markdown
     locked: bool = False  # téléphone verrouillé (Hey UniC) : aucune donnée de l'entreprise, aucun outil
     tracking_key: str | None = None  # conversation intégrée à la fiche d'un client du suivi (ou « _all »)
+    code: bool = False  # travail de UniC Code : conversation à part (hors de la liste du chat), tous les outils + les développeurs, mode profond
 
 
 class TranslateIn(BaseModel):
@@ -254,7 +255,7 @@ def list_conversations(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = db.query(Conversation).filter(Conversation.user_id == user.id, or_(Conversation.kind.is_(None), Conversation.kind != "suivi"))
+    query = db.query(Conversation).filter(Conversation.user_id == user.id, or_(Conversation.kind.is_(None), Conversation.kind.notin_(("suivi", "code"))))
     query = query.filter(Conversation.archived.is_(True)) if archived else query.filter(or_(Conversation.archived.is_(None), Conversation.archived.is_(False)))
     if q:   # le titre OU ce qui a été écrit dedans : on retrouve « la conversation où on a parlé du plafond de Mme Fall »
         query = query.filter(or_(Conversation.title.ilike(f"%{q}%"),
@@ -382,17 +383,20 @@ def _tracking_conv(db: Session, user: User, key: str) -> Conversation:
     return conv
 
 
-def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
+def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None, steps: list[str] | None = None) -> dict:
     if body.tracking_key:
         conv = _tracking_conv(db, user, body.tracking_key)
     elif body.conversation_id:
         conv = db.get(Conversation, body.conversation_id)
         if conv is None or conv.user_id != user.id:
             raise HTTPException(404, "Conversation introuvable")
+        if body.code and conv.kind != "code":
+            raise HTTPException(404, "Travail introuvable")
     else:
-        conv = Conversation(user_id=user.id, title="Nouvelle conversation", project_id=body.project_id)
+        conv = Conversation(user_id=user.id, title="Nouvelle conversation", project_id=body.project_id, kind="code" if body.code else None)
         db.add(conv)
         db.flush()
+    code = bool(body.code or conv.kind == "code")
     text = (body.message or "").strip()
     if not text and not body.file_ids:
         raise HTTPException(400, "Message vide")
@@ -409,7 +413,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
     CANCELLED.discard(conv.id)
     RUNNING.add(conv.id)
     try:
-        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice, body.locked)
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep or code, body.voice, body.locked, code=code)
     except HTTPException:
         raise
     except ai_mod.Cancelled:   # « Arrêter » : ce qui était déjà fait reste, le reste s'arrête là
@@ -430,6 +434,8 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None) -> dict:
         "artifacts": reply.artifacts,
         "capabilities": reply.capabilities,
     }
+    if code and steps:
+        meta["steps"] = list(dict.fromkeys(steps))[:40]   # ce que l'IA a fait, dans l'ordre (afficher son travail)
     asst = Message(
         conversation_id=conv.id, role="assistant", content=reply.content,
         meta_json=json.dumps(meta, ensure_ascii=False),
@@ -508,9 +514,13 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
 
     holder: dict = {"cid": body.conversation_id}
 
+    steps: list[str] = []
+
     def sink(ev):
         if holder["cid"] and holder["cid"] in CANCELLED:
             raise ai.Cancelled()   # arrêt demandé : coupe le flux avant la prochaine étape (texte, outil)
+        if ev.get("t") == "status" and ev.get("text") and ev["text"] != "Je réfléchis…":
+            steps.append(str(ev["text"]))
         q.put(ev)
 
     def on_start(cid):
@@ -523,7 +533,7 @@ def chat_stream(body: ChatIn, user: User = Depends(get_current_user)):
         mtok = mem.AFTER_REPLY.set(pending)
         try:
             q.put({"t": "status", "text": "Je réfléchis…"})
-            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body, on_start=on_start)})
+            q.put({"t": "done", **_chat_turn(db, db.get(User, uid), body, on_start=on_start, steps=steps)})
             q.put(None)   # flux fermé : l'écran n'attend plus
             for t in pending:
                 mem.extract_in_background(t)   # la mémoire se met à jour ensuite

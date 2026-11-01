@@ -648,6 +648,24 @@ def _calc_for(db: Session, text: str):
     return calc.calculate_from_text(text, _calc_defaults(db))
 
 
+CODE_PROMPT = (
+    "\n\nTU ES UNIC CODE, le MAÎTRE du projet UniC : le patron te confie un TRAVAIL, tu le mènes à bout. Tu as TOUS les outils d'UniC AI "
+    "(courrier, agenda, devis, factures, fichiers, mémoire, recherche…) et deux développeurs puissants qui travaillent en fond : "
+    "code_app (modifie UniC AI lui-même : lit tout le dépôt, teste, propose un changement à fusionner d'un clic) et code_project "
+    "(crée un site, un jeu, une application, un script, un outil, un document : ZIP + aperçu). "
+    "\n1. Jamais « je n'ai pas accès » ni « je ne peux pas » avant d'avoir essayé tes outils : cherche l'outil, utilise-le. "
+    "\n2. Travail sur les données ou le courrier de l'entreprise : fais-le toi-même avec tes outils. "
+    "\n3. Code (corriger ou ajouter une fonction à UniC AI) : code_app. Création à part : code_project. Les développeurs ne voient PAS cette "
+    "conversation : donne-leur une demande complète (quoi, où, comment ça doit marcher, tout ce que le patron a dit). Plusieurs travaux = plusieurs appels. "
+    "\n4. Supprimer des mails (pubs, notifications GitHub, newsletters) : tu ne supprimes jamais toi-même. Appelle mail_cleanup_propose : "
+    "une carte s'affiche, seul le clic du patron envoie à la corbeille (récupérable 30 jours). Dis-le clairement, sans prétendre avoir supprimé. "
+    "\n5. MONTRE TA DÉMARCHE : une ou deux phrases sur ce que tu comprends et ce que tu vas faire AVANT d'agir ; puis agis ; puis un résultat clair : "
+    "ce qui est fait, ce qui tourne en fond, ce qui attend le clic du patron, ce qui reste. Français simple, phrases courtes, aucun jargon. "
+    "Ne parle jamais de « Claude Code » : tu dis « je », « mon développeur ». "
+    "\n6. Travail impossible ou dangereux (sécurité, secrets, déploiement, suppression sans clic) : dis-le franchement et propose l'alternative sûre."
+)
+
+
 def handle_turn(
     db: Session,
     conv: Conversation,
@@ -657,8 +675,11 @@ def handle_turn(
     deep: bool = False,
     voice: bool = False,
     locked: bool = False,
+    code: bool = False,
 ) -> AssistantReply:
     state = _state(conv)
+    if code:   # travail de UniC Code : tous les outils + les développeurs ; le travail connaît sa conversation (lien des travaux lancés)
+        state["code_mode"], state["conv_id"] = True, conv.id
     file_ids = file_ids or []
     caps: list[str] = []
     artifacts: list[dict] = []
@@ -688,6 +709,8 @@ def handle_turn(
         )
 
     intent = "chat" if locked else _intent(text, state)   # téléphone verrouillé : conversation simple, jamais d'action métier
+    if code and not locked:
+        intent = "chat"   # UniC Code : jamais l'automate local, c'est le maître (IA + tous les outils) qui mène le travail
     reply_text = ""
 
     # Document demandé sans métré/devis exploitable : plus de phrase toute faite. Si un moteur IA cloud est là
@@ -1214,8 +1237,10 @@ def handle_turn(
                                            + " ; ".join(f"{f.get('name')} (file_id={f.get('id')})" for f in state["files"])
                                            + ". Pour REGARDER de nouveau un plan ou une image avec une question précise (angles, jonctions en T, équerres, "
                                            "nombre de cloisons, cotes…) : read_plan(file_id, question=«…»). Ne dis jamais que tu ne peux plus ouvrir le fichier : appelle l'outil.")
+                code_mode = tools_on and bool(state.get("code_mode"))
+                tool_defs = agent.TOOLS + agent.CODE_TOOLS if code_mode else agent.TOOLS
                 if tools_on:
-                    msgs[0]["content"] += agent.AGENT_PROMPT          # texte fixe : dans la partie en cache
+                    msgs[0]["content"] += agent.AGENT_PROMPT + (CODE_PROMPT if code_mode else "")   # texte fixe : dans la partie en cache
                     msgs[1]["content"] += agent.availability_note(db)   # varie (connecteurs branchés) : hors cache
                     msgs[1]["content"] += round_table_note(text, deep)   # plusieurs regards : demandés, ou réflexion profonde
                 else:   # téléphone verrouillé, moteur de secours : la date n'est pas une donnée de l'entreprise, l'IA la reçoit toujours
@@ -1232,10 +1257,10 @@ def handle_turn(
                     if deep and not voice:   # tâche complexe : plus d'étapes d'outils (tableur, bilan, devis en plusieurs temps)
                         web_kw["max_rounds"] = DEEP_TOOL_ROUNDS
                     ai = chat_complete(msgs, deep=deep, web=can_search,
-                                       tools=agent.TOOLS if tools_on else None, tool_handler=session, **voice_kw, **web_kw)
+                                       tools=tool_defs if tools_on else None, tool_handler=session, **voice_kw, **web_kw)
                     if voice_kw.get("model") and not (ai.available and ai.text) and ai.error != "refusal":
                         # le modèle rapide n'a pas répondu : on retombe sur le modèle courant, sans bruit
-                        ai = chat_complete(msgs, deep=deep, web=can_search, tools=agent.TOOLS if tools_on else None,
+                        ai = chat_complete(msgs, deep=deep, web=can_search, tools=tool_defs if tools_on else None,
                                            tool_handler=session, effort="low", max_tokens=1200)
                 if ai.provider in ("claude", "vibecode") and ai.raw:
                     usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider)   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
@@ -1246,7 +1271,7 @@ def handle_turn(
                     audit(db, user.id, "ai_phantom_claim", "conversation", conv.id, ", ".join(phantom)[:250])
                     fix = msgs + [{"role": "assistant", "content": ai.text}, {"role": "user", "content": claims.correction_prompt(phantom)}]
                     with live_stream():
-                        again = chat_complete(fix, deep=deep, web=False, tools=agent.TOOLS, tool_handler=session,
+                        again = chat_complete(fix, deep=deep, web=False, tools=tool_defs, tool_handler=session,
                                               **{k: v for k, v in voice_kw.items() if k != "model"})
                     if again.available and again.text and again.error != "refusal":
                         if again.provider in ("claude", "vibecode") and again.raw:
@@ -1269,9 +1294,10 @@ def handle_turn(
                     ai.text = checked.text
                 if session is not None and session.used:
                     caps.extend(f"tool:{n}" for n in dict.fromkeys(session.used))
-                    if session.cards or session.documents or session.images or session.files:
+                    if session.cards or session.documents or session.images or session.files or session.jobs or session.cleanup:
                         structured = {k: v for k, v in (("drafts", session.cards), ("documents", session.documents),
-                                                        ("images", session.images), ("files", session.files)) if v}
+                                                        ("images", session.images), ("files", session.files),
+                                                        ("jobs", session.jobs), ("cleanup", session.cleanup)) if v}
                 if ai.error == "refusal":
                     reply_text = "Je ne peux pas aider sur ce point précis. Reformule ou demande autre chose."
                 elif ai.available and ai.text:
