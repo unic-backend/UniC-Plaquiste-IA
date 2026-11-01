@@ -2703,11 +2703,11 @@ def selfcare_job(jid: str, db: Session = Depends(get_db), user: User = Depends(A
     j = db.get(RepairJob, jid)
     if j is None:
         raise HTTPException(404, "Proposition introuvable")
-    if j.status == "proposed":
+    if j.status in ("proposed", "working"):   # « working » : suivi de Claude Code sur GitHub
         try:
             repair.sync(db, j)
-        except repair.RepairError:
-            pass
+        except (repair.RepairError, KeyError, TypeError, ValueError):   # GitHub injoignable ou réponse inattendue : état inchangé
+            db.rollback()
     out = repair.to_dict(j)
     if j.status == "proposed":
         try:
@@ -2787,6 +2787,20 @@ def selfcare_close(jid: str, db: Session = Depends(get_db), user: User = Depends
         raise HTTPException(404, "Proposition introuvable")
     _repair_call(repair.close, db, j)
     return repair.to_dict(j)
+
+
+class EngineIn(BaseModel):
+    engine: str = Field(max_length=20)
+
+
+@router.put("/selfcare/engine")
+def selfcare_engine(body: EngineIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """Choix du patron : moteur de l'Atelier « claude_code » (GitHub Actions, par défaut) ou « classique »."""
+    from app import repair
+    value = _repair_call(repair.set_engine, db, body.engine)
+    audit(db, user.id, "atelier_engine", "selfcare", value)
+    db.commit()
+    return repair.status(db)
 
 
 @router.get("/selfcare/github")
