@@ -49,6 +49,13 @@ STEP_HINTS = {
 PREVIEW_CSP = ("sandbox allow-scripts allow-forms allow-modals allow-popups; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' "
                "blob: data:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; "
                "frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'")
+# Règles « Ponytail » (DietrichGebert/ponytail, licence MIT), reprises en bref pour les projets : le dossier est vide, AGENTS.md ne s'y applique pas.
+LAZY_RULES = ("CODE : écris le moins de code qui résout tout le problème. Dans l'ordre : la fonction a-t-elle besoin d'exister (sinon ne l'écris pas, dis-le en une ligne) ; "
+              "ce que le projet a déjà ; la bibliothèque standard ou la plateforme ; une dépendance déjà présente (jamais de nouvelle dépendance pour quelques lignes) ; "
+              "sinon le minimum de code. Aucune abstraction, option ni configuration que personne n'a demandée. Ne coupe jamais : la validation des entrées, "
+              "la gestion d'erreur qui évite de perdre des données, la sécurité, l'accessibilité, ni rien de ce que le patron a demandé. "
+              "Une logique non triviale (calcul, argent, sécurité, lecture de texte) laisse un petit test. "
+              "Termine ton résumé par une ou deux lignes : ce que tu as sauté ou pas vérifié, et le risque.")
 WORKING_NOTE = "Claude Code travaille sur GitHub (5 à 40 minutes) : il crée, teste et prépare la livraison."
 
 
@@ -157,9 +164,8 @@ def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: st
     task = CodeTask(id=new_id(), request=text, budget=budget, parent_id=parent.id if parent else "", summary=WORKING_NOTE, conv_id=conv_id)
     ask = text if parent is None else (f"SUITE DU PROJET (les fichiers du projet livré sont dans le dossier courant).\n"
                                        f"Demande d'origine : {parent.request[:3000]}\n\nCE QUE LE PATRON VEUT MAINTENANT :\n{text}")
-    if anti_vibecode.wanted(text, parent.request if parent else ""):   # pages web : les 43 réflexes d'un site « fait par l'IA » sont interdits
-        rules = anti_vibecode.block()
-        ask = ask[:ASK_MAX - len(rules) - 2] + "\n\n" + rules
+    rules = LAZY_RULES + ("\n\n" + anti_vibecode.block() if anti_vibecode.wanted(text, parent.request if parent else "") else "")   # pages web : + les 43 réflexes d'un site « fait par l'IA » interdits
+    ask = ask[:ASK_MAX - len(rules) - 2] + "\n\n" + rules
     r = _gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {
         "task_id": task.id, "request": ask[:ASK_MAX], "model": settings.anthropic_model, "budget": budget,
         "parent_run": str(parent.run_id) if parent else ""}})

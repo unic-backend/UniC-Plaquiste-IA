@@ -121,17 +121,19 @@ def _inputs(monkeypatch):
     return seen
 
 
-def test_un_site_part_avec_les_regles_et_sa_demande_intacte(client, db, monkeypatch):
-    seen = _inputs(monkeypatch)
-    demande = "Un site vitrine pour une boulangerie à Dakar. " + "Détail. " * 900   # demande très longue : jamais coupée par les règles
-    assert client.post("/api/code/projects", json={"request": demande[:8000]}).status_code == 200
-    (inputs,) = seen
-    assert inputs["request"].startswith(demande[:200]) and inputs["request"].endswith(anti_vibecode.block())
-    assert len(inputs["request"]) <= 20_000
-
-
-def test_un_jeu_ou_un_script_part_sans_les_regles(client, db, monkeypatch):
+def test_un_jeu_ou_un_script_part_avec_les_regles_de_code_mais_sans_celles_du_design(client, db, monkeypatch):
+    from app import code_tasks
     seen = _inputs(monkeypatch)
     for demande in ("Un jeu de memory pour enfants", "Un script qui classe mes factures par mois"):
         assert client.post("/api/code/projects", json={"request": demande}).status_code == 200
-    assert len(seen) == 2 and all("DESIGN :" not in i["request"] for i in seen)
+    assert len(seen) == 2 and all(i["request"].endswith(code_tasks.LAZY_RULES) and "DESIGN :" not in i["request"] for i in seen)
+
+
+def test_un_site_recoit_les_deux_jeux_de_regles_et_sa_demande_reste_intacte(client, db, monkeypatch):
+    from app import code_tasks
+    seen = _inputs(monkeypatch)
+    demande = "Un site vitrine pour une boulangerie à Dakar. " + "Détail. " * 900
+    assert client.post("/api/code/projects", json={"request": demande[:8000]}).status_code == 200
+    (inputs,) = seen
+    assert inputs["request"].startswith(demande[:200]) and code_tasks.LAZY_RULES in inputs["request"] and inputs["request"].endswith(anti_vibecode.block())
+    assert len(inputs["request"]) <= code_tasks.ASK_MAX

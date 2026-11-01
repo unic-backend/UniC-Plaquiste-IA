@@ -9,6 +9,8 @@ import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -51,14 +53,16 @@ PREFIX = {
 
 def next_number(db: Session, kind: str) -> str:
     year = datetime.now(timezone.utc).year
-    seq = db.get(Sequence, (kind, year))
-    if seq is None:
-        seq = Sequence(name=kind, year=year, value=0)
-        db.add(seq)
-        db.flush()
-    seq.value += 1
-    prefix = PREFIX.get(kind, kind.upper()[:3])
-    return f"{prefix}-{year}-{seq.value:04d}"
+    key = (Sequence.name == kind, Sequence.year == year)
+    bump = update(Sequence).where(*key).values(value=Sequence.value + 1)   # l'incrément se fait dans la base : lire, +1, écrire donnait le même numéro à deux requêtes simultanées
+    if not db.execute(bump).rowcount:
+        try:
+            with db.begin_nested():
+                db.add(Sequence(name=kind, year=year, value=0))
+        except IntegrityError:   # une autre requête vient de créer la ligne de l'année
+            pass
+        db.execute(bump)
+    return f"{PREFIX.get(kind, kind.upper()[:3])}-{year}-{db.scalar(select(Sequence.value).where(*key)):04d}"
 
 
 # ---------- numérotation maison : UC-AAAA-MMJJ-CLI ----------
@@ -191,7 +195,6 @@ def add_with_unique_number(db: Session, obj, next_number) -> None:
     """Ajoute un document numéroté. Si un autre document vient de prendre le même numéro (deux créations simultanées),
     on retente avec le numéro suivant au lieu d'échouer : le numéro reste unique et l'utilisateur ne voit aucune erreur.
     `next_number()` recalcule un numéro libre ; chaque essai est isolé dans un point de sauvegarde (le reste du travail est gardé)."""
-    from sqlalchemy.exc import IntegrityError
     for attempt in range(10):
         try:
             with db.begin_nested():
