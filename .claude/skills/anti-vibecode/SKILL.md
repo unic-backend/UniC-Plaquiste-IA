@@ -27,17 +27,22 @@ What the user typed after `/anti-vibecode`: `$ARGUMENTS`
   tells: one brand color that is not purple or indigo, one typeface that is not Inter / Geist / Space
   Grotesk, and one layout idea that is not a centered hero + 3 feature cards. Say them in one line.
   Answer with « 43 règles actives » (or « 43 rules active ») and the 3 choices.
-- `audit [path]`: grep the `scan:` patterns, then check by eye what a regex cannot see. Report only, no edit.
+- `audit [path]`: run the scanner, then check by eye what a regex cannot see. Report only, no edit.
 - `fix [path]`: audit, then fix every sign found, highest impact first (the « What is missing »
   section always counts, a site without legal pages is not shippable).
 
 ## Audit
 
-1. Scan the code by hand: for every sign marked `scan:` in `references/signs.md`, grep its patterns
-   over the project (`rg -n "<pattern>" <project root>`), skipping `node_modules`, `dist`, `build`.
-   Note each hit with its sign number, file and line. (The upstream `scripts/scan.mjs` scanner is not
-   installed in this repository: if it is added later under `scripts/`, run `node scripts/scan.mjs <project root>` instead.)
-2. Open the site (dev server or the built pages) and check the visual signs marked `eye` in `references/signs.md`: layout, motion, copy, what is missing. Read the landing page copy yourself.
+1. Run the scanner from this skill's folder on the project root (or the path given):
+
+   ```bash
+   node <skill folder>/scripts/scan.mjs <project root>
+   ```
+
+   It prints each sign it detected with its number, file and line, and the signs it cannot detect.
+   Node 18+, no dependency.
+2. Open the site (dev server or the built pages) and check the visual signs the scanner lists as
+   « check by eye »: layout, motion, copy, what is missing. Read the landing page copy yourself.
 3. Report as a checklist: `✓ NN  <sign>` when clean, `✗ NN  <sign>  <file:line>  → <fix>` when found.
    End with the count: `NN/43 signes trouvés`.
 
@@ -51,7 +56,7 @@ What the user typed after `/anti-vibecode`: `$ARGUMENTS`
   not exist yet, remove the block, never fake it. Ask the user for the real numbers.
 - Missing legal pages: create `mentions-legales` and `confidentialite` (or `legal` and `privacy`)
   pages with the fields the user must fill marked `TODO`, never invented company details.
-- Run the grep pass again at the end and show the before / after count.
+- Run the scanner again at the end and show the before / after count.
 
 ## Going further
 
@@ -64,7 +69,7 @@ For a full design pass after the cleanup, two skills pair well with this one:
 
 ## UniC : règles locales
 
-- Source : skill `anti-vibecode` de Melvynx/shared-skills, copié ici avec `references/signs.md` (43 signes).
+- Source : skill `anti-vibecode` de Melvynx/shared-skills, copié ici avec `references/signs.md` (43 signes) et `scripts/scan.mjs`.
 - S'applique aux **nouveaux** sites, pages et projets web (UniC Code, projets livrés en ZIP).
 - Pour l'appli UniC elle-même (`frontend/`), le design existant prime : ne réécris pas l'existant pour
   suivre ces signes. Seules les nouvelles pages sans identité propre suivent la liste.

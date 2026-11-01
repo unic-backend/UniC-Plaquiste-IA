@@ -1,7 +1,10 @@
 """Anti-vibecode : les 43 signes d'un site « fait par l'IA » sont donnés à Claude Code pour les projets web de UniC Code.
 Deux copies des règles (le skill du dépôt lu par Claude Code, le module du serveur) : elles doivent rester identiques."""
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,9 +40,27 @@ def test_le_skill_est_installe_pour_claude_code():
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     head = text.split("---")[1]
     assert re.search(r"^name:\s*anti-vibecode\s*$", head, re.M) and "description:" in head
-    assert "references/signs.md" in text and "scripts/scan.mjs" in text   # le scanner d'origine n'est pas installé : le texte le dit
-    assert not (SKILL / "scripts").exists()
+    assert "references/signs.md" in text and "scripts/scan.mjs" in text and (SKILL / "scripts" / "scan.mjs").is_file()
     assert "frontend/" in text   # le design de l'appli UniC elle-même n'est pas réécrit
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node absent")
+def test_le_scanner_trouve_les_signes_d_un_site_vibecode_et_laisse_un_site_propre(tmp_path):
+    scan = SKILL / "scripts" / "scan.mjs"
+    mauvais, propre = tmp_path / "mauvais", tmp_path / "propre"
+    mauvais.mkdir()
+    propre.mkdir()
+    (mauvais / "index.html").write_text(
+        "<title>Create Next App</title><button class='bg-indigo-600'>Go</button><Sparkles/><p>Boost your business</p>", encoding="utf-8")
+    (propre / "index.html").write_text(
+        "<title>Boulangerie Diop, Dakar</title><meta property='og:image' content='/og.png'>"
+        "<a href='/mentions-legales'>Mentions légales</a><a href='/confidentialite'>Confidentialité</a>", encoding="utf-8")
+
+    def lancer(dossier):
+        out = subprocess.run(["node", str(scan), str(dossier), "--json"], capture_output=True, text=True, timeout=60, check=True).stdout
+        return {int(n) for n in json.loads(out)["found"]}
+    assert {5, 17, 29, 39, 37, 38, 41} <= lancer(mauvais)
+    assert lancer(propre) == set()
 
 
 def test_seuls_les_projets_web_recoivent_les_regles():
