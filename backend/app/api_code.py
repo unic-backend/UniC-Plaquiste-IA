@@ -17,6 +17,7 @@ from app.security import require_roles
 from app.services import audit
 
 router = APIRouter(prefix="/code", tags=["code"])
+ITEMS_MAX = 40
 ADMIN = require_roles("admin", "manager")
 FINISHED = ("done", "failed", "closed")
 
@@ -43,8 +44,42 @@ def overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     repair.sync_all(db)
     projects = db.query(CodeTask).options(defer(CodeTask.preview)).order_by(CodeTask.created_at.desc()).limit(30).all()
     jobs = db.query(RepairJob).filter(RepairJob.engine == "claude_code").order_by(RepairJob.created_at.desc()).limit(20).all()
-    return {"github": repair.status(db), "budgets": list(code_tasks.BUDGETS),
-            "projects": [code_tasks.to_dict(t) for t in projects], "app_jobs": [repair.to_dict(j) for j in jobs]}
+    app_jobs = [repair.to_dict(j) for j in jobs]
+    items = [code_tasks.to_dict(t) | {"title": t.title or _short(t.request)} for t in projects] \
+        + [j | {"type": "app", "job_kind": j["kind"], "title": _short(j["request"] or j["summary"])} for j in app_jobs]
+    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return {"github": repair.status(db), "budgets": list(code_tasks.BUDGETS), "items": items[:ITEMS_MAX],
+            "projects": [code_tasks.to_dict(t) for t in projects], "app_jobs": app_jobs}
+
+
+def _short(text: str, n: int = 72) -> str:
+    t = re.sub(r"\s+", " ", text or "").strip()
+    first = re.split(r"(?<=[.!?])\s", t, maxsplit=1)[0] or t
+    return first if len(first) <= n else first[: n - 1].rstrip() + "…"
+
+
+class TaskIn(BaseModel):
+    request: str = Field(min_length=1, max_length=code_tasks.REQUEST_MAX)
+    parent_id: str = Field(default="", max_length=36)
+
+
+@router.post("/tasks")
+def start_task(body: TaskIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
+    """UNE zone de saisie : le serveur choisit. Suite d'un projet livré → projet. Sinon : demande sur l'appli → Claude Code sur tout le dépôt
+    (proposition à fusionner d'un clic) ; le reste → projet dans un dossier vide (ZIP + aperçu). « /ia » ou « /projet » en début de phrase force le choix."""
+    parent = db.get(CodeTask, body.parent_id) if body.parent_id else None
+    if body.parent_id and parent is None:
+        raise HTTPException(404, "Projet à continuer introuvable.")
+    kind, text = ("projet", body.request.strip()) if parent else code_tasks.route(body.request)
+    if kind == "app":
+        job = _c(repair.start_job, db, code_tasks.job_kind(text), text, "", True, code_tasks.BUDGET_DEFAULT)
+        audit(db, user.id, "code_app_job", "repair_job", job.id, text[:300])
+        db.commit()
+        return repair.to_dict(job) | {"type": "app", "job_kind": job.kind, "title": _short(text)}
+    t = _c(code_tasks.start, db, text, code_tasks.BUDGET_DEFAULT, parent.id if parent else "")
+    audit(db, user.id, "code_project", "code_task", t.id, text[:300])
+    db.commit()
+    return code_tasks.to_dict(t) | {"title": t.title or _short(text)}
 
 
 class ProjectIn(BaseModel):
