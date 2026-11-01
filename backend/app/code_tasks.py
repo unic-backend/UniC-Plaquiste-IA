@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app import repair, secrets_box
+from app import anti_vibecode, repair, secrets_box
 from app.models import CodeTask, new_id
 
 logger = logging.getLogger("unic.code")
@@ -157,6 +157,9 @@ def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: st
     task = CodeTask(id=new_id(), request=text, budget=budget, parent_id=parent.id if parent else "", summary=WORKING_NOTE, conv_id=conv_id)
     ask = text if parent is None else (f"SUITE DU PROJET (les fichiers du projet livré sont dans le dossier courant).\n"
                                        f"Demande d'origine : {parent.request[:3000]}\n\nCE QUE LE PATRON VEUT MAINTENANT :\n{text}")
+    if anti_vibecode.wanted(text, parent.request if parent else ""):   # pages web : les 43 réflexes d'un site « fait par l'IA » sont interdits
+        rules = anti_vibecode.block()
+        ask = ask[:ASK_MAX - len(rules) - 2] + "\n\n" + rules
     r = _gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {
         "task_id": task.id, "request": ask[:ASK_MAX], "model": settings.anthropic_model, "budget": budget,
         "parent_run": str(parent.run_id) if parent else ""}})
