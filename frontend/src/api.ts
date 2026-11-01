@@ -387,7 +387,7 @@ export const api = {
     request<ChatOut>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
   /** Réponse en flux : statut + texte au fil de l'eau. Si le flux ne démarre pas, repli sur la réponse d'un bloc. */
   chatStream: async (
-    body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean; voice?: boolean; locked?: boolean },
+    body: { message: string; conversation_id?: string; file_ids?: string[]; deep?: boolean; voice?: boolean; locked?: boolean; code?: boolean },
     on: (ev: { t: "status" | "delta" | "reset" | "conv"; text?: string; conversation_id?: string }) => void,
     signal?: AbortSignal,
   ): Promise<ChatOut & { streamed: boolean }> => {

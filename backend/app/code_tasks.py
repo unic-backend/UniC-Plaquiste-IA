@@ -137,7 +137,7 @@ def to_dict(t: CodeTask) -> dict:
 
 # ---------- lancement ----------
 
-def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: str = "") -> CodeTask:
+def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: str = "", conv_id: str = "") -> CodeTask:
     text = (request or "").strip()
     if len(text) < REQUEST_MIN:
         raise CodeError("Décris le projet (une phrase au moins).")
@@ -154,7 +154,7 @@ def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: st
         raise CodeError("Deux projets sont déjà en cours : attends qu'ils finissent.", 409)
     tok, repo, base = _ctx(db)
     from app.config import settings
-    task = CodeTask(id=new_id(), request=text, budget=budget, parent_id=parent.id if parent else "", summary=WORKING_NOTE)
+    task = CodeTask(id=new_id(), request=text, budget=budget, parent_id=parent.id if parent else "", summary=WORKING_NOTE, conv_id=conv_id)
     ask = text if parent is None else (f"SUITE DU PROJET (les fichiers du projet livré sont dans le dossier courant).\n"
                                        f"Demande d'origine : {parent.request[:3000]}\n\nCE QUE LE PATRON VEUT MAINTENANT :\n{text}")
     r = _gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {

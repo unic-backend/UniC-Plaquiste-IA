@@ -801,6 +801,7 @@ class CodeTask(Base):
     parent_id: Mapped[str] = mapped_column(String(36), default="")      # projet continué
     run_id: Mapped[int] = mapped_column(BigInteger, default=0)
     artifact_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    conv_id: Mapped[str] = mapped_column(String(36), default="")        # travail UniC Code qui l'a lancé (vide : lancé à la main)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -821,6 +822,7 @@ class RepairJob(Base):
     pr_url: Mapped[str] = mapped_column(String(300), default="")
     error: Mapped[str] = mapped_column(Text, default="")
     engine: Mapped[str] = mapped_column(String(16), default="")         # "claude_code" : tâche de UniC Code ; vide : Atelier
+    conv_id: Mapped[str] = mapped_column(String(36), default="")        # travail UniC Code qui l'a lancé (vide : lancé à la main)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

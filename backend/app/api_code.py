@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session, defer
 
 from app import code_tasks, repair
 from app.database import get_db
-from app.models import CodeTask, RepairJob, User
+from app.models import CodeTask, Conversation, RepairJob, User
 from app.security import require_roles
 from app.services import audit
 
 router = APIRouter(prefix="/code", tags=["code"])
 ITEMS_MAX = 40
+CONVS_MAX = 60
 ADMIN = require_roles("admin", "manager")
 FINISHED = ("done", "failed", "closed")
 
@@ -45,10 +46,16 @@ def overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     projects = db.query(CodeTask).options(defer(CodeTask.preview)).order_by(CodeTask.created_at.desc()).limit(30).all()
     jobs = db.query(RepairJob).filter(RepairJob.engine == "claude_code").order_by(RepairJob.created_at.desc()).limit(20).all()
     app_jobs = [repair.to_dict(j) for j in jobs]
-    items = [code_tasks.to_dict(t) | {"title": t.title or _short(t.request)} for t in projects] \
-        + [j | {"type": "app", "job_kind": j["kind"], "title": _short(j["request"] or j["summary"])} for j in app_jobs]
+    conv_of = {j.id: j.conv_id for j in jobs}
+    items = [code_tasks.to_dict(t) | {"title": t.title or _short(t.request), "conv_id": t.conv_id} for t in projects] \
+        + [j | {"type": "app", "job_kind": j["kind"], "title": _short(j["request"] or j["summary"]), "conv_id": conv_of.get(j["id"], "")} for j in app_jobs]
     items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    from app.api import RUNNING
+    convs = db.query(Conversation).filter(Conversation.user_id == user.id, Conversation.kind == "code") \
+        .order_by(Conversation.updated_at.desc()).limit(CONVS_MAX).all()
     return {"github": repair.status(db), "budgets": list(code_tasks.BUDGETS), "items": items[:ITEMS_MAX],
+            "convs": [{"id": c.id, "title": c.title, "updated_at": c.updated_at.isoformat() if c.updated_at else None, "working": c.id in RUNNING}
+                      for c in convs],
             "projects": [code_tasks.to_dict(t) for t in projects], "app_jobs": app_jobs}
 
 
