@@ -76,3 +76,56 @@ def test_examen_hebdo_garde_l_historique_et_previent(monkeypatch):
         time.sleep(0.05)
     assert len(seen) == 1 and seen[0][0].startswith("examen IA ") and "-S" in seen[0][0] and seen[0][2] == "check"
     assert "note en baisse" in seen[0][1] and "cloison-320" in seen[0][1]
+
+
+def _outage(messages, tools, tool_handler, **kw):   # Claude injoignable (crédit épuisé) : aucune réponse, aucun outil
+    from app.ai import AIResult
+    return AIResult("", "claude", kw.get("model", ""), False, "claude: crédit Anthropic épuisé (quota)", error_kind="quota")
+
+
+def test_une_panne_de_claude_n_est_pas_une_note_de_zero():
+    """Le 31/10, le banc affichait 0/31 « outil non appelé » : Claude ne répondait pas. La panne est dite, l'IA n'est pas notée."""
+    with SessionLocal() as db:
+        before = evals.history(db)
+        rep = evals.run(db, cases=evals.CASES[:3], complete=_outage)
+        db.commit()
+        assert rep["total"] == 0 and rep["unanswered"] == 3 and "crédit Anthropic épuisé" in rep["error"]
+        assert all(r.get("unanswered") and r["problems"][0].startswith("Claude n'a pas répondu") for r in rep["results"])
+        assert not any("Outil attendu" in p for r in rep["results"] for p in r["problems"])
+        assert evals.history(db) == before                                       # la tendance ne chute pas pour une panne
+        assert evals.report_last(db)["error"] == rep["error"]                     # l'Atelier affiche la vraie cause
+    prev = {"score": 100.0, "results": [{"id": c["id"], "ok": True} for c in evals.CASES[:3]]}
+    assert evals.regressions(prev, rep) == []                                    # pas d'alerte « l'IA a empiré »
+
+
+def test_cas_sans_reponse_mis_a_part_et_reponse_vide_notee():
+    from app.ai import AIResult
+    first = evals.CASES[0]
+
+    def mixed(messages, tools, tool_handler, **kw):
+        if messages[-1]["content"] == first["message"]:
+            return _outage(messages, tools, tool_handler, **kw)
+        return AIResult("", "claude", "m", False, "empty")                       # Claude a répondu… sans rien faire : c'est noté
+    with SessionLocal() as db:
+        rep = evals.run(db, cases=evals.CASES[:2], complete=mixed)
+        db.rollback()
+    assert rep["unanswered"] == 1 and rep["total"] == 1 and rep["passed"] == 0 and "error" not in rep
+    noted = next(r for r in rep["results"] if r["id"] == evals.CASES[1]["id"])
+    assert not noted.get("unanswered") and any("Outil attendu" in p for p in noted["problems"])
+    prev = {"score": 100.0, "results": [{"id": first["id"], "ok": True}]}
+    assert not any(first["id"] in m for m in evals.regressions(prev, rep))      # sans réponse : pas « cas qui échoue »
+
+
+def test_examen_hebdo_impossible_previent_le_patron(monkeypatch):
+    seen = []
+    monkeypatch.setattr(selfcare, "report", lambda source, message, detail="", kind="error": seen.append((source, message, kind)))
+    monkeypatch.setattr(evals, "run", lambda db: {"at": datetime.now(timezone.utc).isoformat(), "score": 0.0, "passed": 0, "total": 0,
+                                                  "unanswered": 31, "error": "Claude n'a pas répondu : quota", "results": []})
+    monkeypatch.setattr(evals, "report_last", lambda db: {"score": 90.0, "at": "2000-01-01T00:00:00+00:00", "results": []})
+    evals.start_background(weekly=True)
+    import time
+    for _ in range(50):
+        if "run" not in evals.RUNNING:
+            break
+        time.sleep(0.05)
+    assert len(seen) == 1 and "Examen de l'IA impossible" in seen[0][1] and "quota" in seen[0][1] and "note en baisse" not in seen[0][1]
