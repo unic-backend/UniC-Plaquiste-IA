@@ -1,5 +1,5 @@
-"""Atelier : le moteur est Claude Code (workflow .github/workflows/atelier.yml). Le serveur lui confie la tâche, suit l'exécution sur GitHub,
-ouvre la proposition en BROUILLON quand il a fini (ou explique l'échec), et retombe sur le moteur classique si le workflow manque.
+"""UniC Code · Mon IA : moteur Claude Code (workflow .github/workflows/atelier.yml). Le serveur lui confie la tâche, suit l'exécution sur
+GitHub, ouvre la proposition en BROUILLON quand il a fini (ou explique l'échec). L'Atelier, lui, garde son moteur classique.
 Le workflow lui-même : jeton en lecture pour Claude, garde-fous de la base avant toute publication, entrées jamais recopiées dans un script."""
 import io
 import os
@@ -95,7 +95,7 @@ def test_la_tache_part_a_claude_code_sur_github(db, monkeypatch):
     monkeypatch.setattr(repair, "_gh", gh)
     _no_classic(monkeypatch)
     job = _job(db, branch=False)
-    repair.run_job(db, job)
+    repair.run_job(db, job, claude_code=True)
     assert job.status == "working" and job.branch == f"unic-ai/feature-{job.id[:8]}", job.error
     assert job.summary == repair.WORKING_NOTE and not job.pr_number
     (method, path, kw), = calls
@@ -103,12 +103,12 @@ def test_la_tache_part_a_claude_code_sur_github(db, monkeypatch):
     inputs = kw["json"]["inputs"]
     assert kw["json"]["ref"] == "main" and inputs["job_id"] == job.id and inputs["branch"] == job.branch
     assert "bouton export PDF" in inputs["request"] and inputs["model"] == settings.anthropic_model and inputs["budget"] == "5"
-    assert repair.status(db)["engine"] == "claude_code"                       # moteur par défaut
+    assert repair.status(db)["engine"] == "classique"                         # l'Atelier garde son moteur classique
 
 
-def test_sans_workflow_ou_au_choix_du_patron_le_moteur_classique_prend_le_relais(db, monkeypatch):
+def test_l_atelier_reste_classique_et_le_repli_marche(db, monkeypatch):
     from app import repair
-    for engine, dispatch_code in (("", 404), ("classique", 204)):
+    for engine, dispatch_code in (("", 204), ("classique", 204), ("claude_code", 404)):
         repair._put(db, repair.ENGINE_KEY, engine)
         db.commit()
         calls = []
@@ -138,7 +138,7 @@ def test_sans_workflow_ou_au_choix_du_patron_le_moteur_classique_prend_le_relais
         job = _job(db, branch=False)
         repair.run_job(db, job)
         assert job.status == "proposed" and job.pr_number == 8, job.error
-        assert any(p.endswith("/dispatches") for p in calls) == (engine == "")      # « classique » : GitHub Actions jamais sollicité
+        assert any(p.endswith("/dispatches") for p in calls) == (engine == "claude_code")   # Atelier : GitHub Actions jamais sollicité
 
 
 def _follow_world(monkeypatch, job, *, run=None, steps=(), ref_code=200, note="", existing=()):

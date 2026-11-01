@@ -2640,7 +2640,9 @@ def selfcare_overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)
     return {"incidents": selfcare.incidents(db, "open"), "sleeping": selfcare.sleeping(),
             "last_check": last.value if last else None, "github": repair.status(db),
             "slow_queries": list(reversed(SLOW_QUERIES)), "secrets_unreadable": secret_health.unreadable(db), "breakers": breaker.BREAKER.status(), "auto_work": selfcare.auto_enabled(db), "agents_halted": agents.halted(db), "agents_all_tools": len(agents.SAFE_TOOLS),
-            "jobs": [repair.to_dict(j) for j in db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()],
+            # l'Atelier ne montre que SES tâches : celles de UniC Code (Claude Code) restent dans UniC Code
+            "jobs": [repair.to_dict(j) for j in db.query(RepairJob).filter(RepairJob.engine != "claude_code")
+                     .order_by(RepairJob.created_at.desc()).limit(20).all()],
             "agents": [agents.to_dict(a) for a in db.query(CustomAgent).order_by(CustomAgent.created_at.desc()).all()]}
 
 

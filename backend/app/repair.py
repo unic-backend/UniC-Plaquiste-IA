@@ -1,11 +1,11 @@
 """UniC se corrige et s'améliore lui-même — sans jamais toucher la production sans le clic du patron.
 
 1. Un problème (incident) ou une demande de fonction arrive.
-2. Moteur « Claude Code » (par défaut) : le serveur lance .github/workflows/atelier.yml ; Claude Code lit TOUT le dépôt, modifie le
-   code, lance les tests, puis le workflow vérifie les garde-fous et pousse une branche à part. Le serveur suit l'exécution et ouvre la
-   PULL REQUEST (brouillon). Repli automatique sur le moteur « classique » si le workflow ou la permission Actions manque :
-   Claude Opus lit jusqu'à 10 fichiers et écrit le correctif ; le serveur le vérifie (chemins autorisés, remplacements exacts,
-   Python qui compile) puis ouvre la pull request. Dans les deux cas, la production ne change pas.
+2. Atelier : moteur « classique » — Claude Opus lit jusqu'à 10 fichiers et écrit le correctif ; le serveur le vérifie (chemins
+   autorisés, remplacements exacts, Python qui compile) puis ouvre la PULL REQUEST.
+   UniC Code (section du menu, « Mon IA ») : moteur Claude Code — le serveur lance .github/workflows/atelier.yml ; Claude Code a accès
+   à TOUT le dépôt, modifie le code, lance les tests, puis le workflow vérifie les garde-fous et pousse une branche à part. Le serveur
+   suit l'exécution et ouvre la pull request (brouillon). Dans les deux cas, la production ne change pas.
 4. GitHub Actions lance tous les tests sur cette branche.
 5. Le patron voit le résumé et l'état des tests ; « Fusionner » n'est possible que si les tests sont verts.
    Après fusion, Render redéploie (crochet de déploiement si fourni, sinon « Manual Deploy »).
@@ -108,6 +108,7 @@ ENGINE_KEY = "atelier_engine"
 ENGINES = ("claude_code", "classique")
 WORKFLOW = "atelier.yml"
 BUDGET_USD = "5"                       # plafond de dépense Claude par tâche (--max-budget-usd)
+BUDGETS = ("2", "5", "10")
 ASK_MAX = 20_000
 POLL_EVERY = timedelta(seconds=30)     # l'écran de l'Atelier se rafraîchit toutes les 8 s : GitHub n'est interrogé qu'une fois sur quatre
 LOST_AFTER = timedelta(minutes=20)     # lancement accepté mais aucune exécution visible
@@ -124,12 +125,13 @@ STEP_HINTS = {
 
 
 def engine(db: Session) -> str:
+    """Moteur des tâches lancées depuis l'ATELIER : « classique » par défaut (choix du patron : Claude Code vit dans UniC Code)."""
     v = _get(db, ENGINE_KEY)
-    return v if v in ENGINES else "claude_code"
+    return v if v in ENGINES else "classique"
 
 
 def set_engine(db: Session, value: str) -> str:
-    """Choix du patron : « claude_code » (par défaut) ou « classique » (l'ancien moteur, sans GitHub Actions)."""
+    """Moteur des tâches de l'Atelier : « classique » (défaut) ou « claude_code ». UniC Code utilise toujours Claude Code."""
     if value not in ENGINES:
         raise RepairError("Moteur inconnu : « claude_code » ou « classique ».")
     _put(db, ENGINE_KEY, value)
@@ -354,11 +356,11 @@ def _branch(job: RepairJob) -> str:
     return f"{BRANCH_PREFIX}{job.kind}-{job.id[:8]}"
 
 
-def _dispatch(job: RepairJob, tok: str, repo: str, base: str, ask: str) -> bool:
+def _dispatch(job: RepairJob, tok: str, repo: str, base: str, ask: str, budget: str = BUDGET_USD) -> bool:
     """Confie la tâche à Claude Code (workflow atelier.yml). False si le dépôt ou le jeton ne le permet pas : le moteur classique prend le relais."""
     from app.config import settings
     r = _gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {
-        "job_id": job.id, "branch": _branch(job), "request": ask[:ASK_MAX], "model": settings.anthropic_model, "budget": BUDGET_USD}})
+        "job_id": job.id, "branch": _branch(job), "request": ask[:ASK_MAX], "model": settings.anthropic_model, "budget": budget}})
     if r.status_code != 204:
         logger.warning("Atelier : Claude Code indisponible (GitHub %s), moteur classique", r.status_code)
         return False
@@ -385,14 +387,14 @@ def _open_pr(db: Session, job: RepairJob, tok: str, repo: str, base: str, title:
             i.status, i.fix_url = "fixing", job.pr_url
 
 
-def run_job(db: Session, job: RepairJob, claude_code: bool = False) -> RepairJob:
+def run_job(db: Session, job: RepairJob, claude_code: bool = False, budget: str = BUDGET_USD) -> RepairJob:
     """Du problème à la pull request. Toute erreur laisse le job « failed » avec une explication.
-    claude_code=True (demande faite dans UniC Code) : Claude Code obligatoirement, jamais le repli sur le moteur classique."""
+    Tâche de UniC Code (job.engine == "claude_code") : Claude Code obligatoirement, jamais le repli sur le moteur classique."""
     try:
         tok, repo, base = _ctx(db)
         ask, trace_paths = _ask(db, job)
-        if claude_code:
-            if not _dispatch(job, tok, repo, base, ask):
+        if claude_code or job.engine == "claude_code":
+            if not _dispatch(job, tok, repo, base, ask, budget):
                 raise RepairError("Claude Code n'a pas pu démarrer sur GitHub : workflow atelier.yml absent, ou jeton sans la permission "
                                   "« Actions : Read and write ».", 503)
         elif not (engine(db) == "claude_code" and _dispatch(job, tok, repo, base, ask)):
@@ -440,9 +442,12 @@ def _classic(db: Session, job: RepairJob, tok: str, repo: str, base: str, ask: s
     _open_pr(db, job, tok, repo, base, title, patch.get("summary", ""), list(changed))
 
 
-def start_job(db: Session, kind: str, request: str = "", incident_id: str = "", claude_code: bool = False) -> RepairJob:
+def start_job(db: Session, kind: str, request: str = "", incident_id: str = "", claude_code: bool = False,
+              budget: str = BUDGET_USD) -> RepairJob:
     if kind not in ("fix", "feature"):
         raise RepairError("Type inconnu.")
+    if budget not in BUDGETS:
+        raise RepairError("Plafond inconnu : 2, 5 ou 10 $.")
     if not _token(db):
         raise RepairError("Atelier non connecté à GitHub : Paramètres › Atelier › Connecter GitHub.")
     if is_release_request(request):
@@ -453,7 +458,8 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "", 
         raise RepairError("Incident introuvable.", 404)
     if db.query(RepairJob).filter(RepairJob.status == "working").count() >= 2:
         raise RepairError("Deux corrections sont déjà en cours : attends qu'elles finissent.")
-    job = RepairJob(kind=kind, request=(request or "").strip()[:4000], incident_id=incident_id or "")
+    job = RepairJob(kind=kind, request=(request or "").strip()[:4000], incident_id=incident_id or "",
+                    engine="claude_code" if claude_code else "")
     db.add(job)
     db.commit()
     jid = job.id
@@ -464,7 +470,7 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "", 
         try:
             j = s.get(RepairJob, jid)
             if j is not None:
-                run_job(s, j, claude_code)
+                run_job(s, j, claude_code, budget)
         finally:
             s.close()
 
@@ -673,8 +679,10 @@ def build_apk(db: Session) -> dict:
 
 
 def to_dict(job: RepairJob) -> dict:
+    files = json.loads(job.files or "[]")
     return {"id": job.id, "kind": job.kind, "request": job.request, "status": job.status, "summary": job.summary,
-            "files": json.loads(job.files or "[]"), "pr_url": job.pr_url, "pr_number": job.pr_number, "error": job.error,
+            "files": files, "engine": job.engine or "classique",
+            "pr_url": job.pr_url, "pr_number": job.pr_number, "error": job.error,
             "incident_id": job.incident_id, "created_at": job.created_at.isoformat() if job.created_at else None}
 
 

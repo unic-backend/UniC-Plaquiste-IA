@@ -485,19 +485,7 @@ export function Atelier() {
           {connected ? (
             <>
               <p className="hint ic"><I.Check size={16} /> Connecté · {d.github.repo} · branche {d.github.base || "par défaut"} · déploiement auto {d.github.deploy_hook ? "oui" : "non"}</p>
-              <p className="hint">
-                Moteur : {d.github.engine === "classique"
-                  ? "classique (lit 10 fichiers au plus, ne lance pas les tests)."
-                  : "Claude Code sur GitHub (lit tout le dépôt, lance les tests ; plafond 5 $ par tâche, clé ANTHROPIC_API_KEY dans les secrets GitHub)."}
-              </p>
-              <div className="row-actions">
-                <button className="btn btn-line btn-small" disabled={!!busy}
-                  onClick={() => act("engine", () => api.setAtelierEngine(d.github.engine === "classique" ? "claude_code" : "classique"),
-                    (r) => (r.engine === "classique" ? "Moteur classique activé." : "Moteur Claude Code activé."))}>
-                  {d.github.engine === "classique" ? "Passer à Claude Code" : "Revenir au moteur classique"}
-                </button>
-                <button className="btn btn-ghost btn-small" onClick={() => window.confirm("Déconnecter GitHub ?") && act("gh", () => api.githubDisconnect())}>Déconnecter</button>
-              </div>
+              <button className="btn btn-ghost btn-small" onClick={() => window.confirm("Déconnecter GitHub ?") && act("gh", () => api.githubDisconnect())}>Déconnecter</button>
             </>
           ) : (
             <ol className="at-steps">
