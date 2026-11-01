@@ -48,3 +48,9 @@ Repris : **la structure et les animations** (carte d'identité qui tombe et se r
 
 Repris : le **skill** (les **43 signes** d'un site « fait par l'IA » et son **scanner** `scripts/scan.mjs`, Node sans dépendance) dans `docs/anti-vibecode/` (le dossier `.claude/` est refusé par les garde-fous : Claude Code le lit sur demande, ou installé en global), et les mêmes règles envoyées aux **projets web de UniC Code** (`backend/app/anti_vibecode.py`, branché dans `code_tasks.start` ; un test vérifie que les deux copies restent identiques).
 **Non repris** : rien d'autre du dépôt d'origine. **Licence non vérifiée** dans le dépôt d'origine : à contrôler avant toute diffusion hors de ce dépôt privé. Le design de l'appli UniC elle-même (`frontend/`) n'est pas réécrit.
+
+## 6. Plugin « Ponytail » (DietrichGebert/ponytail, licence MIT)
+
+Installé **sur le compte Claude du patron** (Paramètres › Plugins), pas dans le dépôt : `.claude/` est refusé par les garde-fous. Ses hooks ont été relus (v5.3.3) : pas de réseau actif, pas de lecture de secrets ; une mise à jour future n'est pas relue tant que la synchro automatique reste active.
+Repris dans UniC Code : ses règles en bref (`LAZY_RULES` dans `backend/app/code_tasks.py`) sont ajoutées à **chaque projet** (dossier vide : `AGENTS.md` n'y arrive pas). Pour le code de l'appli, `AGENTS.md` dit déjà « étends l'existant, ne recrée rien » : rien n'est ajouté (`repair.py` est une zone protégée).
+Premier résultat de son audit : `next_number` donnait le même numéro à deux requêtes simultanées (corrigé, test `test_numeros_simultanes.py`). Les devis et factures étaient déjà protégés par `add_with_unique_number` ; les clients, fournisseurs et projets ne l'étaient pas.
