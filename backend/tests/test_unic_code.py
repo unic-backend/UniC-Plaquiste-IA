@@ -294,12 +294,13 @@ def _claude_says(monkeypatch, text="", available=True, boom=False):
     from app.ai import PROVIDERS, AIResult
     seen = []
 
-    def fake(messages, **kw):
+    def fake(self, messages, **kw):
         seen.append((messages, kw))
         if boom:
             raise RuntimeError("réseau")
         return AIResult(text, "claude", kw.get("model", ""), available and bool(text), "" if text else "claude: crédit épuisé")
-    monkeypatch.setattr(PROVIDERS["claude"], "complete", fake)
+    # au niveau de la CLASSE, comme les autres tests : un faux posé sur l'instance resterait en place et masquerait leurs faux
+    monkeypatch.setattr(type(PROVIDERS["claude"]), "complete", fake)
     return seen
 
 
