@@ -43,3 +43,8 @@ Avant toute intégration : (1) ouvrir le fichier `LICENSE` du dépôt ; (2) lire
 
 Repris : **la structure et les animations** (carte d'identité qui tombe et se retourne, mots en cascade, collage, chiffres qui montent, rangée de photos épinglée, mouvement réduit, impression PDF).
 **Non repris** : le nom, le téléphone, l'e-mail, les photos, les chiffres et les textes de cette personne. Le Book d'UniC n'utilise que tes coordonnées, tes photos, tes chiffres déjà publiés sur ton site et tes 2 vrais avis Google (voir `backend/app/site_pages/book.html`, publiable depuis Réseaux › Site web › « Book d'entreprise »).
+
+## 5. Skill « anti-vibecode » (Melvynx/shared-skills)
+
+Repris : le **skill** (les **43 signes** d'un site « fait par l'IA » et son **scanner** `scripts/scan.mjs`, Node sans dépendance) dans `docs/anti-vibecode/` (le dossier `.claude/` est refusé par les garde-fous : Claude Code le lit sur demande, ou installé en global), et les mêmes règles envoyées aux **projets web de UniC Code** (`backend/app/anti_vibecode.py`, branché dans `code_tasks.start` ; un test vérifie que les deux copies restent identiques).
+**Non repris** : rien d'autre du dépôt d'origine. **Licence non vérifiée** dans le dépôt d'origine : à contrôler avant toute diffusion hors de ce dépôt privé. Le design de l'appli UniC elle-même (`frontend/`) n'est pas réécrit.
