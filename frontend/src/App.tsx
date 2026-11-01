@@ -536,6 +536,14 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   const openConv = loc.pathname.startsWith("/c/") ? [...convs, ...archived].find((c) => loc.pathname === `/c/${c.id}`) : undefined;
   useEffect(() => setOpen(false), [loc.pathname]);
   const [work, setWork] = useState(0);   // erreurs à corriger + propositions prêtes (pastille de l'Atelier)
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {   // le menu du haut ne montre que 4 entrées : la page ouverte reste toujours visible dedans
+    const nav = navRef.current, el = nav?.querySelector<HTMLElement>(".side-brief.active");
+    if (!nav || !el) return;
+    const top = el.offsetTop, bottom = top + el.offsetHeight;
+    if (top < nav.scrollTop) nav.scrollTop = Math.max(0, top - 6);
+    else if (bottom > nav.scrollTop + nav.clientHeight) nav.scrollTop = bottom - nav.clientHeight + 6;
+  }, [loc.pathname, open]);
   useEffect(() => {
     if (!open) return;
     api.selfcare().then((d) => setWork(d.incidents.filter((i: any) => i.kind === "error" || i.kind === "tool").length
@@ -560,7 +568,7 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/" className="btn new-chat" onClick={() => setOpen(false)}>
           + Nouvelle conversation
         </Link>
-        <nav className="side-nav" aria-label="Navigation">
+        <nav className="side-nav" aria-label="Navigation" ref={navRef}>
         <button className="side-brief" onClick={() => {
           try { sessionStorage.setItem(AUTO_KEY, "briefing"); } catch { /* ignoré */ }
           setOpen(false);
