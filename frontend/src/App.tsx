@@ -34,6 +34,7 @@ import { Pointage, SignaturePanel } from "./Terrain";
 const UnicVoice = lazyPage(() => import("./UnicVoice"), "UnicVoice");
 const Interpreter = lazyPage(() => import("./Interpreter"), "Interpreter");
 const Atelier = lazyPage(() => import("./Atelier"), "Atelier");
+const UniCCode = lazyPage(() => import("./UniCCode"), "UniCCode");
 import { ConvMenu } from "./ConvTools";
 const Higgsfield = lazyPage(() => import("./Higgsfield"), "Higgsfield");
 const Chantiers = lazyPage(() => import("./Chantiers"), "Chantiers");
@@ -586,6 +587,9 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
         <Link to="/atelier" className={`side-brief side-code ${loc.pathname === "/atelier" ? "active" : ""}`} onClick={() => setOpen(false)}>
           <I.Code size={18} /> Atelier · Code
           {work > 0 && <span className="side-badge" aria-label={`${work} élément(s) à voir`}>{work}</span>}
+        </Link>
+        <Link to="/unic-code" className={`side-brief side-code ${loc.pathname === "/unic-code" ? "active" : ""}`} onClick={() => setOpen(false)}>
+          <I.Sparkle size={18} /> <span>UniC Code</span>
         </Link>
         </nav>
         <input
@@ -1749,6 +1753,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/couts", title: "Coût de Claude", text: "Crédit restant, coût par message et par jour" },
       { to: "/sante", title: "Moteur & santé", text: "État de l'IA, du serveur, des connecteurs" },
       { to: "/atelier", title: "Atelier", text: "UniC se vérifie, se corrige et crée ses agents" },
+      { to: "/unic-code", title: "UniC Code", text: "Claude Code : sites, jeux, applis, scripts, et le code de ton IA" },
       { to: "/pointage", title: "Pointage", text: "Arrivée et départ du chantier, heures travaillées" },
     ],
   },
@@ -2345,6 +2350,7 @@ export default function App() {
         <Route path="/parametres/entreprise" element={<CompanyPage />} />
         <Route path="/sante" element={<Sante />} />
         <Route path="/atelier" element={<Atelier />} />
+        <Route path="/unic-code" element={<UniCCode />} />
         <Route path="/pointage" element={<Pointage />} />
         <Route path="/unic" element={<UnicVoice />} />
         <Route path="/interprete" element={<Interpreter />} />
