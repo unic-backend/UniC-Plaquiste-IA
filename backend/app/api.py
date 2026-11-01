@@ -413,7 +413,7 @@ def _chat_turn(db: Session, user: User, body: ChatIn, on_start=None, steps: list
     CANCELLED.discard(conv.id)
     RUNNING.add(conv.id)
     try:
-        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep or code, body.voice, body.locked, code=code)
+        reply = handle_turn(db, conv, user, text or "Analyse le fichier.", body.file_ids, body.deep, body.voice, body.locked, code=code)
     except HTTPException:
         raise
     except ai_mod.Cancelled:   # « Arrêter » : ce qui était déjà fait reste, le reste s'arrête là

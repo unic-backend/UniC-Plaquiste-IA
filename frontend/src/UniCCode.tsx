@@ -208,7 +208,7 @@ export function UniCCode() {
     ctl.current = abort;
     let convId = cid || undefined;
     try {
-      const out = await api.chatStream({ message, conversation_id: convId, deep: true, code: true }, (ev) => {
+      const out = await api.chatStream({ message, conversation_id: convId, deep: false, code: true }, (ev) => {
         if (ev.t === "conv" && ev.conversation_id) { inflight.current = convId = ev.conversation_id; setSel({ kind: "conv", id: ev.conversation_id }); }
         else if (ev.t === "status") setLive((l) => ({ ...l, status: ev.text || "", steps: ev.text && ev.text !== "Je réfléchis…" && !l.steps.includes(ev.text) ? [...l.steps, ev.text] : l.steps }));
         else if (ev.t === "delta") setLive((l) => ({ ...l, text: l.text + (ev.text || "") }));
@@ -311,7 +311,7 @@ export function UniCCode() {
           {busy && (
             <div className="uc-turn">
               <Steps steps={live.steps} live />
-              <Typing deep web status={live.status} liveHtml={live.text ? md(live.text) : undefined} />
+              <Typing deep={false} web status={live.status} liveHtml={live.text ? md(live.text) : undefined} />
             </div>
           )}
           <div ref={end} />
