@@ -14,7 +14,7 @@ eq("scène sans durée", sceneSeconds({ type: "title" }), 0);
 eq("total arrondi", totalSeconds([{ type: "title", seconds: 3.7 }, { type: "text", seconds: 7.4 }]), 11);
 eq("durée courte", duration(42), "42 s");
 eq("durée longue", duration(65), "1 min 05 s");
-eq("les 6 ambiances du moteur", Object.keys(THEMES).join(","), "unic,night,light,earth,ocean,sunset");
+eq("les 12 ambiances du moteur", Object.keys(THEMES).join(","), "unic,night,light,earth,ocean,sunset,noir,luxe,papier,pastel,neon,chantier");
 eq("insécables français", frText("Dakar Arena : 15 000 places !"), "Dakar Arena\u00a0: 15\u00a0000 places\u00a0!");
 eq("guillemets", frText("« Bonjour »"), "«\u00a0Bonjour\u00a0»");
 eq("vide", frText(undefined), "");

@@ -311,7 +311,7 @@ TOOLS: list[dict] = [
             "brief": {"type": "string", "description": "La demande du patron, complète (sujet, durée, ton, public, ce qu'il veut montrer)."},
             "format": {"type": "string", "enum": ["vertical", "horizontal", "square"],
                        "description": "vertical : WhatsApp, TikTok, Reels ; horizontal : YouTube ; carré : Facebook, Instagram."},
-            "theme": {"type": "string", "enum": ["auto", "unic", "night", "light", "earth", "ocean", "sunset"]}},
+            "theme": {"type": "string", "enum": ["auto", "unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier"]}},
             "required": ["brief"], "additionalProperties": False},
     },
     {

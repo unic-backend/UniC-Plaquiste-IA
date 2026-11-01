@@ -130,7 +130,7 @@ def _hf(fn, *a):
 class VideoPlanIn(BaseModel):
     brief: str = Field("", max_length=20000)
     format: str = Field("vertical", pattern="^(vertical|horizontal|square)$")
-    theme: str = Field("auto", pattern="^(auto|unic|night|light|earth|ocean|sunset)$")   # ambiance imposée, ou « auto » : l'IA choisit
+    theme: str = Field("auto", pattern="^(auto|unic|night|light|earth|ocean|sunset|noir|luxe|papier|pastel|neon|chantier)$")   # ambiance imposée, ou « auto » : l'IA choisit
     current: dict | None = None                                                       # scénario affiché, pour une correction
     changes: list[str] = Field(default_factory=list, max_length=50)   # corrections du patron, la dernière à appliquer (le scénariste garde les 12 dernières)
 
