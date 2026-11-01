@@ -1461,6 +1461,10 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 
 /* Menu latéral : navigation en lignes sobres, recherche intégrée, bouton principal seul en relief */
 .side-nav { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+/* 4 entrées visibles (la 5e à moitié : on voit qu'on peut faire défiler) ; le reste défile. L'historique des conversations remonte. */
+.side-nav { position: relative; flex-shrink: 0; max-height: calc(6px + 4 * 46px + 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.side-nav::-webkit-scrollbar { display: none; }
+.side-nav .side-brief { flex-shrink: 0; }
 .side-nav .side-brief { margin: 0; padding: 0 12px; height: 44px; border: 0; border-radius: 12px; background: transparent; box-shadow: none; font-size: 15px; text-align: left; }
 .side-nav .side-brief:hover { background: rgba(255,255,255,.06); }
 .side-nav .side-brief.active { background: rgba(255,255,255,.1); }
