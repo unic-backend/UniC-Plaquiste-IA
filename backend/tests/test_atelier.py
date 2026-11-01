@@ -42,7 +42,8 @@ def test_le_banc_utilise_les_vraies_consignes_et_compte_les_actions_inventees(cl
     seen = []
 
     def fake_complete(messages, tools=None, tool_handler=None, **kw):
-        seen.append((messages[0]["content"], kw))
+        seen.append(("\n".join(m["content"] for m in messages if m["role"] == "system"), kw))
+        assert messages[0].get("cache") is True and agent.AGENT_PROMPT[:60] in messages[0]["content"]   # règles + outils en cache
         if "banque" in messages[-1]["content"]:
             tool_handler("save_email_draft", {"to": "conseiller@banque.sn", "subject": "Rendez-vous", "body": "Bonjour"})
             return _NS(text="Brouillon prêt : relis-le puis envoie-le.")
