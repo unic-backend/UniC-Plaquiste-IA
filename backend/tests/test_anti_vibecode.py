@@ -1,5 +1,5 @@
 """Anti-vibecode : les 43 signes d'un site « fait par l'IA » sont donnés à Claude Code pour les projets web de UniC Code.
-Deux copies des règles (le skill du dépôt lu par Claude Code, le module du serveur) : elles doivent rester identiques."""
+Deux copies des règles (le skill du dépôt dans docs/anti-vibecode, le module du serveur) : elles doivent rester identiques."""
 import json
 import os
 import re
@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import anti_vibecode  # noqa: E402
 from app.main import app  # noqa: E402
 
-SKILL = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "anti-vibecode"
+SKILL = Path(__file__).resolve().parents[2] / "docs" / "anti-vibecode"
 
 
 def _rows():
@@ -36,7 +36,7 @@ def test_le_module_du_serveur_reprend_mot_pour_mot_le_skill_du_depot():
     assert [n for n, _, _ in anti_vibecode.SIGNS] == list(range(1, 44))
 
 
-def test_le_skill_est_installe_pour_claude_code():
+def test_le_skill_est_complet_dans_le_depot():
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     head = text.split("---")[1]
     assert re.search(r"^name:\s*anti-vibecode\s*$", head, re.M) and "description:" in head

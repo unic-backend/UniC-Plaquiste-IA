@@ -1,8 +1,7 @@
 """Anti-vibecode : les 43 signes d'un site « fait par l'IA », donnés à Claude Code pour les projets web de UniC Code.
 
-Source : skill `anti-vibecode` de Melvynx/shared-skills, copié dans `.claude/skills/anti-vibecode/` (lu par Claude Code quand il travaille
-sur le dépôt). Le serveur n'embarque pas ce dossier (le Dockerfile ne copie que backend, frontend, scripts) : les règles sont donc
-reprises ici mot pour mot, et `tests/test_anti_vibecode.py` vérifie que les deux copies restent identiques."""
+Source : skill `anti-vibecode` de Melvynx/shared-skills, copié dans `docs/anti-vibecode/`. Le serveur n'embarque pas ce dossier (le
+Dockerfile ne copie que backend, frontend, scripts) : les règles sont donc reprises ici mot pour mot, et `tests/test_anti_vibecode.py` vérifie que les deux copies restent identiques."""
 from __future__ import annotations
 
 import re

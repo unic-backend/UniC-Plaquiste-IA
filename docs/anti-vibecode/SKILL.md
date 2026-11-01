@@ -69,7 +69,7 @@ For a full design pass after the cleanup, two skills pair well with this one:
 
 ## UniC : règles locales
 
-- Source : skill `anti-vibecode` de Melvynx/shared-skills, copié ici avec `references/signs.md` (43 signes) et `scripts/scan.mjs`.
+- Source : skill `anti-vibecode` de Melvynx/shared-skills, copié dans `docs/anti-vibecode/` (les garde-fous refusent `.claude/` à la racine) avec `references/signs.md` (43 signes) et `scripts/scan.mjs`.
 - S'applique aux **nouveaux** sites, pages et projets web (UniC Code, projets livrés en ZIP).
 - Pour l'appli UniC elle-même (`frontend/`), le design existant prime : ne réécris pas l'existant pour
   suivre ces signes. Seules les nouvelles pages sans identité propre suivent la liste.
