@@ -56,7 +56,7 @@ FX_TYPES = ("typewriter", "kinetic", "checklist", "neon", "slogan", *PANEL_TYPES
 OVERLAY_TYPES = ("typewriter", "kinetic", "checklist", "neon", *PANEL_TYPES)       # ce qu'on peut incruster sur un film (ou mettre en haut d'un écran divisé)
 MAX_PANELS = 400
 TYPE_CPS = 14                                                         # machine à écrire : 14 caractères/s (scenes.html)
-THEMES = ("unic", "night", "light", "earth", "ocean", "sunset")
+THEMES = ("unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier")
 # Montage des vidéos du patron (moteur : scripts/video/edit.py) : l'IA TRAVAILLE ses films (vitesse, couleurs, cadrage, zoom, transitions…).
 GRADES = ("cinema", "warm", "night", "crisp", "bw")
 ZOOMS = ("in", "out", "punch")
@@ -178,7 +178,7 @@ TOOL = {"name": "storyboard", "description": "Scénario de la vidéo, avec ce qu
     "target_seconds": {"type": "number", "description": "Durée totale DEMANDÉE par le patron en secondes (demande ou correction), seulement s'il l'a précisée ; sinon omets."},
     "format": {"type": "string", "enum": list(FORMATS), "description": "Seulement si la dernière demande du patron réclame explicitement un AUTRE format que celui indiqué "
                "(« YouTube » : horizontal ; « TikTok », « Reels », « statut » : vertical ; « carré » : square) ; sinon omets."},
-    "theme": {"type": "string", "enum": ["unic", "night", "light", "earth", "ocean", "sunset"], "description": "Ambiance des couleurs : unic (bleu nuit et or, entreprise), night (noir et cyan : technologie, espace), light (crème : sobre, éducatif), earth (vert et ocre : nature, animaux, voyage), ocean (bleu-vert : mer, bien-être), sunset (bordeaux et orange : émotion, récit)."},
+    "theme": {"type": "string", "enum": ["unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier"], "description": "Ambiance des couleurs : unic (bleu nuit et or, entreprise), night (noir et cyan : technologie, espace), light (crème : sobre, éducatif), earth (vert et ocre : nature, animaux, voyage), ocean (bleu-vert : mer, bien-être), sunset (bordeaux et orange : émotion, récit), noir (noir et rouge : sport, actualité, impact), luxe (noir et or : premium, immobilier, mode), papier (blanc et bleu encre : tutoriel, explication), pastel (rose et lilas : beauté, enfants, douceur), neon (violet et vert néon : jeux, musique, fête), chantier (gris béton et jaune : bâtiment, travaux, sécurité)."},
     "scenes": {"type": "array", "maxItems": MAX_SCENES, "description": "Les scènes dans l’ordre.", "items": {"type": "object", "properties": SCENE_PROPS, "required": ["type"]}},
     "captions": {"type": "boolean", "description": "Sous-titres mot à mot sur la parole (film parlé ou voix off déjà transcrits) : omets (oui par défaut) ; false seulement si le patron n'en veut pas."},
     "audio": {"type": "object", "description": "Bande son, seulement avec les médias du patron : musique (identifiant), départ dans la musique (music_start, s), voix (identifiant), "
@@ -210,6 +210,11 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo, LIBRE. Tu ne suis aucune recett
           "seulement une photo du site, et seulement s'il les a demandées) qui apparaît en points-pixels (reveal). "
           "Lisibilité : une idée par scène, textes courts lisibles sur téléphone (titre : 18 caractères par ligne ; puces et légendes : 60), "
           "le temps de lire (environ 1 seconde pour 20 caractères, plus 1 seconde). "
+          "RÈGLES DE MOTION (comme un motion designer de films de lancement) : ACCROCHE dans les 3 premières secondes (scène 1 courte et forte, "
+          "jamais un titre vague) ; UNE idée par scène ; hiérarchie à trois niveaux (un grand mot, un texte moyen, un détail) ; ALTERNE texte, image, "
+          "chiffre et animation, jamais trois scènes de texte d'affilée ; RYTHME varié (2 à 4 s pour l'énergie, plus long pour expliquer) ; "
+          "la DERNIÈRE scène conclut (chiffre fort, appel ou phrase), sans coupe sèche ; UNE seule ambiance de couleurs du début à la fin ; "
+          "choisis l'ambiance (theme) qui va avec le SUJET, pas toujours la même. "
           "VÉRITÉ : tu ne sais du patron QUE ce qu'il t'a donné. Les textes viennent de ses médias (ce qu'on y voit, ce qui y est dit) et de sa demande ; "
           "n'invente ni chiffre, ni prix, ni avis, ni nom, ni contact, ni fait sur une personne ou une entreprise réelle ; n'ajoute aucune image ni information "
           "qu'il n'a pas fournie ou demandée. Ce moteur ne crée ni images ni films : il monte les médias donnés avec des textes et des animations ; "
@@ -952,10 +957,65 @@ def plan(db: Session | None, brief: str = "", fmt: str = "vertical", theme: str 
             notes.append(f"Durée demandée : {_hms(target)}, mais ce scénario ne dure que {_hms(done)} : demande d'ajouter des scènes.")
     if fmt_out != fmt:
         notes.append(f"Format {FORMATS[fmt_out].split(' (')[0]} appliqué : c'est celui que ta demande réclame.")
+    advice = critique(spec)
+    if advice:
+        notes.append("Conseil de montage : " + " ".join(advice))
     clips, imgs = video_hybrid.ai_counts(spec)
     return {"spec": spec, "seconds": _duration(spec), "note": " ".join(notes), "ai": {"clips": clips, "images": imgs},
             "understood": _cut(got.get("understood"), 400), "assumptions": _lines(got.get("assumptions"), 4), "limits": _lines(got.get("limits"), 3),
             "target": target, "changes": changes}
+
+
+# ---------- contrôle du montage (sans IA, sans coût) : ce qui rend une vidéo molle, dit au patron ----------
+
+TEXT_TYPES = ("title", "text", "quote", "stats", "typewriter", "kinetic", "checklist", "neon", "slogan")   # scènes de texte : trois d'affilée = monotone
+WORDS_MAX = 30       # au-delà, on ne lit plus sur téléphone
+STILL_MAX = 12.0     # secondes sur un même texte avant que l'attention baisse
+HOOK_MAX = 6.0       # une accroche tient en quelques secondes
+CRITIQUE_SKIP = {"type", "svg", "media", "image", "images", "anim", "prompt", "phrases", "panels", "transition", "grade", "focus", "zoom",
+                 "layout", "split_media", "theme", "style", "id", "chapters"}
+
+
+def _words(v) -> int:
+    if isinstance(v, str):
+        return len(v.split())
+    if isinstance(v, (list, tuple)):
+        return sum(_words(x) for x in v)
+    if isinstance(v, dict):
+        return sum(_words(x) for k, x in v.items() if k not in CRITIQUE_SKIP)
+    return 0
+
+
+def critique(spec: dict) -> list[str]:
+    """Conseils de montage (3 au plus, les plus utiles d'abord) : accroche trop lente, texte trop dense, même texte trop longtemps,
+    scènes de texte à la suite, rythme uniforme. Aucun appel IA : lecture du scénario seulement ; le patron décide."""
+    scenes = [s for s in (spec.get("scenes") or []) if isinstance(s, dict)]
+    if len(scenes) < 3:
+        return []
+    out: list[str] = []
+    total = sum(float(s.get("seconds") or 0) for s in scenes)
+    first = float(scenes[0].get("seconds") or 0)
+    if total >= 20 and first > HOOK_MAX:
+        out.append(f"La première scène dure {first:g} s : une accroche tient en 2 à 4 s.")
+    for i, s in enumerate(scenes, 1):
+        n = _words({k: v for k, v in s.items() if k != "type"}) if s.get("type") in TEXT_TYPES else 0
+        if n > WORDS_MAX:
+            out.append(f"Scène {i} : {n} mots à l'écran. Au-delà de {WORDS_MAX}, on ne lit plus sur téléphone : coupe-la en deux.")
+            break
+    for i, s in enumerate(scenes, 1):
+        if s.get("type") in TEXT_TYPES and float(s.get("seconds") or 0) > STILL_MAX:
+            out.append(f"Scène {i} : {float(s['seconds']):g} s sur un même texte. Après 10 s, l'attention baisse : ajoute une image ou un chiffre.")
+            break
+    run = 0
+    for i, s in enumerate(scenes, 1):
+        run = run + 1 if s.get("type") in TEXT_TYPES else 0
+        if run >= 3:
+            out.append(f"Les scènes {i - 2} à {i} sont toutes du texte : alterne avec une photo, un chiffre ou une animation.")
+            break
+    secs = [round(float(s.get("seconds") or 0), 1) for s in scenes if s.get("seconds")]
+    if len(secs) >= 5 and len(set(secs)) == 1:
+        out.append(f"Toutes les scènes durent {secs[0]:g} s : varie le rythme (2 à 4 s pour l'énergie, plus long pour expliquer).")
+    return out[:3]
 
 
 DRAFT_KEY = "video_draft"

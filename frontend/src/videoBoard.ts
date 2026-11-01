@@ -10,6 +10,12 @@ export const THEMES: Record<string, { name: string; bg: string; fg: string; acce
   earth: { name: "Nature", bg: "#10231a", fg: "#f4efe0", accent: "#e9b44c", soft: "#cfe3b8", g1: "#1f5a3a", g2: "#5a3a12", cardBg: "#cfe3b8", cardFg: "#10231a" },
   ocean: { name: "Océan", bg: "#04202e", fg: "#eefbff", accent: "#35d0c4", soft: "#bfeeee", g1: "#0d5a7a", g2: "#0a2a55", cardBg: "#bfeeee", cardFg: "#04202e" },
   sunset: { name: "Couchant", bg: "#2a0f1f", fg: "#fff5ee", accent: "#ff8a4c", soft: "#ffd2b8", g1: "#6a1f3a", g2: "#7a3a10", cardBg: "#ffd2b8", cardFg: "#2a0f1f" },
+  noir: { name: "Noir", bg: "#0b0b0c", fg: "#f5f5f5", accent: "#ff3b30", soft: "#ffd5d5", g1: "#3a0a0a", g2: "#1a1a1a", cardBg: "#ffd5d5", cardFg: "#0b0b0c" },
+  luxe: { name: "Luxe", bg: "#0d0b08", fg: "#f7f1e3", accent: "#d4af37", soft: "#e8d9b0", g1: "#3a2f10", g2: "#1a140a", cardBg: "#e8d9b0", cardFg: "#0d0b08" },
+  papier: { name: "Papier", bg: "#fbfaf7", fg: "#14213d", accent: "#d62839", soft: "#4a5b82", g1: "#ffffff", g2: "#e8ecf5", cardBg: "#14213d", cardFg: "#fbfaf7" },
+  pastel: { name: "Pastel", bg: "#fdf1f5", fg: "#3b2a45", accent: "#d6336c", soft: "#6f4f80", g1: "#ffffff", g2: "#f1dcff", cardBg: "#3b2a45", cardFg: "#fdf1f5" },
+  neon: { name: "Néon", bg: "#0a0414", fg: "#f4eaff", accent: "#39ff88", soft: "#e0b3ff", g1: "#3a0f6a", g2: "#0a3a2a", cardBg: "#e0b3ff", cardFg: "#0a0414" },
+  chantier: { name: "Chantier", bg: "#1e2124", fg: "#f1f3f4", accent: "#ffd400", soft: "#cfd4d8", g1: "#3a4046", g2: "#2a2f33", cardBg: "#ffd400", cardFg: "#1e2124" },
 };
 
 /** Durée d'une scène telle que le moteur la filme (une scène « page » : accueil + chapitres + descente finale). */
