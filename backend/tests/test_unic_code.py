@@ -286,3 +286,100 @@ def test_workflow_unic_code_sans_acces_au_depot():
     assert livraison["name"] == "projet" and "node_modules" in livraison["path"] and livraison["if-no-files-found"] == "error"
     from app import code_tasks
     assert set(code_tasks.STEP_HINTS) <= set(steps)                              # chaque explication au patron vise une vraie étape
+
+
+# ---------- une seule zone de saisie : le serveur choisit entre « projet » et « code de l'IA » ----------
+
+def _claude_says(monkeypatch, text="", available=True, boom=False):
+    from app.ai import PROVIDERS, AIResult
+    seen = []
+
+    def fake(messages, **kw):
+        seen.append((messages, kw))
+        if boom:
+            raise RuntimeError("réseau")
+        return AIResult(text, "claude", kw.get("model", ""), available and bool(text), "" if text else "claude: crédit épuisé")
+    monkeypatch.setattr(PROVIDERS["claude"], "complete", fake)
+    return seen
+
+
+def test_le_classement_demande_un_mot_a_claude_puis_replie_sur_les_mots(monkeypatch):
+    from app import code_tasks as ct
+    from app.config import settings
+    seen = _claude_says(monkeypatch, "APP")
+    assert ct.classify("Fais un jeu de dames") == "app"                       # Claude décide, même sans mot-clé
+    messages, kw = seen[0]
+    assert kw["model"] == settings.anthropic_fast_model and kw["max_tokens"] <= 16 and messages[0]["role"] == "system"
+    _claude_says(monkeypatch, "PROJET.")
+    assert ct.classify("Corrige le bouton Fusionner dans l'Atelier") == "projet"
+    for kw in ({"text": ""}, {"text": "Je ne sais pas"}, {"text": "APP", "available": False}, {"boom": True}):
+        _claude_says(monkeypatch, **kw)                                       # Claude muet, incohérent ou en panne : jamais d'erreur
+        assert ct.classify("Corrige le bouton Fusionner dans l'Atelier") == "app"
+        assert ct.classify("Fais un jeu de memory pour mobile") == "projet"
+
+
+def test_slash_ia_et_slash_projet_forcent_le_choix(monkeypatch):
+    from app import code_tasks as ct
+    seen = _claude_says(monkeypatch, "PROJET")
+    assert ct.route("/ia ajoute un export Excel des pointages") == ("app", "ajoute un export Excel des pointages")
+    assert ct.route("/projet un site pour ma boutique") == ("projet", "un site pour ma boutique")
+    assert seen == []                                                         # choix explicite : aucune question à Claude
+    assert ct.route("Un site pour ma boutique") == ("projet", "Un site pour ma boutique")
+    assert ct.job_kind("Le clavier cache la zone de texte") == "fix" and ct.job_kind("Ajoute un export Excel") == "feature"
+
+
+def test_une_demande_sur_l_appli_part_a_claude_code_sur_tout_le_depot(client, db, monkeypatch):
+    from app import code_tasks as ct
+    from app import repair
+    from app.models import RepairJob
+    monkeypatch.setattr(ct, "classify", lambda request: "app")
+    started = []
+    monkeypatch.setattr(repair, "run_job", lambda s, j, claude_code=False, budget="5": started.append((j.id, j.kind, claude_code, budget)))
+    r = client.post("/api/code/tasks", json={"request": "Le clavier cache la zone de texte dans le chat"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["type"] == "app" and out["engine"] == "claude_code" and out["job_kind"] == "fix"
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.02)
+    assert started == [(out["id"], "fix", True, ct.BUDGET_DEFAULT)]
+    db.query(RepairJob).filter(RepairJob.id == out["id"]).delete(synchronize_session=False)
+    db.commit()
+
+
+def test_un_projet_ou_une_suite_part_au_dossier_vide_sans_classement(client, db, monkeypatch):
+    from app import code_tasks as ct
+    asked = []
+    monkeypatch.setattr(ct, "classify", lambda request: asked.append(request) or "projet")
+    calls = _world(monkeypatch)
+    r = client.post("/api/code/tasks", json={"request": "Un jeu de memory sur les outils du plaquiste"})
+    assert r.status_code == 200 and r.json()["type"] == "project" and asked and r.json()["title"].startswith("Un jeu de memory")
+    inputs = next(kw["json"]["inputs"] for m, p, kw in calls if p.endswith("/dispatches"))
+    assert inputs["budget"] == ct.BUDGET_DEFAULT and inputs["parent_run"] == ""
+    done = _task(db, status="done", run_id=500, artifact_id=12)
+    asked.clear()
+    r = client.post("/api/code/tasks", json={"request": "Corrige le bouton de l'écran d'accueil", "parent_id": done.id})
+    assert r.status_code == 200 and r.json()["parent_id"] == done.id and asked == []   # une suite reste dans son projet
+    assert client.post("/api/code/tasks", json={"request": "Suite d'un projet inconnu", "parent_id": "n'existe-pas"}).status_code == 404
+    assert client.post("/api/code/tasks", json={"request": "court"}).status_code == 400
+
+
+def test_la_liste_melange_projets_et_code_de_l_ia_du_plus_recent_au_plus_ancien(client, db):
+    from app.models import RepairJob
+    old = _task(db, status="done", minutes=300, title="Jeu de memory")
+    new = _task(db, minutes=2)
+    mine = RepairJob(kind="feature", request="Ajoute un export Excel des pointages. Avec les heures.", status="proposed", engine="claude_code")
+    other = RepairJob(kind="fix", request="Correction lancée depuis l'Atelier", status="failed")
+    db.add_all([mine, other])
+    db.commit()
+    items = client.get("/api/code").json()["items"]
+    ids = [i["id"] for i in items]
+    assert other.id not in ids                                                # le code de l'Atelier reste dans l'Atelier
+    assert ids.index(mine.id) < ids.index(new.id) < ids.index(old.id)       # le plus récent d'abord
+    by = {i["id"]: i for i in items}
+    assert by[mine.id]["type"] == "app" and by[mine.id]["title"] == "Ajoute un export Excel des pointages."
+    assert by[old.id]["type"] == "project" and by[old.id]["title"] == "Jeu de memory"
+    assert by[new.id]["title"].startswith("Un jeu de memory")                 # pas encore de titre : la demande
+    db.query(RepairJob).filter(RepairJob.id.in_([mine.id, other.id])).delete(synchronize_session=False)
+    db.commit()

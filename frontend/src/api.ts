@@ -575,6 +575,8 @@ export const api = {
     request<any>("/api/selfcare/github", { method: "PUT", body: JSON.stringify(body) }),
   githubDisconnect: () => request<any>("/api/selfcare/github", { method: "DELETE" }),
   code: () => request<any>("/api/code"),
+  codeTask: (body: { request: string; parent_id?: string }) =>
+    request<any>("/api/code/tasks", { method: "POST", body: JSON.stringify(body) }),
   codeStart: (body: { request: string; budget: string; parent_id?: string }) =>
     request<any>("/api/code/projects", { method: "POST", body: JSON.stringify(body) }),
   codeClose: (id: string) => request<any>(`/api/code/projects/${id}/close`, { method: "POST" }),

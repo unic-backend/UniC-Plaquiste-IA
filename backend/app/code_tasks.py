@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ logger = logging.getLogger("unic.code")
 
 WORKFLOW = "unic-code.yml"
 BUDGETS = ("2", "5", "10")
+BUDGET_DEFAULT = "5"                    # plafond de dépense par tâche (l'écran n'a plus de réglage : une seule zone de saisie)
 ASK_MAX = 20_000
 REQUEST_MIN, REQUEST_MAX = 10, 8_000
 MAX_WORKING = 2
@@ -48,6 +50,52 @@ PREVIEW_CSP = ("sandbox allow-scripts allow-forms allow-modals allow-popups; def
                "blob: data:; style-src 'unsafe-inline' data:; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; "
                "frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'")
 WORKING_NOTE = "Claude Code travaille sur GitHub (5 à 40 minutes) : il crée, teste et prépare la livraison."
+
+
+# ---------- une seule zone de saisie : le serveur choisit entre « projet » (dossier vide) et « code de l'appli » (tout le dépôt) ----------
+
+APP_RE = re.compile(r"\b(unic[ -]?(?:ai|ia)|mon (?:ia|appli|application)|l['’ ]appli(?:cation)?|le chat|l['’]atelier|le studio|banc d['’]essai|"
+                    r"l['’]apk|backend|frontend|le d[ée]p[oô]t|le repo|le menu|l['’]onglet|l['’][ée]cran|le clavier|le serveur)\b", re.I)
+FIX_RE = re.compile(r"\b(bug|corrig\w*|r[ée]par\w*|erreur|probl[èe]me|plante\w*|cass[ée]\w*|cache|disparu|ne (?:marche|fonctionne) (?:pas|plus)|"
+                    r"n['’]?arrive pas)\b", re.I)
+FORCE_RE = re.compile(r"^\s*/(ia|app|projet|project)\b[ \t]*", re.I)
+ROUTE_PROMPT = ("Tu classes la demande d'un patron en un seul mot. Réponds APP si elle demande de corriger, modifier ou ajouter une fonction à "
+                "l'application UniC AI elle-même (ses écrans, son chat, son Atelier, son Studio, ses outils, son serveur, son code). "
+                "Réponds PROJET si elle demande de créer autre chose (site, jeu, script, document, outil indépendant). Un seul mot, rien d'autre.")
+
+
+def looks_like_app(text: str) -> bool:
+    return bool(APP_RE.search(text or ""))
+
+
+def job_kind(text: str) -> str:
+    """« fix » (problème signalé) ou « feature » (nouvelle fonction) pour une tâche sur le code de l'appli."""
+    return "fix" if FIX_RE.search(text or "") else "feature"
+
+
+def classify(request: str) -> str:
+    """« app » ou « projet ». Une courte question à Claude (modèle rapide, quelques centaines de jetons) ; si Claude ne répond pas
+    (crédit, clé, réseau) : repli sur les mots de la demande. Jamais d'erreur : au pire, « projet » (dossier vide, sans danger)."""
+    try:
+        from app.ai import PROVIDERS
+        from app.config import settings
+        res = PROVIDERS["claude"].complete([{"role": "system", "content": ROUTE_PROMPT}, {"role": "user", "content": request[:1500]}],
+                                           model=settings.anthropic_fast_model, max_tokens=8)
+        word = (getattr(res, "text", "") or "").strip().upper()
+        if getattr(res, "available", False) and word.startswith(("APP", "PROJET")):
+            return "app" if word.startswith("APP") else "projet"
+    except Exception:   # jamais bloquant : le repli ci-dessous décide
+        logger.warning("UniC Code : classement par Claude impossible, repli sur les mots de la demande")
+    return "app" if looks_like_app(request) else "projet"
+
+
+def route(request: str) -> tuple[str, str]:
+    """(« app » | « projet », demande nettoyée). « /ia … » et « /projet … » forcent le choix."""
+    text = (request or "").strip()
+    m = FORCE_RE.match(text)
+    if m:
+        return ("app" if m.group(1).lower() in ("ia", "app") else "projet"), text[m.end():].strip()
+    return classify(text), text
 
 
 class CodeError(Exception):
@@ -82,14 +130,14 @@ def _aware(d: datetime | None) -> datetime | None:
 
 
 def to_dict(t: CodeTask) -> dict:
-    return {"id": t.id, "request": t.request, "status": t.status, "title": t.title, "summary": t.summary, "error": t.error,
+    return {"type": "project", "id": t.id, "request": t.request, "status": t.status, "title": t.title, "summary": t.summary, "error": t.error,
             "files": json.loads(t.files or "[]"), "preview": bool(t.preview), "budget": t.budget, "parent_id": t.parent_id,
             "zip": bool(t.artifact_id), "created_at": t.created_at.isoformat() if t.created_at else None}
 
 
 # ---------- lancement ----------
 
-def start(db: Session, request: str, budget: str = "5", parent_id: str = "") -> CodeTask:
+def start(db: Session, request: str, budget: str = BUDGET_DEFAULT, parent_id: str = "") -> CodeTask:
     text = (request or "").strip()
     if len(text) < REQUEST_MIN:
         raise CodeError("Décris le projet (une phrase au moins).")
