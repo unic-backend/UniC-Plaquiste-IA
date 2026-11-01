@@ -174,9 +174,12 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
             return {"evaluation": True, "note": "Banc d'essai : outil non exécuté. Réponds en une phrase."}
         # mêmes consignes, même modèle et même effort que la vraie conversation : sinon on mesure une autre IA
         deep = wants_deep(db, case["message"], asked=False, voice=False, attached=False, focus=False)
-        system = SYSTEM_RULES + agent.AGENT_PROMPT + agent.availability_note(db)
+        # comme la conversation : partie stable (règles + outils) en cache de prompt, relue à ~10 % du prix et hors limite de débit ;
+        # sans cache, 31 cas × ~23 000 jetons partent d'un coup (coût élevé, et limite de débit du compte vite atteinte)
+        stable, varying = SYSTEM_RULES + agent.AGENT_PROMPT, agent.availability_note(db)
         try:
-            res = complete([{"role": "system", "content": system}, {"role": "user", "content": case["message"]}],
+            res = complete([{"role": "system", "content": stable, "cache": True}, {"role": "system", "content": varying},
+                            {"role": "user", "content": case["message"]}],
                            tools=agent.TOOLS, tool_handler=handler, max_tokens=4000, effort="high" if deep else "medium",
                            model=settings.anthropic_model if deep else settings.anthropic_fast_model)
             err = str(getattr(res, "error", "") or "")
