@@ -30,6 +30,22 @@ class AIResult:
     error_kind: str = ""   # classification de l'échec : quota | auth | request | network | server | refusal | other
 
 
+# Crédit ou quota réellement épuisé. Les mots « credit » ou « balance » seuls ne suffisent pas : une autre erreur qui les cite (outil, requête
+# refusée) passait pour un crédit épuisé alors que la Console affichait du crédit.
+CREDIT_RE = re.compile(r"credit balance|(?:insufficient|low|negative|zero|no)\s+(?:funds|balance|credits?)|balance (?:is )?too low|"
+                       r"out of credits?|payment required|\bquota\b", re.I)
+_SECRET_RE = re.compile(r"\b(?:sk|vk|ghp|github_pat)[-_][A-Za-z0-9_\-]{8,}")
+
+
+def server_reason(exc: Exception, limit: int = 110) -> str:
+    """Raison donnée par le serveur du fournisseur, courte et sans aucune clé : pour que le patron voie la vraie cause."""
+    status = getattr(exc, "status_code", None)
+    text = re.sub(r"\s+", " ", str(getattr(exc, "message", "") or exc)).strip()
+    text = _SECRET_RE.sub("…", text)
+    text = text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return f"HTTP {status} : {text}" if status else text
+
+
 def classify_exc(exc: Exception) -> str:
     """Classe un échec fournisseur : rate | quota | auth | request | network | server | other.
 
@@ -43,7 +59,7 @@ def classify_exc(exc: Exception) -> str:
     name = type(exc).__name__.lower()
     if status == 429 or "rate limit" in msg or "rate_limit" in msg or "too many requests" in msg:
         return "rate"
-    if status == 402 or "credit" in msg or "balance" in msg or "quota" in msg:
+    if status == 402 or CREDIT_RE.search(msg):
         return "quota"
     if status in (401, 403) or "api key" in msg or "authentication" in msg or "unauthorized" in msg or "forbidden" in msg:
         return "auth"
@@ -63,7 +79,8 @@ def explain_error(exc: Exception, who: str = "Claude", key_env: str = "ANTHROPIC
     msg = str(getattr(exc, "message", "") or exc).lower()
     kind = classify_exc(exc)
     if kind == "quota" and status != 429:
-        return f"crédit {who} épuisé : recharge sur {console}"
+        hint = f" Crédit positif sur la Console ? Alors la clé {key_env} sur Render vient d'une autre organisation." if who == "Claude" else ""
+        return f"crédit {who} épuisé selon le serveur ({server_reason(exc)}). Recharge sur {console}.{hint}"
     if status == 401:
         return f"clé API refusée (vérifie {key_env} sur Render)"
     if status == 403:
