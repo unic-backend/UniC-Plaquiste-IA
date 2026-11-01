@@ -75,11 +75,11 @@ def _names(kw):
     return {t["name"] for t in kw["tools"]}
 
 
-def test_un_travail_unic_code_est_une_conversation_a_part_menee_en_profond_avec_tous_les_outils(client, db, master):
+def test_un_travail_unic_code_est_une_conversation_a_part_menee_en_normal_avec_tous_les_outils(client, db, master):
     r = client.post("/api/chat", json={"message": "Supprime les pubs de mon mail", "code": True})
     assert r.status_code == 200, r.text
     msgs, kw = master["calls"][-1]
-    assert kw["deep"] is True                                                    # mode profond forcé, sans que l'écran le demande
+    assert kw["deep"] is False                                                   # Normal par défaut (Opus coûte environ 0,20 $ le message) ; Profond seulement si l'écran le demande
     assert {"code_app", "code_project", "mail_cleanup_propose", "read_inbox", "create_quote", "get_prices"} <= _names(kw)   # tout + les développeurs
     assert "UNIC CODE" in msgs[0]["content"] and "mail_cleanup_propose" in msgs[0]["content"]
     cid = r.json()["conversation_id"]
@@ -97,7 +97,9 @@ def test_une_conversation_de_unic_code_reste_en_mode_maitre_aux_messages_suivant
     cid = client.post("/api/chat", json={"message": "Prépare le nettoyage de mon mail", "code": True}).json()["conversation_id"]
     client.post("/api/chat", json={"message": "Et aussi l'agenda de demain", "conversation_id": cid, "code": True})
     _, kw = master["calls"][-1]
-    assert "code_app" in _names(kw) and kw["deep"] is True
+    assert "code_app" in _names(kw) and kw["deep"] is False
+    client.post("/api/chat", json={"message": "Analyse en détail", "conversation_id": cid, "code": True, "deep": True})
+    assert master["calls"][-1][1]["deep"] is True                                  # Profond reste possible sur demande
 
 
 def test_les_etapes_du_travail_sont_gardees_pour_les_montrer(client, db, master):
