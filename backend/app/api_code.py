@@ -42,7 +42,7 @@ def overview(db: Session = Depends(get_db), user: User = Depends(ADMIN)):
     code_tasks.follow_all(db)
     repair.sync_all(db)
     projects = db.query(CodeTask).options(defer(CodeTask.preview)).order_by(CodeTask.created_at.desc()).limit(30).all()
-    jobs = db.query(RepairJob).order_by(RepairJob.created_at.desc()).limit(20).all()
+    jobs = db.query(RepairJob).filter(RepairJob.engine == "claude_code").order_by(RepairJob.created_at.desc()).limit(20).all()
     return {"github": repair.status(db), "budgets": list(code_tasks.BUDGETS),
             "projects": [code_tasks.to_dict(t) for t in projects], "app_jobs": [repair.to_dict(j) for j in jobs]}
 
@@ -122,12 +122,14 @@ def apercu(tid: str, t: str = Query(default="", max_length=400), db: Session = D
 class AppJobIn(BaseModel):
     kind: str = Field(pattern="^(fix|feature)$")
     request: str = Field(min_length=1, max_length=4000)
+    budget: str = Field(default="5", max_length=4)
 
 
 @router.post("/app")
 def app_job(body: AppJobIn, db: Session = Depends(get_db), user: User = Depends(ADMIN)):
-    """Code de l'IA elle-même : toujours Claude Code (jamais le moteur classique), proposition en brouillon, fusion au clic du patron."""
-    job = _c(repair.start_job, db, body.kind, body.request, "", True)
+    """Code de l'IA elle-même : toujours Claude Code, qui lit tout le dépôt (jamais le moteur classique). Proposition en brouillon,
+    fusion au clic du patron. Zones protégées : refusées par les garde-fous, comme partout."""
+    job = _c(repair.start_job, db, body.kind, body.request, "", True, body.budget)
     audit(db, user.id, "code_app_job", "repair_job", job.id, body.request[:300])
     db.commit()
     return repair.to_dict(job)

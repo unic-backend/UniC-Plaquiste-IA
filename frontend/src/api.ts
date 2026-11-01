@@ -580,7 +580,7 @@ export const api = {
   codeClose: (id: string) => request<any>(`/api/code/projects/${id}/close`, { method: "POST" }),
   codeDelete: (id: string) => request<any>(`/api/code/projects/${id}`, { method: "DELETE" }),
   codePreviewLink: (id: string) => request<{ path: string }>(`/api/code/projects/${id}/preview-link`),
-  codeApp: (body: { kind: "fix" | "feature"; request: string }) =>
+  codeApp: (body: { kind: "fix" | "feature"; request: string; budget?: string }) =>
     request<any>("/api/code/app", { method: "POST", body: JSON.stringify(body) }),
   setAtelierEngine: (engine: "claude_code" | "classique") =>
     request<any>("/api/selfcare/engine", { method: "PUT", body: JSON.stringify({ engine }) }),

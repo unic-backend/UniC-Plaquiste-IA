@@ -238,6 +238,30 @@ def test_le_code_de_l_ia_passe_toujours_par_claude_code(db, monkeypatch):
     db.commit()
 
 
+def test_mon_ia_lance_claude_code_et_reste_dans_unic_code(client, db, monkeypatch):
+    from app import repair
+    from app.models import RepairJob
+    started = []
+    monkeypatch.setattr(repair, "run_job", lambda s, j, claude_code=False, budget="5": started.append((j.id, claude_code, budget)))
+    r = client.post("/api/code/app", json={"kind": "feature", "request": "Ajoute un export Excel des pointages", "budget": "10"})
+    assert r.status_code == 200 and r.json()["engine"] == "claude_code"
+    for _ in range(50):
+        if started:
+            break
+        time.sleep(0.02)
+    assert started == [(r.json()["id"], True, "10")]
+    assert client.post("/api/code/app", json={"kind": "fix", "request": "Corrige le total des factures", "budget": "500"}).status_code == 400
+    atelier = RepairJob(kind="fix", request="Correction lancée depuis l'Atelier", status="failed")
+    db.add(atelier)
+    db.commit()
+    code_ids = {j["id"] for j in client.get("/api/code").json()["app_jobs"]}
+    atelier_ids = {j["id"] for j in client.get("/api/selfcare").json()["jobs"]}
+    assert r.json()["id"] in code_ids and r.json()["id"] not in atelier_ids          # chaque section ne montre que SES tâches
+    assert atelier.id in atelier_ids and atelier.id not in code_ids
+    db.query(RepairJob).filter(RepairJob.id.in_([r.json()["id"], atelier.id])).delete(synchronize_session=False)
+    db.commit()
+
+
 def test_workflow_unic_code_sans_acces_au_depot():
     text = WORKFLOW.read_text(encoding="utf-8")
     wf = yaml.safe_load(text)

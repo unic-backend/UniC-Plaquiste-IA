@@ -820,6 +820,7 @@ class RepairJob(Base):
     pr_number: Mapped[int] = mapped_column(Integer, default=0)
     pr_url: Mapped[str] = mapped_column(String(300), default="")
     error: Mapped[str] = mapped_column(Text, default="")
+    engine: Mapped[str] = mapped_column(String(16), default="")         # "claude_code" : tâche de UniC Code ; vide : Atelier
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

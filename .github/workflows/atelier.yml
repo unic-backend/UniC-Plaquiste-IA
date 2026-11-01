@@ -1,7 +1,8 @@
-name: Atelier (Claude Code)
-run-name: "Atelier ${{ inputs.job_id }}"
+name: UniC Code · Mon IA (Claude Code)
+run-name: "Atelier ${{ inputs.job_id }}"   # titre lu par le serveur (repair._find_run) : ne pas changer
 
-# Moteur de l'Atelier : lancé par le serveur (backend/app/repair.py) quand le patron demande une correction ou une fonction.
+# UniC Code, onglet « Mon IA » : lancé par le serveur (backend/app/repair.py) quand le patron demande une correction ou une fonction
+# de l'appli. L'Atelier garde son moteur classique. Claude Code lit TOUT le dépôt ; les zones protégées restent au propriétaire.
 # 1. « claude » : Claude Code lit le dépôt, modifie le code, lance les tests. Jeton en LECTURE seule, sans identifiants git sur le disque :
 #    le code qu'il écrit et exécute (tests) ne peut rien publier.
 # 2. « publier » : applique la modification, vérifie les garde-fous (version de la base, jamais celle de la modification), pousse la branche.
@@ -96,7 +97,7 @@ jobs:
         run: |
           mkdir -p "$UNIC_DATA_DIR" "$RUNNER_TEMP/atelier"
           cat > "$RUNNER_TEMP/rules.md" <<'RULES'
-          Tu es l'Atelier d'UniC AI : tu corriges ou améliores le code de ce dépôt à la demande du patron.
+          Tu es UniC Code (Claude Code) : tu corriges ou améliores l'appli UniC AI à la demande du patron. Tu as accès à tout le dépôt.
           Règles absolues :
           1. Lis AGENTS.md et CLAUDE.md en entier avant toute modification : leurs règles priment sur la demande.
           2. Ne modifie jamais les zones protégées : backend/app/{auth,security,secrets_box,config,repair,selfcare,trust}.py, .github/,
@@ -119,7 +120,7 @@ jobs:
           claude -p "$(cat "$RUNNER_TEMP/task.md")" \
             --append-system-prompt "$(cat "$RUNNER_TEMP/rules.md")" \
             --model "$MODEL" --max-budget-usd "$BUDGET" --output-format json --permission-mode acceptEdits \
-            --allowedTools "Read,Edit,Write,Glob,Grep,TodoWrite,Bash(make test),Bash(make lint),Bash(cd:*),Bash(python -m pytest:*),Bash(ruff check:*),Bash(bandit:*),Bash(npm --prefix frontend run:*),Bash(npm run:*),Bash(npx tsc:*),Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(ls:*)" \
+            --allowedTools "Read,Edit,Write,Glob,Grep,TodoWrite,Bash(make test),Bash(make lint),Bash(cd:*),Bash(python -m pytest:*),Bash(ruff check:*),Bash(bandit:*),Bash(npm --prefix frontend run:*),Bash(npm run:*),Bash(npx tsc:*),Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(ls:*),Bash(find:*),Bash(grep:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)" \
             > "$RUNNER_TEMP/claude.json"
           set -e
           jq -r '.result // ""' "$RUNNER_TEMP/claude.json" > "$RUNNER_TEMP/atelier/summary.md" || true
