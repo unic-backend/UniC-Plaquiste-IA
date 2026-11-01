@@ -7,3 +7,4 @@
 .appversion-check.mjs
 .codelock-check.mjs
 .timers-check.mjs
+.keyboard-check.mjs
