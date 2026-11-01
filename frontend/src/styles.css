@@ -1910,3 +1910,11 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .vs-pick { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
 .vs-pick .chip { cursor: pointer; }
 .vs-pick .chip.off { opacity: .5; pointer-events: none; }
+
+/* UniC Code : le moteur Claude Code (projets livrés en ZIP + aperçu, code de l'IA) */
+.unic-code h1 { display: flex; align-items: center; gap: 10px; }
+.unic-code .chips { margin: 4px 0 12px; }
+.unic-code .code-summary { white-space: pre-wrap; line-height: 1.5; margin: 6px 0 10px; }
+.unic-code .code-budget { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; color: var(--muted); font-size: 14px; }
+.unic-code .code-budget select { width: auto; min-width: 96px; }
+.unic-code .link-btn { background: none; border: 0; padding: 0; color: var(--copper); font: inherit; text-decoration: underline; cursor: pointer; }

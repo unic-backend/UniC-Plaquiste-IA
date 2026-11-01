@@ -385,12 +385,17 @@ def _open_pr(db: Session, job: RepairJob, tok: str, repo: str, base: str, title:
             i.status, i.fix_url = "fixing", job.pr_url
 
 
-def run_job(db: Session, job: RepairJob) -> RepairJob:
-    """Du problème à la pull request. Toute erreur laisse le job « failed » avec une explication."""
+def run_job(db: Session, job: RepairJob, claude_code: bool = False) -> RepairJob:
+    """Du problème à la pull request. Toute erreur laisse le job « failed » avec une explication.
+    claude_code=True (demande faite dans UniC Code) : Claude Code obligatoirement, jamais le repli sur le moteur classique."""
     try:
         tok, repo, base = _ctx(db)
         ask, trace_paths = _ask(db, job)
-        if not (engine(db) == "claude_code" and _dispatch(job, tok, repo, base, ask)):
+        if claude_code:
+            if not _dispatch(job, tok, repo, base, ask):
+                raise RepairError("Claude Code n'a pas pu démarrer sur GitHub : workflow atelier.yml absent, ou jeton sans la permission "
+                                  "« Actions : Read and write ».", 503)
+        elif not (engine(db) == "claude_code" and _dispatch(job, tok, repo, base, ask)):
             _classic(db, job, tok, repo, base, ask, trace_paths)
     except RepairError as exc:
         job.status, job.error = "failed", str(exc)[:1000]
@@ -435,7 +440,7 @@ def _classic(db: Session, job: RepairJob, tok: str, repo: str, base: str, ask: s
     _open_pr(db, job, tok, repo, base, title, patch.get("summary", ""), list(changed))
 
 
-def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") -> RepairJob:
+def start_job(db: Session, kind: str, request: str = "", incident_id: str = "", claude_code: bool = False) -> RepairJob:
     if kind not in ("fix", "feature"):
         raise RepairError("Type inconnu.")
     if not _token(db):
@@ -459,7 +464,7 @@ def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") 
         try:
             j = s.get(RepairJob, jid)
             if j is not None:
-                run_job(s, j)
+                run_job(s, j, claude_code)
         finally:
             s.close()
 

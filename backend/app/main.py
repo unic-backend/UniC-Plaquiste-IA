@@ -22,6 +22,7 @@ from app.api_field import router as field_router
 from app.api_reseaux import router as reseaux_router
 from app.api_voice import router as voice_router
 from app.api_website import router as website_router
+from app.api_code import router as code_router
 from app import ratelimit
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_columns, ensure_indexes
@@ -263,6 +264,7 @@ app.include_router(reseaux_router, prefix="/api")
 app.include_router(field_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
 app.include_router(website_router, prefix="/api")
+app.include_router(code_router, prefix="/api")
 
 
 def startup():

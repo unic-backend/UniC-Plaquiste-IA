@@ -574,6 +574,14 @@ export const api = {
   githubConnect: (body: { token?: string; repo?: string; base?: string; deploy_hook?: string }) =>
     request<any>("/api/selfcare/github", { method: "PUT", body: JSON.stringify(body) }),
   githubDisconnect: () => request<any>("/api/selfcare/github", { method: "DELETE" }),
+  code: () => request<any>("/api/code"),
+  codeStart: (body: { request: string; budget: string; parent_id?: string }) =>
+    request<any>("/api/code/projects", { method: "POST", body: JSON.stringify(body) }),
+  codeClose: (id: string) => request<any>(`/api/code/projects/${id}/close`, { method: "POST" }),
+  codeDelete: (id: string) => request<any>(`/api/code/projects/${id}`, { method: "DELETE" }),
+  codePreviewLink: (id: string) => request<{ path: string }>(`/api/code/projects/${id}/preview-link`),
+  codeApp: (body: { kind: "fix" | "feature"; request: string }) =>
+    request<any>("/api/code/app", { method: "POST", body: JSON.stringify(body) }),
   setAtelierEngine: (engine: "claude_code" | "classique") =>
     request<any>("/api/selfcare/engine", { method: "PUT", body: JSON.stringify({ engine }) }),
   createAgent: (body: { name: string; mission: string; every_hours: number }) =>

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -782,6 +783,26 @@ class Incident(Base):
     fix_url: Mapped[str] = mapped_column(String(300), default="")       # correctif proposé (pull request)
     first_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CodeTask(Base):
+    """UniC Code : un projet confié à Claude Code (site, jeu, appli, script, document…), livré en ZIP avec un aperçu."""
+    __tablename__ = "code_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    request: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="working")  # working | done | failed | closed
+    title: Mapped[str] = mapped_column(String(120), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[str] = mapped_column(Text, default="[]")
+    preview: Mapped[str] = mapped_column(Text, default="")              # apercu.html (autonome), affiché isolé du reste de l'appli
+    budget: Mapped[str] = mapped_column(String(8), default="5")
+    parent_id: Mapped[str] = mapped_column(String(36), default="")      # projet continué
+    run_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    artifact_id: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class RepairJob(Base):
