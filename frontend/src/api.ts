@@ -574,6 +574,8 @@ export const api = {
   githubConnect: (body: { token?: string; repo?: string; base?: string; deploy_hook?: string }) =>
     request<any>("/api/selfcare/github", { method: "PUT", body: JSON.stringify(body) }),
   githubDisconnect: () => request<any>("/api/selfcare/github", { method: "DELETE" }),
+  setAtelierEngine: (engine: "claude_code" | "classique") =>
+    request<any>("/api/selfcare/engine", { method: "PUT", body: JSON.stringify({ engine }) }),
   createAgent: (body: { name: string; mission: string; every_hours: number }) =>
     request<any>("/api/agents", { method: "POST", body: JSON.stringify(body) }),
   setAgent: (id: string, status: string) => request<any>(`/api/agents/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),

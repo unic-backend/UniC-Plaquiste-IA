@@ -485,12 +485,24 @@ export function Atelier() {
           {connected ? (
             <>
               <p className="hint ic"><I.Check size={16} /> Connecté · {d.github.repo} · branche {d.github.base || "par défaut"} · déploiement auto {d.github.deploy_hook ? "oui" : "non"}</p>
-              <button className="btn btn-ghost btn-small" onClick={() => window.confirm("Déconnecter GitHub ?") && act("gh", () => api.githubDisconnect())}>Déconnecter</button>
+              <p className="hint">
+                Moteur : {d.github.engine === "classique"
+                  ? "classique (lit 10 fichiers au plus, ne lance pas les tests)."
+                  : "Claude Code sur GitHub (lit tout le dépôt, lance les tests ; plafond 5 $ par tâche, clé ANTHROPIC_API_KEY dans les secrets GitHub)."}
+              </p>
+              <div className="row-actions">
+                <button className="btn btn-line btn-small" disabled={!!busy}
+                  onClick={() => act("engine", () => api.setAtelierEngine(d.github.engine === "classique" ? "claude_code" : "classique"),
+                    (r) => (r.engine === "classique" ? "Moteur classique activé." : "Moteur Claude Code activé."))}>
+                  {d.github.engine === "classique" ? "Passer à Claude Code" : "Revenir au moteur classique"}
+                </button>
+                <button className="btn btn-ghost btn-small" onClick={() => window.confirm("Déconnecter GitHub ?") && act("gh", () => api.githubDisconnect())}>Déconnecter</button>
+              </div>
             </>
           ) : (
             <ol className="at-steps">
               <li>Sur github.com : Settings › Developer settings › Fine-grained tokens › Generate.</li>
-              <li>Accès : seulement le dépôt <b>UniC-Plaquiste-IA</b>. Permissions : <b>Contents</b>, <b>Pull requests</b> et <b>Checks (lecture)</b>.</li>
+              <li>Accès : seulement le dépôt <b>UniC-Plaquiste-IA</b>. Permissions : <b>Contents</b>, <b>Pull requests</b>, <b>Actions (lecture et écriture)</b> et <b>Checks (lecture)</b>.</li>
               <li>Colle le jeton ici. Il est chiffré sur le serveur et ne s'affiche plus jamais.</li>
             </ol>
           )}

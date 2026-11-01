@@ -1,9 +1,11 @@
 """UniC se corrige et s'améliore lui-même — sans jamais toucher la production sans le clic du patron.
 
 1. Un problème (incident) ou une demande de fonction arrive.
-2. Claude Opus (raisonnement profond) lit le code ACTUEL dans le dépôt GitHub et écrit le correctif + un test.
-3. Le serveur vérifie le correctif (chemins autorisés, remplacements exacts, Python qui compile) puis ouvre une
-   PULL REQUEST sur une branche à part : la production ne change pas.
+2. Moteur « Claude Code » (par défaut) : le serveur lance .github/workflows/atelier.yml ; Claude Code lit TOUT le dépôt, modifie le
+   code, lance les tests, puis le workflow vérifie les garde-fous et pousse une branche à part. Le serveur suit l'exécution et ouvre la
+   PULL REQUEST (brouillon). Repli automatique sur le moteur « classique » si le workflow ou la permission Actions manque :
+   Claude Opus lit jusqu'à 10 fichiers et écrit le correctif ; le serveur le vérifie (chemins autorisés, remplacements exacts,
+   Python qui compile) puis ouvre la pull request. Dans les deux cas, la production ne change pas.
 4. GitHub Actions lance tous les tests sur cette branche.
 5. Le patron voit le résumé et l'état des tests ; « Fusionner » n'est possible que si les tests sont verts.
    Après fusion, Render redéploie (crochet de déploiement si fourni, sinon « Manual Deploy »).
@@ -13,12 +15,14 @@ Zones protégées (sécurité, secrets, déploiement, ce mécanisme lui-même) :
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import re
 import threading
-from datetime import datetime, timezone
+import zipfile
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy.orm import Session
@@ -95,7 +99,41 @@ def deployed_branch() -> str:
 
 def status(db: Session) -> dict:
     return {"connected": bool(_token(db)), "repo": _get(db, "repair_repo") or DEFAULT_REPO,
-            "base": deployed_branch() or _get(db, "repair_base") or "", "deploy_hook": bool(_hook(db))}
+            "base": deployed_branch() or _get(db, "repair_base") or "", "deploy_hook": bool(_hook(db)), "engine": engine(db)}
+
+
+# ---------- moteur : Claude Code (GitHub Actions) ou classique ----------
+
+ENGINE_KEY = "atelier_engine"
+ENGINES = ("claude_code", "classique")
+WORKFLOW = "atelier.yml"
+BUDGET_USD = "5"                       # plafond de dépense Claude par tâche (--max-budget-usd)
+ASK_MAX = 20_000
+POLL_EVERY = timedelta(seconds=30)     # l'écran de l'Atelier se rafraîchit toutes les 8 s : GitHub n'est interrogé qu'une fois sur quatre
+LOST_AFTER = timedelta(minutes=20)     # lancement accepté mais aucune exécution visible
+MAX_RUN = timedelta(hours=2)
+WORKING_NOTE = "Claude Code travaille sur GitHub (5 à 30 minutes) : il lit le dépôt, modifie le code et lance les tests."
+STEP_HINTS = {
+    "Clé Claude (secret ANTHROPIC_API_KEY)": "Clé Claude absente sur GitHub : github.com › dépôt UniC-Plaquiste-IA › Settings › Secrets and "
+                                             "variables › Actions › New repository secret › nom ANTHROPIC_API_KEY.",
+    "Claude Code travaille": "Claude Code n'a pas terminé (plafond de dépense atteint ou erreur).",
+    "Modification préparée": "Modification trop grosse pour être proposée.",
+    "Garde-fous (zones protégées)": "Refusé par les garde-fous : la modification touchait une zone protégée ou supprimait un fichier essentiel.",
+    "Publication de la branche": "GitHub a refusé la publication de la branche (elle existe peut-être déjà).",
+}
+
+
+def engine(db: Session) -> str:
+    v = _get(db, ENGINE_KEY)
+    return v if v in ENGINES else "claude_code"
+
+
+def set_engine(db: Session, value: str) -> str:
+    """Choix du patron : « claude_code » (par défaut) ou « classique » (l'ancien moteur, sans GitHub Actions)."""
+    if value not in ENGINES:
+        raise RepairError("Moteur inconnu : « claude_code » ou « classique ».")
+    _put(db, ENGINE_KEY, value)
+    return value
 
 
 def connect(db: Session, token: str, repo: str = "", base: str = "", deploy_hook: str = "") -> dict:
@@ -304,54 +342,56 @@ def _incident_text(db: Session, job: RepairJob) -> tuple[str, list[str]]:
     return text, paths
 
 
+def _ask(db: Session, job: RepairJob) -> tuple[str, list[str]]:
+    problem, trace_paths = _incident_text(db, job)
+    ask = problem or f"DEMANDE DU PATRON ({'nouvelle fonction' if job.kind == 'feature' else 'problème signalé'}) :\n{job.request}"
+    if problem and job.request:
+        ask += f"\n\nPRÉCISION DU PATRON : {job.request}"
+    return ask, trace_paths
+
+
+def _branch(job: RepairJob) -> str:
+    return f"{BRANCH_PREFIX}{job.kind}-{job.id[:8]}"
+
+
+def _dispatch(job: RepairJob, tok: str, repo: str, base: str, ask: str) -> bool:
+    """Confie la tâche à Claude Code (workflow atelier.yml). False si le dépôt ou le jeton ne le permet pas : le moteur classique prend le relais."""
+    from app.config import settings
+    r = _gh("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches", tok, json={"ref": base, "inputs": {
+        "job_id": job.id, "branch": _branch(job), "request": ask[:ASK_MAX], "model": settings.anthropic_model, "budget": BUDGET_USD}})
+    if r.status_code != 204:
+        logger.warning("Atelier : Claude Code indisponible (GitHub %s), moteur classique", r.status_code)
+        return False
+    job.branch, job.summary = _branch(job), WORKING_NOTE
+    return True
+
+
+def _open_pr(db: Session, job: RepairJob, tok: str, repo: str, base: str, title: str, summary: str, files: list[str]) -> None:
+    body = (f"{summary}\n\n**Origine** : {'incident ' + job.incident_id if job.incident_id else job.request[:400]}\n\n"
+            "Proposé par UniC AI. Les tests tournent sur cette branche ; la fusion se fait seulement au clic du patron.")
+    # déjà ouverte (deux écrans ouverts en même temps, ou nouvel essai après une coupure) : on la reprend au lieu d'en ouvrir une seconde
+    owner = repo.split("/", 1)[0]
+    same = _ok(_gh("GET", f"/repos/{repo}/pulls", tok, params={"head": f"{owner}:{job.branch}", "state": "all"}), "pull request")
+    # BROUILLON : la fusion automatique du dépôt (automerge.yml) ignore les brouillons ; seul le clic « Fusionner » du patron la publie
+    pr = same[0] if isinstance(same, list) and same else _ok(_gh("POST", f"/repos/{repo}/pulls", tok, json={
+        "title": title[:90], "head": job.branch, "base": base, "body": body, "draft": True}), "pull request")
+    job.status, job.summary = "proposed", summary[:3000]
+    job.pr_number, job.pr_url = pr.get("number", 0), pr.get("html_url", "")
+    job.files = json.dumps(sorted(f for f in files if f), ensure_ascii=False)
+    job.request = job.request or title[:4000]
+    if job.incident_id:
+        i = db.get(Incident, job.incident_id)
+        if i is not None:
+            i.status, i.fix_url = "fixing", job.pr_url
+
+
 def run_job(db: Session, job: RepairJob) -> RepairJob:
     """Du problème à la pull request. Toute erreur laisse le job « failed » avec une explication."""
     try:
         tok, repo, base = _ctx(db)
-        problem, trace_paths = _incident_text(db, job)
-        ask = problem or f"DEMANDE DU PATRON ({'nouvelle fonction' if job.kind == 'feature' else 'problème signalé'}) :\n{job.request}"
-        if problem and job.request:
-            ask += f"\n\nPRÉCISION DU PATRON : {job.request}"
-        tree = _tree(tok, repo, base)
-        listing = "\n".join(f"{t['path']} ({t['size'] // 1024} ko)" for t in tree)
-        picked = _claude(RULES, f"{ask}\n\nFICHIERS DU DÉPÔT :\n{listing}", PICK_TOOL, deep=False).get("paths", [])
-        wanted = [p for p in dict.fromkeys(trace_paths + list(picked)) if any(t["path"] == p for t in tree)][:MAX_FILES_READ]
-        files, total = {}, 0
-        for p in wanted:
-            text = _read(tok, repo, base, p)
-            if text and total + len(text) <= MAX_CHARS:
-                files[p] = text
-                total += len(text)
-        if not files:
-            raise RepairError("Aucun fichier pertinent lisible dans le dépôt.")
-        code = "\n\n".join(f"=== {p} ===\n{t}" for p, t in files.items())
-        patch = _claude(RULES, f"{ask}\n\nCODE ACTUEL (branche {base}) :\n{code}\n\nAppelle submit_patch.", PATCH_TOOL, deep=True)
-        if patch.get("cannot") and not patch.get("edits") and not patch.get("new_files"):
-            raise RepairError("Correction non faite par prudence : " + patch["cannot"][:400])
-        changed = apply_edits(files, patch.get("edits") or [], patch.get("new_files") or [])
-        branch = f"{BRANCH_PREFIX}{job.kind}-{job.id[:8]}"
-        head = _ok(_gh("GET", f"/repos/{repo}/git/ref/heads/{base}", tok), "branche de base")["object"]["sha"]
-        base_tree = _ok(_gh("GET", f"/repos/{repo}/git/commits/{head}", tok), "commit de base")["tree"]["sha"]
-        tree_sha = _ok(_gh("POST", f"/repos/{repo}/git/trees", tok, json={"base_tree": base_tree, "tree": [
-            {"path": p, "mode": "100644", "type": "blob", "content": t} for p, t in changed.items()]}), "arbre")["sha"]
-        title = (patch.get("title") or "Correctif UniC AI")[:90]
-        commit = _ok(_gh("POST", f"/repos/{repo}/git/commits", tok, json={
-            "message": f"{title}\n\n{patch.get('summary', '')}\n\nProposé par UniC AI (atelier d'auto-réparation).",
-            "tree": tree_sha, "parents": [head]}), "commit")["sha"]
-        _ok(_gh("POST", f"/repos/{repo}/git/refs", tok, json={"ref": f"refs/heads/{branch}", "sha": commit}), "branche")
-        body = (f"{patch.get('summary', '')}\n\n**Origine** : {'incident ' + job.incident_id if job.incident_id else job.request[:400]}\n\n"
-                "Proposé par UniC AI. Les tests tournent sur cette branche ; la fusion se fait seulement au clic du patron.")
-        # BROUILLON : la fusion automatique du dépôt (automerge.yml) ignore les brouillons ; seul le clic « Fusionner » du patron la publie
-        pr = _ok(_gh("POST", f"/repos/{repo}/pulls", tok, json={"title": title, "head": branch, "base": base, "body": body, "draft": True}),
-                 "pull request")
-        job.status, job.summary, job.branch = "proposed", patch.get("summary", "")[:3000], branch
-        job.pr_number, job.pr_url = pr.get("number", 0), pr.get("html_url", "")
-        job.files = json.dumps(sorted(changed), ensure_ascii=False)
-        job.request = job.request or title
-        if job.incident_id:
-            i = db.get(Incident, job.incident_id)
-            if i is not None:
-                i.status, i.fix_url = "fixing", job.pr_url
+        ask, trace_paths = _ask(db, job)
+        if not (engine(db) == "claude_code" and _dispatch(job, tok, repo, base, ask)):
+            _classic(db, job, tok, repo, base, ask, trace_paths)
     except RepairError as exc:
         job.status, job.error = "failed", str(exc)[:1000]
     except Exception as exc:   # jamais de trace brute vers le patron
@@ -360,6 +400,39 @@ def run_job(db: Session, job: RepairJob) -> RepairJob:
     job.updated_at = datetime.now(timezone.utc)
     db.commit()
     return job
+
+
+def _classic(db: Session, job: RepairJob, tok: str, repo: str, base: str, ask: str, trace_paths: list[str]) -> None:
+    """Moteur classique : Claude lit jusqu'à 10 fichiers et rend des remplacements exacts, que le serveur vérifie et publie."""
+    tree = _tree(tok, repo, base)
+    listing = "\n".join(f"{t['path']} ({t['size'] // 1024} ko)" for t in tree)
+    picked = _claude(RULES, f"{ask}\n\nFICHIERS DU DÉPÔT :\n{listing}", PICK_TOOL, deep=False).get("paths", [])
+    wanted = [p for p in dict.fromkeys(trace_paths + list(picked)) if any(t["path"] == p for t in tree)][:MAX_FILES_READ]
+    files, total = {}, 0
+    for p in wanted:
+        text = _read(tok, repo, base, p)
+        if text and total + len(text) <= MAX_CHARS:
+            files[p] = text
+            total += len(text)
+    if not files:
+        raise RepairError("Aucun fichier pertinent lisible dans le dépôt.")
+    code = "\n\n".join(f"=== {p} ===\n{t}" for p, t in files.items())
+    patch = _claude(RULES, f"{ask}\n\nCODE ACTUEL (branche {base}) :\n{code}\n\nAppelle submit_patch.", PATCH_TOOL, deep=True)
+    if patch.get("cannot") and not patch.get("edits") and not patch.get("new_files"):
+        raise RepairError("Correction non faite par prudence : " + patch["cannot"][:400])
+    changed = apply_edits(files, patch.get("edits") or [], patch.get("new_files") or [])
+    branch = _branch(job)
+    head = _ok(_gh("GET", f"/repos/{repo}/git/ref/heads/{base}", tok), "branche de base")["object"]["sha"]
+    base_tree = _ok(_gh("GET", f"/repos/{repo}/git/commits/{head}", tok), "commit de base")["tree"]["sha"]
+    tree_sha = _ok(_gh("POST", f"/repos/{repo}/git/trees", tok, json={"base_tree": base_tree, "tree": [
+        {"path": p, "mode": "100644", "type": "blob", "content": t} for p, t in changed.items()]}), "arbre")["sha"]
+    title = (patch.get("title") or "Correctif UniC AI")[:90]
+    commit = _ok(_gh("POST", f"/repos/{repo}/git/commits", tok, json={
+        "message": f"{title}\n\n{patch.get('summary', '')}\n\nProposé par UniC AI (atelier d'auto-réparation).",
+        "tree": tree_sha, "parents": [head]}), "commit")["sha"]
+    _ok(_gh("POST", f"/repos/{repo}/git/refs", tok, json={"ref": f"refs/heads/{branch}", "sha": commit}), "branche")
+    job.branch = branch
+    _open_pr(db, job, tok, repo, base, title, patch.get("summary", ""), list(changed))
 
 
 def start_job(db: Session, kind: str, request: str = "", incident_id: str = "") -> RepairJob:
@@ -436,9 +509,93 @@ def checks(db: Session, job: RepairJob) -> dict:
     return {"state": "success", "sha": sha, "detail": "Tous les contrôles passent."}
 
 
+# ---------- suivi d'une tâche confiée à Claude Code ----------
+
+def _aware(d: datetime | None) -> datetime | None:
+    return d if d is None or d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _find_run(tok: str, repo: str, job: RepairJob) -> dict | None:
+    runs = _ok(_gh("GET", f"/repos/{repo}/actions/workflows/{WORKFLOW}/runs", tok, params={"event": "workflow_dispatch", "per_page": 30}),
+               "suivi de Claude Code").get("workflow_runs", [])
+    return next((r for r in runs if r.get("display_title") == f"Atelier {job.id}"), None)
+
+
+def _failed_step(tok: str, repo: str, run_id: int) -> str:
+    try:
+        jobs = _ok(_gh("GET", f"/repos/{repo}/actions/runs/{run_id}/jobs", tok), "étapes").get("jobs", [])
+    except RepairError:
+        return ""
+    return next((s.get("name", "") for j in jobs for s in (j.get("steps") or []) if s.get("conclusion") == "failure"), "")
+
+
+def _run_note(tok: str, repo: str, run_id: int) -> str:
+    """Explication écrite par Claude Code (artefact « atelier », fichier summary.md). Vide si illisible : ce n'est qu'un plus."""
+    try:
+        arts = _ok(_gh("GET", f"/repos/{repo}/actions/runs/{run_id}/artifacts", tok), "résumé").get("artifacts", [])
+        art = next((a for a in arts if a.get("name") == "atelier" and not a.get("expired")), None)
+        if art is None:
+            return ""
+        r = _gh("GET", f"/repos/{repo}/actions/artifacts/{art['id']}/zip", tok, follow_redirects=True)
+        if r.status_code >= 300 or len(r.content) > 8_000_000:
+            return ""
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            info = z.getinfo("summary.md")
+            if info.file_size > 200_000:
+                return ""
+            return z.read(info).decode("utf-8", "replace").strip()[:3000]
+    except (RepairError, KeyError, ValueError, zipfile.BadZipFile):
+        return ""
+
+
+def _follow(db: Session, job: RepairJob) -> None:
+    """Tâche confiée à Claude Code : suit l'exécution sur GitHub. À la fin, ouvre la proposition (brouillon) ou explique l'échec."""
+    now = datetime.now(timezone.utc)
+    if now - (_aware(job.updated_at) or now - POLL_EVERY) < POLL_EVERY:
+        return
+    tok, repo, base = _ctx(db)
+    run = _find_run(tok, repo, job)
+    age = now - (_aware(job.created_at) or now)
+    job.updated_at = now
+    if run is None or run.get("status") != "completed":
+        if run is None and age > LOST_AFTER:
+            job.status, job.error = "failed", "Claude Code n'a pas démarré sur GitHub. Relance la demande."
+        elif age > MAX_RUN:
+            if run is not None:
+                _gh("POST", f"/repos/{repo}/actions/runs/{run.get('id')}/cancel", tok)
+            job.status, job.error = "failed", "Claude Code a dépassé 2 heures : tâche arrêtée."
+        db.commit()
+        return
+    url = run.get("html_url", "")
+    if run.get("conclusion") != "success":
+        step = _failed_step(tok, repo, run.get("id", 0))
+        note = _run_note(tok, repo, run.get("id", 0))
+        why = STEP_HINTS.get(step) or (f"Étape « {step} » en échec." if step else f"Exécution {run.get('conclusion') or 'interrompue'}.")
+        job.status, job.error = "failed", (why + (f"\n\nExplication de Claude : {note}" if note else "") + f"\n\nDétail : {url}")[:1000]
+        db.commit()
+        return
+    ref = _gh("GET", f"/repos/{repo}/git/ref/heads/{job.branch}", tok)
+    if ref.status_code == 404:
+        note = _run_note(tok, repo, run.get("id", 0))
+        job.status, job.error = "failed", ("Claude Code n'a rien modifié." + (f"\n\nSon explication : {note}" if note else "")
+                                           + f"\n\nDétail : {url}")[:1000]
+        db.commit()
+        return
+    sha = _ok(ref, "branche de la proposition")["object"]["sha"]
+    message = _ok(_gh("GET", f"/repos/{repo}/git/commits/{sha}", tok), "commit").get("message", "")
+    title, _, rest = message.partition("\n")
+    rest = rest.replace("Proposé par UniC AI (Atelier, Claude Code).", "").strip()
+    files = [f.get("filename", "") for f in _ok(_gh("GET", f"/repos/{repo}/compare/{base}...{job.branch}", tok), "comparaison").get("files", [])]
+    _open_pr(db, job, tok, repo, base, title.strip() or "Proposition UniC AI", rest or WORKING_NOTE, files)
+    db.commit()
+
+
 def sync(db: Session, job: RepairJob) -> None:
-    """La pull request a été fusionnée (ou fermée) sans passer par « Fusionner » (fusion automatique de GitHub) : on aligne la proposition,
-    sinon elle resterait « Prête » et la pastille de l'Atelier ne disparaîtrait jamais."""
+    """Tâche confiée à Claude Code : suivi de l'exécution. Proposition fusionnée (ou fermée) sans passer par « Fusionner » (fusion
+    automatique de GitHub) : on l'aligne, sinon elle resterait « Prête » et la pastille de l'Atelier ne disparaîtrait jamais."""
+    if job.status == "working" and job.branch:
+        _follow(db, job)
+        return
     if job.status != "proposed" or not job.pr_number:
         return
     state = checks(db, job)["state"]
@@ -453,11 +610,14 @@ def sync(db: Session, job: RepairJob) -> None:
 
 
 def sync_all(db: Session) -> None:
-    for job in db.query(RepairJob).filter(RepairJob.status == "proposed").all():
+    for job in db.query(RepairJob).filter(RepairJob.status.in_(("proposed", "working"))).all():
         try:
             sync(db, job)
         except RepairError:
             return   # GitHub injoignable ou non connecté : l'état reste tel quel
+        except (KeyError, TypeError, ValueError):   # réponse GitHub inattendue pour UNE tâche : les autres restent suivies
+            logger.warning("Atelier : suivi impossible pour %s", job.id[:8])
+            db.rollback()
 
 
 # ---------- publication : déploiement Render et APK ----------
@@ -560,6 +720,15 @@ def merge(db: Session, job: RepairJob) -> dict:
 
 
 def close(db: Session, job: RepairJob) -> None:
+    if job.status == "working" and job.branch:   # Claude Code travaille encore : on l'arrête, rien ne sera proposé
+        try:
+            tok, repo, _ = _ctx(db)
+            run = _find_run(tok, repo, job)
+            if run is not None and run.get("status") != "completed":
+                _gh("POST", f"/repos/{repo}/actions/runs/{run.get('id')}/cancel", tok)
+            _gh("DELETE", f"/repos/{repo}/git/refs/heads/{job.branch}", tok)
+        except RepairError:
+            pass
     if job.status == "proposed" and job.pr_number:
         tok, repo, _ = _ctx(db)
         _gh("PATCH", f"/repos/{repo}/pulls/{job.pr_number}", tok, json={"state": "closed"})
