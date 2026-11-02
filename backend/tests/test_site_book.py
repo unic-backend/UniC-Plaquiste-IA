@@ -86,9 +86,15 @@ def test_book_contains_only_the_companys_own_real_data():
 
 def test_book_images_are_all_known_site_files():
     known = {"logo-unic-512", "poster-03", "galerie-19", "service-10", "ref-stade-03", "ref-dakar-arena", "ref-uam", "ref-uam-04",
-             "realis-01-plafond", "realis-02-cloisons", "realis-05-deco-murale", "realis-07-habillage-mural", "hero-salon-arches"}
+             "realis-01-plafond", "realis-02-cloisons", "realis-05-deco-murale", "realis-07-habillage-mural", "hero-salon-arches",
+             "ref-ced-01", "ref-ced-02", "ref-ced-03", "ref-ced-04", "ref-ced-05"}   # photos du centre équestre (dépôt du site, PR #6)
     used = set(re.findall(r'/images/([a-z0-9-]+)\.webp', website.book_html()))
     assert used <= known, used - known
+
+
+def test_book_shows_the_five_equestrian_centre_photos_instead_of_a_coming_soon_card():
+    h = website.book_html()
+    assert all(f"/images/ref-ced-0{n}.webp" in h for n in range(1, 6)) and "frame soon" not in h and "À venir" not in h
 
 
 def test_book_preview_points_photos_to_the_live_site(client):
