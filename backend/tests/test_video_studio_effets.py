@@ -95,3 +95,17 @@ def test_scenes_3d_vue_eclatee_et_salon():
     assert room["lines"] == ["Et si…", "…ton plafond s'allumait ?"] and room["seconds"] == vs.SECONDS["room3d"][1]
     out = _engine().clean(sp)["scenes"]                                                    # le moteur accepte ce que le Studio écrit
     assert [s["type"] for s in out] == ["layers3d", "room3d"] and out[0]["layers"][0] == "Bandes + enduit"
+
+
+def test_courbe_et_code_pour_tous_les_domaines():
+    sp = vs.build_spec("vertical", [
+        {"type": "chart", "values": [100, 104, "x", 98, 121], "suffix": "$", "label": "cours (exemple)"},   # une valeur non chiffrée est écartée
+        {"type": "chart", "values": [7]},                                                                  # un seul point n'est pas une courbe
+        {"type": "code", "label": "moyenne.py", "code": ["def moyenne(notes):", "\treturn sum(notes) / len(notes)", "", "if a < b:", "", ""]},
+        {"type": "code", "code": ["", "  "]}], NAMES)
+    ch, co = sp["scenes"]
+    assert ch["values"] == [100, 104, 98, 121] and ch["suffix"] == "$" and ch["label"] == "cours (exemple)"
+    assert co["lines"] == ["def moyenne(notes):", "    return sum(notes) / len(notes)", "", "if a < b:"]   # indentation et « < » gardés, vides du bout retirés
+    assert co["seconds"] >= vs._readable(co) or co["seconds"] == vs.SECONDS["code"][1]                       # le temps de tout taper
+    out = _engine().clean(sp)["scenes"]
+    assert [s["type"] for s in out] == ["chart", "code"] and out[1]["lines"][1].startswith("    return") and out[0]["label"] == "COURS (EXEMPLE)"

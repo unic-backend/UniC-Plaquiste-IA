@@ -48,7 +48,7 @@ function layers(sc, root, u) {
     const lab = div("", txt, ov, `position:absolute;left:${colX}px;width:${colW}px;font:700 ${15 * u}px/1.08 "Barlow Condensed",sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--fg);transform:translateY(-50%)`);
     return { line, dot, lab };
   });
-  const head = sc.heading ? div("", sc.heading, ov, `position:absolute;left:${16 * u}px;right:${16 * u}px;top:${H * .07}px;text-align:center;font:400 ${30 * u}px/1.05 Anton,Impact,sans-serif;color:var(--fg);text-transform:uppercase`) : null;
+  const head = sc.heading ? div("", sc.heading, ov, `position:absolute;left:${16 * u}px;right:${16 * u}px;top:${H * .07}px;text-align:center;font:400 ${30 * u}px/1.05 Anton,Impact,sans-serif;color:var(--fg);text-transform:uppercase;text-wrap:balance`) : null;
   const p = new THREE.Vector3();
   return {
     draw(t, dur) {

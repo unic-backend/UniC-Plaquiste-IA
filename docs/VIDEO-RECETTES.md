@@ -42,6 +42,21 @@ Vérifier avant de rendre : `hyperframes lint`, puis `hyperframes snapshot --at 
 | Vidéos de référence | yt-dlp (Unlicense) | `--js-runtimes node` ; une vidéo de tiers sert à étudier, jamais à republier |
 | Stabiliser, ralentir, niveau sonore | FFmpeg (déjà là) | filtres `vidstabdetect/vidstabtransform`, `minterpolate`, `loudnorm` |
 
+## Maîtrise universelle (règle du patron : tous les domaines, pas seulement le placo)
+Chaque style se choisit d'après ce qu'il faut MONTRER, jamais d'après le métier. Même outil, autre domaine :
+
+| Domaine | Montrer | Outil (Studio de l'appli / atelier) |
+|---|---|---|
+| Trading, commerce, ventes | une évolution, un écart | `chart` (courbe + %), `counter`, `stats` |
+| Agriculture | ce dont un sol ou une plante est fait ; une saison | `layers3d` (horizons du sol), `bars` (semis → récolte), `chart` (rendement) |
+| Élevage, pêche | un effectif ; un cycle de vie ; une zone | `dots` (un point par bête), `bars` (œuf → adulte), `route` (sortie en mer) |
+| Informatique, technologie | du code, une architecture | `code` (éditeur qui se tape), `layers3d` (couches d'une application), `flow` |
+| Logistique, export | un trajet, des étapes | `route`, `flow`, `counter` (délais) |
+| Sport | une équipe, un score, une progression | `dots` (joueurs), `chart` (buts, temps), `stats` |
+| Intérieur, déco, BTP | un ouvrage, une ambiance | `layers3d`, `room3d`, modèles `cloison` et `plafond` |
+
+Vérité partout : un chiffre vient de la demande ou d'une source sûre ; s'il illustre seulement, le mot « exemple » est écrit à l'écran.
+
 ## Règles de qualité retenues
 - **Vrai** : jamais d'avis, de chiffre, de chantier ou de garantie inventés ; un exemple est marqué « exemple ».
 - **Compréhensible sans le son** : à la fin, on sait ce que fait UniC et quoi faire (devis, WhatsApp).
