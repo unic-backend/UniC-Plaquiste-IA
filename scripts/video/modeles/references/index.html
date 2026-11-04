@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #02083a; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: linear-gradient(180deg, #061566 0%, #02083a 100%); font-family: InterL, sans-serif; color: #fff; }
+      .ref { position: absolute; inset: 0; opacity: 0; }
+      .ph { position: absolute; left: 0; top: 0; width: 1080px; height: 1180px; overflow: hidden; z-index: 0; }
+      .ph img { width: 100%; height: 100%; object-fit: cover; transform-origin: 50% 60%; }
+      .ph::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(2,8,58,0) 55%, rgba(2,8,58,.95) 100%); }
+      .wipe { position: absolute; inset: 0; background: #ffc400; transform-origin: right center; z-index: 2; }
+      .txt { position: absolute; left: 80px; right: 80px; top: 1090px; }
+      .pill { display: inline-block; padding: 10px 22px; border-radius: 999px; background: #ffc400; color: #02083a; font: 700 28px InterL; letter-spacing: .16em; text-transform: uppercase; }
+      .mask { overflow: hidden; padding: 18px 0 6px; margin-top: -18px; }   /* place pour les accents (É) */
+      .name { display: block; margin-top: 26px; font: 400 116px/1 Anton; letter-spacing: .01em; text-transform: uppercase; }
+      .place { display: block; margin-top: 22px; font: 500 38px InterL; color: rgba(255,255,255,.8); }
+      .idx { position: absolute; right: 80px; top: 1100px; font: 400 44px Anton; color: rgba(255,255,255,.55); letter-spacing: .05em; }
+      .idx b { color: #ffc400; font-weight: 400; }
+      #intro { position: absolute; left: 0; right: 0; top: 720px; text-align: center; }
+      #intro .k { font: 700 32px InterL; letter-spacing: .3em; color: #ffc400; text-transform: uppercase; }
+      #intro .t { margin-top: 24px; font: 400 150px/0.95 Anton; text-transform: uppercase; }
+      #intro .line { width: 0; height: 8px; margin: 34px auto 0; background: #ffc400; border-radius: 4px; }
+      #outro { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; }
+      #outro .logo { width: 300px; height: 300px; border-radius: 50%; background: #071a7d url(assets/logo.webp) center/86% no-repeat; box-shadow: 0 0 0 10px rgba(255,196,0,.9); }
+      #outro .b { margin-top: 60px; font: 400 104px/1 Anton; letter-spacing: .04em; }
+      #outro .b span { color: #ffc400; }
+      #outro .c { margin-top: 26px; font: 700 40px InterL; color: rgba(255,255,255,.88); }
+      #outro .p { margin-top: 16px; font: 400 64px Anton; color: #ffc400; letter-spacing: .04em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="16" data-width="1080" data-height="1920">
+      <div id="intro"><div class="k">Ils nous font confiance</div><div class="t"><div class="mask"><span style="display:block" id="i1">Nos grandes</span></div><div class="mask"><span style="display:block;color:#ffc400" id="i2">références</span></div></div><div class="line" id="il"></div></div>
+      <div id="refs"></div>
+      <div id="outro"><div class="logo"></div><div class="b">UNIC <span>PLAQUISTE</span></div><div class="c">Devis gratuit sous 48 h</div><div class="p">+221 77 708 50 92</div></div>
+    </div>
+    <script>
+      // Les 4 grands projets du site (photos des chantiers UniC), tous à Diamniadio.
+      const REFS = [
+        ["ref-stade-03", "Stade<br>Abdoulaye Wade", "Diamniadio · Grand projet"],
+        ["ref-arena-02", "Dakar<br>Arena", "Diamniadio · Grand projet"],
+        ["ref-uam-04", "Université<br>Amadou Mahtar Mbow", "Diamniadio · Grand projet"],
+        ["ref-ced-02", "Centre équestre<br>de Diamniadio", "Diamniadio · Grand projet"],
+      ];
+      const box = document.getElementById("refs");
+      REFS.forEach(([img, name, place], i) => box.insertAdjacentHTML("beforeend",
+        `<div class="ref" id="r${i}"><div class="ph"><img src="assets/${img}.webp" alt=""><div class="wipe"></div></div>
+         <div class="txt"><span class="pill">Grand projet</span><div class="mask"><span class="name">${name}</span></div><div class="mask"><span class="place">${place}</span></div></div>
+         <div class="idx"><b>0${i + 1}</b> / 04</div></div>`));
+      const E = "power3.out", tl = gsap.timeline({ paused: true });
+      tl.from("#i1", { yPercent: 110, duration: 0.8, ease: E }, 0.2).from("#i2", { yPercent: 110, duration: 0.8, ease: E }, 0.35)
+        .to("#il", { width: 420, duration: 0.8, ease: E }, 0.6).from("#intro .k", { opacity: 0, y: 20, duration: 0.6, ease: E }, 0.1)
+        .to("#intro", { opacity: 0, y: -80, duration: 0.5, ease: "power2.in" }, 1.7);
+      REFS.forEach((_, i) => {
+        const t0 = 2.0 + i * 2.9, r = `#r${i}`;
+        tl.set(r, { opacity: 1 }, t0)
+          .fromTo(`${r} .wipe`, { scaleX: 1 }, { scaleX: 0, duration: 0.9, ease: "power4.inOut" }, t0)
+          .fromTo(`${r} img`, { scale: 1.18 }, { scale: 1.04, duration: 3.6, ease: "power2.out" }, t0)
+          .from(`${r} .pill`, { opacity: 0, x: -30, duration: 0.5, ease: E }, t0 + 0.35)
+          .from(`${r} .name`, { yPercent: 105, duration: 0.8, ease: E }, t0 + 0.45)
+          .from(`${r} .place`, { yPercent: 110, duration: 0.7, ease: E }, t0 + 0.6)
+          .from(`${r} .idx`, { opacity: 0, duration: 0.5 }, t0 + 0.6);
+        if (i < REFS.length - 1) tl.to(r, { opacity: 0, duration: 0.35, ease: "power1.in" }, t0 + 2.75);
+        else tl.to(r, { opacity: 0, y: -60, duration: 0.5, ease: "power2.in" }, t0 + 2.75);
+      });
+      tl.to("#outro", { opacity: 1, duration: 0.6, ease: E }, 13.9)
+        .from("#outro .logo", { scale: 0.6, duration: 0.8, ease: "back.out(1.7)" }, 13.9)
+        .from("#outro .b, #outro .c, #outro .p", { y: 40, opacity: 0, duration: 0.6, stagger: 0.12, ease: E }, 14.2)
+        .to({}, { duration: 0.01 }, 15.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

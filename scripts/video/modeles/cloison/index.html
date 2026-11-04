@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #02083a; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden;
+        background: radial-gradient(120% 70% at 50% 42%, #0b2a9a 0%, #061566 45%, #02083a 100%); font-family: InterL, sans-serif; }
+      #gl { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+      #lines { position: absolute; inset: 0; width: 1080px; height: 1920px; pointer-events: none; }
+      .head { position: absolute; left: 0; right: 0; top: 120px; text-align: center; }
+      .kicker { display: inline-block; font: 700 30px InterL; letter-spacing: .28em; color: #ffc400; text-transform: uppercase;
+        padding: 12px 26px; border: 2px solid rgba(255,196,0,.55); border-radius: 999px; }
+      .title { margin-top: 30px; font: 400 104px/1 Anton; color: #fff; letter-spacing: .01em; text-transform: uppercase; }
+      .title b { color: #ffc400; font-weight: 400; }
+      .label { position: absolute; width: 344px; padding: 16px 20px; border-radius: 18px; background: rgba(4, 12, 70, .82);
+        border: 1.5px solid rgba(255,255,255,.16); color: #fff; }
+      .label .n { font: 400 36px/1 Anton; color: #ffc400; letter-spacing: .02em; }
+      .label .t { margin-top: 6px; font: 700 29px/1.15 InterL; }
+      .label .s { margin-top: 5px; font: 500 23px/1.25 InterL; color: rgba(255,255,255,.72); }
+      .foot { position: absolute; left: 0; right: 0; bottom: 150px; text-align: center; }
+      .brand { font: 400 84px/1 Anton; color: #fff; letter-spacing: .04em; }
+      .brand b { color: #ffc400; font-weight: 400; }
+      .cta { margin-top: 18px; font: 700 34px InterL; color: rgba(255,255,255,.85); letter-spacing: .06em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="9" data-width="1080" data-height="1920">
+      <canvas id="gl" width="1080" height="1920"></canvas>
+      <svg id="lines" viewBox="0 0 1080 1920"></svg>
+      <div class="head" id="head"><span class="kicker">Vue éclatée</span><h1 class="title">Dans une <b>cloison</b><br />placo 72/48</h1></div>
+      <div class="foot" id="foot"><div class="brand">UNIC <b>PLAQUISTE</b></div><div class="cta">Devis gratuit · Dakar</div></div>
+    </div>
+    <script type="module">
+      import * as THREE from "./lib/three.module.js";
+
+      // ---- temps : tout dérive de t (rendu image par image, dans le désordre possible) ----
+      const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+      const seg = (t, a, b) => clamp((t - a) / (b - a));
+      const io = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+      const out = (x) => 1 - Math.pow(1 - x, 4);
+
+      // ---- scène ----
+      const W = 1080, H = 1920;
+      const canvas = document.getElementById("gl");
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(W, H, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 50);
+
+      scene.add(new THREE.HemisphereLight(0xdfe7ff, 0x18204a, 0.9));
+      const key = new THREE.DirectionalLight(0xfff0dc, 2.6); key.position.set(3, 5, 4); scene.add(key);
+      const rim = new THREE.DirectionalLight(0x9db8ff, 1.4); rim.position.set(-4, 3, -3); scene.add(rim);
+
+      const metal = new THREE.MeshStandardMaterial({ color: 0xdfe5ee, metalness: 0.6, roughness: 0.38 });
+      const wool = new THREE.MeshStandardMaterial({ color: 0xe8c45a, roughness: 1 });
+      const board = new THREE.MeshStandardMaterial({ color: 0xefede6, roughness: 0.92 });
+      const tape = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, emissive: 0x222222 });
+      const box = (w, h, d, m) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+
+      // Cloison 72/48 : ossature 48 mm, montants tous les 60 cm, laine 45 mm, une plaque BA13 (12,5 mm) de chaque côté.
+      const L = 1.2, HT = 2.0, S = 0.048, P = 0.0125;
+      const wall = new THREE.Group(); scene.add(wall);
+      const railLow = new THREE.Group(), railHigh = new THREE.Group();
+      for (const [g, y] of [[railLow, 0], [railHigh, HT]]) {
+        g.add(box(L, 0.006, S, metal));                                    // âme du rail U
+        const f1 = box(L, 0.035, 0.004, metal), f2 = f1.clone();          // ailes
+        f1.position.set(0, y === 0 ? 0.0175 : -0.0175, S / 2); f2.position.set(0, y === 0 ? 0.0175 : -0.0175, -S / 2);
+        g.add(f1, f2); g.position.y = y; wall.add(g);
+      }
+      const studs = [-0.6, 0, 0.6].map((x) => { const s = box(0.036, HT - 0.012, S, metal); s.position.set(x, HT / 2, 0); wall.add(s); return s; });
+      const woolA = box(0.56, HT - 0.06, 0.045, wool); woolA.position.set(-0.3, HT / 2, 0);
+      const woolB = woolA.clone(); woolB.position.x = 0.3; wall.add(woolA, woolB);
+      const front = box(L, HT, P, board); front.position.set(0, HT / 2, S / 2 + P / 2);
+      const back = box(L, HT, P, board); back.position.set(0, HT / 2, -S / 2 - P / 2); wall.add(front, back);
+      const joint = box(0.06, HT, 0.002, tape); joint.position.set(0.6, HT / 2, S / 2 + P + 0.001); wall.add(joint);
+
+      const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.95, 48), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28 }));
+      shadow.rotation.x = -Math.PI / 2; shadow.scale.set(1, 0.45, 1); shadow.position.y = -0.04; scene.add(shadow);
+
+      // ---- légendes (HTML) reliées aux pièces par un trait ----
+      const root = document.getElementById("root"), svg = document.getElementById("lines");
+      const parts = [
+        { n: "01", t: "Rail 48 mm", s: "Fixé au sol et au plafond", obj: railLow, at: [0.5, 0.02, 0.02], side: "R", y: 1330, from: 2.4 },
+        { n: "02", t: "Montants 48 mm", s: "Un tous les 60 cm", obj: studs[2], at: [0, 0.3, 0.025], side: "R", y: 730, from: 3.0 },
+        { n: "03", t: "Laine minérale", s: "45 mm : son et chaleur", obj: woolB, at: [0.05, -0.35, 0.023], side: "R", y: 1130, from: 3.6 },
+        { n: "04", t: "Plaque BA13", s: "12,5 mm de chaque côté", obj: front, at: [0.2, 0.75, 0.007], side: "R", y: 530, from: 4.2 },
+        { n: "05", t: "Bandes + enduit", s: "Joints invisibles", obj: joint, at: [0, 0.1, 0.0011], side: "R", y: 930, from: 4.8 },
+      ];
+      for (const p of parts) {
+        p.el = document.createElement("div"); p.el.className = "label";
+        p.el.innerHTML = `<div class="n">${p.n}</div><div class="t">${p.t}</div><div class="s">${p.s}</div>`;
+        p.el.style.left = (p.side === "L" ? 40 : W - 40 - 344) + "px"; p.el.style.top = p.y + "px";
+        root.appendChild(p.el);
+        p.line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        p.line.setAttribute("stroke", "#ffc400"); p.line.setAttribute("stroke-width", "3");
+        p.dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        p.dot.setAttribute("r", "9"); p.dot.setAttribute("fill", "#ffc400");
+        svg.append(p.line, p.dot);
+      }
+      const head = document.getElementById("head"), foot = document.getElementById("foot");
+      const v = new THREE.Vector3();
+
+      function renderAt(t) {
+        // 0 → 1,6 s : la cloison montée arrive ; 1,6 → 4,2 s : elle s'ouvre ; 7,4 → 9 s : elle se referme pour la signature.
+        const build = out(seg(t, 0, 1.6));
+        const ex = io(seg(t, 1.6, 4.2)) * (1 - io(seg(t, 7.2, 8.6)));
+        wall.position.y = -0.35 * (1 - build);
+        wall.rotation.y = -0.35 * (1 - build);
+        front.position.z = S / 2 + P / 2 + 0.62 * ex;
+        joint.position.z = S / 2 + P + 0.001 + 0.62 * ex + 0.16 * ex;
+        back.position.z = -S / 2 - P / 2 - 0.48 * ex;
+        woolA.position.z = woolB.position.z = 0.26 * ex;
+        railLow.position.y = -0.2 * ex; railHigh.position.y = HT + 0.2 * ex;
+
+        const az = 0.78 + 0.3 * io(seg(t, 1.2, 6.5)), el = 0.26, dist = 9.4 - 0.4 * io(seg(t, 1.2, 6.5));
+        camera.position.set(Math.sin(az) * Math.cos(el) * dist, 1.0 + Math.sin(el) * dist, Math.cos(az) * Math.cos(el) * dist);
+        camera.lookAt(0, 1.0, 0);
+        // cloison à gauche et sous le titre ; la colonne de droite reste aux légendes
+        camera.setViewOffset(W, H, 170 * io(seg(t, 1.2, 3.0)) * (1 - io(seg(t, 7.0, 8.2))), -110, W, H);
+        camera.updateMatrixWorld();
+        wall.updateMatrixWorld(true);
+        renderer.render(scene, camera);
+
+        head.style.opacity = out(seg(t, 0.2, 1.0)) * (1 - seg(t, 7.0, 7.6));
+        head.style.transform = `translateY(${-40 * (1 - out(seg(t, 0.2, 1.0)))}px)`;
+        foot.style.opacity = out(seg(t, 7.5, 8.3));
+        foot.style.transform = `translateY(${40 * (1 - out(seg(t, 7.5, 8.3)))}px)`;
+
+        for (const p of parts) {
+          const a = out(seg(t, p.from, p.from + 0.6)) * (1 - seg(t, 7.0, 7.5));
+          v.set(...p.at).applyMatrix4(p.obj.matrixWorld).project(camera);
+          const x = (v.x + 1) / 2 * W, y = (1 - v.y) / 2 * H;
+          const lx = p.side === "L" ? 40 + 344 : W - 40 - 344, ly = p.y + 42;
+          const k = out(seg(t, p.from + 0.15, p.from + 0.75));   // le trait se dessine du cartouche vers la pièce
+          p.el.style.opacity = a;
+          p.el.style.transform = `translateX(${(p.side === "L" ? -30 : 30) * (1 - a)}px)`;
+          p.line.setAttribute("x1", lx); p.line.setAttribute("y1", ly);
+          p.line.setAttribute("x2", lx + (x - lx) * k); p.line.setAttribute("y2", ly + (y - ly) * k);
+          p.line.setAttribute("opacity", a); p.dot.setAttribute("cx", x); p.dot.setAttribute("cy", y);
+          p.dot.setAttribute("opacity", a * seg(t, p.from + 0.6, p.from + 0.8));
+        }
+      }
+
+      const tl = gsap.timeline({ paused: true });
+      tl.to({}, { duration: 9 });
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+      window.addEventListener("hf-seek", (e) => renderAt(e.detail.time));
+      renderAt(0);
+    </script>
+  </body>
+</html>
