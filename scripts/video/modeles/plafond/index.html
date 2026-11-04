@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #05060d; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #05060d; }
+      #gl { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+      .txt { position: absolute; left: 0; right: 0; text-align: center; color: #fff; }
+      #t1 { bottom: 380px; font: 400 128px/0.95 Anton; letter-spacing: .01em; text-shadow: 0 6px 40px rgba(0,0,0,.6); }
+      #t1 b { color: #ffc400; font-weight: 400; }
+      #t2 { bottom: 300px; font: 700 34px InterL; letter-spacing: .3em; color: rgba(255,255,255,.85); text-transform: uppercase; }
+      #t3 { bottom: 150px; font: 400 64px/1 Anton; letter-spacing: .05em; }
+      #t3 b { color: #ffc400; font-weight: 400; }
+      #vig { position: absolute; inset: 0; background: radial-gradient(120% 85% at 50% 35%, transparent 55%, rgba(0,0,0,.5) 100%), linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,0) 34%); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="9" data-width="1080" data-height="1920">
+      <canvas id="gl" width="1080" height="1920"></canvas>
+      <div id="vig"></div>
+      <div class="txt" id="t1">FAUX PLAFOND<br /><b>LUMINEUX</b></div>
+      <div class="txt" id="t2">LED indirecte · spots encastrés</div>
+      <div class="txt" id="t3">UNIC <b>PLAQUISTE</b></div>
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      import { RectAreaLightUniformsLib } from "./lib/RectAreaLightUniformsLib.js";
+      RectAreaLightUniformsLib.init();
+      const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+      const seg = (t, a, b) => clamp((t - a) / (b - a));
+      const io = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+      const out = (x) => 1 - Math.pow(1 - x, 3);
+
+      const W = 1080, H = 1920;
+      const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("gl"), antialias: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
+      const scene = new THREE.Scene(); scene.background = new THREE.Color(0x05060d);
+      const camera = new THREE.PerspectiveCamera(78, W / H, 0.05, 40);
+
+      // Pièce 5 × 5 m, hauteur 2,90 m. Caisson de faux plafond (bande de 0,6 m à 2,60 m) avec gorge lumineuse côté intérieur.
+      const RX = 2.5, RZ = 2.5, HY = 2.9, CY = 2.6, BAND = 0.6;
+      const mat = (c, r = 0.9, e = 0) => new THREE.MeshStandardMaterial({ color: c, roughness: r, emissive: e });
+      const plane = (w, h, m) => new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+      const wallM = mat(0xf1e6d2), floorM = mat(0x6e4f35, 0.75), ceilM = mat(0xf4f2ec), bandM = mat(0xf7f5f0);
+      const floor = plane(5, 5, floorM); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+      const ceil = plane(5, 5, ceilM); ceil.rotation.x = Math.PI / 2; ceil.position.y = HY; scene.add(ceil);
+      for (const [x, z, ry] of [[0, -RZ, 0], [-RX, 0, Math.PI / 2], [RX, 0, -Math.PI / 2], [0, RZ, Math.PI]]) {
+        const w = plane(5, HY, wallM); w.position.set(x, HY / 2, z); w.rotation.y = ry; scene.add(w);
+      }
+      // fenêtre de nuit au fond
+      const win = plane(1.6, 1.3, new THREE.MeshBasicMaterial({ color: 0x0b1a4a })); win.position.set(0.9, 1.55, -RZ + 0.01); scene.add(win);
+      const frameM = mat(0x2a2f3a, 0.6);
+      for (const [w, h, x, y] of [[1.7, 0.05, 0.9, 2.2], [1.7, 0.05, 0.9, 0.9], [0.05, 1.35, 0.05, 1.55], [0.05, 1.35, 1.75, 1.55], [0.04, 1.3, 0.9, 1.55]]) {
+        const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), frameM); f.position.set(x, y, -RZ + 0.03); scene.add(f);
+      }
+      // caisson : 4 bandes sous le plafond + retombée côté intérieur (cache la LED)
+      const thick = 0.12;
+      const bands = [[5, BAND, 0, -RZ + BAND / 2], [5, BAND, 0, RZ - BAND / 2], [BAND, 5 - 2 * BAND, -RX + BAND / 2, 0], [BAND, 5 - 2 * BAND, RX - BAND / 2, 0]];
+      for (const [w, d, x, z] of bands) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w, thick, d), bandM); b.position.set(x, CY, z); scene.add(b);
+      }
+      const inner = 5 - 2 * BAND, lip = 0.08;
+      const leds = [];
+      for (const [w, d, x, z] of [[inner, 0.02, 0, -inner / 2], [inner, 0.02, 0, inner / 2], [0.02, inner, -inner / 2, 0], [0.02, inner, inner / 2, 0]]) {
+        const r = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, lip, d + 0.02), bandM); r.position.set(x, CY + thick / 2 + lip / 2, z); scene.add(r);
+        const led = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w - 0.04, 0.02), 0.015, Math.max(d - 0.04, 0.02)), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+        led.position.set(x * 1.06, CY + thick / 2 + 0.01, z * 1.06); scene.add(led); leds.push(led);
+      }
+      // gorge lumineuse : un panneau de lumière par côté, tourné vers le plafond intérieur ; ils s'allument l'un après l'autre
+      const coves = [];
+      for (const [w, x, z, ry] of [[inner, 0, -inner / 2 + 0.06, 0], [inner, inner / 2 - 0.06, 0, Math.PI / 2], [inner, 0, inner / 2 - 0.06, 0], [inner, -inner / 2 + 0.06, 0, Math.PI / 2]]) {
+        const l = new THREE.RectAreaLight(0xffb45a, 0, w, 0.06);
+        l.position.set(x, CY + thick / 2 + 0.03, z); l.lookAt(x, HY, z); l.rotateZ(ry);   // longueur du panneau le long de son côté
+        scene.add(l); coves.push(l);
+      }
+      // spots encastrés dans la bande
+      const spots = [];
+      for (const [x, z] of [[-RX + BAND / 2, -1.0], [-RX + BAND / 2, 1.0], [RX - BAND / 2, -1.0], [RX - BAND / 2, 1.0]]) {
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(0.05, 24), new THREE.MeshBasicMaterial({ color: 0x1a1a1a }));
+        disc.rotation.x = Math.PI / 2; disc.position.set(x, CY - thick / 2 - 0.002, z); scene.add(disc);
+        const s = new THREE.SpotLight(0xfff0d8, 0, 5, 0.55, 0.6, 1.5); s.position.set(x, CY - thick / 2 - 0.01, z);
+        s.target.position.set(x, 0, z); scene.add(s, s.target); spots.push({ disc, s });
+      }
+      // mobilier simple : canapé, table basse, tapis
+      const sofaM = mat(0x2b3a55, 0.85), woodM = mat(0x9a7350, 0.6), rugM = mat(0xcbbca4, 1);
+      const add = (g, m, x, y, z) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); scene.add(o); return o; };
+      add(new THREE.BoxGeometry(2.2, 0.42, 0.9), sofaM, -0.2, 0.21, -1.6);
+      add(new THREE.BoxGeometry(2.2, 0.5, 0.22), sofaM, -0.2, 0.55, -1.98);
+      add(new THREE.BoxGeometry(0.22, 0.32, 0.9), sofaM, -1.21, 0.5, -1.6); add(new THREE.BoxGeometry(0.22, 0.32, 0.9), sofaM, 0.81, 0.5, -1.6);
+      add(new THREE.BoxGeometry(2.6, 0.01, 1.7), rugM, -0.1, 0.005, -0.6);
+      add(new THREE.BoxGeometry(1.0, 0.05, 0.55), woodM, -0.2, 0.4, -0.55);
+      for (const [x, z] of [[-0.62, -0.78], [0.22, -0.78], [-0.62, -0.32], [0.22, -0.32]]) add(new THREE.BoxGeometry(0.04, 0.38, 0.04), woodM, x, 0.19, z);
+      const amb = new THREE.HemisphereLight(0x3a4a80, 0x120c08, 0.35); scene.add(amb);
+      const night = new THREE.Color(0x3a4a80), warm = new THREE.Color(0xffd7a0), groundNight = new THREE.Color(0x120c08), groundWarm = new THREE.Color(0x9a7650);
+      const moon = new THREE.DirectionalLight(0x6f87d8, 0.7); moon.position.set(1, 2, -3); scene.add(moon);
+
+      const t1 = document.getElementById("t1"), t2 = document.getElementById("t2"), t3 = document.getElementById("t3");
+      function renderAt(t) {
+        // caméra : lent travelling avant, le regard monte vers le plafond
+        const d = io(seg(t, 0, 9));
+        camera.position.set(1.05 - 0.35 * d, 1.35 + 0.1 * d, 1.45 - 0.45 * d);
+        camera.lookAt(-1.7, 2.55 + 0.25 * d, -1.9);
+        // 1,0 → 3,4 s : la LED fait le tour ; 3,6 → 5,2 s : les spots s'allument un par un
+        coves.forEach((l, i) => { l.intensity = 14 * out(seg(t, 1.0 + i * 0.55, 1.9 + i * 0.55)); });
+        const ledOn = out(seg(t, 1.0, 3.4));
+        leds.forEach((m) => m.material.color.setRGB(1.0 * ledOn, 0.72 * ledOn, 0.35 * ledOn));
+        spots.forEach(({ disc, s }, i) => { const a = out(seg(t, 3.6 + i * 0.35, 3.9 + i * 0.35)); s.intensity = 14 * a; disc.material.color.setRGB(0.1 + 0.9 * a, 0.1 + 0.85 * a, 0.1 + 0.75 * a); });
+        amb.intensity = 0.45 + 0.75 * ledOn;   // la lumière rebondit dans la pièce
+        amb.color.copy(night).lerp(warm, ledOn);
+        amb.groundColor.copy(groundNight).lerp(groundWarm, ledOn);   // le sol renvoie la lumière vers le plafond
+        renderer.render(scene, camera);
+        const a1 = out(seg(t, 5.2, 6.0)), a3 = out(seg(t, 7.0, 7.8));
+        t1.style.opacity = a1; t1.style.transform = `translateY(${50 * (1 - a1)}px)`;
+        t2.style.opacity = out(seg(t, 5.6, 6.4));
+        t3.style.opacity = a3; t3.style.transform = `translateY(${30 * (1 - a3)}px)`;
+      }
+      const tl = gsap.timeline({ paused: true }); tl.to({}, { duration: 9 });
+      window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;
+      window.addEventListener("hf-seek", (e) => renderAt(e.detail.time));
+      renderAt(0);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; font-family: InterL, sans-serif; color: #0b1230;
+        background-color: #efe8dc;
+        background-image: radial-gradient(circle at 1px 1px, rgba(7,26,125,.10) 2px, transparent 2.5px);
+        background-size: 46px 46px; }
+      .card { position: absolute; left: 70px; top: 300px; width: 940px; padding: 64px 60px; border-radius: 44px; background: #fff;
+        box-shadow: 0 40px 90px -30px rgba(7,26,125,.35), 0 2px 0 rgba(7,26,125,.06); opacity: 0; }
+      .kick { font: 700 28px InterL; letter-spacing: .22em; color: #b07f00; text-transform: uppercase; }
+      .h { margin-top: 20px; font: 700 70px/1.06 InterL; letter-spacing: -.02em; color: #071a7d; }
+      .h .g { color: #d49a00; }
+      .num { display: inline-flex; width: 96px; height: 96px; border-radius: 28px; background: #071a7d; color: #ffc400; font: 400 60px/96px Anton; justify-content: center; }
+      .row { display: flex; align-items: center; gap: 28px; }
+      .bubble { margin-top: 48px; max-width: 700px; padding: 26px 32px; border-radius: 32px 32px 32px 8px; background: #e7f6ec; font: 500 38px/1.3 InterL; }
+      .bubble.me { margin-left: auto; border-radius: 32px 32px 8px 32px; background: #dcf8c6; }
+      .tag { display: inline-block; margin-top: 14px; padding: 8px 16px; border-radius: 999px; background: #f2f2f2; font: 700 22px InterL; color: #777; letter-spacing: .1em; }
+      .phone { margin-top: 44px; font: 400 92px/1 Anton; color: #0b1230; letter-spacing: .02em; white-space: nowrap; }
+      .caret { display: inline-block; width: 6px; height: 80px; background: #d49a00; vertical-align: -6px; margin-left: 6px; }
+      .ring { position: relative; width: 420px; height: 420px; margin: 50px auto 0; }
+      .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+      .ring .v { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .ring .v b { font: 400 150px/1 Anton; color: #071a7d; }
+      .ring .v span { font: 700 30px InterL; color: #666; letter-spacing: .14em; text-transform: uppercase; }
+      .stats { margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px; }
+      .stat { padding: 34px 10px; border-radius: 30px; background: #f5f3ee; text-align: center; }
+      .stat b { display: block; font: 400 86px/1 Anton; color: #071a7d; }
+      .stat span { display: block; margin-top: 12px; font: 700 24px/1.2 InterL; color: #555; }
+      .pin { width: 120px; height: 120px; border-radius: 60px 60px 60px 8px; transform: rotate(-45deg); background: #071a7d; margin: 56px auto 0; position: relative; }
+      .pin::after { content: ""; position: absolute; left: 38px; top: 38px; width: 44px; height: 44px; border-radius: 50%; background: #ffc400; }
+      .tape { margin: 48px auto 0; width: 760px; height: 92px; border-radius: 16px; background: #ffc400; position: relative; overflow: hidden; transform-origin: left center; }
+      .tape i { position: absolute; top: 0; width: 3px; height: 36px; background: #0b1230; }
+      .tape em { position: absolute; top: 46px; font: 700 24px InterL; font-style: normal; color: #0b1230; }
+      #cap { position: absolute; left: 0; right: 0; top: 1190px; text-align: center; }
+      #cap .p { display: inline-block; padding: 18px 34px; border-radius: 22px; background: #071a7d; font: 700 54px/1.1 InterL; color: #fff; box-shadow: 0 16px 40px -18px rgba(0,0,0,.5); }
+      #cap .w { opacity: .4; } #cap .w.on { opacity: 1; } #cap .w.cur { color: #ffc400; }
+      #ava { position: absolute; left: 50%; top: 1420px; width: 210px; height: 210px; margin-left: -105px; border-radius: 50%; background: #071a7d url(assets/logo.webp) center/86% no-repeat;
+        box-shadow: 0 0 0 8px #fff, 0 26px 60px -20px rgba(7,26,125,.6); }
+      #foot { position: absolute; left: 0; right: 0; bottom: 120px; text-align: center; font: 700 30px InterL; letter-spacing: .12em; color: #071a7d; opacity: .75; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="16" data-width="1080" data-height="1920">
+      <div class="card" id="c0"><div class="kick">Devis gratuit</div><div class="h">Votre devis<br />en <span class="g">3 étapes</span></div>
+        <div class="bubble me" id="b1">Bonjour, un faux plafond pour mon salon 📷</div><div class="tag" id="tg">Exemple de message</div></div>
+      <div class="card" id="c1"><div class="row"><span class="num">1</span><div class="kick">WhatsApp</div></div>
+        <div class="h">Envoyez photos<br />ou plans</div><div class="phone"><span id="ph"></span><span class="caret" id="ca"></span></div></div>
+      <div class="card" id="c2"><div class="row"><span class="num">2</span><div class="kick">À Dakar</div></div>
+        <div class="h">Visite<br />et métré</div><div class="pin" id="pin"></div>
+        <div class="tape" id="tape"></div></div>
+      <div class="card" id="c3"><div class="row"><span class="num">3</span><div class="kick">Sans engagement</div></div>
+        <div class="h">Devis gratuit<br />sous <span class="g">48 h</span></div>
+        <div class="ring"><svg viewBox="0 0 420 420"><circle cx="210" cy="210" r="180" stroke="#f0ece4" stroke-width="34" fill="none" />
+          <circle id="arc" cx="210" cy="210" r="180" stroke="#ffc400" stroke-width="34" fill="none" stroke-linecap="round" stroke-dasharray="1131" stroke-dashoffset="1131" /></svg>
+          <div class="v"><b id="hrs">0</b><span>heures max</span></div></div></div>
+      <div class="card" id="c4"><div class="kick">UniC Plaquiste · Dakar</div><div class="h">Plafonds, cloisons,<br />peinture, déco</div>
+        <div class="stats"><div class="stat"><b id="s1">0</b><span>ans<br />d'expérience</span></div><div class="stat"><b id="s2">0</b><span>chantiers<br />livrés</span></div><div class="stat"><b id="s3">0</b><span>clients<br />satisfaits</span></div></div></div>
+      <div id="cap"><span class="p" id="capp"></span></div>
+      <div id="ava"></div>
+      <div id="foot">unicplaquiste.com</div>
+    </div>
+    <script>
+      // graduations du mètre ruban : un trait tous les 5 cm, chiffre tous les 50 cm
+      const tape = document.getElementById("tape");
+      for (let i = 0; i <= 60; i++) tape.insertAdjacentHTML("beforeend", `<i style="left:${12 + i * 12}px;height:${i % 10 ? (i % 5 ? 20 : 30) : 40}px"></i>` + (i % 10 ? "" : `<em style="left:${4 + i * 12}px">${String(i / 20).replace(".", ",")}</em>`));
+      const tl = gsap.timeline({ paused: true });
+      const E = "power3.out";
+      const cards = ["#c0", "#c1", "#c2", "#c3", "#c4"], at = [0.2, 3.4, 6.6, 9.8, 13.0];
+      cards.forEach((c, i) => {
+        tl.fromTo(c, { opacity: 0, y: 70, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: E }, at[i]);
+        if (i < cards.length - 1) tl.to(c, { opacity: 0, y: -60, scale: 0.97, duration: 0.45, ease: "power2.in" }, at[i + 1] - 0.4);
+      });
+      tl.fromTo("#b1", { opacity: 0, y: 30, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "back.out(1.6)" }, 1.0);
+      tl.fromTo("#tg", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 1.4);
+      // numéro tapé lettre par lettre
+      const num = "+221 77 708 50 92", ph = document.getElementById("ph"), typed = { n: 0 };
+      tl.to(typed, { n: num.length, duration: 1.4, ease: "none", onUpdate: () => (ph.textContent = num.slice(0, Math.round(typed.n))) }, 4.2);
+      tl.fromTo("#ca", { opacity: 1 }, { opacity: 0, duration: 0.01, repeat: 9, yoyo: true, ease: "steps(1)" }, 4.0);
+      tl.fromTo("#pin", { y: -160, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6, ease: "bounce.out" }, 7.2);
+      tl.fromTo("#tape", { scaleX: 0 }, { scaleX: 1, duration: 1.2, ease: "power2.out" }, 7.7);
+      // compteur 0 → 48 h et anneau qui se remplit
+      const hrs = document.getElementById("hrs"), h = { v: 0 };
+      tl.to(h, { v: 48, duration: 1.6, ease: "power2.out", onUpdate: () => (hrs.textContent = Math.round(h.v)) }, 10.4);
+      tl.to("#arc", { attr: { "stroke-dashoffset": 0 }, duration: 1.6, ease: "power2.out" }, 10.4);
+      // chiffres vrais du site : 8 ans, 180+ chantiers, 98 % satisfaits
+      [["#s1", 8, ""], ["#s2", 180, "+"], ["#s3", 98, "%"]].forEach(([id, to, suf], i) => {
+        const el = document.querySelector(id), o = { v: 0 };
+        tl.to(o, { v: to, duration: 1.3, ease: "power2.out", onUpdate: () => (el.textContent = Math.round(o.v) + suf) }, 13.6 + i * 0.2);
+      });
+      tl.fromTo("#ava", { scale: 0.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(1.8)" }, 0.4);
+      // pastille de sous-titres : un groupe de mots par étape, le mot « dit » s'allume (rythme de lecture)
+      const lines = [[0.6, "Votre devis en 3 étapes"], [3.8, "Envoyez photos ou plans"], [7.0, "On vient mesurer chez vous"], [10.2, "Devis gratuit sous 48 heures"], [13.4, "8 ans, plus de 180 chantiers"]];
+      const capp = document.getElementById("capp");
+      lines.forEach(([t0, txt], k) => {
+        const words = txt.split(" ");
+        tl.call(() => { capp.innerHTML = words.map((w) => `<span class="w">${w}</span>`).join(" "); }, null, t0);
+        words.forEach((_, j) => tl.call(() => { const ws = capp.querySelectorAll(".w"); ws.forEach((el, q) => { el.classList.toggle("on", q <= j); el.classList.toggle("cur", q === j); }); }, null, t0 + 0.12 + j * 0.34));
+        tl.fromTo("#cap", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: E }, t0);
+      });
+      tl.to({}, { duration: 0.01 }, 15.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
