@@ -603,7 +603,9 @@ def _render(
             st = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                   ("TOPPADDING", (0, 0), (-1, -1), P(3.6)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3.6)),
                   ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                  ("LINEBELOW", (0, 1), (-1, -1), 0.35, LINE)]
+                  ("LINEBELOW", (0, 1), (-1, -1), 0.35, LINE), ("LINEAFTER", (0, 1), (-2, -1), 0.35, LINE),   # colonnes séparées : rien ne se mélange
+                  ("LINEAFTER", (0, 0), (-2, 0), 0.35, colors.HexColor("#3D5DB8")),
+                  ("BOX", (0, 0), (-1, -1), 0.8, BLUE), ("ROUNDEDCORNERS", [6, 6, 6, 6])]                    # cadre arrondi
             for r in range(1, len(data) - (1 if has_sub else 0)):
                 if r % 2 == 0:
                     st.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
@@ -626,6 +628,7 @@ def _render(
         data = [[Paragraph(h, headw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
         t = Table(data, colWidths=[w * mm * 180 / sum(col_widths) for w in col_widths], repeatRows=1)
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), BLUE), ("LINEBELOW", (0, 1), (-1, -1), 0.35, LINE),
+                               ("LINEAFTER", (0, 0), (-2, -1), 0.35, LINE), ("BOX", (0, 0), (-1, -1), 0.8, BLUE), ("ROUNDEDCORNERS", [6, 6, 6, 6]),
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), P(3.6)),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), P(3.6)), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA])]))
         story += [t, Spacer(1, P(8))]
@@ -643,7 +646,8 @@ def _render(
         rst = [("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7), ("LINEBELOW", (0, 0), (-1, -2), 0.35, LINE)]
         if final:
-            rst += [("BACKGROUND", (0, -1), (-1, -1), YELLOW), ("TOPPADDING", (0, -1), (-1, -1), P(6)), ("BOTTOMPADDING", (0, -1), (-1, -1), P(6))]
+            rst += [("BACKGROUND", (0, -1), (-1, -1), YELLOW), ("TOPPADDING", (0, -1), (-1, -1), P(6)), ("BOTTOMPADDING", (0, -1), (-1, -1), P(6)),
+                    ("ROUNDEDCORNERS", [6, 6, 6, 6])]
         rt.setStyle(TableStyle(rst))
         words = ""
         amount = _amount(final[1]) if final else 0
