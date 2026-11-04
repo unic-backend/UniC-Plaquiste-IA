@@ -3373,7 +3373,8 @@ def test_quote_pdf_keeps_labour_out_of_the_materials_table(tmp_path):
     i_mat, i_deliv, i_sub_mat = text.index("Tableau des matériaux"), text.index("Livraison : à la charge du client"), text.index("Sous-total matériaux HT")
     i_lab_bar, i_lab_row, i_sub_lab = text.index("Main-d'œuvre (pose)"), text.index("Main-d'œuvre — pose complète"), text.index("Sous-total main-d'œuvre HT")
     assert i_mat < i_deliv < i_sub_mat < i_lab_bar < i_lab_row < i_sub_lab       # livraison dans les matériaux ; main-d'œuvre dans son tableau, dessous
-    assert "Surface (m²)" in text and "Prix unitaire (par m²)" in text and "134 m²" in text and "4 000 FCFA" in text and "536 000 FCFA" in text
+    assert "Surface (m²)" in text and "Prix unitaire (par m²)" in text and "134 m²" in text and "536 000 FCFA" in text
+    assert "P.U. (FCFA)" in text and "Montant (FCFA)" in text and "4 000" in text   # devise une fois, dans l'en-tête des colonnes
     assert "514 500 FCFA" in text and "1 050 500 FCFA" in text                    # sous-total matériaux, total général
     assert text.count("Main-d'œuvre — pose complète") == 1
 
@@ -3419,9 +3420,9 @@ def test_ai_edits_a_received_pdf_and_verifies_it(client, tmp_path):
     fid = _upload(client, "devis_externe.pdf", original, "application/pdf")
     s = _session_for(fid)
     info = s("inspect_file", {})
-    assert info["texte_modifiable"] and any("4 000 FCFA" in b["text"] for b in info["blocs"])
+    assert info["texte_modifiable"] and any("4 000" in b["text"] for b in info["blocs"])
     res = s("edit_file", {"edits": [
-        {"op": "replace", "find": "4 000 FCFA", "replace": "4 500 FCFA"},
+        {"op": "replace", "find": "4 000", "replace": "4 500"},
         {"op": "replace", "find": "536 000 FCFA", "replace": "603 000 FCFA"},
         {"op": "replace", "find": "Faux plafond", "replace": "Faux plafond hydrofuge — œuvre"},
         {"op": "add_text", "text": "Prix de pose revu le 06/10/2026.", "page": 1},

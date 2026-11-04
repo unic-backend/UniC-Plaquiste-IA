@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -108,6 +108,9 @@ BLUE = colors.HexColor("#1A3FA0")
 YELLOW = colors.HexColor("#F2C200")
 GRID = colors.HexColor("#CCCCCC")
 ZEBRA = colors.HexColor("#F4F6FB")
+TINT = colors.HexColor("#F3F5FA")          # fonds des encadrés (client, objet, références)
+LINE = colors.HexColor("#DDE2EC")          # filets fins entre les lignes du tableau
+YELLOW_DARK = colors.HexColor("#B98C00")   # or lisible sur blanc (accroche)
 STATUS_FR = {"draft": "Brouillon", "approved": "Approuvé", "sent": "Envoyé", "paid": "Payé", "cancelled": "Annulé"}
 MENTION_PU = "Les prix indiqués dans la colonne « Prix Unitaire » sont des prix à l'unité, et non des montants totaux. Le montant total de chaque ligne figure dans la colonne « Prix Total »."
 GENERIC_UNITS = {"", "u", "unité", "unite"}
@@ -273,14 +276,15 @@ def _footer(company_name: str, doc_label: str, number: str):
 
 
 def _bar(text: str, width_mm: float = 180) -> Table:
-    t = Table([[Paragraph(text, _st("bar", fontSize=11, textColor=colors.white))]], colWidths=[width_mm * mm])
-    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), BLUE), ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                           ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    """Titre de section : texte bleu, filet or dessous (plus de bandeau plein : lecture plus claire)."""
+    t = Table([[Paragraph(text, _st("bar", fontSize=10.5, textColor=BLUE, leading=13))]], colWidths=[width_mm * mm])
+    t.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.2, YELLOW), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                           ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]))
     return t
 
 
 def _fit_title(text: str, max_mm: float = 46) -> int:
-    for size in range(20, 10, -1):
+    for size in range(24, 10, -1):
         if stringWidth(text, "Helvetica-Bold", size) <= max_mm * mm:
             return size
     return 11
@@ -313,30 +317,136 @@ def _amount(cell: str) -> float:
         return 0.0
 
 
-def _sum_lines(lines: list[list[str]]) -> str:
+def _sum_lines(lines: list[list[str]], currency: str = "") -> str:
     total = sum(_amount(l[-1]) for l in lines)
-    cur = " FCFA" if any("FCFA" in _strip(l[-1]) for l in lines) else ""
-    return f"{round(total):,}".replace(",", " ") + cur
+    return f"{round(total):,}".replace(",", " ") + (f" {currency}" if currency else "")
 
 
-def _labour_table(heads: list[str], lines: list[list[str]]) -> tuple[list[str], list[list[str]]]:
-    """Tableau de la main-d'œuvre : Désignation | Surface (m²) | Prix unitaire (par m²) | Prix Total."""
-    qi = heads.index("Quantité")
-    pi = heads.index("Prix Unitaire") if "Prix Unitaire" in heads else None
-    ti = heads.index("Prix Total") if "Prix Total" in heads else None
-    per_m2 = all(_strip(l[qi]).lower().endswith(("m²", "m2")) for l in lines)
-    hd = ["Désignation", "Surface (m²)" if per_m2 else "Quantité"] + (["Prix unitaire (par m²)" if per_m2 else "Prix Unitaire"] if pi is not None else []) + (["Prix Total"] if ti is not None else [])
+# --- Lignes lisibles : désignation propre, unité dans sa colonne ---------------
+
+UNIT_FR = {"u": "Unité", "unité": "Unité", "unite": "Unité", "pce": "Pièce", "pièce": "Pièce", "piece": "Pièce", "barre": "Barre",
+           "paquet": "Paquet", "sac": "Sac", "seau": "Seau", "rouleau": "Rouleau", "forfait": "Forfait", "m2": "m²", "m²": "m²",
+           "ml": "ml", "m": "m", "kg": "kg", "l": "L", "boîte": "Boîte", "boite": "Boîte", "carton": "Carton", "lot": "Lot",
+           "jour": "Jour", "h": "Heure", "heure": "Heure", "plaque": "Plaque"}
+_CONTAINER = {"paquets": "paquet", "sacs": "sac", "seaux": "seau", "rouleaux": "rouleau", "cartons": "carton", "barres": "barre", "lots": "lot"}
+_PACK_RE = re.compile(r"\(\s*(paquet|sac|seau|rouleau|carton|boîte|boite|lot)s?\s+de\s+(\d+)[^)]*\)", re.I)
+_PRICE_PAREN_RE = re.compile(r"\([^)]*\d[\d\s.,]*\s*(?:fcfa|f\s?cfa|cfa|xof|€|eur)\b[^)]*\)", re.I)
+_LEAD_RE = re.compile(r"^(paquets?|sacs?|seaux?|rouleaux?|cartons?|barres?|lots?)\s+(?:de\s+|d['’]\s*)?(.+)$", re.I)
+
+
+def _singular(word: str) -> str:
+    """Premier mot d'une désignation au singulier (une ligne = un article) : « Tiges » → « Tige » ; « Vis », « Frais » restent."""
+    if len(word) > 3 and word[-1] in "sS" and word[-2:].lower() not in ("ss", "us", "is", "os", "as"):
+        return word[:-1]
+    return word
+
+
+def tidy_item(designation: str, unit: str) -> tuple[str, str]:
+    """Ligne de devis écrite comme un professionnel : le conditionnement et le prix sortent de la désignation.
+    « Tiges 1 m (paquet de 100 tiges à 300 FCFA) » + paquet → (« Tige 1 m », « Paquet de 100 ») ;
+    « Paquet vis 25 mm » → (« Vis 25 mm », « Paquet ») ; « Barre de fourrure (2,80 m) » + barre → (« Fourrure 2,80 m », « Barre »)."""
+    d, u = " ".join(_strip(designation).split()), _strip(unit).lower()
+    if _is_labour(d) or "à la charge" in d.lower():   # main-d'œuvre, livraison : le libellé du patron reste tel quel
+        return d, UNIT_FR.get(u, unit or "")
+    pack = None
+    m = _PACK_RE.search(d)
+    if m:
+        pack, d = (m.group(1).lower(), m.group(2)), d[:m.start()] + d[m.end():]
+    d = _PRICE_PAREN_RE.sub("", d)   # un prix n'a rien à faire dans la désignation : il est dans sa colonne
+    m = _LEAD_RE.match(d.strip())
+    if m:
+        cont = _CONTAINER.get(m.group(1).lower(), m.group(1).lower())
+        if not u or u in GENERIC_UNITS or u == cont:
+            d, u = m.group(2), cont
+    d = re.sub(r"\(\s*([\d.,]+\s*(?:mm|cm|m|kg|l|ml)\b[^)]*)\)", r"\1", d)   # « (2,80 m) » → « 2,80 m »
+    d = " ".join(re.sub(r"\(\s*\)", "", d).split()).strip(" -–—:;,")
+    if d:
+        first, _, rest = d.partition(" ")
+        d = (_singular(first[:1].upper() + first[1:]) + (" " + rest if rest else ""))
+    if pack and (not u or u in GENERIC_UNITS or u == pack[0]):
+        label = f"{pack[0].capitalize()} de {pack[1]}"
+    else:
+        label = UNIT_FR.get(u, unit or "Unité")
+    return d or _strip(designation), label
+
+
+# --- Montant en lettres (« Arrêté le présent devis à la somme de … ») ---------
+
+_UNITS = ("zéro un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze quinze seize "
+          "dix-sept dix-huit dix-neuf").split()
+_TENS = {2: "vingt", 3: "trente", 4: "quarante", 5: "cinquante", 6: "soixante"}
+
+
+def _below_100(n: int, final: bool = True) -> str:
+    if n < 20:
+        return _UNITS[n]
+    t, u = divmod(n, 10)
+    if t == 7:
+        return "soixante et onze" if u == 1 else "soixante-" + _UNITS[10 + u]
+    if t == 8:
+        return ("quatre-vingts" if final else "quatre-vingt") if u == 0 else "quatre-vingt-" + _UNITS[u]
+    if t == 9:
+        return "quatre-vingt-" + _UNITS[10 + u]
+    return _TENS[t] + ("" if u == 0 else " et un" if u == 1 else "-" + _UNITS[u])
+
+
+def _below_1000(n: int, final: bool = True) -> str:
+    """`final` : rien ne suit (pas « mille ») — « deux cents », mais « deux cent mille » ; « quatre-vingts », mais « quatre-vingt mille »."""
+    c, r = divmod(n, 100)
+    parts = []
+    if c:
+        parts.append("cent" if c == 1 else _UNITS[c] + " cent" + ("s" if r == 0 and final else ""))
+    if r:
+        parts.append(_below_100(r, final))
+    return " ".join(parts)
+
+
+def en_lettres(n: int) -> str:
+    """Nombre entier en toutes lettres, orthographe traditionnelle : 2 791 000 → « deux millions sept cent quatre-vingt-onze mille »."""
+    if n == 0:
+        return "zéro"
+    parts = []
+    for value, name in ((10 ** 9, "milliard"), (10 ** 6, "million")):
+        q, n = divmod(n, value)
+        if q:
+            parts.append(f"{en_lettres(q) if q >= 1000 else _below_1000(q)} {name}{'s' if q > 1 else ''}")
+    q, n = divmod(n, 1000)
+    if q:
+        parts.append("mille" if q == 1 else _below_1000(q, final=False) + " mille")
+    if n:
+        parts.append(_below_1000(n))
+    return " ".join(parts)
+
+
+_CUR_RE = re.compile(r"\s*(FCFA|F CFA|XOF|EUR|€|\$)\s*$", re.I)
+
+
+def _currency_of(cells: list[str]) -> str:
+    """Devise commune à toutes les cellules de prix (affichée une fois dans l'en-tête de colonne) ; « » si elles diffèrent."""
+    found = {(_CUR_RE.search(_strip(c)) or [None, ""])[1].upper() for c in cells if re.search(r"\d", _strip(c))}
+    return found.pop() if len(found) == 1 else ""
+
+
+def _labour_table(heads: list[str], lines: list[list[str]], currency: str = "") -> tuple[list[str], list[list[str]]]:
+    """Tableau de la main-d'œuvre : N° | Désignation | Surface (m²) | Prix unitaire (par m²) | Montant."""
+    qi, ui = heads.index("Qté"), heads.index("Unité")
+    per_m2 = all(_strip(l[ui]) == "m²" or _strip(l[qi]).lower().endswith(("m²", "m2")) for l in lines)
+    hd = ["N°", "Désignation", "Surface (m²)" if per_m2 else "Qté"] + [
+        ("Prix unitaire (par m²)" if per_m2 and h.startswith("P.U") else h) for h in heads[4:]]
     out = []
-    for l in lines:
+    for n, l in enumerate(lines, 1):
         q = _strip(l[qi])
         if per_m2:
             q = re.sub(r"\s*m(²|2)$", "", q) + " m²"
-        out.append([l[0], q] + ([l[pi]] if pi is not None else []) + ([l[ti]] if ti is not None else []))
+        elif _strip(l[ui]):
+            q = f"{q} {_strip(l[ui]).lower()}"
+        out.append([str(n), l[1], q] + l[4:])
     return hd, out
 
 
 def _columns(headers: list[str], rows: list[list[str]]):
-    """Tableau à la charte : Désignation | Prix Unitaire | Quantité | Prix Total (colonnes absentes omises)."""
+    """Tableau professionnel : N° | Désignation | Unité | Qté | P.U. | Montant (la devise une seule fois, dans l'en-tête).
+    Rend (en-têtes, lignes, prix présents, devise) ou None si le tableau n'a ni désignation ni quantité."""
     low = [h.lower() for h in headers]
 
     def find(*keys):
@@ -346,23 +456,46 @@ def _columns(headers: list[str], rows: list[list[str]]):
         return None
 
     d, q, u = find("désignation", "designation"), find("qté", "quantité"), find("unité", "unite")
-    pu, tot = find("p.u"), find("total")
+    pu, tot = find("p.u", "pu", "prix u"), find("total", "montant")
     if d is None or q is None:
         return None
-    heads = ["Désignation"] + (["Prix Unitaire"] if pu is not None else []) + ["Quantité"] + (["Prix Total"] if tot is not None else [])
-    if pu is None and tot is None and u is not None:
-        heads.append("Unité")
+    currency = _currency_of([r[i] for r in rows for i in (pu, tot) if i is not None])
+    unit_cell = lambda s: _CUR_RE.sub("", _clean(s)) if currency else _clean(s)   # noqa: E731
+    sfx = f" ({currency})" if currency else ""
+    heads = ["N°", "Désignation", "Unité", "Qté"] + ([f"{_strip(headers[pu]) or 'P.U.'}{sfx}"] if pu is not None else []) + ([f"Montant{sfx}"] if tot is not None else [])
     out = []
-    for r in rows:
-        qty = _clean(r[q])
-        unit = _strip(r[u]) if u is not None else ""
-        if unit.lower() not in GENERIC_UNITS and (pu is not None or tot is not None):
-            qty = f"{qty} {unit}"
-        line = [r[d]] + ([_clean(r[pu])] if pu is not None else []) + [qty] + ([_clean(r[tot])] if tot is not None else [])
-        if pu is None and tot is None and u is not None:
-            line.append(unit)
+    for n, r in enumerate(rows, 1):
+        name, unit = tidy_item(r[d], r[u] if u is not None else "")
+        line = [str(n), name, unit, _clean(_strip(r[q]))]
+        free = "à la charge" in name.lower() and (tot is None or _amount(r[tot]) == 0)   # « Livraison : à la charge du client » : pas de « 0 »
+        if pu is not None:
+            line.append("—" if free else unit_cell(r[pu]))
+        if tot is not None:
+            line.append("—" if free else unit_cell(r[tot]))
         out.append(line)
-    return heads, out, pu is not None
+    return heads, out, pu is not None, currency
+
+
+def _meta_pairs(meta_lines: list[str]) -> list[tuple[str, str]]:
+    """« Date 04/11/2026 » → (« Date », « 04/11/2026 ») ; le statut interne (brouillon…) n'apparaît jamais chez le client."""
+    out = []
+    for m in (x.strip() for x in meta_lines):
+        if not m or m.lower().startswith("statut"):
+            continue
+        k, sep, v = m.partition(":") if ":" in m[:14] else m.partition(" ")
+        out.append((k.strip(), v.strip()) if sep and v.strip() else ("", m))
+    return out
+
+
+def _arrete(doc_label: str) -> str:
+    low = doc_label.lower()
+    if low.startswith("facture") or low.startswith("situation"):
+        return "Arrêtée la présente facture à la somme de"
+    if low == "avoir":
+        return "Arrêté le présent avoir à la somme de"
+    if low == "devis":
+        return "Arrêté le présent devis à la somme de"
+    return ""
 
 
 def _render(
@@ -388,139 +521,139 @@ def _render(
     path.parent.mkdir(parents=True, exist_ok=True)
     e = _entreprise(company)
     is_quote = doc_label.upper() == "DEVIS"
-    txt = _st("txt")
-    cell = _st("cell", fontSize=8.5, leading=11)
-    cellw = _st("cellw", fontSize=8.5, leading=11, textColor=colors.white)
+    txt = _st("txt", fontName="Helvetica", fontSize=8.5, leading=11.5)
+    small = _st("small", fontName="Helvetica", fontSize=7.8, leading=10.2, textColor=MUTED)
+    bullet = _st("bullet", fontName="Helvetica", fontSize=7.8, leading=10.2, textColor=MUTED, leftIndent=9, bulletIndent=0)
+    cell = _st("cell", fontName="Helvetica", fontSize=8.5, leading=11)
+    cellc = _st("cellc", fontName="Helvetica", fontSize=8.5, leading=11, alignment=TA_CENTER)
+    cellr = _st("cellr", fontName="Helvetica", fontSize=8.5, leading=11, alignment=TA_RIGHT)
+    cellb = _st("cellbr", fontSize=8.5, leading=11, alignment=TA_RIGHT)
+    headw = _st("headw", fontSize=7.8, leading=10, textColor=colors.white)
+    label = _st("label", fontSize=7, leading=9, textColor=MUTED)
 
-    # --- en-tête : logo, identité, type et numéro du document
-    infos = "<br/>".join(x for x in (
-        e["specialite"], f"{e['gerant']} - Gérant" if e["gerant"] else "", f"Tel : {e['telephone']}" if e["telephone"] else "",
-        e["adresse"], e["site"],
-        " | ".join(x for x in ((f"NINEA : {e['ninea']}" if e["ninea"] else ""), (f"RCCM : {e['rccm']}" if e["rccm"] else "")) if x)) if x)
+    # --- en-tête : logo + identité à gauche ; type, numéro et références à droite
+    contact = " · ".join(x for x in (f"{e['gerant']}, gérant" if e["gerant"] else "", f"Tél. {e['telephone']}" if e["telephone"] else "") if x)
+    legal = " · ".join(x for x in ((f"NINEA : {e['ninea']}" if e["ninea"] else ""), (f"RCCM : {e['rccm']}" if e["rccm"] else "")) if x)
     ident = [Paragraph(e["nom"], _st("nom", fontSize=17, textColor=BLUE, leading=20)),
-             Paragraph(e["accroche"], _st("accr", fontSize=10, textColor=YELLOW, leading=12)),
-             Paragraph(SOUS_ACCROCHE, _st("accr2", fontSize=10, textColor=YELLOW, leading=12)),
-             Paragraph(infos, _st("info", fontSize=8.5, leading=10.5))]
-    tsize = _fit_title(doc_label)
-    titre = [Paragraph(doc_label, _st("titre", fontSize=tsize, textColor=BLUE, alignment=TA_RIGHT, leading=tsize + 2)),
-             Paragraph(f"N° {number}", _st("num", fontSize=10, alignment=TA_RIGHT, leading=14))]
+             Paragraph(" · ".join(x for x in (e["accroche"], SOUS_ACCROCHE) if x), _st("accr", fontSize=9, textColor=YELLOW_DARK, leading=12)),
+             Spacer(1, P(2))] + [Paragraph(x, small) for x in (e["specialite"], contact, " · ".join(x for x in (e["adresse"], e["site"]) if x), legal) if x]
+    tsize = _fit_title(doc_label, 56)
+    refs = Table([[Paragraph(k.upper(), label), Paragraph(v, _st("rv", fontSize=8.5, leading=11, alignment=TA_RIGHT))] for k, v in _meta_pairs(meta_lines)] or [[""]],
+                 colWidths=[20 * mm, 38 * mm])
+    refs.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), TINT), ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                              ("TOPPADDING", (0, 0), (-1, -1), P(2.2)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2.2)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                              ("ROUNDEDCORNERS", [4, 4, 4, 4])]))
+    titre = [Paragraph(doc_label.upper(), _st("titre", fontSize=tsize, textColor=BLUE, alignment=TA_RIGHT, leading=tsize + 3)), Spacer(1, P(3)), refs]
     if _logo_ok():
-        head = Table([[RLImage(str(LOGO), width=P(30) * mm, height=P(30) * mm), ident, titre]], colWidths=[P(33) * mm, (129 - P(33)) * mm, 51 * mm])
+        head = Table([[RLImage(str(LOGO), width=P(26) * mm, height=P(26) * mm), ident, titre]], colWidths=[P(29) * mm, (122 - P(29)) * mm, 58 * mm])
     else:
-        head = Table([[ident, titre]], colWidths=[129 * mm, 51 * mm])
+        head = Table([[ident, titre]], colWidths=[122 * mm, 58 * mm])
     head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                              ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), P(0)),
-                              ("BOTTOMPADDING", (0, 0), (-1, -1), P(0))]))
-    rule = Table([[""]], colWidths=[180 * mm], rowHeights=[2])
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+    rule = Table([[""]], colWidths=[180 * mm], rowHeights=[1.6])
     rule.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), YELLOW)]))
-    story: list = [head, Spacer(1, P(3)), rule, Spacer(1, P(6))]
+    story: list = [head, Spacer(1, P(4)), rule, Spacer(1, P(6))]
 
-    # --- destinataire + références
+    # --- client et objet, côte à côte, sur fond teinté
     party_lines = [l for l in (party_right[1] or "").split("\n") if l.strip()]
-    left = [Paragraph(party_right[0].upper(), _st("cl", fontSize=10, textColor=BLUE, leading=13))] + \
-           [Paragraph(l, txt) for l in party_lines]
-    metas = []
-    for m in meta_lines:
-        m = m.strip()
-        if m.lower().startswith("statut "):
-            continue   # le statut interne (brouillon…) n'a rien à faire sur un document client
-        elif m.lower().startswith("date ") and ":" not in m[:6]:
-            m = "Date : " + m[5:]
-        elif m.lower().startswith("validité ") and ":" not in m[:10]:
-            m = "Validité : " + m[9:]
-        metas.append(Paragraph(m, txt))
-    bloc = Table([[left, metas]], colWidths=[90 * mm, 90 * mm])
-    bloc.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [bloc, Spacer(1, P(6))]
+    who = party_lines[0] if party_lines else ""
+    client = [Paragraph(party_right[0].upper(), label), Spacer(1, P(1.5)),
+              Paragraph(who or "—", _st("cn", fontSize=11, leading=14))] + [Paragraph(l, txt) for l in party_lines[1:]]
+    obj_text = (title or doc_label) + (("<br/>" + notes.replace("\n", "<br/>")) if notes and not is_quote else "")
+    objet = [Paragraph("OBJET", label), Spacer(1, P(1.5)), Paragraph(obj_text, _st("obj", fontName="Helvetica", fontSize=8.5, leading=11.5, alignment=TA_JUSTIFY))]
+    cards = Table([[client, "", objet]], colWidths=[62 * mm, 4 * mm, 114 * mm])
+    cards.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), TINT), ("BACKGROUND", (2, 0), (2, 0), TINT), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                               ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                               ("TOPPADDING", (0, 0), (-1, -1), P(6)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(6)),
+                               ("LEFTPADDING", (1, 0), (1, 0), 0), ("RIGHTPADDING", (1, 0), (1, 0), 0)]))
+    story += [cards, Spacer(1, P(8))]
 
-    # --- objet
-    low = doc_label.lower()
-    objet = "Objet de la facture" if low.startswith("facture") or low.startswith("situation") else \
-            "Objet de l'avoir" if low == "avoir" else f"Objet du {low}"
-    story += [_bar(objet), Spacer(1, P(4)),
-              Paragraph((title or doc_label) + (("<br/>" + notes.replace("\n", "<br/>")) if notes and not is_quote else ""),
-                        _st("just", leading=12.5, alignment=TA_JUSTIFY)), Spacer(1, P(8))]
-
-    # --- tableau
+    # --- tableaux
     mapped = _columns(headers, rows)
     split_labour = False
+    currency = ""
     if mapped:
-        heads, body, has_pu = mapped
-        if has_pu:
-            story += [Paragraph("Important — Prix unitaires :", _st("imp", textColor=BLUE, leading=12)),
-                      Paragraph(MENTION_PU, txt), Spacer(1, P(8))]
+        heads, body, has_pu, currency = mapped
         mat_body, lab_body = body, []
         if is_quote:   # règle du patron : la main-d'œuvre n'est JAMAIS dans le tableau des matériaux ; elle a son propre tableau en dessous
-            mat_body = [l for l in body if not _is_labour(_strip(l[0]))]
-            lab_body = [l for l in body if _is_labour(_strip(l[0]))]
+            mat_body = [l for l in body if not _is_labour(_strip(l[1]))]
+            lab_body = [l for l in body if _is_labour(_strip(l[1]))]
             if not mat_body:   # un devis de main-d'œuvre seule : un seul tableau, inchangé
                 mat_body, lab_body = body, []
+            for n, l in enumerate(mat_body, 1):
+                l[0] = str(n)
         split_labour = bool(lab_body)
-        cellr = _st("cellr", fontSize=8.5, leading=11, alignment=TA_RIGHT)
-        cellwr = _st("cellwr", fontSize=8.5, leading=11, textColor=colors.white, alignment=TA_RIGHT)
 
         def grid(hd: list[str], lines: list[list[str]], sub: tuple[str, str] | None) -> Table:
             ncol = len(hd)
-            widths = {4: [78, 34, 28, 40], 3: [118, 34, 28] if "Prix Unitaire" in hd else [98, 40, 42], 2: [140, 40]}.get(ncol, [180 / ncol] * ncol)
-            if hd[0] == "Désignation" and "Surface (m²)" in hd:
-                widths = {4: [66, 30, 44, 40], 3: [98, 40, 42]}.get(ncol, widths)
-            data = [[Paragraph(h, cellw if n == 0 else cellwr) for n, h in enumerate(hd)]]
+            if hd[2] == "Unité":   # N° | Désignation | Unité | Qté | P.U. | Montant
+                widths = [9, 0, 25, 16, 27, 31][:ncol]
+            else:                  # main-d'œuvre : N° | Désignation | Surface | P.U. par m² | Montant
+                widths = [9, 0, 25, 34, 31][:ncol]
+            widths[1] = 180 - sum(widths)
+            styles = [cellc, cell] + [cellc if (h == "Unité") else cellr for h in hd[2:]]
+            data = [[Paragraph(h, _st(f"h{n}", fontSize=7.8, leading=10, textColor=colors.white,
+                                         alignment=TA_LEFT if n == 1 else TA_CENTER if n in (0,) or h == "Unité" else TA_RIGHT)) for n, h in enumerate(hd)]]
             for line in lines:
-                data.append([Paragraph(str(c), cell if n == 0 else cellr) for n, c in enumerate(line)])
-            has_sub = bool(sub) and hd[-1] == "Prix Total"
+                data.append([Paragraph(str(c), styles[n] if n < ncol - 1 else cellb) for n, c in enumerate(line)])
+            has_sub = bool(sub)
             if has_sub:
-                data.append([Paragraph(sub[0], cellw)] + [""] * (ncol - 2) + [Paragraph(_clean(sub[1]), cellwr)])
+                data.append([""] + [Paragraph(sub[0], _st("sl", fontSize=8.5, leading=11))] + [""] * (ncol - 3) + [Paragraph(sub[1], cellb)])
             t = Table(data, colWidths=[w * mm for w in widths], repeatRows=1)
-            st = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
-                  ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                  ("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3))]
-            if has_sub:
-                st += [("BACKGROUND", (0, -1), (-1, -1), BLUE), ("SPAN", (0, -1), (-2, -1))]
+            st = [("BACKGROUND", (0, 0), (-1, 0), BLUE), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                  ("TOPPADDING", (0, 0), (-1, -1), P(3.6)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3.6)),
+                  ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                  ("LINEBELOW", (0, 1), (-1, -1), 0.35, LINE)]
             for r in range(1, len(data) - (1 if has_sub else 0)):
                 if r % 2 == 0:
                     st.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
+            if has_sub:
+                st += [("BACKGROUND", (0, -1), (-1, -1), TINT), ("SPAN", (1, -1), (-2, -1)), ("LINEABOVE", (0, -1), (-1, -1), 0.8, BLUE)]
             t.setStyle(TableStyle(st))
             return t
 
-        first_total = totals[0] if totals else None
         if split_labour:
             story += [_bar("Tableau des matériaux (fournitures)"), Spacer(1, P(3)),
-                      grid(heads, mat_body, ("Sous-total matériaux HT", _sum_lines(mat_body))), Spacer(1, P(8))]
-            lab_heads, lab_rows = _labour_table(heads, lab_body)
+                      grid(heads, mat_body, ("Sous-total matériaux HT", _sum_lines(mat_body, currency))), Spacer(1, P(8))]
+            lab_heads, lab_rows = _labour_table(heads, lab_body, currency)
             story += [_bar("Main-d'œuvre (pose)"), Spacer(1, P(3)),
-                      grid(lab_heads, lab_rows, ("Sous-total main-d'œuvre HT", _sum_lines(lab_body))), Spacer(1, P(8))]
+                      grid(lab_heads, lab_rows, ("Sous-total main-d'œuvre HT", _sum_lines(lab_body, currency))), Spacer(1, P(8))]
         else:
             story += [_bar("Tableau des matériaux (fournitures)" if is_quote else "Détail"), Spacer(1, P(3)),
-                      grid(heads, mat_body, first_total), Spacer(1, P(8))]
+                      grid(heads, mat_body, None), Spacer(1, P(8))]
     else:
         story += [_bar("Détail"), Spacer(1, P(3))]
-        data = [[Paragraph(h, cellw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
+        data = [[Paragraph(h, headw) for h in headers]] + [[Paragraph(str(c), cell) for c in r] for r in rows]
         t = Table(data, colWidths=[w * mm * 180 / sum(col_widths) for w in col_widths], repeatRows=1)
-        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), BLUE), ("GRID", (0, 0), (-1, -1), 0.4, GRID),
-                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), P(3)),
-                               ("BOTTOMPADDING", (0, 0), (-1, -1), P(3)), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA])]))
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), BLUE), ("LINEBELOW", (0, 1), (-1, -1), 0.35, LINE),
+                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), P(3.6)),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), P(3.6)), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA])]))
         story += [t, Spacer(1, P(8))]
 
-    # --- totaux : lignes intermédiaires, puis bandeau jaune sur le total
+    # --- totaux : récapitulatif à droite (sans doublon), montant en lettres à gauche
     if totals:
-        labels = [a for a, _ in totals]
         final = next(((a, b) for a, b in totals if a == "Total"), None)
-        middle = [(a, b) for a, b in totals[1:] if (a, b) != final] if mapped and mapped[0][-1] == "Prix Total" and not split_labour else \
-                 [(a, b) for a, b in totals if (a, b) != final]
-        if middle:
-            mt = Table([[Paragraph(a, _st("ml", alignment=TA_RIGHT)), Paragraph(_clean(b), _st("mv", alignment=TA_RIGHT))] for a, b in middle],
-                       colWidths=[130 * mm, 50 * mm])
-            mt.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(2)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2))]))
-            story += [mt, Spacer(1, P(4))]
+        has_vat = any(a.upper().startswith("TVA") for a, _ in totals)
+        middle = [(a, b) for a, b in totals if (a, b) != final and (has_vat or not final or _clean(b) != _clean(final[1]))]
+        recap = [[Paragraph(a, _st("ml", fontName="Helvetica", fontSize=8.5, leading=11)), Paragraph(_clean(b), cellb)] for a, b in middle]
         if final:
-            has_vat = any(l.upper().startswith("TVA") for l in labels)
-            lab = "MONTANT TOTAL TTC" if has_vat else "MONTANT TOTAL"
-            ttc = Table([[Paragraph(lab, _st("t1", fontSize=12, textColor=BLUE)),
-                          Paragraph(_clean(final[1]), _st("t2", fontSize=12, textColor=BLUE, alignment=TA_RIGHT))]],
-                        colWidths=[110 * mm, 70 * mm])
-            ttc.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), YELLOW), ("TOPPADDING", (0, 0), (-1, -1), P(6)),
-                                     ("BOTTOMPADDING", (0, 0), (-1, -1), P(6)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-            story += [ttc, Spacer(1, P(10))]
+            recap.append([Paragraph("TOTAL TTC" if has_vat else "MONTANT TOTAL", _st("t1", fontSize=10.5, textColor=BLUE, leading=13)),
+                          Paragraph(_clean(final[1]), _st("t2", fontSize=12, textColor=BLUE, alignment=TA_RIGHT, leading=14))])
+        rt = Table(recap, colWidths=[38 * mm, 40 * mm])
+        rst = [("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(3)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+               ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7), ("LINEBELOW", (0, 0), (-1, -2), 0.35, LINE)]
+        if final:
+            rst += [("BACKGROUND", (0, -1), (-1, -1), YELLOW), ("TOPPADDING", (0, -1), (-1, -1), P(6)), ("BOTTOMPADDING", (0, -1), (-1, -1), P(6))]
+        rt.setStyle(TableStyle(rst))
+        words = ""
+        amount = _amount(final[1]) if final else 0
+        if final and _arrete(doc_label) and amount > 0 and amount.is_integer() and currency in ("FCFA", "F CFA", "XOF"):
+            lettres = en_lettres(int(amount))
+            words = f"{_arrete(doc_label)} : <b>{lettres[:1].upper() + lettres[1:]} francs CFA</b> ({_clean(final[1])})."
+        left_col = Paragraph(words, _st("words", fontName="Helvetica", fontSize=8.3, leading=11.5)) if words else ""
+        story += [Table([[left_col, rt]], colWidths=[100 * mm, 80 * mm],
+                        style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                          ("RIGHTPADDING", (0, 0), (0, 0), 14), ("RIGHTPADDING", (1, 0), (1, 0), 0)])), Spacer(1, P(10))]
 
     if warnings:
         for w in warnings:
@@ -539,12 +672,12 @@ def _render(
         story += [Table([[d, Paragraph("Scanne ce code avec ton téléphone pour payer par Wave.", txt)]], colWidths=[side + P(8), None],
                         style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")])), Spacer(1, P(6))]
 
-    # --- conditions et exclusions (devis), comme sur le devis de référence
+    # --- conditions (à gauche) et exclusions (à droite), comme sur le devis de référence, en plus compact
     if is_quote:
         labour = split_labour or any("main-d" in _strip(r[1]).lower() or "pose" in _strip(r[1]).lower() for r in rows if len(r) > 1)
         important = [b.strip() for b in (company.get("payment_terms") or "").split("\n") if b.strip()]
         important += [
-            "Les prix indiqués dans la colonne « Prix Unitaire » sont des prix à l'unité, et non des montants totaux.",
+            "Les prix unitaires s'entendent à l'unité indiquée (barre, paquet, sac…) ; le montant de chaque ligne figure dans la colonne « Montant ».",
             *([] if labour else ["Ce devis porte uniquement sur les fournitures et matériaux. La main-d'œuvre fait l'objet d'un devis distinct."]),
             "UniC Plaquiste se charge de la commande, de la réception et de la vérification qualitative des matériaux.",
             "Les quantités pourront être ajustées selon la surface réelle constatée sur site.",
@@ -558,30 +691,30 @@ def _render(
             excl.insert(0, "La main-d'œuvre et l'exécution des travaux.")
         if any(re.search(r"\bled\b", _strip(r[1]), re.I) for r in rows if len(r) > 1):   # ruban LED au devis (plafond à gorge, îlot…)
             excl = [("Luminaires (le ruban LED listé au tableau est compris)." if re.search(r"\bLED\b", x) else x) for x in excl]
-        story += [Paragraph("Conditions et modalités", _st("ch", fontSize=12, textColor=BLUE, leading=15)), Spacer(1, P(2)),
-                  Paragraph("Conditions importantes :", _st("ci", textColor=BLUE, leading=12))]
-        story += [Paragraph(f"• {b}", txt) for b in important]
-        if excl:
-            story += [Spacer(1, P(4)), Paragraph("Ne sont pas inclus :", _st("ex", textColor=BLUE, leading=12))]
-            story += [Paragraph(f"• {x}", txt) for x in excl]
-        story.append(Spacer(1, P(14)))
+        cond = [Paragraph("Conditions", _st("ch", fontSize=9.5, textColor=BLUE, leading=12)), Spacer(1, P(2))] + \
+               [Paragraph(b, bullet, bulletText="•") for b in important]
+        exc = ([Paragraph("Ne sont pas inclus", _st("ex", fontSize=9.5, textColor=BLUE, leading=12)), Spacer(1, P(2))] +
+               [Paragraph(x, bullet, bulletText="•") for x in excl]) if excl else ""
+        story += [Table([[cond, exc]], colWidths=[108 * mm, 72 * mm],
+                        style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                          ("RIGHTPADDING", (0, 0), (0, 0), 14), ("RIGHTPADDING", (1, 0), (1, 0), 0)])), Spacer(1, P(12))]
 
     # --- signatures : un cadre par partie (signature à la main, ou champ de signature Adobe invisible dans le cadre)
-    who = party_lines[0] if party_lines else party_right[0]
-    other = f"{party_right[0].capitalize()} ({who})"
-    box_w, box_h = 82 * mm, P(26) * mm
-    head = _st("sh", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
-    sig = Table([[Paragraph(e["nom"], head), Paragraph(other, head)],
-                 [Paragraph("Date : ____ / ____ / ________", txt), Paragraph("Date : ____ / ____ / ________", txt)],
+    other = f"{party_right[0].capitalize()} ({who or party_right[0]})"
+    box_w, box_h = 82 * mm, P(24) * mm
+    shead = _st("sh", fontName="Helvetica-Bold", fontSize=9.5, leading=12)
+    mention = "Date et mention « Bon pour accord »" if is_quote else "Date : ____ / ____ / ________"
+    sig = Table([[Paragraph(e["nom"], shead), Paragraph(other, shead)],
+                 [Paragraph("Date : ____ / ____ / ________", small), Paragraph(mention, small)],
                  [SignBox(box_w, box_h, "Signature_UniC", owner_signature_path(), owner_stamp_path()), SignBox(box_w, box_h, "Signature_Client")]],
                 colWidths=[90 * mm, 90 * mm])
-    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(3)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2)),
+    sig.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), P(2)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(2)),
                              ("LEFTPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(KeepTogether(sig))
 
-    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=P(9) * mm,
+    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=P(10) * mm,
                             bottomMargin=P(14) * mm, title=f"{doc_label} {number}", author=e["nom"])
-    foot = _footer(e["nom"], doc_label, number)
+    foot = _footer(" · ".join(x for x in (e["nom"], legal) if x), doc_label, number)
     doc.build(story, onFirstPage=foot, onLaterPages=foot)
     return doc.page
 
