@@ -123,6 +123,12 @@ html.split #cap{top:45%;transform:translateY(-50%)}
 .pnl .lt{flex:none}
 .pnl b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
 .pnl small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--soft);text-transform:uppercase}
+/* grille de points, étapes au trait, trajet : dessins au trait (SVG), un seul accent de couleur */
+.pnd,.pnr,.pnt{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*10);width:100%}
+.pnd b,.pnt b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
+.pnd small,.pnr small,.pnt small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--soft);text-transform:uppercase;text-align:center}
+.pnr svg,.pnt svg,.pnd svg{display:block;overflow:visible}
+.pnr text,.pnt text{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.08em;text-transform:uppercase;fill:var(--fg)}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
   border-radius:calc(var(--u)*14);background:color-mix(in srgb,var(--royal) 93%,transparent);border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);box-shadow:0 14px 34px -12px rgba(0,0,0,.55)}
@@ -199,7 +205,7 @@ window.setup = sc => {
     A.e.forEach((e, i) => { if (e.classList.contains("ln")) e.style.margin = `${14 * u}px 0 ${6 * u}px`; if (e.classList.contains("e3")) e.style.margin = `${12 * u}px 0 ${20 * u}px`; if (e.classList.contains("e5")) e.style.marginTop = `${20 * u}px`; if (e.classList.contains("e6")) e.style.marginTop = `${6 * u}px`;
       const mins = { e1: 34, e2: 20, e4: 14 }, k = Object.keys(mins).find(c => e.classList.contains(c));
       if (k) fitLine(e, W() - 48 * u, mins[k] * u); else fit(e, W() - 48 * u); }); fitH(box, u);
-  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan", "counter", "flow", "wave", "chat", "badge", "lottie"].includes(T)) {
+  } else if (["typewriter", "kinetic", "checklist", "neon", "slogan", ...PANELS].includes(T)) {
     fxSetup(sc, root, u);
   } else if (T === "motion") {   // animation libre de l'IA : SVG animé en CSS, isolé dans une ombre (ses styles ne touchent pas la page)
     root.style.padding = "0"; const host = el("div", "mo", "", root); host.style.cssText = "position:absolute;inset:0";
@@ -356,7 +362,10 @@ function fxDraw(sc, t, dur, u) {
     A.hr.style.transform = `scaleX(${eo(ramp(t, 1.6, 2.2))})`; if (A.br) A.br.style.opacity = eo(ramp(t, 1.9, 2.4)); }
 }
 // ---------- panneaux animés (motion design) ----------
-const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie"];
+const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route"];
+const NS = "http://www.w3.org/2000/svg";
+const sv = (tag, at, parent) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (parent) parent.appendChild(e); return e; };   // dessin du moteur (jamais un texte du scénario en balise)
+const svText = (parent, x, y, txt, size, anchor) => { const e = sv("text", { x, y, "text-anchor": anchor, "font-size": size }, parent); e.textContent = txt; return e; };
 let LOT = null;   // animation Lottie en cours (une à la fois ; détruite à chaque nouvelle scène)
 const sfx = x => x ? (/^[+×]/.test(x) ? x : "\u00a0" + x) : "";   // « 0 € », « 98 % », mais « 180+ »
 const prng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };   // déterministe : même image à chaque rendu
@@ -387,6 +396,43 @@ function panelSetup(sc, box, u) {
       rendererSettings: { preserveAspectRatio: "xMidYMid meet" } }); A.pn.n = Math.max(1, sc.data.op - sc.data.ip); A.pn.fr = sc.data.fr; }
     A.pn.w = w; A.pn.t = L[0] ? el("b", "", fr(L[0]), w) : null; if (A.pn.t) { A.pn.t.style.fontSize = 34 * u + "px"; fit(A.pn.t, W() - 48 * u); }
     A.pn.s = L[1] ? el("small", "", fr(L[1]), w) : null; if (A.pn.s) { A.pn.s.style.fontSize = 14 * u + "px"; fit(A.pn.s, W() - 48 * u); }
+  } else if (T === "dots") {   // grille de points : un point par unité ; le compteur compte exactement les points allumés
+    const w = el("div", "pnd", "", box), n = sc.value, h = Math.min(sc.highlight || 0, n);
+    const b = el("b", "", num(n, 0) + sfx(sc.suffix), w); b.style.fontSize = 84 * u + "px"; fit(b, W() - 48 * u);   // taille réglée sur le chiffre final
+    const s = sc.label ? el("small", "", fr(sc.label), w) : null; if (s) { s.style.fontSize = 15 * u + "px"; fit(s, W() - 48 * u); }
+    const aw = W() - 48 * u, ah = Math.max(70 * u, H() - 56 * u - 140 * u), cols = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * aw / ah)))), rows = Math.ceil(n / cols);
+    const cell = Math.min(aw / cols, ah / rows, 34 * u), g = sv("svg", { width: cols * cell, height: rows * cell }, w), gold = new Set();
+    for (let j = 0; j < h; j++) gold.add(Math.min(n - 1, Math.floor((j + .5) * rows / h) * cols + Math.floor((j * .618 + .3) % 1 * cols)));   // points en or éparpillés (lignes régulières, colonnes au nombre d'or)
+    A.pn = { w, b, s, n, cell, gold, d: [], q: [] };   // q : instant d'allumage de chaque point (0 → 1), de plus en plus rapproché
+    for (let i = 0; i < n; i++) { A.pn.d.push(sv("circle", { cx: (i % cols + .5) * cell, cy: (Math.floor(i / cols) + .5) * cell, r: cell * .12 }, g));
+      A.pn.q.push(n > 1 ? 1 - Math.pow(1 - i / (n - 1), 2) : 0); }
+    fitH(w, u);
+  } else if (T === "bars") {   // étapes au trait : chaque barre plus haute que la précédente, un point d'or monte de l'une à l'autre
+    const w = el("div", "pnr", "", box), n = sc.steps.length, s = sc.label ? el("small", "", fr(sc.label), w) : null;
+    if (s) { s.style.fontSize = 16 * u + "px"; fit(s, W() - 48 * u); }
+    const aw = W() - 40 * u, ah = cl(H() - 56 * u - (s ? 40 * u : 0) - 30 * u, 100 * u, 380 * u), gap = aw / n, bw = gap * .62, base = ah;
+    const g = sv("svg", { width: aw, height: ah + 30 * u }, w), stroke = 2.2 * u, maxLen = Math.max(4, ...sc.steps.map(x => x.length));
+    const fs = Math.min(13 * u, (gap - 4 * u) / (maxLen * .52));
+    A.pn = { w, s, n, base, aw, ln: sv("line", { x1: 0, y1: base, x2: 0, y2: base, stroke: "var(--fg)", "stroke-width": stroke, "stroke-linecap": "round" }, g), r: [], t: [], x: [], h: [] };
+    sc.steps.forEach((x, i) => { const cx = (i + .5) * gap, hh = (ah - 26 * u) * (.25 + .75 * (n > 1 ? i / (n - 1) : 1));
+      A.pn.r.push(sv("rect", { x: cx - bw / 2, y: base, width: bw, height: 0, fill: "none", stroke: "var(--fg)", "stroke-width": stroke }, g));
+      A.pn.t.push(svText(g, cx, base + 20 * u, fr(x), fs, "middle")); A.pn.x.push(cx); A.pn.h.push(hh); });
+    A.pn.dot = sv("circle", { cx: A.pn.x[0], cy: base, r: 6.5 * u, fill: "var(--gold)" }, g);
+  } else if (T === "route") {   // trajet SCHÉMATIQUE (pas une carte) : de lines[0] à lines[1] ; value = distance donnée par le patron (facultative)
+    const w = el("div", "pnt", "", box), has = typeof sc.value === "number";
+    const b = has ? el("b", "", num(sc.value, decs(sc.value)) + sfx(sc.suffix), w) : null; if (b) { b.style.fontSize = 58 * u + "px"; fit(b, W() - 48 * u); }
+    const s = sc.label ? el("small", "", fr(sc.label), w) : null; if (s) { s.style.fontSize = 15 * u + "px"; fit(s, W() - 48 * u); }
+    const aw = W() - 40 * u, ah = cl(H() - 56 * u - (b ? 80 * u : 0) - (s ? 30 * u : 0), 110 * u, 330 * u), g = sv("svg", { width: aw, height: ah }, w);
+    for (let x = 14 * u; x < aw; x += 28 * u) sv("line", { x1: x, y1: 0, x2: x, y2: ah, stroke: "var(--fg)", "stroke-opacity": .07, "stroke-width": 1 }, g);
+    for (let y = 14 * u; y < ah; y += 28 * u) sv("line", { x1: 0, y1: y, x2: aw, y2: y, stroke: "var(--fg)", "stroke-opacity": .07, "stroke-width": 1 }, g);
+    const a = [aw * .14, ah * .74], z = [aw * .86, ah * .26], d = `M${a} C${a[0] + aw * .06},${a[1] - ah * .6} ${z[0] - aw * .36},${z[1] + ah * .3} ${z}`;
+    const glow = sv("path", { d, fill: "none", stroke: "var(--gold)", "stroke-width": 9 * u, "stroke-opacity": .28, "stroke-linecap": "round", pathLength: 1, "stroke-dasharray": 1, "stroke-dashoffset": 1 }, g);
+    const path = sv("path", { d, fill: "none", stroke: "var(--gold)", "stroke-width": 3.5 * u, "stroke-linecap": "round", pathLength: 1, "stroke-dasharray": 1, "stroke-dashoffset": 1 }, g);
+    const pa = sv("circle", { cx: a[0], cy: a[1], r: 7 * u, fill: "var(--fg)" }, g), ring = sv("circle", { cx: z[0], cy: z[1], r: 9 * u, fill: "none", stroke: "var(--gold)", "stroke-width": 2 * u, opacity: 0 }, g);
+    const pb = sv("circle", { cx: z[0], cy: z[1], r: 9 * u, fill: "var(--gold)" }, g), car = sv("circle", { r: 6 * u, fill: "var(--fg)", stroke: "var(--gold)", "stroke-width": 3 * u, opacity: 0 }, g);
+    const L = sc.lines, la = svText(g, a[0] - 8 * u, a[1] + 26 * u, fr(L[0]), 14 * u, "start"), lb = svText(g, z[0] + 8 * u, z[1] - 20 * u, fr(L[1]), 14 * u, "end");
+    [la, lb].forEach(e => { const m = aw - 8 * u; let f = 14 * u; for (let i = 0; i < 30 && e.getComputedTextLength() > m * .62 && f > 8; i++) { f *= .93; e.setAttribute("font-size", f); } });
+    A.pn = { w, b, s, has, glow, path, pa, pb, ring, car, la, lb, len: path.getTotalLength() };
   } else if (T === "badge") {
     const b = el("div", "pnb", "", box), ci = el("div", "ci", "", b); ci.style.fontSize = 50 * u + "px"; ci.textContent = [...(L[0] || "?").trim()][0].toUpperCase();
     A.pn.rings = [0, 1].map(() => el("s", "", "", ci)); A.pn.ci = ci;
@@ -421,6 +467,37 @@ function panelDraw(sc, t, dur, u) {
     if (LOT) { const f = t * P.fr; LOT.goToAndStop(sc.loop ? f % P.n : Math.min(P.n - 1, f), true); }
     if (P.t) { const k = eo(ramp(t, .35, .8)); fx(P.t, k, (1 - k) * 14 * u); }
     if (P.s) { const k = eo(ramp(t, .55, 1)); fx(P.s, k, (1 - k) * 10 * u); }
+  } else if (T === "dots") {
+    const k = eo(ramp(t, .05, .4)); fx(P.w, k, (1 - k) * 18 * u); const T0 = .35, span = cl(dur - (P.gold.size ? 2.4 : 1.6), .8, 4.2);
+    const lit = P.q.filter(x => x * span <= t - T0).length, done = lit === P.n;   // le compteur compte exactement les points allumés
+    P.b.textContent = num(lit, 0) + (done ? sfx(sc.suffix) : ""); P.b.style.transform = `scale(${1 + .1 * Math.sin(Math.PI * ramp(t, T0 + span, T0 + span + .3))})`;
+    if (P.s) { const ks = eo(ramp(t, .3, .7)); fx(P.s, ks, (1 - ks) * 10 * u); }
+    const kg = P.gold.size ? eo(ramp(t, T0 + span + .45, T0 + span + .95)) : 0;   // puis les points en or ressortent, les autres s'effacent
+    P.d.forEach((c, i) => { const a = T0 + P.q[i] * span, q = eo(ramp(t, a, a + .22)), g = P.gold.has(i);
+      c.setAttribute("r", P.cell * (.12 + .24 * q + (g ? .1 * kg : 0))); c.style.fill = g && kg > 0 ? "var(--gold)" : "var(--fg)";
+      c.style.opacity = (.16 + .84 * q) * (g ? 1 : 1 - .6 * kg); });
+  } else if (T === "bars") {
+    if (P.s) { const ks = eo(ramp(t, .05, .45)); fx(P.s, ks, (1 - ks) * 10 * u); }
+    const step = cl((dur - 1.4) / P.n, .35, .75), at = i => .45 + i * step, top = i => P.base - P.h[i] - 7.5 * u;
+    P.ln.setAttribute("x2", P.aw * eo(ramp(t, .05, .5)));
+    P.r.forEach((r, i) => { const q = eo(ramp(t, at(i), at(i) + .4)); r.setAttribute("y", P.base - P.h[i] * q); r.setAttribute("height", P.h[i] * q); r.style.opacity = q > 0 ? 1 : 0;
+      P.t[i].style.opacity = eo(ramp(t, at(i) + .1, at(i) + .45)); });
+    let i = -1; while (i + 1 < P.n && t >= at(i + 1)) i++;
+    const p = i < 0 ? 0 : eio(ramp(t, at(i), at(i) + .42)), x0 = i <= 0 ? P.x[0] : P.x[i - 1], y0 = i <= 0 ? P.base - 7.5 * u : top(i - 1);
+    P.dot.setAttribute("cx", i < 0 ? P.x[0] : lerp(x0, P.x[i], p)); P.dot.setAttribute("cy", i < 0 ? P.base - 7.5 * u : lerp(y0, top(i), p) - Math.sin(Math.PI * p) * 26 * u);
+    P.dot.style.opacity = eo(ramp(t, .1, .4));
+    const kf = eo(ramp(t, at(P.n - 1) + .5, at(P.n - 1) + 1)), last = P.r[P.n - 1];   // la dernière étape passe en or : le résultat
+    last.style.stroke = `color-mix(in srgb,var(--gold) ${Math.round(kf * 100)}%,var(--fg))`; last.style.fill = `color-mix(in srgb,var(--gold) ${Math.round(kf * 22)}%,transparent)`;
+  } else if (T === "route") {
+    const k = eo(ramp(t, .05, .4)); fx(P.w, k, (1 - k) * 18 * u);
+    const T1 = .6, T2 = Math.max(T1 + 1, dur - 1.3), p = eio(ramp(t, T1, T2));
+    P.path.setAttribute("stroke-dashoffset", 1 - p); P.glow.setAttribute("stroke-dashoffset", 1 - p);   // attribut : un style en px serait arrondi (le trait sauterait)
+    const pt = P.path.getPointAtLength(p * P.len); P.car.setAttribute("cx", pt.x); P.car.setAttribute("cy", pt.y); P.car.setAttribute("opacity", p > 0 && p < 1 ? 1 : 0);
+    if (P.b) P.b.textContent = num(sc.value * p, decs(sc.value)) + sfx(sc.suffix);
+    const ka = eo(ramp(t, .2, .55)); P.pa.setAttribute("opacity", ka); P.la.setAttribute("opacity", eo(ramp(t, .35, .75)));
+    const kb = eo(ramp(t, T2 - .05, T2 + .3)); P.pb.setAttribute("r", 9 * u * kb * (1 + .25 * Math.sin(Math.PI * kb))); P.lb.setAttribute("opacity", eo(ramp(t, T2 + .1, T2 + .5)));
+    const kr = ramp(t, T2 + .1, T2 + 1.2); P.ring.setAttribute("r", 9 * u + 34 * u * eo(kr)); P.ring.setAttribute("opacity", kr > 0 && kr < 1 ? 1 - kr : 0);
+    if (P.s) { const ks = eo(ramp(t, .3, .7)); fx(P.s, ks, (1 - ks) * 10 * u); }
   } else if (T === "badge") {
     const k = eo(ramp(t, .05, .45)); fx(P.ci, k, 0, .4 + .6 * k);
     P.rings.forEach((r, i) => { const p = ((t - .3 - i * .6) % 1.2 + 1.2) % 1.2 / 1.2; r.style.transform = `scale(${1 + p * .8})`; r.style.opacity = t < .3 + i * .6 ? 0 : (1 - p) * .8; });

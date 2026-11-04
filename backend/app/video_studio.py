@@ -46,8 +46,10 @@ FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.htm
 # durées permises par type de scène (s) : (minimum, maximum) ; la durée réelle tient aussi compte du temps de lecture (_readable)
 SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
            "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12),
-           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8), "motion": (2, 15)}
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
+           "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8), "motion": (2, 15),
+           "dots": (2.5, 12), "bars": (2.5, 12), "route": (2.5, 12)}
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route")
+DOTS_MAX = 400                    # grille de points : un point par unité, au plus 400 (scripts/video/spec.py)
 # Animations Lottie du moteur (scripts/video/lottie/, créées pour UniC) et leur sens ; le patron peut aussi envoyer les siennes (Mes médias).
 BUILTIN_LOTTIE = {"check": "coche qui se trace dans un cercle (validé, terminé, garanti)", "spark": "éclat lumineux (nouveauté, effet waouh)",
                   "arrow": "flèche qui avance (étape suivante, avant → après)", "pin": "repère de lieu qui tombe (adresse, chantier, ville)",
@@ -117,13 +119,16 @@ SCENE_PROPS = {
                "items": {"type": "object", "properties": {"at": {"type": "number"}, "type": {"type": "string", "enum": list(OVERLAY_TYPES)},
                                                           "lines": {"type": "array", "items": {"type": "string"}}, "tag": {"type": "string"}, "place": {"type": "string"},
                                                           "heading": {"type": "string"}, "checks": {"type": "array", "items": {"type": "string"}},
-                                                          "value": {"type": "number"}, "suffix": {"type": "string"}, "label": {"type": "string"},
+                                                          "value": {"type": "number"}, "suffix": {"type": "string"}, "label": {"type": "string"}, "highlight": {"type": "integer"},
                                                           "steps": {"type": "array", "items": {"type": "string"}}, "anim": {"type": "string", "enum": list(BUILTIN_LOTTIE)},
                                                           "media": {"type": "string"}, "loop": {"type": "boolean"}}, "required": ["at", "type"]}},
-    "value": {"type": "number", "description": "counter : le nombre affiché (compte jusqu'à lui) : un prix, un total, une durée…"},
-    "suffix": {"type": "string", "description": "counter : unité courte collée au nombre (€, %, +, FCFA, h…)."},
-    "label": {"type": "string", "description": "counter : ce que mesure le nombre (28 car.)."},
-    "steps": {"type": "array", "items": {"type": "string"}, "description": "flow : 2 à 4 étapes d'un processus, reliées par des flèches qui s'allument (18 car.)."},
+    "value": {"type": "number", "description": "counter : le nombre affiché (compte jusqu'à lui) : un prix, un total, une durée… dots : nombre ENTIER de 1 à 400, un point par unité. "
+              "route : la distance, SEULEMENT si elle est connue avec certitude (sinon omets-la)."},
+    "suffix": {"type": "string", "description": "counter / dots / route : unité courte collée au nombre (€, %, +, FCFA, h, km…)."},
+    "label": {"type": "string", "description": "counter / dots / route : ce que mesure le nombre ; bars : phrase au-dessus des barres (28 car.)."},
+    "highlight": {"type": "integer", "description": "dots : combien de points passent en or à la fin (0 à 12) : ceux qui comptent le plus (grands projets, gagnants…)."},
+    "steps": {"type": "array", "items": {"type": "string"}, "description": "flow : 2 à 4 étapes d'un processus, reliées par des flèches qui s'allument (18 car.). "
+              "bars : 2 à 6 étapes, une barre au trait chacune, de plus en plus haute (14 car.)."},
     "split_media": {"type": "string", "description": "my_clip : écran partagé AVANT | APRÈS : identifiant d'une 2e vidéo du patron, affichée à droite (ex. chantier brut | fini)."},
     "split_start": {"type": "number", "description": "my_clip : seconde de départ dans la 2e vidéo de l'écran partagé."},
     "phrases": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
@@ -143,7 +148,7 @@ SCENE_PROPS = {
     "quote": {"type": "string", "enum": list(QUOTES), "description": "quote : avis client enregistré — SEULEMENT s'il demande ses avis."},
     "lines": {"type": "array", "items": {"type": "string"}, "description": "outro : jusqu'à 6 lignes libres (1 : grand titre, 2 : sous-titre, 3 : petite ligne, 4 : bouton, 5-6 : contact). "
               "typewriter : 1 à 3 lignes tapées au clavier (60 car.). kinetic : 1 à 3 lignes d'un grand titre dont le DERNIER mot arrive en or (26 car. par ligne). "
-              "neon : 1 ou 2 mots en néon (16 car.). slogan : lignes sous la carte (40 car.), inutile avec brand."},
+              "neon : 1 ou 2 mots en néon (16 car.). slogan : lignes sous la carte (40 car.), inutile avec brand. route : [départ, arrivée] (24 car.)."},
     "tag": {"type": "string", "description": "kinetic / neon : petite étiquette dorée au-dessus (ex. « SITE 01 », 12 car.)."},
     "place": {"type": "string", "description": "kinetic : texte à côté de l'étiquette (ex. un lieu, 28 car.)."},
     "checks": {"type": "array", "items": {"type": "string"}, "description": "checklist : 1 à 5 éléments cochés un à un sur verre dépoli (40 car.)."},
@@ -200,11 +205,16 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo, LIBRE. Tu ne suis aucune recett
           "OUTILS DISPONIBLES (à choisir selon le besoin) : scènes title, text, stats (items chiffrés), quote, outro ; effets typewriter (texte tapé au clavier), "
           "kinetic (titre mot par mot, dernier mot en couleur), checklist (liste cochée une à une), neon (1-2 mots lumineux), slogan (carte l1 / l2) ; "
           "panneaux animés counter (un nombre qui compte jusqu'à value, suffix, label), flow (2 à 4 étapes A → B → C), wave (onde sonore, lines = [légende, durée]), "
-          "chat (bulle puis réponse tapée, lines = [réponse, note]), badge (pastille + nom), lottie (icône animée : anim du moteur ou media = une animation du patron) ; "
+          "chat (bulle puis réponse tapée, lines = [réponse, note]), badge (pastille + nom), lottie (icône animée : anim du moteur ou media = une animation du patron), "
+          "dots (grille de points : un point par unité, value entier jusqu'à 400 ; le compteur compte les points qui s'allument de plus en plus vite ; highlight = points en or à la fin), "
+          "bars (étapes au trait : 2 à 6 barres qui montent, un point d'or saute de l'une à l'autre, la dernière finit en or : progression, avant d'arriver au résultat), "
+          "route (trajet SCHÉMATIQUE, pas une vraie carte : un trait relie lines[0] à lines[1] avec un point qui avance ; value = distance seulement si elle est sûre) ; "
           "et l'ambiance de couleurs (theme) qui va avec le contenu. "
           "ANIMATION LIBRE (motion) : quand aucun outil ne montre ce que la vidéo raconte, DESSINE-LE toi-même : un SVG animé en CSS "
           "(interface qui s'assemble, écran flottant, objet, schéma vivant, décor, personnage stylisé, particules, lumière, profondeur en "
-          "perspective…), au format de la vidéo, avec un fond plein et un vrai mouvement pendant toute la scène ; chaque motion est pensée pour "
+          "perspective…), au format de la vidéo, avec un fond plein et un vrai mouvement pendant toute la scène ; style au trait possible : "
+          "un trait qui se dessine (pathLength=\"1\" stroke-dasharray=\"1\" et stroke-dashoffset animé de 1 à 0), un bonhomme bâton qui raconte "
+          "(tête = cercle, corps et membres = traits, chaque membre tourne autour de son articulation avec transform-origin), une seule couleur d'accent ; chaque motion est pensée pour "
           "CETTE scène (jamais un modèle réutilisé). Une scène montre TOUJOURS le contenu de la vidéo : jamais une animation décorative seule "
           "(éclat, flèche, ondes, badge) comme sujet, jamais le nom d'un effet affiché à l'écran. typewriter, kinetic, checklist et neon peuvent avoir une photo derrière (image : "
           "seulement une photo du site, et seulement s'il les a demandées) qui apparaît en points-pixels (reveal). "
@@ -301,6 +311,12 @@ def _readable(sc: dict) -> float:
         shown, n = 1.6, len(sc.get("label") or "") + 4
     elif t == "flow":
         shown, n = .9 + .6 * len(sc["steps"]), sum(len(x) for x in sc["steps"])
+    elif t == "dots":
+        shown, n = 3.0 + (1.0 if sc.get("highlight") else 0), len(sc.get("label") or "") + 4
+    elif t == "bars":
+        shown, n = 1.0 + .6 * len(sc["steps"]), sum(len(x) for x in sc["steps"]) + len(sc.get("label") or "")
+    elif t == "route":
+        shown, n = 2.4, sum(len(x) for x in sc["lines"]) + len(sc.get("label") or "")
     elif t == "lottie":
         shown, n = 1.6, sum(len(x) for x in sc.get("lines") or [])
     elif t in ("wave", "chat", "badge"):
@@ -405,6 +421,18 @@ def _fx_scene(sc: dict, t: str, ok_imgs: set, media: dict | None = None) -> dict
         own = (media or {}).get(str(sc.get("media") or ""))
         src = {"anim": sc["anim"]} if sc.get("anim") in BUILTIN_LOTTIE else {"media": own["id"]} if own and own["kind"] == "lottie" else None
         out = {"type": t, "seconds": _num(secs, lo, hi, 2.5), **src, "lines": lines, "loop": sc.get("loop") is True} if src else None
+    elif t == "dots":             # un point par unité : seulement un entier qu'on peut compter à l'œil
+        v = _stat(sc.get("value"))
+        out = {"type": t, "seconds": _num(secs, lo, hi, 6), "value": v, "suffix": CTRL.sub("", str(sc.get("suffix") or ""))[:6].strip(), "label": _cut(sc.get("label"), 28),
+               "highlight": int(_num(sc.get("highlight"), 0, min(12, v), 0))} if isinstance(v, int) and 1 <= v <= DOTS_MAX else None
+    elif t == "bars":
+        steps = [x for x in (_cut(v, 14) for v in (sc.get("steps") or []) if isinstance(v, str)) if x][:6]
+        out = {"type": t, "seconds": _num(secs, lo, hi, round(1.6 + .75 * len(steps), 1)), "steps": steps, "label": _cut(sc.get("label"), 28)} if len(steps) >= 2 else None
+    elif t == "route":            # trajet schématique ; la distance n'apparaît que si le scénario la donne
+        lines = [x for x in (_cut(v, 24) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
+        v = _stat(sc.get("value"))
+        out = {"type": t, "seconds": _num(secs, lo, hi, 5), "lines": lines, "label": _cut(sc.get("label"), 28),
+               "suffix": CTRL.sub("", str(sc.get("suffix") or ""))[:6].strip(), **({"value": v} if v is not None and v >= 0 else {})} if len(lines) == 2 else None
     elif t in ("wave", "chat", "badge"):
         lines = [x for x in (_cut(v, 30 if t == "chat" else 24) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
         out = {"type": t, "seconds": _num(secs, lo, hi, 4 if t == "chat" else 3), "lines": lines} if lines or t == "wave" else None

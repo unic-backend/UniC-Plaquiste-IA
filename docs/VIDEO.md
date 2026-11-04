@@ -27,6 +27,7 @@ Netlify seulement, sélecteurs `#id`/`.classe` simples). Rien n'est publié. Tes
 
 **Étendre** : un nouveau chiffre vrai → `FACT_STATS` ; un nouvel avis → `QUOTES` ; une nouvelle page filmable → `PAGES` (adresse + chapitres `#id`) ; un nouveau type de scène → `scripts/video/spec.py`
 (validation) + `scenes.html` (animation) + `video_studio.py` (catalogue). Photos : celles du dossier `images/` du site (liste lue sur le dépôt du site si connecté, sinon liste de secours).
+**Panneaux au trait** (scène, incrustation ou haut d'un écran divisé) : `dots` (grille de points, un point par unité jusqu'à 400, le compteur compte les points allumés, `highlight` en or), `bars` (2 à 6 étapes en barres qui montent, un point d'or saute de l'une à l'autre), `route` (trajet schématique de `lines[0]` à `lines[1]`, distance `value` seulement si elle est sûre). Repris des modèles de l'atelier (`scripts/video/modeles/points`, `etapes`, `trajet`).
 **Pas encore** : voix off narrée et synchronisée dans le montage scénarisé long ; les clips courts générés par IA peuvent avoir leur propre son. Photos prises depuis l'appli (il faudrait les héberger), vidéo d'un site tiers.
 
 **Moteur** (`overlay.html` / `overlay.mjs` : ancien moteur du portfolio, conservés et inutilisés) : `make.py` → `render.mjs` (scène page : capture déterministe, horloge virtuelle, animations CSS pilotées à la main, défilement au pixel physique) + `scenes.mjs` (scènes HTML et pastilles, image par image)

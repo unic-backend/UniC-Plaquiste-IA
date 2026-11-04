@@ -118,6 +118,13 @@ def test_panneaux_et_ecran_divise():
         assert sp.clean({"scenes": [{"type": t, **extra}]})["scenes"][0]["type"] == t                  # aussi en scène entière
     with pytest.raises(ValueError):
         sp.clean({"scenes": [{"type": "counter", "value": "beaucoup"}]})
+    for bad in ({"type": "dots", "value": 401}, {"type": "dots", "value": 2.5}, {"type": "bars", "steps": ["A"]}, {"type": "route", "lines": ["Dakar"]}):
+        with pytest.raises(ValueError):
+            sp.clean({"scenes": [bad]})                                                                 # grille, étapes, trajet : refusés s'ils ne veulent rien dire
+    d = sp.clean({"scenes": [{"type": "dots", "value": 180, "highlight": 99}, {"type": "route", "lines": ["A", "B"], "value": -3}]})["scenes"]
+    assert d[0]["highlight"] == 12 and "value" not in d[1]
+    pn = sp.clean({"scenes": [{"type": "clip", "url": URL, "seconds": 6, "panels": [[1, 0, {"type": "bars", "steps": ["Avant", "Après"]}]]}]})["scenes"][0]["panels"]
+    assert pn[0][2]["type"] == "bars"                                                                  # aussi en haut d'un écran divisé ou sur un film
     a = ed.ffmpeg_args({**c, "seconds": 6}, "a.mp4", None, 1080, 1920, 30, 180, "o/%05d.jpg")
     vf = a[a.index("-vf") + 1]
     assert ed.bottom_height(1920) == 1056 and "crop=1080:1056" in vf and "pad=1080:1920:0:864" in vf     # la personne en bas (55 %)

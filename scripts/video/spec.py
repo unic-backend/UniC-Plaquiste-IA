@@ -17,13 +17,15 @@ IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
-         "counter", "flow", "wave", "chat", "badge", "lottie", "motion")
+         "counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "motion")
 # « motion » : animation libre dessinée par l'IA (SVG animé en CSS), nettoyée par le serveur (motion_svg.py) ; revérifiée ici (aucun script ni rien d'externe).
 MOTION_MAX = 60_000
 MOTION_BAD = re.compile(r"<\s*(script|foreignObject|iframe|image|img|a|object|embed|link|meta)\b|\son\w+\s*=|javascript:|data:|@import|"
                         r"(?:href|src)\s*=\s*['\"](?!#)|url\s*\(\s*['\"]?\s*(?!#)", re.I)
-# Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge ; en scène, en incrustation ou en haut d'un écran divisé.
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie")
+# Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge, grille de points (un point par unité),
+# étapes au trait (barres qui montent), trajet schématique ; en scène, en incrustation ou en haut d'un écran divisé.
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route")
+DOTS_MAX = 400   # grille de points : au-delà, les points deviennent trop petits pour être comptés à l'œil
 # Animations vectorielles Lottie (lottie-web « light », sans expressions) : celles du moteur (dossier lottie/) ou celles du patron (lien https).
 LOTTIE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lottie")
 BUILTIN_LOTTIE = tuple(sorted(f[:-5] for f in os.listdir(LOTTIE_DIR) if f.endswith(".json"))) if os.path.isdir(LOTTIE_DIR) else ()
@@ -145,6 +147,25 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
         else:
             raise ValueError("animation : ni animation du moteur ni lien")
         out = {"type": t, "seconds": _secs(s.get("seconds"), 1.5, 10, 2.5), **src, "lines": _lines_of(s.get("lines"), 24, 2), "loop": s.get("loop") is True}
+    elif t == "dots":
+        v = stat_value(s.get("value"))
+        if v is None or v != int(v) or not 1 <= v <= DOTS_MAX:
+            raise ValueError(f"grille de points : un nombre entier de 1 à {DOTS_MAX}")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 12, 6), "value": int(v), "suffix": _txt(s.get("suffix"), 6),
+               "label": _txt(s.get("label"), 28).upper(), "highlight": int(_secs(s.get("highlight"), 0, min(12, v), 0))}
+    elif t == "bars":
+        steps = _lines_of(s.get("steps"), 14, 6)
+        if len(steps) < 2:
+            raise ValueError("étapes au trait : au moins 2 étapes")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 12, 1.6 + 0.75 * len(steps)), "steps": steps, "label": _txt(s.get("label"), 28).upper()}
+    elif t == "route":
+        lines = _lines_of(s.get("lines"), 24, 2)
+        if len(lines) < 2:
+            raise ValueError("trajet : départ et arrivée")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 12, 5), "lines": lines, "label": _txt(s.get("label"), 28).upper(), "suffix": _txt(s.get("suffix"), 6)}
+        v = stat_value(s.get("value"))
+        if v is not None and v >= 0:   # distance donnée par le patron ; sans elle, le trajet seul
+            out["value"] = v
     elif t in ("wave", "chat", "badge"):
         lines = _lines_of(s.get("lines"), 30 if t == "chat" else 24, 2)
         if t != "wave" and not lines:
