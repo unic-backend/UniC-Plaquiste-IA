@@ -193,7 +193,7 @@ class SignBox(Flowable):
         c.drawString(2, self.height + 3, "Signature et cachet")
         c.setStrokeColor(colors.HexColor("#1F3A93"))
         c.setLineWidth(0.8)
-        c.roundRect(0, 0, self.width, self.height, 3, stroke=1, fill=0)
+        c.roundRect(0, 0, self.width, self.height, 6, stroke=1, fill=0)
         from reportlab.lib.utils import ImageReader
         has_stamp = bool(self.stamp and self.stamp.exists())
         sig_w = self.width * (0.55 if has_stamp else 1.0)   # signature à gauche, cachet à droite
@@ -561,11 +561,15 @@ def _render(
               Paragraph(who or "—", _st("cn", fontSize=11, leading=14))] + [Paragraph(l, txt) for l in party_lines[1:]]
     obj_text = (title or doc_label) + (("<br/>" + notes.replace("\n", "<br/>")) if notes and not is_quote else "")
     objet = [Paragraph("OBJET", label), Spacer(1, P(1.5)), Paragraph(obj_text, _st("obj", fontName="Helvetica", fontSize=8.5, leading=11.5, alignment=TA_JUSTIFY))]
-    cards = Table([[client, "", objet]], colWidths=[62 * mm, 4 * mm, 114 * mm])
-    cards.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), TINT), ("BACKGROUND", (2, 0), (2, 0), TINT), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    def card(content, width_mm, height=None):   # encadré à coins arrondis, fond teinté
+        c = Table([[content]], colWidths=[width_mm * mm], rowHeights=[height] if height else None)
+        c.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), TINT), ("ROUNDEDCORNERS", [6, 6, 6, 6]), ("VALIGN", (0, 0), (-1, -1), "TOP"),
                                ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                               ("TOPPADDING", (0, 0), (-1, -1), P(6)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(6)),
-                               ("LEFTPADDING", (1, 0), (1, 0), 0), ("RIGHTPADDING", (1, 0), (1, 0), 0)]))
+                               ("TOPPADDING", (0, 0), (-1, -1), P(6)), ("BOTTOMPADDING", (0, 0), (-1, -1), P(6))]))
+        return c
+    high = max(card(client, 62).wrap(62 * mm, 1e4)[1], card(objet, 114).wrap(114 * mm, 1e4)[1])   # les deux encadrés à la même hauteur
+    cards = Table([[card(client, 62, high), "", card(objet, 114, high)]], colWidths=[62 * mm, 4 * mm, 114 * mm])
+    cards.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")] + [(k, (0, 0), (-1, -1), 0) for k in ("LEFTPADDING", "RIGHTPADDING", "TOPPADDING", "BOTTOMPADDING")]))
     story += [cards, Spacer(1, P(8))]
 
     # --- tableaux
