@@ -17,7 +17,7 @@ IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
-         "counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "motion", "layers3d", "room3d")
+         "counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "chart", "code", "motion", "layers3d", "room3d")
 # 3D (scene3d.js, Three.js en copie locale) : vue éclatée en couches nommées ; salon 3D dont le faux plafond sort et s'allume.
 # « motion » : animation libre dessinée par l'IA (SVG animé en CSS), nettoyée par le serveur (motion_svg.py) ; revérifiée ici (aucun script ni rien d'externe).
 MOTION_MAX = 60_000
@@ -25,7 +25,7 @@ MOTION_BAD = re.compile(r"<\s*(script|foreignObject|iframe|image|img|a|object|em
                         r"(?:href|src)\s*=\s*['\"](?!#)|url\s*\(\s*['\"]?\s*(?!#)", re.I)
 # Panneaux animés (motion design) : compteur, schéma A → B → C, onde sonore, bulle de commentaire, badge, grille de points (un point par unité),
 # étapes au trait (barres qui montent), trajet schématique ; en scène, en incrustation ou en haut d'un écran divisé.
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route")
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "chart", "code")   # chart : courbe ; code : éditeur qui se tape
 DOTS_MAX = 400   # grille de points : au-delà, les points deviennent trop petits pour être comptés à l'œil
 # Animations vectorielles Lottie (lottie-web « light », sans expressions) : celles du moteur (dossier lottie/) ou celles du patron (lien https).
 LOTTIE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lottie")
@@ -47,6 +47,15 @@ MAX_SCENES, MAX_TOTAL = 5000, 43200.0
 
 def _txt(v, n: int) -> str:
     return CTRL.sub("", str(v or "")).strip()[:n]
+
+
+def code_lines(v) -> list[str]:
+    """Lignes de code : indentation gardée (tabulation = 4 espaces), caractères de contrôle retirés, 60 caractères et 12 lignes au plus.
+    Les signes < > restent (le moteur n'écrit le code qu'en texte, jamais en HTML) ; lignes vides du bout retirées."""
+    out = [re.sub(r"[\x00-\x1f\x7f]", "", x.replace("\t", "    ")).rstrip()[:60] for x in (v if isinstance(v, list) else []) if isinstance(x, str)][:12]
+    while out and not out[-1]:
+        out.pop()
+    return out
 
 
 def _secs(v, lo: float, hi: float, dflt: float) -> float:
@@ -167,6 +176,16 @@ def _fx(s: dict, t: str, overlay: bool = False) -> dict:
         v = stat_value(s.get("value"))
         if v is not None and v >= 0:   # distance donnée par le patron ; sans elle, le trajet seul
             out["value"] = v
+    elif t == "chart":
+        vals = [x for x in (stat_value(y) for y in (s.get("values") if isinstance(s.get("values"), list) else [])[:40]) if x is not None]
+        if len(vals) < 2:
+            raise ValueError("courbe : au moins 2 valeurs")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 12, 5), "values": vals, "suffix": _txt(s.get("suffix"), 6), "label": _txt(s.get("label"), 28).upper()}
+    elif t == "code":
+        lines = code_lines(s.get("lines"))
+        if not any(lines):
+            raise ValueError("code : aucune ligne")
+        out = {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 15, round(1.8 + sum(len(x) + 3 for x in lines) / 28, 1)), "lines": lines, "label": _txt(s.get("label"), 24)}
     elif t in ("wave", "chat", "badge"):
         lines = _lines_of(s.get("lines"), 30 if t == "chat" else 24, 2)
         if t != "wave" and not lines:

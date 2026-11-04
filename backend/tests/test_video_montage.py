@@ -127,6 +127,10 @@ def test_panneaux_et_ecran_divise():
     assert pn[0][2]["type"] == "bars"                                                                  # aussi en haut d'un écran divisé ou sur un film
     with pytest.raises(ValueError):
         sp.clean({"scenes": [{"type": "layers3d", "layers": ["une seule"]}]})                         # vue éclatée : au moins 2 couches
+    for bad in ({"type": "chart", "values": [1]}, {"type": "chart", "values": "1,2,3"}, {"type": "code", "lines": ["", "   "]}):
+        with pytest.raises(ValueError):
+            sp.clean({"scenes": [bad]})                                                                 # courbe sans 2 valeurs, code vide : refusés
+    assert sp.code_lines(["\tx = 1", "y = '<b>'" + "z" * 80, "", ""]) == ["    x = 1", ("y = '<b>'" + "z" * 80)[:60]]
     three = ROOT / "three"
     assert (three / "three.module.js").is_file() and (three / "three.core.js").is_file() and "MIT" in (three / "LICENSE").read_text()
     assert 'from "./three/three.module.js"' in (ROOT / "scene3d.js").read_text()                       # 3D : copie locale, jamais un CDN

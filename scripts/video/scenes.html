@@ -128,6 +128,22 @@ html.split #cap{top:45%;transform:translateY(-50%)}
 .pnd b,.pnt b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
 .pnd small,.pnr small,.pnt small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--soft);text-transform:uppercase;text-align:center}
 .pnr svg,.pnt svg,.pnd svg{display:block;overflow:visible}
+/* courbe (cours, ventes, scores…) et éditeur de code : panneaux universels */
+.pnk{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*8);width:100%}
+.pnk .hd{display:flex;align-items:center;gap:calc(var(--u)*10)}
+.pnk b{font-family:Anton,Impact,sans-serif;font-weight:400;color:var(--fg);line-height:1;white-space:nowrap}
+.pnk i{font-style:normal;font-family:"Barlow Condensed",sans-serif;font-weight:700;color:#fff;border-radius:calc(var(--u)*6);padding:calc(var(--u)*3) calc(var(--u)*8);white-space:nowrap}
+.pnk i.up{background:#1f9d5c}.pnk i.dn{background:#d64545}
+.pnk small{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.14em;color:var(--soft);text-transform:uppercase;text-align:center}
+.pnk svg{display:block;overflow:visible}
+.pne{width:calc(100% - var(--u)*28);border-radius:calc(var(--u)*12);background:#0d1117;border:1px solid rgba(255,255,255,.14);box-shadow:0 calc(var(--u)*18) calc(var(--u)*40) rgba(0,0,0,.55);overflow:hidden;text-align:left}
+.pne .bar{display:flex;align-items:center;gap:calc(var(--u)*6);padding:calc(var(--u)*9) calc(var(--u)*12);background:#161b22}
+.pne .bar i{width:calc(var(--u)*9);height:calc(var(--u)*9);border-radius:50%;background:#ff5f56}.pne .bar i:nth-child(2){background:#ffbd2e}.pne .bar i:nth-child(3){background:#27c93f}
+.pne .bar span{margin-left:calc(var(--u)*8);font-family:"Barlow Condensed",sans-serif;font-weight:600;letter-spacing:.06em;color:#8b949e;font-size:calc(var(--u)*13)}
+.pne .src{padding:calc(var(--u)*12) calc(var(--u)*14) calc(var(--u)*14) calc(var(--u)*4);font-family:"DejaVu Sans Mono","Liberation Mono",ui-monospace,monospace;color:#e6edf3;line-height:1.55;white-space:pre}
+.pne .cr{display:flex;min-height:1.55em;overflow-wrap:anywhere}.pne .cr em{flex:none;width:2.6em;padding-right:1em;text-align:right;color:#6e7681;font-style:normal}
+.pne .k{color:var(--gold)}.pne .s{color:#a5d6ff}.pne .n{color:#79c0ff}.pne .c{color:#8b949e;font-style:italic}
+.pne .cur{display:inline-block;width:.55em;height:1.15em;margin-left:1px;background:var(--gold);vertical-align:text-bottom}
 .pnr text,.pnt text{font-family:"Barlow Condensed",sans-serif;font-weight:700;letter-spacing:.08em;text-transform:uppercase;fill:var(--fg)}
 /* pastille de chapitre (scène page) */
 #pill{position:absolute;left:calc(var(--u)*16);bottom:calc(var(--u)*96);display:none;align-items:center;gap:calc(var(--u)*10);padding:calc(var(--u)*9) calc(var(--u)*16) calc(var(--u)*9) calc(var(--u)*12);
@@ -367,7 +383,16 @@ function fxDraw(sc, t, dur, u) {
     A.hr.style.transform = `scaleX(${eo(ramp(t, 1.6, 2.2))})`; if (A.br) A.br.style.opacity = eo(ramp(t, 1.9, 2.4)); }
 }
 // ---------- panneaux animés (motion design) ----------
-const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route"];
+const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "chart", "code"];
+const CODE_CPS = 28;   // éditeur de code : 28 caractères par seconde
+const CODE_KW = /^(def|return|if|elif|else|for|while|in|not|and|or|import|from|as|class|const|let|var|function|async|await|new|try|except|catch|finally|with|yield|lambda|pass|break|continue|True|False|None|true|false|null|undefined|print|SELECT|FROM|WHERE|JOIN|GROUP|BY|ORDER|INSERT|UPDATE|fn|pub|struct|impl|match|func|package|public|private|static|void|int|float|string|bool)$/;
+const codeTokens = line => {   // découpe en morceaux colorés : commentaire, texte, nombre, mot-clé, reste
+  const out = [], re = /(#.*$|\/\/.*$|--.*$)|("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|`[^`]*`?)|(\b\d+(?:[.,]\d+)?\b)|([A-Za-z_]\w*)/g; let m, at = 0;
+  while ((m = re.exec(line))) { if (m.index > at) out.push({ t: line.slice(at, m.index), c: "" });
+    out.push({ t: m[0], c: m[1] ? "c" : m[2] ? "s" : m[3] ? "n" : CODE_KW.test(m[4]) ? "k" : "" }); at = m.index + m[0].length; }
+  if (at < line.length) out.push({ t: line.slice(at), c: "" });
+  return out;
+};
 const NS = "http://www.w3.org/2000/svg";
 const sv = (tag, at, parent) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (parent) parent.appendChild(e); return e; };   // dessin du moteur (jamais un texte du scénario en balise)
 const svText = (parent, x, y, txt, size, anchor) => { const e = sv("text", { x, y, "text-anchor": anchor, "font-size": size }, parent); e.textContent = txt; return e; };
@@ -440,6 +465,26 @@ function panelSetup(sc, box, u) {
     const L = sc.lines, la = svText(g, a[0] - 8 * u, a[1] + 26 * u, fr(L[0]), 14 * u, "start"), lb = svText(g, z[0] + 8 * u, z[1] - 20 * u, fr(L[1]), 14 * u, "end");
     [la, lb].forEach(e => { const m = aw - 8 * u; let f = 14 * u; for (let i = 0; i < 30 && e.getComputedTextLength() > m * .62 && f > 8; i++) { f *= .93; e.setAttribute("font-size", f); } });
     A.pn = { w, b, s, has, glow, path, pa, pb, ring, car, la, lb, len: path.getTotalLength() };
+  } else if (T === "chart") {   // courbe qui se trace : une évolution (cours, ventes, récolte, score…) ; valeur finale et écart calculés sur les données reçues
+    const w = el("div", "pnk", "", box), v = sc.values, n = v.length, d = Math.min(2, Math.max(...v.map(decs))), hd = el("div", "hd", "", w);
+    const b = el("b", "", num(v[n - 1], d) + sfx(sc.suffix), hd); b.style.fontSize = 52 * u + "px";
+    const pct = v[0] !== 0 ? (v[n - 1] - v[0]) / Math.abs(v[0]) * 100 : null, up = v[n - 1] >= v[0];
+    const tag = pct === null ? null : el("i", up ? "up" : "dn", (up ? "▲ +" : "▼ \u2212") + num(Math.abs(pct), Math.abs(pct) < 10 ? 1 : 0) + "\u00a0%", hd);
+    if (tag) tag.style.fontSize = 17 * u + "px"; fit(hd, W() - 40 * u);
+    const s = sc.label ? el("small", "", fr(sc.label), w) : null; if (s) { s.style.fontSize = 15 * u + "px"; fit(s, W() - 48 * u); }
+    const aw = W() - 40 * u, ah = cl(H() - 56 * u - 110 * u, 100 * u, 330 * u), g = sv("svg", { width: aw, height: ah }, w);
+    let lo = Math.min(...v), hi = Math.max(...v); const m = (hi - lo || Math.abs(hi) || 1) * .12; lo -= m; hi += m;
+    const X = i => 4 * u + i * (aw - 44 * u) / (n - 1), Y = x => 8 * u + (hi - x) / (hi - lo) * (ah - 16 * u);
+    for (let j = 0; j < 4; j++) sv("line", { x1: 0, y1: 8 * u + j * (ah - 16 * u) / 3, x2: aw, y2: 8 * u + j * (ah - 16 * u) / 3, stroke: "var(--fg)", "stroke-opacity": .1, "stroke-width": 1 }, g);
+    const area = sv("path", { fill: "var(--gold)", "fill-opacity": .14 }, g), line = sv("path", { fill: "none", stroke: "var(--gold)", "stroke-width": 3 * u, "stroke-linejoin": "round", "stroke-linecap": "round" }, g);
+    const dot = sv("circle", { r: 5.5 * u, fill: "var(--fg)", stroke: "var(--gold)", "stroke-width": 3 * u }, g);
+    A.pn = { w, b, tag, s, v, n, d, X, Y, area, line, dot, base: ah - 8 * u };
+  } else if (T === "code") {   // éditeur de code qui se tape tout seul, en couleurs (mots-clés, textes, nombres, commentaires) ; textContent seulement
+    const w = el("div", "pne", "", box), bar = el("div", "bar", "", w); [0, 1, 2].forEach(() => el("i", "", null, bar)); if (sc.label) el("span", "", sc.label, bar);
+    const src = el("div", "src", "", w), long = Math.max(8, ...sc.lines.map(l => l.length)); src.style.fontSize = Math.min(15 * u, (W() - 56 * u) / ((long + 3.6) * .61)) + "px";   // la plus longue ligne tient, numéros compris (chasse fixe ≈ 0,6 em)
+    A.pn = { w, cur: el("span", "cur", "", null), rows: sc.lines.map((l, i) => { const r = el("div", "cr", "", src); el("em", "", String(i + 1), r); return { c: el("span", "", l, r), toks: codeTokens(l), len: l.length }; }) };
+    fit(src, src.clientWidth - 8 * u); src.style.whiteSpace = "pre-wrap"; A.pn.rows.forEach(r => { r.c.textContent = ""; });   // mesuré sur le texte complet : la plus longue ligne tient ; trop longue même en petit, elle passe à la ligne au lieu d'être coupée
+    fitH(w, u);
   } else if (T === "badge") {
     const b = el("div", "pnb", "", box), ci = el("div", "ci", "", b); ci.style.fontSize = 50 * u + "px"; ci.textContent = [...(L[0] || "?").trim()][0].toUpperCase();
     A.pn.rings = [0, 1].map(() => el("s", "", "", ci)); A.pn.ci = ci;
@@ -505,6 +550,24 @@ function panelDraw(sc, t, dur, u) {
     const kb = eo(ramp(t, T2 - .05, T2 + .3)); P.pb.setAttribute("r", 9 * u * kb * (1 + .25 * Math.sin(Math.PI * kb))); P.lb.setAttribute("opacity", eo(ramp(t, T2 + .1, T2 + .5)));
     const kr = ramp(t, T2 + .1, T2 + 1.2); P.ring.setAttribute("r", 9 * u + 34 * u * eo(kr)); P.ring.setAttribute("opacity", kr > 0 && kr < 1 ? 1 - kr : 0);
     if (P.s) { const ks = eo(ramp(t, .3, .7)); fx(P.s, ks, (1 - ks) * 10 * u); }
+  } else if (T === "chart") {
+    const k = eo(ramp(t, .05, .4)); fx(P.w, k, (1 - k) * 18 * u); if (P.s) { const ks = eo(ramp(t, .3, .7)); fx(P.s, ks, (1 - ks) * 10 * u); }
+    const T2 = Math.max(1.5, dur - 1.3), f = eio(ramp(t, .5, T2)) * (P.n - 1), i0 = Math.floor(f), fr2 = f - i0;   // la courbe avance point par point
+    const pts = []; for (let i = 0; i <= i0; i++) pts.push([P.X(i), P.Y(P.v[i])]);
+    const cur = i0 < P.n - 1 ? P.v[i0] + (P.v[i0 + 1] - P.v[i0]) * fr2 : P.v[P.n - 1]; if (i0 < P.n - 1) pts.push([P.X(f), P.Y(cur)]);
+    const dl = "M" + pts.map(p => p.join(",")).join(" L"), tip = pts[pts.length - 1];
+    P.line.setAttribute("d", dl); P.area.setAttribute("d", `${dl} L${tip[0]},${P.base} L${pts[0][0]},${P.base} Z`);
+    P.dot.setAttribute("cx", tip[0]); P.dot.setAttribute("cy", tip[1]); P.dot.style.opacity = eo(ramp(t, .4, .6));
+    P.b.textContent = num(cur, P.d) + sfx(sc.suffix);
+    if (P.tag) { const kt = eo(ramp(t, T2, T2 + .4)); P.tag.style.opacity = kt; P.tag.style.transform = `scale(${.7 + .3 * kt})`; }
+  } else if (T === "code") {
+    const k = eo(ramp(t, .05, .4)); fx(P.w, k, (1 - k) * 18 * u, .96 + .04 * k);
+    let left = Math.floor(Math.max(0, t - .5) * CODE_CPS), on = -1;   // 28 caractères par seconde, ligne après ligne
+    P.cur.remove();   // un seul curseur, déplacé à chaque image
+    P.rows.forEach((r, i) => { const n = Math.min(r.len, left); left = Math.max(0, left - r.len - 3); if (n < r.len && on < 0 && (n > 0 || i === 0 || left === 0)) on = i;
+      if (r.shown === n) return; r.shown = n; r.c.textContent = "";
+      let rest = n; for (const tk of r.toks) { if (rest <= 0) break; el("span", tk.c, tk.t.slice(0, rest), r.c); rest -= tk.t.length; } });
+    if (on >= 0) P.rows[on].c.appendChild(P.cur); else if (Math.floor(t * 2.5) % 2 === 0) P.rows[P.rows.length - 1].c.appendChild(P.cur);   // fini : le curseur clignote au bout
   } else if (T === "badge") {
     const k = eo(ramp(t, .05, .45)); fx(P.ci, k, 0, .4 + .6 * k);
     P.rings.forEach((r, i) => { const p = ((t - .3 - i * .6) % 1.2 + 1.2) % 1.2 / 1.2; r.style.transform = `scale(${1 + p * .8})`; r.style.opacity = t < .3 + i * .6 ? 0 : (1 - p) * .8; });

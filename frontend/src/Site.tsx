@@ -8,13 +8,15 @@ type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
   typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo", my_photo: "Ma photo",
-  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation", dots: "Grille de points", bars: "Étapes au trait", route: "Trajet", motion: "Animation libre", layers3d: "Vue éclatée 3D", room3d: "Salon 3D" };
+  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation", dots: "Grille de points", bars: "Étapes au trait", route: "Trajet", chart: "Courbe", code: "Code", motion: "Animation libre", layers3d: "Vue éclatée 3D", room3d: "Salon 3D" };
 const ANIM_FR: Record<string, string> = { check: "✓ Validé", spark: "✦ Éclat", arrow: "→ Flèche", pin: "📍 Lieu", pulse: "◉ Ondes" };
 /** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
 const panelText = (p: { [k: string]: unknown }) => {
   const L = Array.isArray(p.lines) ? (p.lines as unknown[]).map(String) : [];
   if (p.type === "counter") return `${statNumber(p.value)}${p.suffix ? (/^[+×]/.test(String(p.suffix)) ? "" : " ") + String(p.suffix) : ""}${p.label ? ` ${String(p.label)}` : ""}`;
   if (p.type === "flow" || p.type === "bars") return [...(p.label ? [String(p.label)] : []), (Array.isArray(p.steps) ? (p.steps as unknown[]).map(String) : []).join(" → ")].join(" · ");
+  if (p.type === "chart") { const v = Array.isArray(p.values) ? (p.values as unknown[]).map(Number) : []; return `${v.length ? statNumber(v[v.length - 1]) : ""}${p.suffix ? " " + String(p.suffix) : ""}${p.label ? ` · ${String(p.label)}` : ""}`; }
+  if (p.type === "code") return [String(p.label || ""), ...(Array.isArray(p.lines) ? (p.lines as unknown[]).map(String) : []).filter((l) => l.trim()).slice(0, 1)].filter(Boolean).join(" · ");
   if (p.type === "dots") return `${statNumber(p.value)} points${p.label ? ` · ${String(p.label)}` : ""}${Number(p.highlight) > 0 ? ` · ${Number(p.highlight)} en or` : ""}`;
   if (p.type === "route") return `${L.join(" → ")}${typeof p.value === "number" ? ` · ${statNumber(p.value)}${p.suffix ? " " + String(p.suffix) : ""}` : ""}`;
   if (p.type === "lottie") return [p.anim ? ANIM_FR[String(p.anim)] || String(p.anim) : "Ton animation", ...L].join(" · ");
@@ -108,7 +110,7 @@ function SceneFrame({ s }: { s: VideoScene }) {
       {words && <span className="f-cap">{words}</span>}
     </>;
   }
-  if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge" || t === "lottie" || t === "dots" || t === "bars" || t === "route") {
+  if (t === "counter" || t === "flow" || t === "wave" || t === "chat" || t === "badge" || t === "lottie" || t === "dots" || t === "bars" || t === "route" || t === "chart" || t === "code") {
     return <>{t === "counter" ? <b className="f-t1">{statNumber(s.value)}{s.suffix ? (/^[+×]/.test(String(s.suffix)) ? "" : " ") + String(s.suffix) : ""}</b> : <small className="f-chip">{SCENE_FR[t]}</small>}
       <b className="f-t2">{frText(t === "counter" ? String(s.label || "") : panelText(s))}</b></>;
   }

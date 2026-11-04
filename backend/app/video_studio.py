@@ -47,8 +47,9 @@ FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.htm
 SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
            "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12),
            "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8), "motion": (2, 15),
-           "dots": (2.5, 12), "bars": (2.5, 12), "route": (2.5, 12), "layers3d": (4, 14), "room3d": (6, 14)}
-PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route")
+           "dots": (2.5, 12), "bars": (2.5, 12), "route": (2.5, 12), "layers3d": (4, 14), "room3d": (6, 14),
+           "chart": (2.5, 12), "code": (2.5, 15)}
+PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "chart", "code")
 DOTS_MAX = 400                    # grille de points : un point par unité, au plus 400 (scripts/video/spec.py)
 # Animations Lottie du moteur (scripts/video/lottie/, créées pour UniC) et leur sens ; le patron peut aussi envoyer les siennes (Mes médias).
 BUILTIN_LOTTIE = {"check": "coche qui se trace dans un cercle (validé, terminé, garanti)", "spark": "éclat lumineux (nouveauté, effet waouh)",
@@ -73,6 +74,7 @@ WANTS_COMPANY = re.compile(r"t[ée]l[ée]phone|num[ée]ro|contact|coordonn[ée]e
                            r"chiffres? (de l'entreprise|d'unic|de ma soci[ée]t[ée])|nos chiffres|mes chiffres", re.I)
 FORMATS = {"vertical": "vertical 9:16 (WhatsApp, TikTok, Reels)", "horizontal": "horizontal 16:9 (YouTube, écran)", "square": "carré 1:1 (Facebook, Instagram)"}
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
+CODE_CTRL = re.compile(r"[\x00-\x1f\x7f]")   # code : < et > gardés (le moteur n'écrit le code qu'en texte, jamais en HTML)
 IMG_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,80}\.webp$")
 
 # Catalogues : tout ce que l'IA peut montrer est ICI (vrai, vérifié par le patron), jamais inventé.
@@ -121,12 +123,16 @@ SCENE_PROPS = {
                                                           "lines": {"type": "array", "items": {"type": "string"}}, "tag": {"type": "string"}, "place": {"type": "string"},
                                                           "heading": {"type": "string"}, "checks": {"type": "array", "items": {"type": "string"}},
                                                           "value": {"type": "number"}, "suffix": {"type": "string"}, "label": {"type": "string"}, "highlight": {"type": "integer"},
+                                                          "values": {"type": "array", "items": {"type": "number"}}, "code": {"type": "array", "items": {"type": "string"}},
                                                           "steps": {"type": "array", "items": {"type": "string"}}, "anim": {"type": "string", "enum": list(BUILTIN_LOTTIE)},
                                                           "media": {"type": "string"}, "loop": {"type": "boolean"}}, "required": ["at", "type"]}},
     "value": {"type": "number", "description": "counter : le nombre affiché (compte jusqu'à lui) : un prix, un total, une durée… dots : nombre ENTIER de 1 à 400, un point par unité. "
               "route : la distance, SEULEMENT si elle est connue avec certitude (sinon omets-la)."},
     "suffix": {"type": "string", "description": "counter / dots / route : unité courte collée au nombre (€, %, +, FCFA, h, km…)."},
     "label": {"type": "string", "description": "counter / dots / route : ce que mesure le nombre ; bars : phrase au-dessus des barres (28 car.)."},
+    "values": {"type": "array", "items": {"type": "number"}, "description": "chart : 2 à 40 valeurs dans l'ordre du temps (cours, ventes, récolte, poids, score…) : "
+               "SEULEMENT des valeurs données ou sûres ; illustratives, écris « exemple » dans label."},
+    "code": {"type": "array", "items": {"type": "string"}, "description": "code : 1 à 12 lignes de VRAI code qui fonctionne (indentation gardée, 60 car. par ligne) ; label = nom du fichier ou langage."},
     "highlight": {"type": "integer", "description": "dots : combien de points passent en or à la fin (0 à 12) : ceux qui comptent le plus (grands projets, gagnants…)."},
     "steps": {"type": "array", "items": {"type": "string"}, "description": "flow : 2 à 4 étapes d'un processus, reliées par des flèches qui s'allument (18 car.). "
               "bars : 2 à 6 étapes, une barre au trait chacune, de plus en plus haute (14 car.)."},
@@ -210,9 +216,15 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo, LIBRE. Tu ne suis aucune recett
           "dots (grille de points : un point par unité, value entier jusqu'à 400 ; le compteur compte les points qui s'allument de plus en plus vite ; highlight = points en or à la fin), "
           "bars (étapes au trait : 2 à 6 barres qui montent, un point d'or saute de l'une à l'autre, la dernière finit en or : progression, avant d'arriver au résultat), "
           "route (trajet SCHÉMATIQUE, pas une vraie carte : un trait relie lines[0] à lines[1] avec un point qui avance ; value = distance seulement si elle est sûre) ; "
+          "chart (courbe qui se trace : une évolution — cours, ventes, récolte, poids, score — avec la valeur finale et l'écart en % calculés sur values), "
+          "code (éditeur de code qui se tape tout seul, en couleurs : code = lignes de vrai code, label = fichier) ; "
           "3D : layers3d (vue éclatée : 2 à 6 couches nommées qui se séparent, chaque légende reliée à sa couche ; montre de quoi une chose est faite : "
           "un mur, un sol, la Terre, un gâteau, une application…), room3d (salon 3D façon dessin animé : la caméra entre, un faux plafond sort et s'allume, "
-          "LED puis spots ; lines = [question, chute]) ; "
+          "LED puis spots ; lines = [question, chute] ; seulement pour un intérieur, une déco, un plafond) ; "
+          "UNIVERSEL : ces outils servent TOUS les domaines (agriculture, élevage, pêche, commerce, trading, informatique, logistique, sport, santé, "
+          "éducation…) ; prends celui qui MONTRE le sujet : chart pour une évolution (cours, ventes, récolte, poids), dots pour un effectif (bêtes, clients, "
+          "joueurs), bars pour des étapes ou une croissance, route pour un trajet (livraison, export, migration), code pour du code, layers3d pour une "
+          "composition (un sol, un produit, une application), flow pour un processus, counter ou stats pour des chiffres ; "
           "et l'ambiance de couleurs (theme) qui va avec le contenu. "
           "ANIMATION LIBRE (motion) : quand aucun outil ne montre ce que la vidéo raconte, DESSINE-LE toi-même : un SVG animé en CSS "
           "(interface qui s'assemble, écran flottant, objet, schéma vivant, décor, personnage stylisé, particules, lumière, profondeur en "
@@ -319,6 +331,10 @@ def _readable(sc: dict) -> float:
         shown, n = 3.0 + (1.0 if sc.get("highlight") else 0), len(sc.get("label") or "") + 4
     elif t == "bars":
         shown, n = 1.0 + .6 * len(sc["steps"]), sum(len(x) for x in sc["steps"]) + len(sc.get("label") or "")
+    elif t == "chart":
+        shown, n = 3.0, len(sc.get("label") or "") + 6
+    elif t == "code":
+        shown, n = .5 + sum(len(x) + 3 for x in sc["lines"]) / 28, 0
     elif t == "route":
         shown, n = 2.4, sum(len(x) for x in sc["lines"]) + len(sc.get("label") or "")
     elif t == "lottie":
@@ -437,6 +453,15 @@ def _fx_scene(sc: dict, t: str, ok_imgs: set, media: dict | None = None) -> dict
         v = _stat(sc.get("value"))
         out = {"type": t, "seconds": _num(secs, lo, hi, 5), "lines": lines, "label": _cut(sc.get("label"), 28),
                "suffix": CTRL.sub("", str(sc.get("suffix") or ""))[:6].strip(), **({"value": v} if v is not None and v >= 0 else {})} if len(lines) == 2 else None
+    elif t == "chart":            # courbe : seulement des nombres ; l'écart en % est calculé par le moteur, jamais écrit par l'IA
+        vals = [x for x in (_stat(v) for v in (sc.get("values") if isinstance(sc.get("values"), list) else [])[:40]) if x is not None]
+        out = {"type": t, "seconds": _num(secs, lo, hi, 5), "values": vals, "suffix": CTRL.sub("", str(sc.get("suffix") or ""))[:6].strip(),
+               "label": _cut(sc.get("label"), 28)} if len(vals) >= 2 else None
+    elif t == "code":             # éditeur de code : indentation gardée, lignes vides du bout retirées
+        lines = [CODE_CTRL.sub("", v.replace("\t", "    ")).rstrip()[:60] for v in (sc.get("code") or sc.get("lines") or []) if isinstance(v, str)][:12]
+        while lines and not lines[-1]:
+            lines.pop()
+        out = {"type": t, "seconds": _num(secs, lo, hi, round(1.8 + sum(len(x) + 3 for x in lines) / 28, 1)), "lines": lines, "label": _cut(sc.get("label"), 24)} if any(lines) else None
     elif t in ("wave", "chat", "badge"):
         lines = [x for x in (_cut(v, 30 if t == "chat" else 24) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
         out = {"type": t, "seconds": _num(secs, lo, hi, 4 if t == "chat" else 3), "lines": lines} if lines or t == "wave" else None
