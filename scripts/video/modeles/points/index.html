@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+      #root { position: relative; width: 1080px; height: 1920px; background: #000; color: #fff; font-family: InterL, sans-serif; }
+      svg { position: absolute; inset: 0; }
+      #num { position: absolute; left: 0; right: 0; top: 140px; text-align: center; font: 400 230px/1 Anton; letter-spacing: .02em; }
+      #num b { color: #ffc400; font-weight: 400; }
+      #lab { position: absolute; left: 0; right: 0; top: 388px; text-align: center; font: 500 34px InterL; letter-spacing: .3em; color: rgba(255,255,255,.75); }
+      #refs { position: absolute; left: 0; right: 0; top: 1460px; text-align: center; font: 500 36px/1.5 InterL; color: #fff; }
+      #refs small { display: block; font-size: 26px; letter-spacing: .3em; color: #ffc400; margin-bottom: 6px; }
+      #end { position: absolute; left: 0; right: 0; bottom: 130px; text-align: center; }
+      #end .b { font: 400 44px Anton; letter-spacing: .32em; }
+      #end .b b { color: #ffc400; font-weight: 400; }
+      #end .s { margin-top: 14px; font: 500 30px InterL; color: rgba(255,255,255,.75); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="11" data-width="1080" data-height="1920">
+      <div id="num"><span id="n">0</span><b id="plus">+</b></div>
+      <div id="lab">CHANTIERS LIVRÉS</div>
+      <svg viewBox="0 0 1080 1920"><g id="grid"></g><g id="rings"></g></svg>
+      <div id="refs"><small>PARMI EUX</small>Stade Abdoulaye Wade · Dakar Arena<br />UAM · Centre équestre</div>
+      <div id="end"><div class="b">UNIC <b>PLAQUISTE</b></div><div class="s">Devis gratuit sous 48 h</div></div>
+    </div>
+    <script>
+      // 180 = FACT_STATS["chantiers"] (backend/app/video_studio.py) : un point par chantier livré, rien d'inventé.
+      const N = 180, COLS = 12, S = 62, X0 = 199, Y0 = 500, GOLD = [38, 81, 124, 166];
+      const grid = document.getElementById("grid"), rings = document.getElementById("rings");
+      for (let i = 0; i < N; i++) {
+        const x = X0 + (i % COLS) * S, y = Y0 + Math.floor(i / COLS) * S, g = GOLD.includes(i);
+        grid.insertAdjacentHTML("beforeend", `<circle class="d${g ? " g" : ""}" cx="${x}" cy="${y}" r="5" fill="#262626" />`);
+        if (g) rings.insertAdjacentHTML("beforeend", `<circle class="ring" cx="${x}" cy="${y}" r="22" fill="none" stroke="#ffc400" stroke-width="3" opacity="0" />`);
+      }
+      // les points s'allument de plus en plus vite ; le compteur compte exactement les points allumés
+      const T0 = 1.2, SPAN = 4.2, delay = gsap.utils.distribute({ base: 0, amount: SPAN, ease: "power2.out" });
+      const dots = gsap.utils.toArray(".d"), starts = dots.map((d, i) => delay(i, d, dots));
+      const n = document.getElementById("n");
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#num", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.2)
+        .fromTo("#lab", { opacity: 0 }, { opacity: 1, duration: 0.7 }, 0.5)
+        .fromTo("#plus", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(3)" }, T0 + SPAN + 0.1)
+        .fromTo("#grid", { opacity: 0 }, { opacity: 1, duration: 0.6 }, 0.6)
+        .to(dots, { attr: { r: 17, fill: "#fff" }, duration: 0.25, ease: "back.out(2)", stagger: (i) => starts[i] }, T0)
+        .to({}, { duration: SPAN + 0.25, ease: "none", onUpdate: () => {
+            const t = tl.time() - T0;
+            n.textContent = starts.filter((s) => s <= t).length;
+          } }, T0)
+        .to(".d:not(.g)", { attr: { fill: "#4a4a4a" }, duration: 0.6 }, 6.0)
+        .to(".d.g", { attr: { r: 22, fill: "#ffc400" }, duration: 0.5, ease: "back.out(2.5)" }, 6.1)
+        .fromTo(".ring", { attr: { r: 22 }, opacity: 1 }, { attr: { r: 70 }, opacity: 0, duration: 1.2, ease: "power2.out", stagger: 0.12, immediateRender: false }, 6.4)
+        .fromTo("#refs", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.7, ease: "power2.out" }, 6.5)
+        .fromTo("#end", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 8.4)
+        .to({}, { duration: 0.01 }, 10.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

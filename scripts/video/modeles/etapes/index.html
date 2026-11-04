@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+      #root { position: relative; width: 1080px; height: 1920px; background: #000; color: #fff; font-family: InterL, sans-serif; }
+      svg { position: absolute; inset: 0; }
+      .q { position: absolute; left: 0; right: 0; text-align: center; font: 500 58px InterL; letter-spacing: .01em; color: #fff; }
+      #q1 { top: 300px; } #q2 { top: 300px; }
+      #brand { position: absolute; left: 0; right: 0; bottom: 170px; text-align: center; font: 400 40px Anton; letter-spacing: .32em; color: rgba(255,255,255,.9); }
+      #brand b { color: #ffc400; font-weight: 400; }
+      text { font: 500 24px InterL; letter-spacing: .06em; fill: rgba(255,255,255,.7); text-anchor: middle; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="10" data-width="1080" data-height="1920">
+      <div class="q" id="q1">chaque étape paraît petite…</div>
+      <div class="q" id="q2">…jusqu'au résultat.</div>
+      <svg viewBox="0 0 1080 1920" id="art">
+        <g id="scene" style="transform-origin: 540px 1100px">
+          <line id="ground" x1="100" y1="1480" x2="100" y2="1480" stroke="#fff" stroke-width="3" />
+          <g id="bars"></g>
+          <circle id="dot" cx="100" cy="1466" r="14" fill="#ffc400" />
+        </g>
+      </svg>
+      <div id="brand">UNIC <b>PLAQUISTE</b></div>
+    </div>
+    <script>
+      // Les 5 étapes réelles d'un ouvrage en plaque de plâtre. Barres au trait : chacune plus haute que la précédente.
+      const STEPS = ["TRACÉ", "OSSATURE", "PLAQUES", "JOINTS", "PEINTURE"];
+      const X0 = 130, GAP = 172, W = 128, BASE = 1480, H = [170, 330, 500, 680, 880];
+      const bars = document.getElementById("bars");
+      STEPS.forEach((s, i) => {
+        const x = X0 + i * GAP;
+        bars.insertAdjacentHTML("beforeend",
+          `<rect id="b${i}" x="${x}" y="${BASE}" width="${W}" height="0" fill="none" stroke="#fff" stroke-width="3" />` +
+          `<text id="t${i}" x="${x + W / 2}" y="${BASE + 56}" opacity="0">${s}</text>`);
+      });
+      const tl = gsap.timeline({ paused: true }), E = "power3.inOut";
+      tl.fromTo("#q1", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 0.3)
+        .fromTo("#dot", { scale: 0, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.4, ease: "back.out(2.5)" }, 0.5)
+        .to("#ground", { attr: { x2: 980 }, duration: 1.0, ease: E }, 1.0);
+      // le point monte sur chaque barre au moment où elle pousse
+      let t = 1.6;
+      STEPS.forEach((_, i) => {
+        const x = X0 + i * GAP + W / 2, top = BASE - H[i];
+        tl.to(`#b${i}`, { attr: { y: top, height: H[i] }, duration: 0.55, ease: "power2.out" }, t)
+          .to(`#t${i}`, { opacity: 1, duration: 0.4 }, t + 0.1)
+          .to("#dot", { attr: { cx: x }, duration: 0.5, ease: "power1.inOut" }, t + 0.05)
+          .to("#dot", { attr: { cy: top - 12 }, duration: 0.5, ease: "power3.out" }, t + 0.05);
+        t += 0.75;
+      });
+      tl.to("#q1", { opacity: 0, duration: 0.4 }, 5.2)
+        .fromTo("#q2", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 5.6)
+        .to("#dot", { attr: { r: 20 }, duration: 0.3, yoyo: true, repeat: 1, ease: "power1.inOut" }, 5.4)
+        .to("#b4", { attr: { fill: "rgba(255,196,0,.18)" }, stroke: "#ffc400", duration: 0.6 }, 5.5)
+        .to("#scene", { scale: 0.86, duration: 2.6, ease: "power2.inOut" }, 6.0)
+        .fromTo("#brand", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 7.6)
+        .to({}, { duration: 0.01 }, 9.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

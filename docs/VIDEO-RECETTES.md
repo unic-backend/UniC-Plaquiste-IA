@@ -13,6 +13,10 @@ Rendu : `bash scripts/video/modeles/preparer.sh <modèle> [sortie.mp4]` (1080×1
 | `plafond` | scène 3D décorative (V4) | 9 s | Salon le soir : la LED de la gorge fait le tour, puis les spots s'allument |
 | `devis` | explication animée en cartes (V1) | 16 s | « Votre devis en 3 étapes » : WhatsApp, visite et métré à Dakar, devis gratuit sous 48 h, 8 ans / 180+ / 98 % |
 | `references` | vitrine de chantiers | 16 s | Stade Abdoulaye Wade, Dakar Arena, UAM, Centre équestre (photos du site), signature avec le numéro |
+| `etapes` | trait minimaliste (« /minimalistic-graphics », V2) | 10 s | Barres au trait : tracé, ossature, plaques, joints, peinture ; un point d'or monte de l'une à l'autre |
+| `points` | grille de points (V2) | 11 s | 180 points = 180+ chantiers livrés ; le compteur compte les points allumés ; les 4 grands projets en or |
+| `bonhomme` | histoire en bonhomme bâton (« /stick-figure », V2) | 12 s | Pièce nue → message à UniC (« devis gratuit sous 48 h ») → le plaquiste arrive → la plaque devient un faux plafond LED |
+| `trajet` | trajet sur carte (« /map-route », V2) | 11 s | Dakar → Diamniadio sur la vraie côte (Natural Earth, domaine public), 28 km à vol d'oiseau, les 4 grands projets |
 
 Chiffres et coordonnées = ceux de `FACTS` / `FACT_STATS` (`backend/app/video_studio.py`) ; photos = dossier `images/` du site.
 
@@ -20,7 +24,10 @@ Chiffres et coordonnées = ceux de `FACTS` / `FACT_STATS` (`backend/app/video_st
 enregistrée dans `window.__timelines["main"]`, et pour la 3D un `renderAt(t)` appelé par l'évènement `hf-seek` (`e.detail.time`).
 Tout doit dépendre du temps `t` seulement (pas d'horloge, pas de hasard non fixé) : HyperFrames filme les images dans le désordre.
 Bibliothèques et polices en local (`lib/`, `fonts/`, copiées par `preparer.sh`), jamais depuis un CDN.
+Un trait qui se dessine : `pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"`, animé par `attr: { "stroke-dashoffset": 0 }`
+(animé en style, GSAP arrondit les px et le trait apparaît d'un coup). Un compteur suit le même temps que ce qu'il compte (`onUpdate`).
 Vérifier avant de rendre : `hyperframes lint`, puis `hyperframes snapshot --at 1.2,4.5,…` et regarder les images.
+`backend/tests/test_video_modeles.py` refuse un modèle qui charge quelque chose depuis Internet ou qui dépend de l'horloge ou du hasard.
 
 ## Recettes testées
 | Besoin | Outil (licence) | Commande / point clé |
