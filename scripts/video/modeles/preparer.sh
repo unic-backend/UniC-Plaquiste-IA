@@ -4,7 +4,7 @@
 # Outils (téléchargés une fois dans ~/.cache/unic-video) : HyperFrames (HTML + GSAP filmé image par image), Three.js, GSAP, polices Anton/Inter.
 # Photos et logo : ceux du site unicplaquiste.com, rien d'inventé. Jamais « hyperframes publish » : rien ne part sans le clic du patron.
 set -euo pipefail
-NOM="${1:?modèle : un dossier de scripts/video/modeles (cloison, plafond, devis, references, etapes, points, bonhomme, trajet)}"
+NOM="${1:?modèle : un dossier de scripts/video/modeles (cloison, plafond, devis, references, etapes, points, bonhomme, trajet, etsi)}"
 ICI="$(cd "$(dirname "$0")" && pwd)"
 SORTIE="$(realpath -m "${2:-$NOM.mp4}")"
 OUTILS="${UNIC_VIDEO_OUTILS:-$HOME/.cache/unic-video}"
