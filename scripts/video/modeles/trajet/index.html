@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+      #root { position: relative; width: 1080px; height: 1920px; background: #000; color: #fff; font-family: InterL, sans-serif; }
+      svg { position: absolute; inset: 0; }
+      #title { position: absolute; left: 0; right: 0; top: 230px; text-align: center; font: 400 92px/1 Anton; letter-spacing: .02em; }
+      #title b { color: #ffc400; font-weight: 400; }
+      #km { position: absolute; left: 0; right: 0; top: 350px; text-align: center; font: 500 34px InterL; color: rgba(255,255,255,.75); }
+      #km span { font-weight: 700; color: #fff; } #km i { font-style: normal; }
+      .pin text { font: 700 30px InterL; letter-spacing: .18em; fill: #fff; text-anchor: middle; }
+      #ocean { font: italic 500 26px InterL; letter-spacing: .3em; fill: rgba(255,255,255,.28); text-anchor: middle; }
+      #card { position: absolute; left: 90px; right: 90px; top: 1380px; padding: 30px 40px; border: 2px solid rgba(255,196,0,.6); border-radius: 26px; background: rgba(20,16,0,.85); }
+      #card small { display: block; font: 700 24px InterL; letter-spacing: .3em; color: #ffc400; margin-bottom: 14px; }
+      #card div { font: 500 36px/1.55 InterL; }
+      #end { position: absolute; left: 0; right: 0; bottom: 120px; text-align: center; }
+      #end .b { font: 400 44px Anton; letter-spacing: .32em; }
+      #end .b b { color: #ffc400; font-weight: 400; }
+      #end .s { margin-top: 14px; font: 500 30px InterL; color: rgba(255,255,255,.75); }
+      #src { position: absolute; right: 24px; bottom: 24px; font: 500 18px InterL; color: rgba(255,255,255,.3); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="11" data-width="1080" data-height="1920">
+      <svg viewBox="0 0 1080 1920">
+        <g id="cam">
+          <g id="grid" stroke="rgba(255,255,255,.06)" stroke-width="1.5"></g>
+          <!-- presqu'île du Cap-Vert : trait de côte Natural Earth 1:10m (domaine public), projection équirectangulaire -->
+          <path id="land" fill="#151515" stroke="rgba(255,255,255,.4)" stroke-width="2.5" stroke-linejoin="round"
+            d="M902.4 1337.9 L851.6 1200.9 L773.8 1093.1 L718.5 1041.8 L685.4 1018.9 L647.6 1001.2 L605.8 994.2 L574.6 985.4 L493.0 942.3 L480.4 927.5 L416.8 928.3 L361.5 921.5 L313.2 924.8 L270.0 955.9 L286.2 975.0 L309.4 982.0 L295.0 1011.0 L270.0 1022.8 L276.6 1029.1 L288.4 1043.5 L295.0 1049.8 L283.1 1078.4 L276.6 1080.3 L270.0 1091.9 L244.7 1075.4 L115.2 914.1 L84.7 885.6 L402.6 800.2 L496.7 723.0 L784.0 600.0 L850.0 546.4 L1694.9 4.3 L1694.9 1796.2 L1020.8 1796.2 Z" />
+          <text id="ocean" x="330" y="1230">OCÉAN ATLANTIQUE</text>
+          <path id="glow" d="M256.7 1014.2 C190 780 380 820 764 966.6" fill="none" stroke="#ffc400" stroke-width="16" stroke-linecap="round" opacity=".35" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" />
+          <path id="route" d="M256.7 1014.2 C190 780 380 820 764 966.6" fill="none" stroke="#ffc400" stroke-width="6" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" />
+          <circle id="car" r="11" fill="#fff" stroke="#ffc400" stroke-width="5" opacity="0" />
+          <g id="pinA" class="pin"><circle cx="256.7" cy="1014.2" r="13" fill="#fff" /><text x="256.7" y="1105">DAKAR</text></g>
+          <g id="pinB" class="pin">
+            <circle id="ringB" cx="764" cy="966.6" r="16" fill="none" stroke="#ffc400" stroke-width="4" />
+            <circle cx="764" cy="966.6" r="16" fill="#ffc400" /><text x="764" y="1052">DIAMNIADIO</text>
+          </g>
+        </g>
+      </svg>
+      <div id="title">DE DAKAR À <b>DIAMNIADIO</b></div>
+      <div id="km"><span id="kmv">0</span> km<i id="vol"> à vol d'oiseau</i></div>
+      <div id="card"><small>GRANDS PROJETS LIVRÉS</small><div>Stade Abdoulaye Wade<br />Dakar Arena<br />UAM · Centre équestre</div></div>
+      <div id="end"><div class="b">UNIC <b>PLAQUISTE</b></div><div class="s">Devis gratuit sous 48 h</div></div>
+      <div id="src">Fond de carte : Natural Earth</div>
+    </div>
+    <script>
+      // graticule tous les 0,1° (le repère de la projection : 1926 px par degré de longitude, 1991 par degré de latitude)
+      const grid = document.getElementById("grid");
+      for (let lon = -17.5; lon <= -17.0; lon += 0.1) { const x = ((lon + 17.58) * 1926).toFixed(1); grid.insertAdjacentHTML("beforeend", `<line x1="${x}" y1="-400" x2="${x}" y2="2400" />`); }
+      for (let lat = 14.3; lat <= 15.2; lat += 0.1) { const y = (960 - (lat - 14.72) * 1991).toFixed(1); grid.insertAdjacentHTML("beforeend", `<line x1="-600" y1="${y}" x2="1700" y2="${y}" />`); }
+
+      const KM = 28.45; // le trait reste sur la terre (vérifié point par point) ; distance Dakar (14,693 N ; 17,447 O) → Diamniadio (14,717 N ; 17,183 O), haversine
+      const A = [256.7, 1014.2], MID = [510, 975], route = document.getElementById("route"), L = route.getTotalLength();
+      const cam = document.getElementById("cam"), car = document.getElementById("car"), kmv = document.getElementById("kmv");
+      const lerp = (a, b, p) => a + (b - a) * p;
+      // une seule variable p (0 → 1) pilote le trait, la voiture, le compteur et la caméra : tout dépend du temps
+      const st = { p: 0, z: 0 };
+      const draw = () => {
+        const z = gsap.parseEase("power2.inOut")(st.z), s = lerp(2.1, 1, z);
+        const fx = lerp(A[0], MID[0], z), fy = lerp(A[1], MID[1], z);
+        cam.setAttribute("transform", `translate(${540 - fx * s} ${1000 - fy * s}) scale(${s})`);
+        const pt = route.getPointAtLength(st.p * L);
+        car.setAttribute("cx", pt.x); car.setAttribute("cy", pt.y);
+        kmv.textContent = Math.round(st.p * KM);
+      };
+      draw();
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#cam", { opacity: 0 }, { opacity: 1, duration: 0.8 }, 0.2)
+        .fromTo("#title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.8, ease: "power3.out" }, 0.3)
+        .fromTo("#pinA", { opacity: 0, y: -40 }, { opacity: 1, y: 0, duration: 0.5, ease: "bounce.out" }, 0.8)
+        .fromTo("#km", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 1.3)
+        .fromTo("#car", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 1.5)
+        .to(["#route", "#glow"], { attr: { "stroke-dashoffset": 0 }, duration: 3.4, ease: "power1.inOut" }, 1.6)
+        .to(st, { p: 1, duration: 3.4, ease: "power1.inOut", onUpdate: draw }, 1.6)
+        .to(st, { z: 1, duration: 3.8, ease: "none", onUpdate: draw }, 1.4)
+        .to("#car", { opacity: 0, duration: 0.2 }, 5.0)
+        .fromTo("#vol", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 5.1)
+        .fromTo("#pinB", { opacity: 0, scale: 0.3, transformOrigin: "50% 30%" }, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(3)" }, 4.9)
+        .fromTo("#ringB", { attr: { r: 16 }, opacity: 1 }, { attr: { r: 70 }, opacity: 0, duration: 1.2, ease: "power2.out", repeat: 1, immediateRender: false }, 5.3)
+        .fromTo("#card", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 5.8)
+        .fromTo("#end", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 8.2)
+        .to({}, { duration: 0.01 }, 10.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
