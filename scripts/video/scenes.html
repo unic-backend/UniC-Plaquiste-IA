@@ -176,6 +176,7 @@ const capDraw = (t, u) => {
 
 window.setup = sc => {
   if (LOT) { LOT.destroy(); LOT = null; }
+  if (G3) { G3.dispose(); G3 = null; }
   S = sc; A = []; CAPS = Array.isArray(sc.caps) ? sc.caps : []; $("#cap").style.display = "none";
   SPLIT = sc.layout === "split"; document.documentElement.classList.toggle("split", SPLIT); const root = $("#sc"); root.textContent = ""; root.className = ""; root.style.cssText = "";
   const T = sc.type, u = Math.min(innerWidth, innerHeight) / 360;
@@ -218,6 +219,9 @@ window.setup = sc => {
       sh.appendChild(document.importNode(svg, true));
     }
     A.mo = sh;
+  } else if (T === "layers3d" || T === "room3d") {   // 3D (Three.js) : module servi par scenes.mjs à une adresse fictive (un module ne se charge pas depuis file://)
+    root.style.padding = "0";
+    return import(MOTEUR + "scene3d.js").then(m => { G3 = m.create(sc, root, u); });
   }
 };
 const FONTS = ["400 40px 'Special Elite'", "400 40px Anton", "500 20px Barlow", "600 20px Barlow", "600 20px 'Barlow Condensed'", "700 20px 'Barlow Condensed'"];
@@ -241,6 +245,7 @@ const kb = (p, t, dur, dir, i = 0) => {   // Ken Burns : zoom lent + dérive
 // tAbs : temps dans la scène pour les sous-titres (une scène peut enchaîner plusieurs animations) ; cont : une autre animation suit (pas de fondu de sortie)
 window.draw = (t, dur, tAbs, cont) => {
   const sc = S, T = sc.type, u = Math.min(innerWidth, innerHeight) / 360, root = $("#root");
+  if (G3) G3.draw(t, dur);
   if (T === "motion" && A.mo) {   // chaque image = l'instant t de TOUTES ses animations CSS (déterministe, indépendant de la machine)
     A.mo.getAnimations().forEach(a => { a.pause(); a.currentTime = t * 1000; });
   }
@@ -366,6 +371,8 @@ const PANELS = ["counter", "flow", "wave", "chat", "badge", "lottie", "dots", "b
 const NS = "http://www.w3.org/2000/svg";
 const sv = (tag, at, parent) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); if (parent) parent.appendChild(e); return e; };   // dessin du moteur (jamais un texte du scénario en balise)
 const svText = (parent, x, y, txt, size, anchor) => { const e = sv("text", { x, y, "text-anchor": anchor, "font-size": size }, parent); e.textContent = txt; return e; };
+let G3 = null;    // scène 3D en cours (une à la fois ; libérée à chaque nouvelle scène)
+const MOTEUR = "https://moteur.unic/";
 let LOT = null;   // animation Lottie en cours (une à la fois ; détruite à chaque nouvelle scène)
 const sfx = x => x ? (/^[+×]/.test(x) ? x : "\u00a0" + x) : "";   // « 0 € », « 98 % », mais « 180+ »
 const prng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };   // déterministe : même image à chaque rendu
