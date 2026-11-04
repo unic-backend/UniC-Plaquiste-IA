@@ -63,3 +63,23 @@ def test_outil_et_consignes_connaissent_les_effets():
     enum = vs.TOOL["input_schema"]["properties"]["scenes"]["items"]["properties"]["type"]["enum"]
     assert set(vs.FX_TYPES) <= set(enum) and "overlay" in vs.SCENE_PROPS and "checks" in vs.SCENE_PROPS
     assert "typewriter" in vs.SYSTEM and "points-pixels" in vs.SYSTEM
+
+
+def test_grille_de_points_etapes_au_trait_et_trajet():
+    sp = vs.build_spec("vertical", [
+        {"type": "dots", "value": 180, "suffix": "+", "label": "chantiers livrés", "highlight": 40},
+        {"type": "dots", "value": 1200},                                     # trop de points pour les compter : écartée
+        {"type": "dots", "value": 12.5},                                     # un point par unité : jamais une fraction
+        {"type": "bars", "steps": ["Tracé", "Ossature", "Plaques", "Joints", "Peinture", "Déco", "Septième"], "label": "chaque étape compte"},
+        {"type": "bars", "steps": ["seule"]},                                # une barre n'est pas une progression : écartée
+        {"type": "route", "lines": ["Dakar", "Diamniadio"], "value": 28, "suffix": "km"},
+        {"type": "route", "lines": ["Paris", "Tokyo"]},                      # sans distance sûre : le trajet seul
+        {"type": "route", "lines": ["Dakar"]}], NAMES)
+    dots, bars, r1, r2 = sp["scenes"]
+    assert dots["value"] == 180 and dots["highlight"] == 12 and dots["suffix"] == "+"                 # au plus 12 points en or
+    assert len(bars["steps"]) == 6 and bars["label"] == "chaque étape compte"
+    assert r1["value"] == 28 and r1["suffix"] == "km" and "value" not in r2
+    assert all(s["seconds"] >= vs.SECONDS[s["type"]][0] for s in sp["scenes"])
+    out = _engine().clean(sp)                                                                          # le moteur accepte ce que le Studio écrit
+    assert [s["type"] for s in out["scenes"]] == ["dots", "bars", "route", "route"]
+    assert out["scenes"][0]["label"] == "CHANTIERS LIVRÉS" and out["scenes"][0]["highlight"] == 12 and "value" not in out["scenes"][3]
