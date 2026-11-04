@@ -47,7 +47,7 @@ FADE_OUT = 0.35                   # fondu de sortie de chaque scène (scenes.htm
 SECONDS = {"title": (2.5, 6), "text": (3, 10), "photo": (2.5, 8), "gallery": (4, 14), "stats": (3, 9), "quote": (3, 10), "outro": (3, 8), "ai_image": (2.5, 8),
            "typewriter": (2.5, 12), "kinetic": (2, 10), "checklist": (3, 12), "neon": (2, 8), "slogan": (4, 12),
            "counter": (1.5, 10), "flow": (2, 12), "wave": (1.5, 10), "chat": (1.5, 10), "badge": (1.5, 10), "lottie": (1.5, 10), "my_photo": (2.5, 8), "motion": (2, 15),
-           "dots": (2.5, 12), "bars": (2.5, 12), "route": (2.5, 12)}
+           "dots": (2.5, 12), "bars": (2.5, 12), "route": (2.5, 12), "layers3d": (4, 14), "room3d": (6, 14)}
 PANEL_TYPES = ("counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route")
 DOTS_MAX = 400                    # grille de points : un point par unité, au plus 400 (scripts/video/spec.py)
 # Animations Lottie du moteur (scripts/video/lottie/, créées pour UniC) et leur sens ; le patron peut aussi envoyer les siennes (Mes médias).
@@ -92,7 +92,8 @@ FALLBACK_IMAGES = ("avantapres-11 avantapres-12 avantapres-13 avantapres-14 deco
 _img_cache: dict = {"t": 0.0, "names": []}
 
 SCENE_PROPS = {
-    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip", "my_photo", "motion"]},
+    "type": {"type": "string", "enum": ["title", "text", "photo", "gallery", "stats", "quote", "page", "outro", *FX_TYPES, "my_clip", "my_photo", "motion", "layers3d", "room3d"]},
+    "layers": {"type": "array", "items": {"type": "string"}, "description": "layers3d : 2 à 6 couches nommées, de la couche du DESSUS à celle du dessous (24 car.) : ce dont la chose est faite."},
     "svg": {"type": "string", "description": "motion : TON dessin animé, un SVG complet (balise <svg viewBox=…>) animé en CSS (@keyframes dans <style>, "
             "animation-delay pour enchaîner) : formes, dégradés, textes, filtres. Compact (4 000 caractères au plus : classes CSS réutilisées). "
             "Aucun script, aucune image ni police externe."},
@@ -137,7 +138,7 @@ SCENE_PROPS = {
     "seconds": {"type": "number", "description": "Durée en secondes (title 3-5, text 4-8, photo 3-5, gallery 2 à 3 s par photo, stats 4-6, quote 5-8, outro 4-6). Inutile pour page."},
     "l1": {"type": "string", "description": "title : ligne 1, 18 caractères max. slogan : ligne blanche (30 car.)."}, "l2": {"type": "string", "description": "title : ligne 2 facultative. slogan : ligne en or (30 car.)."},
     "sub": {"type": "string", "description": "title : sous-titre court."},
-    "heading": {"type": "string", "description": "text : titre."}, "bullets": {"type": "array", "items": {"type": "string"}, "description": "text : 2 à 4 puces courtes (60 caractères)."},
+    "heading": {"type": "string", "description": "text : titre. layers3d : titre au-dessus de la vue éclatée (40 car.)."}, "bullets": {"type": "array", "items": {"type": "string"}, "description": "text : 2 à 4 puces courtes (60 caractères)."},
     "image": {"type": "string", "description": "photo : nom EXACT du catalogue."}, "images": {"type": "array", "items": {"type": "string"}, "description": "gallery : 2 à 6 noms EXACTS du catalogue."},
     "caption": {"type": "string", "description": "photo/gallery/my_photo : légende courte, seulement ce que la photo permet d'affirmer (nom, ou « ce qu'on voit » pour ses photos)."},
     "direction": {"type": "string", "enum": ["in", "out", "left", "right"]},
@@ -148,7 +149,7 @@ SCENE_PROPS = {
     "quote": {"type": "string", "enum": list(QUOTES), "description": "quote : avis client enregistré — SEULEMENT s'il demande ses avis."},
     "lines": {"type": "array", "items": {"type": "string"}, "description": "outro : jusqu'à 6 lignes libres (1 : grand titre, 2 : sous-titre, 3 : petite ligne, 4 : bouton, 5-6 : contact). "
               "typewriter : 1 à 3 lignes tapées au clavier (60 car.). kinetic : 1 à 3 lignes d'un grand titre dont le DERNIER mot arrive en or (26 car. par ligne). "
-              "neon : 1 ou 2 mots en néon (16 car.). slogan : lignes sous la carte (40 car.), inutile avec brand. route : [départ, arrivée] (24 car.)."},
+              "neon : 1 ou 2 mots en néon (16 car.). slogan : lignes sous la carte (40 car.), inutile avec brand. route : [départ, arrivée] (24 car.). room3d : 1 ou 2 lignes, la question puis la chute (ex. « Et si… », « …ton plafond s'allumait ? », 30 car.)."},
     "tag": {"type": "string", "description": "kinetic / neon : petite étiquette dorée au-dessus (ex. « SITE 01 », 12 car.)."},
     "place": {"type": "string", "description": "kinetic : texte à côté de l'étiquette (ex. un lieu, 28 car.)."},
     "checks": {"type": "array", "items": {"type": "string"}, "description": "checklist : 1 à 5 éléments cochés un à un sur verre dépoli (40 car.)."},
@@ -209,6 +210,9 @@ SYSTEM = ("Tu es réalisateur et monteur vidéo, LIBRE. Tu ne suis aucune recett
           "dots (grille de points : un point par unité, value entier jusqu'à 400 ; le compteur compte les points qui s'allument de plus en plus vite ; highlight = points en or à la fin), "
           "bars (étapes au trait : 2 à 6 barres qui montent, un point d'or saute de l'une à l'autre, la dernière finit en or : progression, avant d'arriver au résultat), "
           "route (trajet SCHÉMATIQUE, pas une vraie carte : un trait relie lines[0] à lines[1] avec un point qui avance ; value = distance seulement si elle est sûre) ; "
+          "3D : layers3d (vue éclatée : 2 à 6 couches nommées qui se séparent, chaque légende reliée à sa couche ; montre de quoi une chose est faite : "
+          "un mur, un sol, la Terre, un gâteau, une application…), room3d (salon 3D façon dessin animé : la caméra entre, un faux plafond sort et s'allume, "
+          "LED puis spots ; lines = [question, chute]) ; "
           "et l'ambiance de couleurs (theme) qui va avec le contenu. "
           "ANIMATION LIBRE (motion) : quand aucun outil ne montre ce que la vidéo raconte, DESSINE-LE toi-même : un SVG animé en CSS "
           "(interface qui s'assemble, écran flottant, objet, schéma vivant, décor, personnage stylisé, particules, lumière, profondeur en "
@@ -696,6 +700,13 @@ def build_spec(fmt: str, scenes: list, names: list[str] | None = None, theme: st
             svg = motion_svg.clean(sc.get("svg"), fmt)
             if svg:
                 out.append({"type": t, "seconds": _num(secs, *SECONDS[t], 5), "svg": svg})
+        elif t == "layers3d":    # vue éclatée 3D : 2 à 6 couches nommées, du dessus au dessous
+            layers = [x for x in (_cut(v, 24) for v in (sc.get("layers") or []) if isinstance(v, str)) if x][:6]
+            if len(layers) >= 2:
+                out.append({"type": t, "seconds": _num(secs, *SECONDS[t], 7), "layers": layers, "heading": _cut(sc.get("heading"), 40)})
+        elif t == "room3d":      # salon 3D : le faux plafond sort et s'allume ; 0 à 2 lignes de texte
+            lines = [x for x in (_cut(v, 30) for v in (sc.get("lines") or []) if isinstance(v, str)) if x][:2]
+            out.append({"type": t, "seconds": _num(secs, *SECONDS[t], 10), "lines": lines})
         elif t == "my_photo":    # vraie photo du patron : seulement de sa liste
             it = (media or {}).get(str(sc.get("media") or ""))
             if it and it["kind"] == "photo":

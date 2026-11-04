@@ -125,6 +125,11 @@ def test_panneaux_et_ecran_divise():
     assert d[0]["highlight"] == 12 and "value" not in d[1]
     pn = sp.clean({"scenes": [{"type": "clip", "url": URL, "seconds": 6, "panels": [[1, 0, {"type": "bars", "steps": ["Avant", "Après"]}]]}]})["scenes"][0]["panels"]
     assert pn[0][2]["type"] == "bars"                                                                  # aussi en haut d'un écran divisé ou sur un film
+    with pytest.raises(ValueError):
+        sp.clean({"scenes": [{"type": "layers3d", "layers": ["une seule"]}]})                         # vue éclatée : au moins 2 couches
+    three = ROOT / "three"
+    assert (three / "three.module.js").is_file() and (three / "three.core.js").is_file() and "MIT" in (three / "LICENSE").read_text()
+    assert 'from "./three/three.module.js"' in (ROOT / "scene3d.js").read_text()                       # 3D : copie locale, jamais un CDN
     a = ed.ffmpeg_args({**c, "seconds": 6}, "a.mp4", None, 1080, 1920, 30, 180, "o/%05d.jpg")
     vf = a[a.index("-vf") + 1]
     assert ed.bottom_height(1920) == 1056 and "crop=1080:1056" in vf and "pad=1080:1920:0:864" in vf     # la personne en bas (55 %)

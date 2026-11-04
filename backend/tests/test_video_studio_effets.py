@@ -83,3 +83,15 @@ def test_grille_de_points_etapes_au_trait_et_trajet():
     out = _engine().clean(sp)                                                                          # le moteur accepte ce que le Studio écrit
     assert [s["type"] for s in out["scenes"]] == ["dots", "bars", "route", "route"]
     assert out["scenes"][0]["label"] == "CHANTIERS LIVRÉS" and out["scenes"][0]["highlight"] == 12 and "value" not in out["scenes"][3]
+
+
+def test_scenes_3d_vue_eclatee_et_salon():
+    sp = vs.build_spec("vertical", [
+        {"type": "layers3d", "heading": "Une cloison, couche par couche", "layers": ["Bandes + enduit", "Plaque BA13", "Laine 45 mm", "Montants", "Rails", "Sol", "Septième"]},
+        {"type": "layers3d", "layers": ["seule"]},                                          # une couche ne s'éclate pas : écartée
+        {"type": "room3d", "lines": ["Et si…", "…ton plafond s'allumait ?", "trop"], "seconds": 99}], NAMES)
+    lay, room = sp["scenes"]
+    assert len(lay["layers"]) == 6 and lay["heading"] == "Une cloison, couche par couche"
+    assert room["lines"] == ["Et si…", "…ton plafond s'allumait ?"] and room["seconds"] == vs.SECONDS["room3d"][1]
+    out = _engine().clean(sp)["scenes"]                                                    # le moteur accepte ce que le Studio écrit
+    assert [s["type"] for s in out] == ["layers3d", "room3d"] and out[0]["layers"][0] == "Bandes + enduit"

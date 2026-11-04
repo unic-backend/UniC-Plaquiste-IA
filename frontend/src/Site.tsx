@@ -8,7 +8,7 @@ type Say = (m: string) => void;
 
 const SCENE_FR: Record<string, string> = { title: "Titre", text: "Texte", photo: "Photo", gallery: "Galerie", stats: "Chiffres", quote: "Citation", page: "Défilement du site", outro: "Fin", ai_clip: "Clip IA (payant)", ai_image: "Image IA (payante)",
   typewriter: "Texte tapé", kinetic: "Titre animé", checklist: "Liste cochée", neon: "Néon", slogan: "Slogan", my_clip: "Ma vidéo", my_photo: "Ma photo",
-  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation", dots: "Grille de points", bars: "Étapes au trait", route: "Trajet", motion: "Animation libre" };
+  counter: "Compteur", flow: "Schéma", wave: "Onde sonore", chat: "Bulle « commente »", badge: "Badge", lottie: "Animation", dots: "Grille de points", bars: "Étapes au trait", route: "Trajet", motion: "Animation libre", layers3d: "Vue éclatée 3D", room3d: "Salon 3D" };
 const ANIM_FR: Record<string, string> = { check: "✓ Validé", spark: "✦ Éclat", arrow: "→ Flèche", pin: "📍 Lieu", pulse: "◉ Ondes" };
 /** Un panneau animé en quelques mots (vignettes et liste des animations d'un film). */
 const panelText = (p: { [k: string]: unknown }) => {
@@ -114,6 +114,10 @@ function SceneFrame({ s }: { s: VideoScene }) {
   }
   if (t === "motion" && typeof s.svg === "string") {   // dessin animé de l'IA (SVG nettoyé par le serveur) : vu en image, ses animations jouent, aucun script
     return <img className="f-img" src={"data:image/svg+xml;charset=utf-8," + encodeURIComponent(s.svg)} alt="Animation libre dessinée par l'IA" />;
+  }
+  if (t === "layers3d" || t === "room3d") {   // 3D : rendue à la fabrication ; ici, ce qu'elle dira
+    const words = t === "layers3d" ? [txt(s, "heading"), items(s, "layers").join(" · ")] : items(s, "lines");
+    return <><small className="f-chip">{SCENE_FR[t]}</small><b className="f-t2">{frText(words.filter(Boolean).join(" — "))}</b></>;
   }
   if (t === "my_photo") return <><ClipThumb id={String(s.media || "")} start={0} />{txt(s, "caption") && <span className="f-cap">{txt(s, "caption")}</span>}</>;
   if (t === "ai_clip" || t === "ai_image") return <div className="f-ai"><b>{t === "ai_clip" ? "Clip IA" : "Image IA"}</b><small>{txt(s, "prompt")}</small></div>;

@@ -10,6 +10,10 @@ if (![24, 30, 60].includes(FPS)) throw new Error('VIDEO_FPS doit être 24, 30 ou
 const b = await chromium.launch({ args: ["--font-render-hinting=none", "--disable-lcd-text"] });
 const p = await (await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3 })).newPage();
 if (process.env.VIDEO_PRELOAD) await (await import(process.env.VIDEO_PRELOAD)).default(p);
+// Scènes 3D : Three.js (copie locale, MIT) se charge en module, ce que Chrome refuse depuis file:// ; on sert ces seuls fichiers du moteur à une adresse fictive.
+const MOTEUR_FICHIERS = /^\/(scene3d\.js|three\/three\.(module|core)\.js)$/;
+await p.route("https://moteur.unic/**", r => { const f = new URL(r.request().url()).pathname;
+  return MOTEUR_FICHIERS.test(f) ? r.fulfill({ path: new URL("." + f, import.meta.url).pathname, contentType: "text/javascript", headers: { "Access-Control-Allow-Origin": "*" } }) : r.abort(); });
 const TRIES = 4, pause = ms => new Promise(r => setTimeout(r, ms));
 // Polices vérifiées avant la première image : sans elles, ce tronçon sortirait dans une autre police que les autres (vidéo disparate).
 for (let i = 1; ; i++) {

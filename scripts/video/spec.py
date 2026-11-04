@@ -17,7 +17,8 @@ IMG_BASE = "https://www.unicplaquiste.com/images/"
 CTRL = re.compile(r"[\x00-\x1f\x7f<>]")
 THEMES = ("unic", "night", "light", "earth", "ocean", "sunset", "noir", "luxe", "papier", "pastel", "neon", "chantier")   # palettes de scenes.html : le sujet de la vidéo choisit son ambiance
 TYPES = ("title", "text", "photo", "gallery", "stats", "quote", "page", "outro", "clip", "typewriter", "kinetic", "checklist", "neon", "slogan",
-         "counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "motion")
+         "counter", "flow", "wave", "chat", "badge", "lottie", "dots", "bars", "route", "motion", "layers3d", "room3d")
+# 3D (scene3d.js, Three.js en copie locale) : vue éclatée en couches nommées ; salon 3D dont le faux plafond sort et s'allume.
 # « motion » : animation libre dessinée par l'IA (SVG animé en CSS), nettoyée par le serveur (motion_svg.py) ; revérifiée ici (aucun script ni rien d'externe).
 MOTION_MAX = 60_000
 MOTION_BAD = re.compile(r"<\s*(script|foreignObject|iframe|image|img|a|object|embed|link|meta)\b|\son\w+\s*=|javascript:|data:|@import|"
@@ -266,6 +267,13 @@ def _scene(s: dict) -> dict:
         if not isinstance(svg, str) or not svg.lstrip().startswith("<svg") or len(svg) > MOTION_MAX or MOTION_BAD.search(svg):
             raise ValueError("animation libre refusée (SVG invalide ou ressource externe)")
         return {"type": t, "seconds": _secs(s.get("seconds"), 2, 15, 5), "svg": svg}
+    if t == "layers3d":
+        layers = _lines_of(s.get("layers"), 24, 6)
+        if len(layers) < 2:
+            raise ValueError("vue éclatée : au moins 2 couches")
+        return {"type": t, "seconds": _secs(s.get("seconds"), 4, 14, 7), "layers": layers, "heading": _txt(s.get("heading"), 40)}
+    if t == "room3d":
+        return {"type": t, "seconds": _secs(s.get("seconds"), 6, 14, 10), "lines": _lines_of(s.get("lines"), 30, 2)}
     if t == "title":
         return {"type": t, "seconds": _secs(s.get("seconds"), 2.5, 8, 4), "l1": _txt(s.get("l1"), 24).upper(), "l2": _txt(s.get("l2"), 24).upper(), "sub": _txt(s.get("sub"), 40).upper()}
     if t == "text":
