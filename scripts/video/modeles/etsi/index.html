@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #0b1640; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: radial-gradient(90% 60% at 50% 48%, #24408f 0%, #0b1640 75%); }
+      #gl { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+      .txt { position: absolute; left: 0; right: 0; text-align: center; color: #fff; text-shadow: 0 6px 0 rgba(0,0,0,.35); }
+      #t1 { top: 210px; font: 400 170px/1 Anton; letter-spacing: .02em; color: #ffc400; }
+      #t2 { top: 200px; font: 400 76px/1.05 Anton; letter-spacing: .02em; }
+      #t3 { bottom: 210px; font: 400 64px/1 Anton; letter-spacing: .06em; }
+      #t3 b { color: #ffc400; font-weight: 400; }
+      #shade { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(6,12,40,.8) 0%, rgba(6,12,40,0) 30%, rgba(6,12,40,0) 70%, rgba(6,12,40,.85) 100%); }
+      #t4 { bottom: 150px; font: 700 30px InterL; letter-spacing: .08em; color: rgba(255,255,255,.85); text-shadow: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="10" data-width="1080" data-height="1920">
+      <canvas id="gl" width="1080" height="1920"></canvas>
+      <div id="shade"></div>
+      <div class="txt" id="t1">ET SI…</div>
+      <div class="txt" id="t2">…TON PLAFOND<br />S'ALLUMAIT ?</div>
+      <div class="txt" id="t3">UNIC <b>PLAQUISTE</b></div>
+      <div class="txt" id="t4">Devis gratuit sous 48 h</div>
+    </div>
+    <script type="module">
+      import * as THREE from "three";
+      const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+      const seg = (t, a, b) => clamp((t - a) / (b - a));
+      const io = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+      const out = (x) => 1 - Math.pow(1 - x, 3);
+      const back = (x) => { const c = 2.2; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+
+      const W = 1080, H = 1920;
+      const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("gl"), antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1); renderer.setSize(W, H, false); renderer.setClearColor(0x000000, 0);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 100);
+
+      // style « dessin animé » : 3 tons de lumière, contour noir (copie retournée un peu plus grande)
+      const tones = new THREE.DataTexture(new Uint8Array([70, 150, 255]), 3, 1, THREE.RedFormat);
+      tones.minFilter = tones.magFilter = THREE.NearestFilter; tones.needsUpdate = true;
+      const ink = new THREE.MeshBasicMaterial({ color: 0x14141c, side: THREE.BackSide });
+      const toon = (c) => new THREE.MeshToonMaterial({ color: c, gradientMap: tones });
+      const room = new THREE.Group(); scene.add(room);
+      function part(geo, mat, x, y, z, line = 0.025, parent = room) {
+        const g = new THREE.Group(), m = new THREE.Mesh(geo, mat), o = new THREE.Mesh(geo, ink);
+        geo.computeBoundingBox(); const s = new THREE.Vector3(); geo.boundingBox.getSize(s);
+        o.scale.set((s.x + 2 * line) / s.x, (s.y + 2 * line) / s.y, (s.z + 2 * line) / s.z);
+        g.add(o, m); g.position.set(x, y, z); parent.add(g); return g;
+      }
+      const box = (w, h, d, c, x, y, z) => part(new THREE.BoxGeometry(w, h, d), toon(c), x, y, z);
+
+      // la maison de poupée : sol, deux murs, dalle du plafond
+      box(4.4, 0.2, 4.4, 0xd9a066, 0, -0.1, 0);
+      box(4.4, 2.8, 0.2, 0xf3e3c3, 0, 1.4, -2.1);
+      box(0.2, 2.8, 4.2, 0xf0dcb6, -2.1, 1.4, 0.1);
+      box(4.4, 0.2, 4.4, 0xe9e1d3, 0, 2.9, 0);
+      // le salon
+      part(new THREE.CylinderGeometry(1.05, 1.05, 0.03, 48), toon(0xff7a59), 0.2, 0.015, -0.2);
+      box(1.9, 0.42, 0.85, 0x2bb3a3, 0.2, 0.21, -1.55);
+      box(1.9, 0.55, 0.22, 0x239a8c, 0.2, 0.69, -1.9);
+      box(0.22, 0.6, 0.85, 0x239a8c, -0.86, 0.3, -1.55); box(0.22, 0.6, 0.85, 0x239a8c, 1.26, 0.3, -1.55);
+      box(0.9, 0.62, 0.05, 0xffc400, 0.2, 1.75, -1.98);
+      part(new THREE.CylinderGeometry(0.2, 0.15, 0.38, 24), toon(0xc8643c), -1.55, 0.19, -1.55);
+      part(new THREE.SphereGeometry(0.38, 24, 16), toon(0x3fbf6f), -1.55, 0.72, -1.55);
+      box(0.8, 0.36, 0.55, 0x8a5a3c, 0.2, 0.18, 0.1);
+
+      // le faux plafond : 4 caissons qui sortent du plafond en rebondissant, puis la LED et les spots
+      const bands = [[4.0, 0.7, 0, -1.65], [0.7, 2.6, -1.65, 0], [4.0, 0.7, 0, 1.65], [0.7, 2.6, 1.65, 0]]
+        .map(([w, d, x, z]) => box(w, 0.2, d, 0xffffff, x, 2.7, z));
+      const leds = [[2.6, 0.04, 0, -1.29], [0.04, 2.6, -1.29, 0], [2.6, 0.04, 0, 1.29], [0.04, 2.6, 1.29, 0]].map(([w, d, x, z]) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), new THREE.MeshBasicMaterial({ color: 0x222222 })); m.position.set(x, 2.585, z); room.add(m); return m;
+      });
+      const glows = [[0, -1.0], [-1.0, 0], [0, 1.0], [1.0, 0]].map(([x, z]) => { const l = new THREE.PointLight(0xffb84d, 0, 0, 2); l.position.set(x, 2.2, z); room.add(l); return l; });
+      const spots = [[-0.55, -0.55], [0.55, -0.55], [-0.55, 0.55], [0.55, 0.55]].map(([x, z]) => {
+        const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 24), new THREE.MeshBasicMaterial({ color: 0x555555 }));
+        disc.position.set(x, 2.785, z); room.add(disc);
+        const s = new THREE.SpotLight(0xfff1d6, 0, 0, 0.5, 0.35, 1.5); s.position.set(x, 2.75, z); s.target.position.set(x, 0, z); room.add(s, s.target);
+        return { disc, s };
+      });
+      const hemi = new THREE.HemisphereLight(0x9fb4ff, 0x3a2a20, 1.1); scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(3, 5, 4); scene.add(sun);
+      const warm = new THREE.Color(0xffe0b0), cool = new THREE.Color(0x9fb4ff);
+
+      const t1 = document.getElementById("t1"), t2 = document.getElementById("t2"), t3 = document.getElementById("t3"), t4 = document.getElementById("t4");
+      const show = (el, a, dy = 40) => { el.style.opacity = a; el.style.transform = `translateY(${dy * (1 - a)}px) scale(${0.9 + 0.1 * a})`; };
+      function renderAt(t) {
+        // la maquette arrive en rebondissant ; la caméra entre ensuite et lève les yeux vers le plafond
+        const pop = back(seg(t, 0.2, 1.0)); room.scale.setScalar(Math.max(0.0001, pop));
+        const k = io(seg(t, 1.5, 3.6)), drift = seg(t, 3.6, 10);
+        const a = THREE.MathUtils.degToRad(45 + 5 * k + 10 * drift), r = 13 - 8.8 * k - 0.4 * drift;
+        camera.position.set(Math.sin(a) * r, 2.4 - 1.4 * k, Math.cos(a) * r);
+        camera.lookAt(-0.3 * k, 1.3 + 1.1 * k, -0.3 * k);
+        bands.forEach((g, i) => {
+          const s = 2.6 + i * 0.35, p = seg(t, s, s + 0.25), u = seg(t, s + 0.25, s + 0.9);
+          g.visible = t >= s;
+          const sy = p < 1 ? 0.05 + 1.35 * p : 1 + 0.4 * Math.exp(-5 * u) * Math.cos(13 * u);   // jaillit étiré, puis rebondit
+          const sx = p < 1 ? 0.6 + 0.4 * p : 1 - 0.15 * Math.exp(-5 * u) * Math.cos(13 * u);
+          g.scale.set(sx, sy, sx); g.position.y = 2.8 - 0.1 * sy;
+        });
+        const led = out(seg(t, 4.4, 5.4));
+        leds.forEach((m) => m.material.color.setRGB(0.13 + 0.87 * led, 0.13 + 0.62 * led, 0.13 + 0.17 * led));
+        glows.forEach((l) => { l.intensity = 0.3 * led; });
+        spots.forEach(({ disc, s }, i) => { const k = out(seg(t, 5.5 + i * 0.3, 5.75 + i * 0.3)); s.intensity = 9 * k; disc.material.color.setRGB(0.33 + 0.67 * k, 0.33 + 0.62 * k, 0.33 + 0.5 * k); });
+        hemi.color.copy(cool).lerp(warm, 0.6 * led); hemi.intensity = 1.1 - 0.1 * led; sun.intensity = 0.8 - 0.45 * led;
+        renderer.render(scene, camera);
+        show(t1, back(seg(t, 0.4, 0.9)) * (1 - seg(t, 3.6, 3.9)));
+        show(t2, out(seg(t, 4.6, 5.3)));
+        show(t3, out(seg(t, 7.6, 8.3)), 30); show(t4, out(seg(t, 8.0, 8.6)), 20);
+      }
+      const tl = gsap.timeline({ paused: true }); tl.to({}, { duration: 10 });
+      window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;
+      window.addEventListener("hf-seek", (e) => renderAt(e.detail.time));
+      renderAt(0);
+    </script>
+  </body>
+</html>

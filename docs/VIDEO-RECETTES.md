@@ -17,6 +17,7 @@ Rendu : `bash scripts/video/modeles/preparer.sh <modèle> [sortie.mp4]` (1080×1
 | `points` | grille de points (V2) | 11 s | 180 points = 180+ chantiers livrés ; le compteur compte les points allumés ; les 4 grands projets en or |
 | `bonhomme` | histoire en bonhomme bâton (« /stick-figure », V2) | 12 s | Pièce nue → message à UniC (« devis gratuit sous 48 h ») → le plaquiste arrive → la plaque devient un faux plafond LED |
 | `trajet` | trajet sur carte (« /map-route », V2) | 11 s | Dakar → Diamniadio sur la vraie côte (Natural Earth, domaine public), 28 km à vol d'oiseau, les 4 grands projets |
+| `etsi` | 3D cartoon « et si ? » (V2) | 10 s | Maquette de salon (contours noirs, 3 tons) ; la caméra entre, les caissons jaillissent du plafond, la LED puis les spots s'allument |
 
 Chiffres et coordonnées = ceux de `FACTS` / `FACT_STATS` (`backend/app/video_studio.py`) ; photos = dossier `images/` du site.
 
