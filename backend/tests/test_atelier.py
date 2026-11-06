@@ -59,6 +59,30 @@ def test_le_banc_utilise_les_vraies_consignes_et_compte_les_actions_inventees(cl
     assert kw["model"] == settings.anthropic_model and kw["effort"] == "high"      # un courrier = enjeu : même modèle qu'en vrai
 
 
+def test_le_banc_laisse_consulter_avant_d_agir(client):
+    """Consulter d'abord (boîte mail, annuaire, documents) est permis : la réponse factice dit de poursuivre. Avant, elle disait
+    « réponds en une phrase », le modèle s'arrêtait là et 5 cas échouaient à tort (« outil attendu non appelé »)."""
+    from app import evals
+    from app.database import SessionLocal
+    notes = {}
+
+    def fake_complete(messages, tools=None, tool_handler=None, **kw):
+        if "ciment" in messages[-1]["content"]:
+            notes["lookup"] = tool_handler("search_inbox", {"query": "ciment"})["note"]
+            if "Ne t'arrête pas" in notes["lookup"]:   # un vrai modèle ne poursuit que si la réponse le lui permet
+                tool_handler("save_email_draft", {"subject": "Nouveaux prix", "body": "Bonjour"})
+            return _NS(text="Brouillon prêt : ajoute l'adresse de ton fournisseur avant de l'envoyer.")
+        notes["video"] = tool_handler("plan_video", {"brief": "UniC sur TikTok, 30 s"})["note"]
+        return _NS(text="Le scénario est dans le Studio vidéo : relis-le, puis lance la fabrication.")
+    with SessionLocal() as db:
+        rep = evals.run(db, cases=[_case("mail-sans-adresse"), _case("video-chat")], complete=fake_complete)
+        db.rollback()
+    ok = {r["id"]: r for r in rep["results"]}
+    assert ok["mail-sans-adresse"]["ok"] and ok["video-chat"]["ok"], rep["results"]
+    assert "Réponds en une phrase" not in notes["lookup"]
+    assert "Ne dis jamais que la vidéo est faite" in notes["video"]                # même consigne que le vrai plan_video
+
+
 def test_la_qualite_montre_les_actions_fantomes(client):
     import re
     from app import quality

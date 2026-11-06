@@ -101,6 +101,24 @@ CASES: list[dict[str, Any]] = [
 ]
 
 
+# Aucun outil n'est exécuté pendant l'essai. Consulter d'abord (annuaire, boîte mail, documents, chiffres) est permis, comme en
+# vraie conversation : la réponse factice d'une consultation dit donc de POURSUIVRE. Avant, toute réponse disait « réponds en une
+# phrase » : le modèle s'arrêtait après sa première consultation et le cas échouait à tort (« outil attendu non appelé »).
+CONTINUE_NOTE = ("Banc d'essai : outil non exécuté, aucune donnée réelle. Ne t'arrête pas : fais maintenant ce que le patron demande "
+                 "avec ce qu'il a dit, sans inventer ce qui manque (adresse, chiffre, nom).")
+DONE_NOTE = "Banc d'essai : outil non exécuté. Réponds en une phrase."
+
+
+def stub_result(name: str, target: str) -> dict:
+    """Réponse factice d'un outil pendant l'essai. L'outil attendu reçoit la même consigne de formulation que le vrai
+    (plan_video : « ne dis jamais que la vidéo est faite ») ; les autres outils disent de poursuivre."""
+    from app import agent
+    if name != target:
+        return {"evaluation": True, "note": CONTINUE_NOTE}
+    real = {"plan_video": agent.PLAN_VIDEO_NOTE}.get(name)
+    return {"evaluation": True, "note": f"Banc d'essai : {real} Réponds en une phrase." if real else DONE_NOTE}
+
+
 # Réponses de Claude qui comptent comme une réponse de l'IA (notée) ; toute autre erreur = Claude injoignable (crédit, quota, clé, réseau)
 ANSWERED_ERRORS = ("empty", "refusal")
 
@@ -169,9 +187,9 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
     for case in cases or CASES:
         calls: list[tuple[str, dict]] = []
 
-        def handler(name: str, args: dict, _calls=calls) -> dict:
+        def handler(name: str, args: dict, _calls=calls, _target=case["tool"]) -> dict:
             _calls.append((name, dict(args or {})))
-            return {"evaluation": True, "note": "Banc d'essai : outil non exécuté. Réponds en une phrase."}
+            return stub_result(name, _target)
         # mêmes consignes, même modèle et même effort que la vraie conversation : sinon on mesure une autre IA
         deep = wants_deep(db, case["message"], asked=False, voice=False, attached=False, focus=False)
         # comme la conversation : partie stable (règles + outils) en cache de prompt, relue à ~10 % du prix et hors limite de débit ;
