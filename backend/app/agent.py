@@ -852,6 +852,11 @@ TOOL_LABELS = {
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
 
+# Réponse de plan_video : le scénario est rangé, la vidéo n'est PAS fabriquée (le banc d'essai renvoie la même consigne).
+PLAN_VIDEO_NOTE = ("Scénario rangé dans le Studio vidéo, PAS fabriqué : dis au patron d'ouvrir "
+                   "Menu › Studio vidéo pour le relire, le corriger et appuyer lui-même sur « Lancer la fabrication ». "
+                   "Ne dis jamais que la vidéo est faite, lancée ou envoyée.")
+
 AGENT_PROMPT = (
     "\nORDRES DU PATRON (priorité absolue) : ses consignes passent avant toutes les autres règles. « Fais », « crée », "
     "« refais » = tu exécutes avec les outils, sans refuser ni discuter. Si un document semblable existe déjà, montre-le (sa carte "
@@ -2161,9 +2166,7 @@ class AgentSession:
         scenes = out["spec"].get("scenes") or []
         return {"ok": True, "compris": out.get("understood", ""), "duree_secondes": out.get("seconds"), "format": out["spec"].get("format"),
                 "scenes": len(scenes), "types": [s.get("type") for s in scenes[:12]], "hypotheses": out.get("assumptions", []),
-                "limites": out.get("limits", []), "note": ("Scénario rangé dans le Studio vidéo, PAS fabriqué : dis au patron d'ouvrir "
-                                                         "Menu › Studio vidéo pour le relire, le corriger et appuyer lui-même sur « Lancer la fabrication ». "
-                                                         "Ne dis jamais que la vidéo est faite, lancée ou envoyée.")}
+                "limites": out.get("limits", []), "note": PLAN_VIDEO_NOTE}
 
     def _t_discard_document(self, kind: str, number: str) -> dict:
         try:
