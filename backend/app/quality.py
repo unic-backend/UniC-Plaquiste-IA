@@ -50,12 +50,12 @@ def _calc_check(db: Session, since: datetime) -> tuple[int, int]:
     return ok, total
 
 
-def _invented(report: dict | None) -> tuple[int, int]:
-    """(inventions vues au banc d'essai, nombre de cas) : un problème « inventé » = l'IA a complété ce que le patron n'avait pas dit."""
+def _invented(report: dict | None) -> tuple[int, int, list[str]]:
+    """(inventions vues au banc d'essai, nombre de cas, cas concernés) : un problème « inventé » = l'IA a complété ce que le patron n'avait pas dit."""
     if not report:
-        return 0, 0
-    n = sum(1 for r in report.get("results", []) for p in r.get("problems", []) if "inventé" in p)
-    return n, int(report.get("total") or 0)
+        return 0, 0, []
+    hits = [(r.get("id") or "?", p) for r in report.get("results", []) for p in r.get("problems", []) if "inventé" in p]
+    return len(hits), int(report.get("total") or 0), sorted({i for i, _ in hits})
 
 
 def report(db: Session, days: int = DAYS) -> dict[str, Any]:
@@ -74,11 +74,13 @@ def report(db: Session, days: int = DAYS) -> dict[str, Any]:
 
     # 2. Données manquantes : l'IA évite-t-elle d'inventer ? (dernier banc d'essai)
     last = evals.report_last(db)
-    inv, cases = _invented(last)
+    inv, cases, which = _invented(last)
     if last:
         rows.append(_row("manquantes", "Données manquantes (rien d'inventé)", f"{inv} invention(s) / {cases} cas",
                          OK if inv == 0 else BAD,
-                         f"Banc d'essai du {str(last.get('at', ''))[:10]} : score {last.get('score')} %."))
+                         f"Banc d'essai du {str(last.get('at', ''))[:10]} : score {last.get('score')} %."
+                         + (f" Cas concerné(s) : {', '.join(which)}. Un correctif plus récent que ce banc ? Relance-le (Atelier) : "
+                            "le chiffre se met à jour." if inv else "")))
     else:
         rows.append(_row("manquantes", "Données manquantes (rien d'inventé)", "non mesuré", NONE, "Lance le banc d'essai IA pour mesurer."))
 
