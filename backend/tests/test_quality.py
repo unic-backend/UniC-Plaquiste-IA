@@ -82,6 +82,7 @@ def test_invented_values_in_last_eval_are_counted(db):
     db.commit()
     r = _by_id(quality.report(db))["manquantes"]
     assert r["etat"] == "bad" and r["valeur"].startswith("1 invention")
+    assert "Cas concerné(s) : x" in r["detail"] and "Relance-le" in r["detail"]   # on voit QUEL cas, et que relancer met à jour
 
 
 def test_quality_route_is_closed_without_code_and_open_with_it(client):
