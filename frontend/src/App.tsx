@@ -11,6 +11,7 @@ import { CoverLetterBox, DiagramCard, FileCard, ShareButton } from "./Share";
 import { AttachRow, type Attach } from "./Attach";
 const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
 const Equipe = lazyPage(() => import("./Equipe"), "Equipe");
+const Pieces = lazyPage(() => import("./Pieces"), "Pieces");
 const Bibliotheque = lazyPage(() => import("./Bibliotheque"), "Bibliotheque");
 const Analyse = lazyPage(() => import("./Analyse"), "Analyse");
 const Tresorerie = lazyPage(() => import("./Tresorerie"), "Tresorerie");
@@ -1771,6 +1772,7 @@ const HUB: { title: string; items: HubItem[] }[] = [
       { to: "/analyse", title: "Analyse & bilan", text: "Encaissé, signé, dépenses, marges, meilleurs clients, PDF" },
       { to: "/tresorerie", title: "Trésorerie", text: "L'argent des 90 prochains jours, alerte avant un trou" },
       { to: "/parametres/entreprise", title: "Informations société", text: "Nom, coordonnées, TVA, calcul, mon compte, code de l'appli" },
+      { to: "/calcul", title: "Calcul par pièce", text: "Sans l'IA : pièces, matériel, prix, devis" },
       { to: "/materiaux", title: "Matériaux & prix", text: "Grille de prix UniC" },
       { to: "/clients", title: "Clients", text: "Fiches clients" },
     ],
@@ -2325,6 +2327,7 @@ export default function App() {
       <Routes>
         <Route path="/clients" element={<Clients />} />
         <Route path="/materiaux" element={<Materiaux />} />
+        <Route path="/calcul" element={<Pieces />} />
         <Route path="/chantiers" element={<Chantiers />} />
         <Route path="/chantiers/manuels" element={<ProjetsManuels />} />
         <Route path="/chantiers/:id" element={<ChantierDetail />} />

@@ -467,6 +467,9 @@ export const api = {
   createProject: (body: any) =>
     request("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   quotes: () => request<any[]>("/api/quotes?summary=1"),
+  calcPieces: (body: any) => request<any>("/api/calc/pieces", { method: "POST", body: JSON.stringify(body) }),
+  calcPiecesQuote: (body: any) =>
+    request<{ id: string; numero: string; total: number | null; complet: boolean }>("/api/calc/pieces/devis", { method: "POST", body: JSON.stringify(body) }),
   getQuote: (id: string) => request<any>(`/api/quotes/${id}`),
   preview: (artifactId: string) => request<{ pages: number; images: string[]; filename: string }>(`/api/artifacts/${artifactId}/preview`),
   validateMessage: (id: string, on: boolean) => request<{ validated: boolean; total: number }>(`/api/messages/${id}/validate`, { method: on ? "POST" : "DELETE" }),

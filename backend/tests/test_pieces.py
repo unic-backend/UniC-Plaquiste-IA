@@ -1,0 +1,135 @@
+"""Calcul par pièce SANS l'IA (pieces.py, /api/calc/pieces) et accroche plafond : IPN par éclipses, tiges raccordées (calc.hang_from)."""
+import pytest
+from fastapi.testclient import TestClient
+
+from app import calc, pieces
+from app.agent import AgentSession
+from app.config import settings
+from app.database import SessionLocal
+from app.main import app
+from app.models import Quotation
+
+
+@pytest.fixture
+def c(monkeypatch):
+    monkeypatch.setattr(settings, "unic_access_code", "")
+    with TestClient(app) as client:
+        yield client
+
+
+def _q(res: calc.CalcResult, sku: str):
+    return next((q for q in res.quantities if q.sku == sku), None)
+
+
+def test_ipn_eclipses_et_tiges_raccordees():
+    """Chantier Oumar : 636 m² sous IPN, suspente de 4 m → 4 tiges de 1 m par point, une éclipse par point (au lieu de la cheville)."""
+    res = calc.calculate_ceiling(26.5, 24, dims_known=True)
+    points = _q(res, "UC-TIGES-A-L-UNITE").quantity
+    calc.hang_from(res, "ipn", 4)
+    assert _q(res, "UC-TIGES-A-L-UNITE").quantity == points * 4
+    assert _q(res, "UC-CHEVILLES-A-LETON") is None
+    assert _q(res, calc.ECLIPSE_SKU).quantity == -(-points // 100)        # paquets de 100, arrondi au-dessus
+    assert _q(res, "UC-PIVOT").quantity == -(-points // 100)              # un pivot par point, pas par tige
+    assert res.to_dict()["verification"]["ok"]
+
+
+def test_dalle_suspente_courte_ne_change_rien():
+    res = calc.calculate_ceiling(5, 4, dims_known=True)
+    before = {q.sku: q.quantity for q in res.quantities}
+    calc.hang_from(res, "dalle", 0.6)
+    assert {q.sku: q.quantity for q in res.quantities} == before
+
+
+def test_verification_trouve_une_tige_oubliee():
+    res = calc.hang_from(calc.calculate_ceiling(5, 4, dims_known=True), "dalle", 2.5)
+    _q(res, "UC-TIGES-A-L-UNITE").quantity -= 1
+    assert not res.to_dict()["verification"]["ok"]
+
+
+def test_pieces_groupees_et_lignes_fusionnees(c):
+    rooms = [
+        {"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4, "moulure": True},
+        {"name": "Chambre", "kind": "ceiling", "length_m": 4, "width_m": 3.5},
+        {"name": "SDB", "kind": "ceiling", "length_m": 3, "width_m": 2.5, "hydrofuge": True},
+        {"name": "Couloir", "kind": "partition", "length_m": 3, "height_m": 2.6, "doors": 1},
+        {"name": "Salon", "kind": "paint", "area_m2": 60},
+    ]
+    with SessionLocal() as db:
+        r = pieces.calculate(db, rooms, labour_m2=2500)
+    assert r["ok"]
+    assert [b["pieces"] for b in r["blocs"]] == ["Salon, Chambre", "SDB", "Couloir", "Salon"]   # salon + chambre : une seule marge
+    keys = [(l["sku"] or l["name"], l["unit"]) for l in r["lignes"]]
+    assert len(keys) == len(set(keys))                                                         # chaque matériel une fois
+    assert r["surface_posee_m2"] == pytest.approx(20 + 14 + 7.5 + 3 * 2.6)                     # peinture hors pose
+    assert r["main_oeuvre"]["montant"] == round(r["surface_posee_m2"] * 2500)
+    priced = sum(l["montant"] for l in r["lignes"] if l["montant"] is not None)
+    assert r["total"] == round(priced + r["main_oeuvre"]["montant"])
+    assert r["complet"] == (not r["prix_manquants"])
+
+
+@pytest.mark.parametrize("rooms, words", [
+    ([], "au moins une pièce"),
+    ([{"kind": "toiture"}], "type inconnu"),
+    ([{"name": "Salon", "kind": "ceiling", "length_m": 5}], "Largeur manquante pour « Salon »"),
+    ([{"kind": "partition", "length_m": 3, "height_m": "abc"}], "Hauteur illisible"),
+    ([{"kind": "paint", "area_m2": -4}], "Surface hors limites"),
+    ([{"kind": "ceiling", "length_m": float("nan"), "width_m": 3}], "Longueur hors limites"),
+])
+def test_saisie_refusee_avec_message_clair(c, rooms, words):
+    with SessionLocal() as db, pytest.raises(ValueError, match=words):
+        pieces.calculate(db, rooms)
+
+
+def test_api_calcul_puis_devis_sans_ia(c):
+    body = {"pieces": [{"name": "Salle de conférence", "kind": "ceiling", "length_m": 26.5, "width_m": 24, "support": "ipn", "suspente_m": 4}],
+            "main_oeuvre_m2": 3000}
+    r = c.post("/api/calc/pieces", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    eclipse = next(l for l in d["lignes"] if l["sku"] == calc.ECLIPSE_SKU)
+    assert eclipse["prix_unitaire"] is None and eclipse["name"] in d["prix_manquants"]   # base neuve : prix à saisir, jamais inventé
+    assert c.post("/api/calc/pieces/devis", json=body).status_code == 400     # pas de devis sans client
+    r = c.post("/api/calc/pieces/devis", json={**body, "client": "Oumar Pieces", "lieu": "Colobane"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    with SessionLocal() as db:
+        q = db.get(Quotation, out["id"])
+        assert q.status == "draft" and q.number == out["numero"]
+        assert "faux plafond BA13 salle de conférence (26,5 × 24 m)" in q.object_text
+        descs = [i.description for i in q.items]
+        assert pieces.LABOUR_LINE in descs and calc.ECLIPSE_NAME in descs
+        mo = next(i for i in q.items if i.description == pieces.LABOUR_LINE)
+        assert mo.quantity == 636 and mo.unit_price == 3000
+
+
+def test_api_mesure_invalide_400(c):
+    r = c.post("/api/calc/pieces", json={"pieces": [{"kind": "ceiling", "length_m": 5}]})
+    assert r.status_code == 400 and "Largeur" in r.json()["detail"]
+
+
+def test_outil_ia_accroche_ipn(c):
+    with SessionLocal() as db:
+        out = AgentSession(db, None, {})._t_calculate_materials(kind="ceiling", length_m=10, width_m=8, support="ipn", suspente_m=3)
+    skus = {q.get("sku"): q.get("quantity") for q in out["quantites"]}
+    assert calc.ECLIPSE_SKU in skus and "UC-CHEVILLES-A-LETON" not in skus
+    assert out["verification"]["ok"]
+
+
+def test_eclipse_du_patron_reprise_avec_son_prix(c):
+    """Le patron a déjà ajouté son éclipse à la main (autre code) : elle est reprise, nom et prix gardés, rien n'est dupliqué."""
+    from app.models import AppSetting, Material, MaterialPrice
+    from app.seed import apply_owner_eclipse_v13
+    from app.services import selling_price_for_sku
+    with SessionLocal() as db:
+        m = db.query(Material).filter(Material.sku == calc.ECLIPSE_SKU).one()
+        m.sku, m.name = "UC-ECLIPSE-PATRON", "Éclipse IPN du patron"
+        db.add(MaterialPrice(material_id=m.id, kind="selling", amount=12000, currency="FCFA", source="saisie manuelle"))
+        db.delete(db.get(AppSetting, "seed_owner_eclipse_v13"))
+        db.commit()
+        assert apply_owner_eclipse_v13(db) == 1
+        mats = db.query(Material).filter(Material.name.ilike("%clipse%")).all()
+        assert [(x.sku, x.name) for x in mats] == [(calc.ECLIPSE_SKU, "Éclipse IPN du patron")]
+        assert selling_price_for_sku(db, calc.ECLIPSE_SKU)[0] == 12000
+        assert apply_owner_eclipse_v13(db) == 0                      # une seule fois
+        db.query(MaterialPrice).filter(MaterialPrice.material_id == m.id, MaterialPrice.source == "saisie manuelle").delete()
+        db.commit()                                                  # base partagée : on remet la grille comme avant

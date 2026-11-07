@@ -975,6 +975,36 @@ def make_hydrofuge(result: CalcResult, why: str = "") -> CalcResult:
     return result
 
 
+ROD_M = 1.0                                                          # tige de 1 m (grille du patron : « Tiges 1 m »)
+ECLIPSE_SKU, ECLIPSE_NAME = "UC-ECLIPSE-IPN", "Éclipse pour IPN (paquet de 100)"
+
+
+def hang_from(result: CalcResult, support: str = "dalle", drop_m: float | None = None) -> CalcResult:
+    """Accroche du faux plafond (règles du patron, chantier de Colobane) :
+    - IPN (charpente métallique, pas de dalle) : une éclipse serrée sur l'IPN par point d'accroche, à la place de la cheville
+      à laiton, en paquets de 100 ;
+    - suspente plus haute qu'une tige de 1 m : tiges raccordées, ⌈ hauteur / 1 m ⌉ tiges par point (4 m → 4 tiges par point)."""
+    rods = next((q for q in result.quantities if q.sku == "UC-TIGES-A-L-UNITE"), None)
+    if rods is None:
+        return result
+    points = int(result.inputs.get("hang_points") or rods.quantity)
+    result.inputs["hang_points"] = points
+    if drop_m and drop_m > ROD_M:
+        per, h = math.ceil(round(drop_m / ROD_M, 6)), f"{drop_m:g}".replace(".", ",")
+        rods.quantity = points * per
+        rods.formula = f"{points} points d'accroche × {per} tiges de 1 m raccordées (suspente de {h} m)"
+        result.inputs["drop_m"] = drop_m
+        result.assumptions.append(f"Suspente de {h} m : {per} tiges de 1 m raccordées par point d'accroche.")
+    if support == "ipn":
+        for q in result.quantities:
+            if q.sku == "UC-CHEVILLES-A-LETON":
+                q.sku, q.name = ECLIPSE_SKU, ECLIPSE_NAME
+                q.formula = f"⌈{points} points / 100⌉ : une éclipse sur l'IPN par point d'accroche"
+        result.inputs["support"] = "ipn"
+        result.understanding = result.understanding.rstrip(".") + ", accroché aux IPN par éclipses."
+    return result
+
+
 DECOR_RE = re.compile(r"caisson|d[ée]caiss|gorge|bandeau|[îi]lots?\b|plafond\s+lumineux", re.I)
 
 
@@ -1932,6 +1962,13 @@ def verify(result: "CalcResult") -> dict[str, Any]:
             if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
                 problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
             fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}
+            if inp.get("hang_points"):   # accroche : ⌈ suspente / 1 m ⌉ tiges par point ; IPN : 1 éclipse par point (paquets de 100)
+                per = math.ceil(round(float(inp.get("drop_m") or ROD_M) / ROD_M, 6)) if (inp.get("drop_m") or 0) > ROD_M else 1
+                if qty.get("UC-TIGES-A-L-UNITE") != inp["hang_points"] * per:
+                    problems.append(f"Tiges : moteur {qty.get('UC-TIGES-A-L-UNITE')} ≠ contrôle {inp['hang_points'] * per}.")
+                hold = ECLIPSE_SKU if inp.get("support") == "ipn" else "UC-CHEVILLES-A-LETON"
+                if hold in qty and qty[hold] != _min_count(Fraction(inp["hang_points"]), Fraction(100)):
+                    problems.append(f"Accroche : moteur {qty[hold]} ≠ contrôle {_min_count(Fraction(inp['hang_points']), Fraction(100))} paquet(s).")
             pts = sum(_min_count(per, _F(fx["anchor_spacing_m"])) + 4 for per in pers)
             packs = _min_count(Fraction(pts), Fraction(int(fx["anchors_per_pack"])))
             if "UC-PAQUET-CHEVILLES-A-FRAPPER" in qty and qty["UC-PAQUET-CHEVILLES-A-FRAPPER"] != packs:
