@@ -133,3 +133,25 @@ def test_eclipse_du_patron_reprise_avec_son_prix(c):
         assert apply_owner_eclipse_v13(db) == 0                      # une seule fois
         db.query(MaterialPrice).filter(MaterialPrice.material_id == m.id, MaterialPrice.source == "saisie manuelle").delete()
         db.commit()                                                  # base partagée : on remet la grille comme avant
+
+
+def test_vis_au_paquet_de_1000_une_fois_par_chantier(c):
+    """Règle du patron : paquet de 1 000 vis. 5 plafonds de 20 m² = 1 500 vis → 2 paquets (pas 5), au prix de sa grille."""
+    rooms = [{"name": f"Chambre {i}", "kind": "ceiling", "length_m": 5, "width_m": 4} for i in range(5)]
+    with SessionLocal() as db:
+        r = pieces.calculate(db, rooms)
+    vis = next(l for l in r["lignes"] if l["sku"] == calc.SCREW_PACK_SKU)
+    assert vis["quantity"] == 2 and vis["unit"] == "paquet" and "1500 vis" in vis["formula"]
+    assert vis["prix_unitaire"] == 5000                                  # « Paquet vis (25 mm ou 35 mm) » de la grille
+    assert not any(l["sku"] == "VIS-PLAQUE" for l in r["lignes"])
+
+
+def test_outil_ia_et_plan_vis_au_paquet(c):
+    from app import plan_quote
+    with SessionLocal() as db:
+        out = AgentSession(db, None, {})._t_calculate_materials(kind="partition", length_m=12, height_m=2.5, sides=1)
+    vis = next(q for q in out["quantites"] if q.get("sku") == calc.SCREW_PACK_SKU)
+    assert vis["quantity"] == 1 and "450 vis" in vis["formula"]          # 30 m² × 15 = 450 vis → 1 paquet
+    plan = plan_quote.build({"pieces": [{"nom": f"Bureau {i}", "surface_m2": 20, "longueur_m": 5, "largeur_m": 4, "plafond": "oui"} for i in range(4)]})
+    vis = [q for q in plan["quantities"] if q["sku"] in (calc.SCREW_PACK_SKU, "VIS-PLAQUE")]
+    assert [(q["sku"], q["quantity"]) for q in vis] == [(calc.SCREW_PACK_SKU, 2)]   # 4 × 300 = 1 200 vis → 2 paquets

@@ -72,3 +72,38 @@ def test_le_choix_du_patron_passe_avant_le_conseil():
         assert [i["style"] for i in out["idees"]] == ["gorge", "caisson", "bandeau"] and "repos" in out["conseil"]
         out = s("ceiling_designs", {"length_m": 4, "width_m": 3.5, "piece": "chambre", "styles": ["ilot"]})
         assert [i["style"] for i in out["idees"]] == ["ilot"] and "conseil" not in out
+
+
+def test_tracage_et_decoupe_du_caisson():
+    """Comment tracer et couper : distances aux murs, diagonales d'équerre, faces courtes moins 2 épaisseurs, bandes dans les plaques."""
+    t = pd.trace_decoupe("caisson", 5, 4)
+    assert t["distances_murs_m"] == [0.6, 0.6] and t["diagonale_m"] == 4.72          # √(3,8² + 2,8²)
+    faces = {f["face"]: f for f in t["bandes"]["faces"]}
+    assert faces["A"]["longueur_cm"] == 380 and faces["B"]["longueur_cm"] == 277.5    # 280 − 2 × 1,25
+    assert faces["A"]["morceaux_cm"] == [200, 180]
+    cut = t["bandes"]
+    assert cut["bandes_par_plaque"] == 8 and cut["bandes"] == 7 and cut["plaques"] == 1  # les deux 77,5 dans une seule bande
+    used = sum(p["cm"] for b in cut["plan_bandes"] for p in b)
+    assert used == pytest.approx(2 * 380 + 2 * 277.5) and cut["chute_cm"] == pytest.approx(7 * 200 - used)
+    assert any("4,72 m" in s for s in t["tracage"]) and "<svg" in diagrams.sanitize(t["svg"])
+
+
+def test_retombee_haute_moins_de_bandes_par_plaque():
+    """Retombée de 25 cm : 4 bandes par plaque (pas 4,8) — le compte à la surface en oubliait."""
+    t = pd.trace_decoupe("ilot", 6, 4.5, retombee_m=0.25)
+    assert t["distances_murs_m"] == [1.5, 1.12] and t["bandes"]["bandes_par_plaque"] == 4
+    assert t["plaques_retombees"] == pd.design("ilot", 6, 4.5, retombee_m=0.25)["plaques_retombees"] == 2
+    with pytest.raises(pd.DesignError):
+        pd.trace_decoupe("caisson", 5, 4, retombee_m=1.3)
+
+
+def test_outil_plan_de_pose_decor(monkeypatch):
+    from app import diagrams as dg
+    from app.agent import AgentSession
+    from app.database import SessionLocal
+    monkeypatch.setattr(dg, "render", lambda db, title, svg, uid: type("A", (), {"id": "x", "filename": "t.png"})())
+    with TestClient(app), SessionLocal() as db:
+        s = AgentSession(db, None, {})
+        out = s._t_pose_plan(5, 4, ouvrage="decor", decor_style="gorge")
+        assert out["plaques_retombees"] == 1 and out["tracage"] and s.images[0]["title"].startswith("Traçage et découpe")
+        assert "error" in s._t_pose_plan(5, 4, ouvrage="decor")

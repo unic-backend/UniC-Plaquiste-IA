@@ -81,7 +81,7 @@ def _ceiling(group: list[dict], cfg: dict) -> calc.CalcResult:
         calc.make_hydrofuge(res, "Plaques hydrofuges (pièce humide cochée).")
     if group[0]["support"] == "ipn" or (group[0]["suspente_m"] or 0) > calc.ROD_M:
         calc.hang_from(res, group[0]["support"], group[0]["suspente_m"])
-    return res
+    return calc.pack_screws(res)
 
 
 def _partition(group: list[dict], cfg: dict) -> calc.CalcResult:
@@ -97,7 +97,7 @@ def _partition(group: list[dict], cfg: dict) -> calc.CalcResult:
                                    fixing_values=cfg["fixings"], sides_known=True, openings_known=True)
     if group[0].get("hydrofuge"):
         calc.make_hydrofuge(res, "Plaques hydrofuges (pièce humide cochée).")
-    return res
+    return calc.pack_screws(res)
 
 
 def _groups(rooms: list[dict]) -> list[tuple[str, list[dict]]]:

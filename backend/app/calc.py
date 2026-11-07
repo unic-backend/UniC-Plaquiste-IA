@@ -975,6 +975,25 @@ def make_hydrofuge(result: CalcResult, why: str = "") -> CalcResult:
     return result
 
 
+SCREW_PACK = 1000   # règle du patron : un paquet de vis à plaque (25 ou 35 mm) contient 1 000 vis
+SCREW_PACK_SKU = "UC-PAQUET-VIS-25-MM-OU-35-MM"   # « Paquet vis (25 mm ou 35 mm) » de la grille du patron
+
+
+def screw_pack_line(screws: int, how: str, mm: int = 25) -> QuantityLine:
+    """Vis à plaque comptées une à une par le moteur, vendues au paquet de 1 000 : arrondi au paquet, le compte reste dans la formule."""
+    return QuantityLine(SCREW_PACK_SKU, f"Vis {mm} mm (paquet de {SCREW_PACK} vis)", ceil_int(screws / SCREW_PACK), "paquet",
+                        f"⌈ {screws} vis ({how}) / {SCREW_PACK} ⌉", STATUS_CONFIRMED)
+
+
+def pack_screws(result: CalcResult, mm: int = 25) -> CalcResult:
+    """Remplace la ligne « Vis à plaque » (en vis) par des paquets de 1 000. À appeler une fois les pièces regroupées, jamais pièce par pièce
+    (5 pièces à 300 vis = 2 paquets, pas 5)."""
+    for i, q in enumerate(result.quantities):
+        if q.sku == "VIS-PLAQUE":
+            result.quantities[i] = screw_pack_line(int(q.quantity), q.formula, mm)
+    return result
+
+
 ROD_M = 1.0                                                          # tige de 1 m (grille du patron : « Tiges 1 m »)
 ECLIPSE_SKU, ECLIPSE_NAME = "UC-ECLIPSE-IPN", "Éclipse pour IPN (paquet de 100)"
 
@@ -1018,7 +1037,7 @@ def decor_style(text: str) -> str | None:
     return None
 
 
-def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_m: float = 0.15, waste: float | None = None,
+def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_m: float = 0.15,
               board_width: float = DEFAULTS["board_width_m"], board_height: float = DEFAULTS["board_height_m"],
               led: bool | None = None) -> CalcResult:
     """L'idée de plafond choisie par le client devient des quantités : plaques des retombées (règle des plaques du moteur) et ruban
@@ -1028,13 +1047,13 @@ def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_
         result.missing.append(f"Décor « {style} » : dis dans quelle pièce (plusieurs zones), il n'est pas compté.")
         return result
     d = plafond_design.design(style, result.inputs["length_m"], result.inputs["width_m"], marge_m=marge_m, retombee_m=retombee_m,
-                              waste=result.inputs.get("waste", DEFAULTS["waste"]) if waste is None else waste,
-                              board_m2=board_area(board_width, board_height))
+                              board_width=board_width, board_height=board_height)
     if not (style in ("gorge", "ilot") if led is None else led):   # LED : propre à la gorge et à l'îlot, ailleurs seulement si demandée
         d["led_ml"] = 0.0
     sku, name = board_sku(board_width, board_height)
     result.quantities.append(QuantityLine(sku, f"{name} — retombées ({d['retombee_m2']:g} m²)", d["plaques_retombees"], "u",
-                                          f"⌈ {d['retombee_ml']:g} ml × {retombee_m:g} m × (1+d) / Splaque ⌉", STATUS_ESTIMATED))
+                                          f"bandes de {retombee_m * 100:g} cm coupées dans les plaques ({d['retombee_ml']:g} ml de retombée), "
+                                          "plan de découpe", STATUS_ESTIMATED))
     if d["led_ml"]:
         result.quantities.append(QuantityLine("UC-RUBAN-LED", "Ruban LED (ml)", ceil_int(d["led_ml"]), "ml",
                                               f"⌈ pourtour {d['led_ml']:g} ml ⌉", STATUS_ESTIMATED))
