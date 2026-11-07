@@ -1027,7 +1027,7 @@ class MaterialIn(BaseModel):
 
 
 class PriceIn(BaseModel):
-    kind: str
+    kind: str = Field(max_length=16)
     amount: float = Field(gt=0, le=1_000_000_000)   # même règle que la saisie en série : jamais 0 ni négatif
     currency: str = ""
     notes: str = ""
@@ -1156,7 +1156,7 @@ class BulkPriceItem(BaseModel):
 
 
 class BulkPricesIn(BaseModel):
-    kind: str
+    kind: str = Field(max_length=16)
     prices: list[BulkPriceItem] = Field(max_length=300)
 
 
@@ -2601,6 +2601,57 @@ def calc_api(body: CalcIn, db: Session = Depends(get_db), user: User = Depends(g
     except ValueError as exc:   # saisie impossible : on renvoie la raison du moteur, pas une erreur interne
         raise HTTPException(400, str(exc)) from exc
     raise HTTPException(400, "Paramètres insuffisants")
+
+
+class PieceIn(BaseModel):
+    name: str = Field("", max_length=40)
+    kind: str = Field(max_length=16)
+    length_m: float | None = None
+    width_m: float | None = None
+    height_m: float | None = None
+    area_m2: float | None = None
+    sides: int = 2
+    doors: int = 0
+    windows: int = 0
+    coats: int = 2
+    hydrofuge: bool = False
+    moulure: bool = False
+    support: str = Field("dalle", max_length=16)
+    suspente_m: float | None = None
+
+
+class PiecesIn(BaseModel):
+    pieces: list[PieceIn] = Field(default_factory=list, max_length=40)
+    entraxe_cm: int | None = None
+    main_oeuvre_m2: float | None = None
+
+
+class PiecesDevisIn(PiecesIn):
+    client: str = Field("", max_length=120)
+    lieu: str = Field("", max_length=120)
+    objet: str = Field("", max_length=900)
+
+
+@router.post("/calc/pieces")
+def calc_pieces(body: PiecesIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Calcul par pièce SANS l'IA (moteur UniC + grille de prix) : marche même quand l'API Claude est coupée."""
+    from app import pieces
+    try:
+        return pieces.calculate(db, [p.model_dump() for p in body.pieces], body.entraxe_cm, body.main_oeuvre_m2)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/calc/pieces/devis")
+def calc_pieces_quote(body: PiecesDevisIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Devis du calcul par pièce, créé comme ceux de l'IA (numéro, prix de la grille, livraison, PDF), sans appel payant."""
+    from app import pieces
+    try:
+        q = pieces.create_quote(db, user.id, [p.model_dump() for p in body.pieces], client=body.client, lieu=body.lieu,
+                                objet=body.objet, entraxe_cm=body.entraxe_cm, labour_m2=body.main_oeuvre_m2)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"id": q.id, "numero": q.number, "total": q.total, "complet": q.prices_complete}
 
 
 # ---------- Atelier : UniC se surveille, se corrige, crée ses agents ----------

@@ -478,6 +478,34 @@ def apply_owner_fixings_v12(db: Session) -> int:
     return n
 
 
+def apply_owner_eclipse_v13(db: Session) -> int:
+    """Accroche sur IPN : une éclipse par point (moteur : UC-ECLIPSE-IPN). Une éclipse déjà dans la grille du patron (ajoutée à la main)
+    est reprise telle quelle, son nom et son prix gardés ; sinon elle est créée sans prix (« à saisir » : aucun prix inventé). Une seule fois."""
+    import unicodedata
+
+    from app.calc import ECLIPSE_NAME, ECLIPSE_SKU
+    from app.models import AppSetting
+
+    flag = "seed_owner_eclipse_v13"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    if db.query(Material).filter(Material.sku == ECLIPSE_SKU).first() is None:
+        plain = lambda t: unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode().lower()   # noqa: E731
+        owned = [m for m in db.query(Material).filter(Material.is_active.is_(True)).all() if "eclipse" in plain(m.name)]
+        if owned:
+            owned.sort(key=lambda m: not any(p.kind == "selling" and p.valid_to is None for p in m.prices))   # celle qui a un prix d'abord
+            owned[0].sku = ECLIPSE_SKU
+        else:
+            m = Material(sku=ECLIPSE_SKU, name=ECLIPSE_NAME, category="ossature", unit="paquet", waste_coefficient=0.0,
+                         notes="Paquet de 100 : une éclipse serrée sur l'IPN par point d'accroche.")
+            db.add(m)
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_prices_v3(db: Session) -> int:
     """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
     from app.models import AppSetting

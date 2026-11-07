@@ -77,6 +77,9 @@ Application **mono-propriétaire**. Sur Internet, définis `UNIC_ACCESS_CODE` (e
 - Téléversement PDF / Office / images, photo chantier (appareil)
 - Lecture PDF page par page, recherche (« trouve les portes »)
 - Moteur BTP : surfaces, plaques, montants, rails, peinture, enduit — formules visibles
+- **Calcul par pièce sans l'IA** (menu Entreprise, `/calcul`, `POST /api/calc/pieces` et `/api/calc/pieces/devis`) : pièces saisies à la main
+  (faux plafond dalle ou IPN par éclipses, suspente haute en tiges de 1 m raccordées, cloison, peinture), matériel compté par le moteur,
+  prix de la grille, devis brouillon. Aucun appel payant : marche quand l'API Claude est coupée.
 - Catalogue matériaux **sans prix inventés**
 - Devis, factures, bons de commande, bons de livraison, rapports — **PDF réels téléchargeables**
 - Approbation humaine (brouillon → approuvé)

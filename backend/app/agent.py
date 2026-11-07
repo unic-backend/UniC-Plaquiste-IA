@@ -198,6 +198,8 @@ TOOLS: list[dict] = [
             "decor_led": {"type": "boolean", "description": "LED demandée pour un caisson ou un bandeau (la gorge et l'îlot l'ont déjà)."},
             "retombee_m": {"type": "number", "description": "Hauteur de retombée du décor (0,15 m par défaut)."},
             "hydrofuge": {"type": "boolean", "description": "Plaques hydrofuges (salle de bain, douche, WC, pièce humide) : référence et prix « -H »."},
+            "support": {"type": "string", "enum": ["dalle", "ipn"], "description": "Faux plafond : ce qui porte l'accroche. dalle (béton : cheville à laiton, par défaut) ; ipn (charpente métallique, toiture : une éclipse sur l'IPN par point, au lieu de la cheville)."},
+            "suspente_m": {"type": "number", "description": "Faux plafond : hauteur de suspente (de la dalle ou de l'IPN jusqu'au plafond), si le patron la donne. Au-delà de 1 m, tiges de 1 m raccordées : ⌈ hauteur ⌉ tiges par point (4 m → 4 tiges)."},
             "entraxe_cm": {"type": "integer", "enum": [50, 60], "description": "Faux plafond : fourrures tous les 50 cm par défaut (plaque en travers) ; 60 SEULEMENT si le patron le dit (fourrures tous les 60 cm, tiges toujours à 90 cm, plaque dans le sens des fourrures sur 3 fourrures). Cloison : montants tous les 60 cm par défaut (plaque debout) ; 50 SEULEMENT si le patron le dit (plaque couchée)."},
             "openings": {"type": "array", "items": {"type": "object", "properties": {
                 "kind": {"type": "string", "enum": ["door", "window"]}, "width_m": {"type": "number"},
@@ -1810,7 +1812,8 @@ class AgentSession:
                                board_length_m: float | None = None, no_openings: bool = False, zones: list | None = None,
                                with_moulure: bool = False, moulure_taille: int | None = None, colle: str = "silicone",
                                decor_style: str | None = None, decor_led: bool | None = None, retombee_m: float = 0.15,
-                               hydrofuge: bool = False, entraxe_cm: int | None = None) -> dict:
+                               hydrofuge: bool = False, entraxe_cm: int | None = None, support: str = "dalle",
+                               suspente_m: float | None = None) -> dict:
         rects = []   # plusieurs pièces / cloisons : (côté 1, côté 2, côtés connus ?), répétés selon count
         for z in zones or []:
             n, a = int(z.get("count") or 1), z.get("length_m")
@@ -1929,6 +1932,8 @@ class AgentSession:
             calc.add_moulure(res, sum(2 * (a + b) for a, b in zs), moulure_taille, colle)
         if hydrofuge and res.kind in ("ceiling", "partition", "partition_area") and res.quantities:
             calc.make_hydrofuge(res)
+        if res.kind == "ceiling" and res.quantities and (support == "ipn" or (suspente_m or 0) > calc.ROD_M):   # IPN : éclipses ; plafond haut : tiges raccordées
+            calc.hang_from(res, support, suspente_m)
         data = res.to_dict()
         self.state["last_calc"] = data   # utilisé par create_quote / bons
         self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible
