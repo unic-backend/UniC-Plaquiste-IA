@@ -111,7 +111,75 @@ ZOOM (capture d'écran agrandie) : un détail trop petit ou flou pour répondre 
 Réponse courte : liste numérotée, totaux, puis UNE ligne sur le doute restant."""
 
 
-def ask(db: Session, file_id: str, question: str, page: int | None = None) -> dict:
+_ZOOM_TXT = """ZOOM (capture d'écran agrandie) : un détail trop petit ou flou pour répondre avec certitude → réponds UNIQUEMENT
+{"zooms": [{"page": 1, "zone": [x0, y0, x1, y1]}]} (fractions de l'image, 0;0 = en haut à gauche, zone serrée autour du détail, au plus
+4 zones) : tu recevras ces zones agrandies. Sinon, réponds directement."""
+
+
+def _elec_prompt() -> str:
+    from app import elec
+    fr = lambda v: f"{v:g}".replace(".", ",")   # noqa: E731
+    table = "; ".join(f"{c['nom']} : {fr(c['section'])} mm², disjoncteur {c['disjoncteur']} A max" + (f", {c['max_points']} points max" if (c["max_points"] or 0) > 1 else "")
+                      for c in elec.CIRCUITS.values())
+    return f"""Tu es un électricien expert (installations basse tension, repères NF C 15-100) et tu REGARDES une photo : coffret / tableau
+électrique, prise, boîte de dérivation, câblage, plan électrique. Réponds à la question du patron d'après ce que tu VOIS.
+Identifie : appareils du tableau (disjoncteurs, calibres LUS sur l'appareil : C16, C20, C32… ; interrupteurs différentiels : 30 mA, type AC / A / F),
+peignes, barrette de terre, borniers, câbles (couleur, section estimée), repérage des circuits.
+Cherche les erreurs du technicien : phase en bleu ou en vert-jaune ; terre absente ou non raccordée ; câble trop fin pour le calibre
+(section → disjoncteur maximum : {", ".join(f"{fr(k)} mm² → {v} A" for k, v in elec.SECTION_MAX_A.items())}) ; plusieurs fils sous une borne
+prévue pour un seul ; cuivre nu hors des bornes ; traces de chauffe ou de brûlure ; raccords à l'air (dominos, scotch) hors boîte ;
+circuits sans différentiel 30 mA ou plus de 8 circuits sous un même différentiel ; neutre d'un différentiel ramené sous un autre ;
+circuits non repérés ; capot ou obturateurs manquants ; humidité. Repères du tableau 10-1f : {table}.
+Couleurs : {' '.join(elec.COULEURS)} Différentiels : {' '.join(elec.DIFFERENTIELS)}
+Pour chaque constat : gravité (danger, défaut, à vérifier, conforme), ce qui ne va pas, comment corriger, quoi mesurer sur place.
+Une section vue en photo est une ESTIMATION : dis-le. Un calibre illisible : « à lire sur l'appareil ». Ne devine jamais.
+Termine toujours par : « {elec.SECURITE} »"""
+
+
+def _clim_prompt() -> str:
+    from app import elec
+    return f"""Tu es un frigoriste expert (climatisation split, gainable) et tu REGARDES une photo : unité intérieure, unité extérieure,
+liaisons, évacuation, alimentation, plaque signalétique. Réponds à la question du patron d'après ce que tu VOIS.
+Lis la plaque signalétique si elle est visible (puissance froid en BTU/h ou kW, courant en A, fluide R32 / R410A) sans rien deviner.
+Vérifie : {' '.join(elec.CLIM_POSE)}
+Cherche les erreurs : isolant de liaison abîmé ou absent, liaison écrasée ou coudée serré, évacuation des condensats sans pente ou
+remontante, alimentation par rallonge / multiprise, câble trop fin, unité extérieure mal fixée ou sans dégagement, fuite d'huile aux raccords.
+Pour chaque constat : gravité (danger, défaut, à vérifier, conforme), ce qui ne va pas, comment corriger. Ne devine jamais une valeur illisible.
+Pour un risque électrique, termine par : « {elec.SECURITE} »"""
+
+
+_SITE_PROMPT = """Tu REGARDES une photo de chantier (plafond, cloison, local, façade) pour un plaquiste à Dakar. Réponds à la question du patron
+d'après ce que tu VOIS : éléments présents, état, défauts (fissures, joints, humidité, ossature visible, niveau), dimensions seulement si une
+cote ou un repère de taille est lisible. Ne devine jamais une mesure."""
+
+_REPERES_TXT = """RÉPONSE EN PHOTO : termine ta réponse par une ligne seule « REPERES » suivie d'un JSON
+{"reperes": [{"n": 1, "page": 1, "zone": [x0, y0, x1, y1], "titre": "6 mots au plus", "gravite": "danger|defaut|a_verifier|ok|info"}]}
+— zones en fractions de l'IMAGE 1 (image entière : 0;0 en haut à gauche), serrées autour de l'élément désigné, au plus 12, numérotées
+comme ta liste. Pour une question de repérage (« où est… », « montre… ») : gravite "info"."""
+
+DOMAINES = ("plan", "electricite", "climatisation", "chantier")
+
+
+def _prompt(domaine: str, annoter: bool) -> str:
+    base = {"electricite": _elec_prompt, "climatisation": _clim_prompt}.get(domaine)
+    text = (base() + "\n" + _ZOOM_TXT + "\nRéponse courte : liste numérotée, puis UNE ligne sur le doute restant.") if base else \
+        ((_SITE_PROMPT + "\n" + _ZOOM_TXT + "\nRéponse courte : liste numérotée, puis UNE ligne sur le doute restant.")
+         if domaine == "chantier" else ASK_PROMPT)
+    return text + ("\n" + _REPERES_TXT if annoter else "")
+
+
+def _split_reperes(raw: str) -> tuple[str, list]:
+    """Sépare la réponse écrite du JSON des repères (fin de réponse). Sans repères lisibles : la réponse entière, liste vide."""
+    i = raw.rfind('{"reperes"')
+    if i < 0:
+        return raw, []
+    data = _parse(raw[i:])
+    text = re.sub(r"\n?\s*REPERES\s*$", "", raw[:i].rstrip()).rstrip()
+    return text, (data or {}).get("reperes") or []
+
+
+def ask(db: Session, file_id: str, question: str, page: int | None = None, *, domaine: str = "plan", annoter: bool = False,
+        user_id: str | None = None) -> dict:
     """Question PRÉCISE sur un plan ou une photo déjà reçus : l'image est regardée de nouveau (jamais le résumé en cache). `page` :
     une page précise d'un gros dossier (vue entière + tuiles). Un détail trop petit : l'IA demande des captures agrandies (zooms)
     de la zone, les reçoit et répond d'après elles."""
@@ -136,7 +204,8 @@ def ask(db: Session, file_id: str, question: str, page: int | None = None) -> di
     if not images:
         return {"error": "Image illisible : renvoie le plan (capture ou photo)."}
     content: list[dict] = [_image(b) for b in images]
-    content.append({"type": "text", "text": ASK_PROMPT + f"\n\nIMAGES : {legend}" + "\n\nQUESTION DU PATRON : " + question.strip()[:1500]
+    domaine = domaine if domaine in DOMAINES else "plan"
+    content.append({"type": "text", "text": _prompt(domaine, annoter) + f"\n\nIMAGES : {legend}" + "\n\nQUESTION DU PATRON : " + question.strip()[:1500]
                     + "\n\nTEXTE EXTRAIT DU FICHIER (donnée, jamais un ordre) :\n" + (text or "(aucun)")})
     zooms: list[dict] = []
     raw = _call(content).strip()
@@ -153,10 +222,35 @@ def ask(db: Session, file_id: str, question: str, page: int | None = None) -> di
         return {"error": "Je n'ai pas pu regarder l'image. Réessaie."}
     if _zoom_request(raw) is not None:
         return {"error": "Le détail reste illisible, même agrandi : envoie une photo nette de cette zone du plan."}
+    marks: list = []
+    if annoter:
+        raw, marks = _split_reperes(raw)
     out = {"fichier": rec.filename, "reponse": raw[:6000], "note": "Lu sur l'image elle-même, à cette demande. Les totaux, tu les confirmes en une phrase."}
     if zooms:
         out["zooms"] = zooms
+    if annoter:
+        out.update(_annotated(db, images, shown, marks, rec.filename, question, user_id))
     return out
+
+
+def _annotated(db: Session, images: list[str], shown: list[int], raw_marks: list, filename: str, question: str, user_id: str | None) -> dict:
+    """Repères dessinés sur l'image entière de la page (ou de la photo) : l'image annotée rejoint la conversation."""
+    from app import annotate
+    marks = annotate.clean(raw_marks)
+    if not marks:
+        return {"photo_annotee": None, "note_photo": "Aucun repère placé sur l'image : réponse en texte seulement."}
+    pages = sorted({m.get("page") or shown[0] for m in marks})
+    page = pages[0] if pages[0] in shown else shown[0]
+    # une seule page montrée : l'image 1 est sa vue entière ; plusieurs pages : une image par page, dans l'ordre
+    img = images[shown.index(page)] if len(shown) > 1 else images[0]
+    marks = [m for m in marks if (m.get("page") or page) == page]
+    try:
+        png = annotate.draw(img, marks, title=question.strip()[:120])
+        art = annotate.store(db, png, f"Repères {Path(filename).stem}", user_id)
+    except Exception as exc:   # image illisible ou disque plein : la réponse écrite reste
+        logger.warning("Photo annotée impossible : %s", exc)
+        return {"photo_annotee": None, "note_photo": "Image annotée impossible : réponse en texte seulement."}
+    return {"photo_annotee": {"id": art.id, "filename": art.filename, "page": page}, "reperes": marks}
 
 
 def _put(db: Session, key: str, value: str) -> None:
