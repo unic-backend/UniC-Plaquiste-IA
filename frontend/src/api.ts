@@ -135,15 +135,16 @@ async function requestInner<T>(path: string, init: RequestInit = {}): Promise<T>
       res = await fetch(apiUrl(path), { ...init, headers });
     } catch {
       if (i < waits.length) {
-        netNote("Connexion au serveur… il redémarre peut-être après une mise à jour (1 à 2 min).");
+        // téléphone hors ligne : le dire, au lieu d'accuser le serveur
+        netNote(navigator.onLine === false ? "Pas de connexion internet sur le téléphone… je réessaie."
+          : "Connexion au serveur… il redémarre peut-être après une mise à jour (1 à 2 min).");
         await new Promise((r) => setTimeout(r, waits[i]));
       }
     }
   }
   if (!res) {
-    throw new Error(
-      "Serveur injoignable. Il redémarre peut-être après une mise à jour (1 à 2 min) : réessayez. Sinon vérifiez votre connexion.",
-    );
+    throw new Error(navigator.onLine === false ? "Pas de connexion internet sur le téléphone : vérifiez le Wi-Fi ou les données mobiles."
+      : "Serveur injoignable. Il redémarre peut-être après une mise à jour (1 à 2 min) : réessayez. Sinon vérifiez votre connexion.");
   }
   if (res.status === 401) throw new AuthError("Code d'accès requis");
   if (!res.ok) {

@@ -658,6 +658,7 @@ def test_access_code_guard(client, monkeypatch):
     monkeypatch.setattr(settings, "unic_access_code", "s3cret-code")
     main.ratelimit._mem.clear()
     assert client.get("/api/ping").status_code == 200                      # santé publique
+    assert isinstance(client.get("/api/ping").json()["uptime_s"], int)       # depuis quand le serveur tourne (redémarrages visibles)
     r = client.get("/api/auth/me")
     assert r.status_code == 401
     assert client.get("/api/auth/me", headers={"x-access-code": "faux"}).status_code == 401
