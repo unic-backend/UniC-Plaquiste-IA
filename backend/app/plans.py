@@ -125,7 +125,7 @@ def _elec_prompt() -> str:
 électrique, prise, boîte de dérivation, câblage, plan électrique. Réponds à la question du patron d'après ce que tu VOIS.
 Identifie : appareils du tableau (disjoncteurs, calibres LUS sur l'appareil : C16, C20, C32… ; interrupteurs différentiels : 30 mA, type AC / A / F),
 peignes, barrette de terre, borniers, câbles (couleur, section estimée), repérage des circuits.
-Cherche les erreurs du technicien : phase en bleu ou en vert-jaune ; terre absente ou non raccordée ; câble trop fin pour le calibre
+Cherche les erreurs du technicien : phase reliée au neutre (rouge raccordé au bleu : court-circuit, danger) ; phase en bleu ou en vert-jaune ; terre absente ou non raccordée ; câble trop fin pour le calibre
 (section → disjoncteur maximum : {", ".join(f"{fr(k)} mm² → {v} A" for k, v in elec.SECTION_MAX_A.items())}) ; plusieurs fils sous une borne
 prévue pour un seul ; cuivre nu hors des bornes ; traces de chauffe ou de brûlure ; raccords à l'air (dominos, scotch) hors boîte ;
 circuits sans différentiel 30 mA ou plus de 8 circuits sous un même différentiel ; neutre d'un différentiel ramené sous un autre ;

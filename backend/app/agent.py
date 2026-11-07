@@ -790,7 +790,7 @@ TOOLS: list[dict] = [
                         "défaut / conforme) ; \"section\" (section et disjoncteur pour une puissance ou un courant, chute de tension "
                         "comprise avec longueur_m) ; \"clim\" (puissance froid d'une pièce : surface_m2, hauteur_m, forte_chaleur ; avec "
                         "courant_a de la plaque signalétique : disjoncteur et section de la ligne dédiée). Cite les nombres tels quels et "
-                        "rappelle la consigne de sécurité ; au Sénégal, la norme ASN fait foi pour un chantier réel."),
+                        "rappelle la consigne de sécurité ; ces règles valent aussi au Sénégal (le patron)."),
         "input_schema": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["regles", "circuit", "section", "clim"]},
             "usage": {"type": "string", "enum": ["eclairage", "prises_8", "prises_12", "prises_cuisine", "specialise", "frigo",
