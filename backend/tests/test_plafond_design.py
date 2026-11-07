@@ -86,6 +86,9 @@ def test_tracage_et_decoupe_du_caisson():
     used = sum(p["cm"] for b in cut["plan_bandes"] for p in b)
     assert used == pytest.approx(2 * 380 + 2 * 277.5) and cut["chute_cm"] == pytest.approx(7 * 200 - used)
     assert any("4,72 m" in s for s in t["tracage"]) and "<svg" in diagrams.sanitize(t["svg"])
+    # ossature (méthode du patron) : A et C 380 = 280 + 100, B et D 280 ; les deux 100 dans une barre → 5 barres de fourrure et de cornière
+    assert t["barres_ossature"] == 5 and any("fourrure sur la ligne tracée" in s for s in t["ossature"])
+    assert "5 barres de chaque" in t["svg"]
 
 
 def test_retombee_haute_moins_de_bandes_par_plaque():

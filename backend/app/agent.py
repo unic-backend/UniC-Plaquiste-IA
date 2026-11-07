@@ -1208,7 +1208,8 @@ class AgentSession:
         return {"idees": out, **({"conseil": conseil} if conseil else {}), "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
                                        "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions. Quand le client a choisi : "
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
-                                       "l'ossature des retombées et le prix du LED se demandent au patron.")}
+                                       "ossature des retombées comptée selon la méthode du patron (fourrure en haut, cornière en bas) ; le prix du LED se demande au patron. "
+                                       "Pour montrer aux ouvriers comment tracer et couper : pose_plan(ouvrage=\"decor\").")}
 
     def _t_pose_plan(self, length_m: float, width_m: float | None = None, plaque_m: float | None = None,
                      entraxe_cm: int | None = None, ouvrage: str = "plafond", height_m: float | None = None,

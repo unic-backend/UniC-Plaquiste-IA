@@ -1,6 +1,6 @@
 """Le client choisit une idée de plafond dessinée (caisson, gorge, bandeau, îlot) : elle devient des quantités de devis — plaques des
-retombées (règle des plaques du moteur) et ruban LED en ml. L'ossature des retombées et le prix du LED sont signalés à donner, jamais
-inventés ; une retombée dite n'est pas prise pour le plénum."""
+retombées (découpe réelle des bandes), ossature des retombées (méthode du patron : fourrure en haut, cornière en bas) et ruban LED en ml.
+Le prix du LED est signalé à donner, jamais inventé ; une retombée dite n'est pas prise pour le plénum."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,7 +25,12 @@ def test_l_idee_choisie_devient_des_quantites(text, style, boards, led):
     assert r.inputs["decor"]["style"] == style
     assert next(v for k, v in d.items() if "retombées" in k) == boards
     assert d.get("Ruban LED (ml)") == led
-    assert any("Ossature des retombées" in m for m in r.missing)
+    # ossature des retombées, méthode du patron : fourrure en haut, cornière en bas, tout le tour (5 × 4, marge 0,60 : 5 barres de chaque)
+    bars = r.inputs["decor"]["ossature_barres"]
+    assert bars == (4 if style == "ilot" else 5) and any("méthode du patron" in a for a in r.assumptions)
+    for sku in ("UC-BARRE-DE-FOURRURE-2-90-M", "UC-CORNIERES"):
+        assert f"+ {bars} " in next(q.formula for q in r.quantities if q.sku == sku)
+    assert not any("Ossature des retombées" in m for m in r.missing)
     assert ("Ruban LED : prix" in " ".join(r.missing)) == bool(led)
     assert r.to_dict()["verification"]["ok"]
 

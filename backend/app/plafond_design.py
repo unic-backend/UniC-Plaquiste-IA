@@ -47,6 +47,34 @@ def _fmt(v: float) -> str:
 BA13_CM = 1.25  # épaisseur d'une BA13 (12,5 mm) : les faces courtes de la retombée se glissent entre les faces longues
 
 
+def _pack(faces: list[tuple[str, float]], stock_cm: float) -> tuple[list[dict], list[list]]:
+    """Chaque face coupée en longueurs de stock (barre, bande) puis morceaux rangés du plus long au plus court dans le stock déjà
+    entamé avant d'en couper un neuf : les chutes servent. Rend le détail par face et le contenu de chaque stock [reste, morceaux]."""
+    detail, pieces = [], []
+    for face, length in faces:
+        rest = round(length % stock_cm, 1)
+        cut = [float(stock_cm)] * int(length // stock_cm) + ([rest] if rest > 0 else [])
+        detail.append({"face": face, "longueur_cm": length, "morceaux_cm": cut})
+        pieces += [(c, face) for c in cut]
+    bins: list[list] = []
+    for length, face in sorted(pieces, key=lambda x: -x[0]):
+        box = next((b for b in bins if b[0] + 1e-9 >= length), None)
+        if box is None:
+            box = [float(stock_cm), []]
+            bins.append(box)
+        box[0] = round(box[0] - length, 1)
+        box[1].append((length, face))
+    return detail, bins
+
+
+def _bars(iw: float, ih: float) -> dict:
+    """Ossature des retombées, méthode du patron : en haut une fourrure sur tout le tour (elle sert aussi de rive au niveau haut),
+    en bas une cornière sur tout le tour. Mêmes coupes pour les deux, dans des barres de 2,80 m."""
+    bar = round(calc.BAR_LENGTH_M * 100)
+    detail, bins = _pack([("A", round(iw * 100, 1)), ("B", round(ih * 100, 1)), ("C", round(iw * 100, 1)), ("D", round(ih * 100, 1))], bar)
+    return {"barre_cm": bar, "faces": detail, "barres": len(bins), "chute_cm": round(sum(b[0] for b in bins), 1)}
+
+
 def _strips(iw: float, ih: float, retombee_m: float, board_width: float, board_height: float) -> dict:
     """Découpe des retombées : bandes de la hauteur de la retombée, coupées dans la longueur de la plaque (1,20 × 2 m → bandes de 2 m).
     Faces longues A et C à la cote du rectangle, faces courtes B et D moins deux épaisseurs de plaque (elles se glissent entre A et C).
@@ -56,19 +84,7 @@ def _strips(iw: float, ih: float, retombee_m: float, board_width: float, board_h
     if per_board < 1:
         raise DesignError(f"Retombée de {_fmt(h)} cm plus haute que la plaque ({bw} cm) : impossible en une bande.")
     faces = [("A", round(iw * 100, 1)), ("B", round(ih * 100 - 2 * BA13_CM, 1)), ("C", round(iw * 100, 1)), ("D", round(ih * 100 - 2 * BA13_CM, 1))]
-    detail, pieces = [], []
-    for face, length in faces:
-        cut = [float(bl)] * int(length // bl) + ([round(length % bl, 1)] if round(length % bl, 1) > 0 else [])
-        detail.append({"face": face, "longueur_cm": length, "morceaux_cm": cut})
-        pieces += [(c, face) for c in cut]
-    bands: list[list] = []   # [reste_cm, [(longueur, face), …]]
-    for length, face in sorted(pieces, key=lambda x: -x[0]):
-        band = next((b for b in bands if b[0] + 1e-9 >= length), None)
-        if band is None:
-            band = [float(bl), []]
-            bands.append(band)
-        band[0] = round(band[0] - length, 1)
-        band[1].append((length, face))
+    detail, bands = _pack(faces, bl)
     return {"bande_cm": h, "longueur_bande_cm": bl, "bandes_par_plaque": per_board, "faces": detail, "bandes": len(bands),
             "plaques": math.ceil(len(bands) / per_board), "chute_cm": round(sum(b[0] for b in bands), 1),
             "plan_bandes": [[{"face": f, "cm": c} for c, f in b[1]] for b in bands]}
@@ -95,7 +111,7 @@ def design(style: str, length_m: float, width_m: float, *, marge_m: float = 0.6,
     name, idea = STYLES[style]
     return {"style": style, "nom": name, "idee": idea, "piece": [L, W], "marge_m": marge if style != "ilot" else None,
             "interieur": [iw, ih], "retombee_m": retombee_m, "retombee_ml": per, "retombee_m2": area, "led_ml": led,
-            "plaques_retombees": _strips(iw, ih, retombee_m, board_width, board_height)["plaques"],
+            "plaques_retombees": _strips(iw, ih, retombee_m, board_width, board_height)["plaques"], "ossature": _bars(iw, ih),
             "svg": _svg(style, name, L, W, marge, iw, ih, retombee_m, led)}
 
 
@@ -158,7 +174,7 @@ def trace_decoupe(style: str, length_m: float, width_m: float, *, marge_m: float
                   board_width: float = 1.2, board_height: float = 2.0) -> dict:
     """Plan de TRAÇAGE et de DÉCOUPE d'un décor, pour les ouvriers : où tracer au cordeau (distances aux murs, contrôle d'équerre par
     les diagonales), puis comment couper les bandes de retombée dans les plaques (cotes de chaque face, morceaux, chutes). Géométrie
-    exacte depuis les dimensions du patron ; l'ossature des retombées suit sa méthode et n'est pas dessinée ici."""
+    exacte depuis les dimensions du patron ; ossature des retombées selon sa méthode (fourrure en haut, cornière en bas)."""
     d = design(style, length_m, width_m, marge_m=marge_m, retombee_m=retombee_m, board_width=board_width, board_height=board_height)
     L, W = d["piece"]
     iw, ih = d["interieur"]
@@ -184,12 +200,23 @@ def trace_decoupe(style: str, length_m: float, width_m: float, *, marge_m: float
         f"chute {_fmt(cut['chute_cm'])} cm de bande.",
         "Jonction de deux morceaux : toujours sur l'ossature, jamais dans le vide ; décale les jonctions d'une face à l'autre.",
     ]
+    os_ = d["ossature"]
+    bars_txt = "; ".join(f"{f['face']} {_fmt(f['longueur_cm'])} = " + " + ".join(_fmt(m) for m in f["morceaux_cm"]) for f in os_["faces"])
+    ossature = [
+        "En haut : en posant les fourrures, prévois une fourrure sur la ligne tracée, tout le tour ; la retombée se visse dessus "
+        "(elle fait fourrure et rive du niveau haut).",
+        "En bas : une cornière sur tout le tour couvre et tient le bas de la retombée.",
+        f"Coupes (cm), les mêmes pour la fourrure et la cornière : {bars_txt}.",
+        f"Total : {os_['barres']} barre{'s' if os_['barres'] > 1 else ''} de fourrure + {os_['barres']} barre{'s' if os_['barres'] > 1 else ''} "
+        f"de cornière ({calc.BAR_TXT} m).",
+    ]
     return {"style": style, "nom": d["nom"], "piece": [L, W], "interieur": [iw, ih], "distances_murs_m": [ax, ay], "diagonale_m": diag,
-            "tracage": tracage, "decoupe": decoupe, "bandes": cut, "plaques_retombees": cut["plaques"],
-            "svg": _svg_trace(style, d["nom"], L, W, iw, ih, ax, ay, diag, cut)}
+            "tracage": tracage, "decoupe": decoupe, "ossature": ossature, "barres_ossature": d["ossature"]["barres"], "bandes": cut, "plaques_retombees": cut["plaques"],
+            "svg": _svg_trace(style, d["nom"], L, W, iw, ih, ax, ay, diag, cut, d["ossature"]["barres"])}
 
 
-def _svg_trace(style: str, name: str, L: float, W: float, iw: float, ih: float, ax: float, ay: float, diag: float, cut: dict) -> str:
+def _svg_trace(style: str, name: str, L: float, W: float, iw: float, ih: float, ax: float, ay: float, diag: float, cut: dict,
+               bars: int) -> str:
     """800 × 900 : en haut la pièce vue de dessus (rectangle à tracer, diagonales, faces A-D, partie décorée en vert clair) ; en bas
     les bandes à couper, les identiques regroupées (« × 12 »), chaque morceau marqué de sa face et de sa longueur."""
     scale = min(560 / L, 280 / W)
@@ -228,7 +255,7 @@ def _svg_trace(style: str, name: str, L: float, W: float, iw: float, ih: float, 
              f'{cut["plaques"]} plaque{"s" if cut["plaques"] > 1 else ""} ({cut["bandes_par_plaque"]} bandes par plaque)</text>')
     shown = groups[:12]
     sx = 640 / cut["longueur_bande_cm"]
-    bh = max(18.0, min(30.0, (860 - top - 30) / max(1, len(shown)) - 6))
+    bh = max(18.0, min(30.0, (830 - top - 30) / max(1, len(shown)) - 6))
     for k, (n, band) in enumerate(shown):
         y = top + 16 + k * (bh + 6)
         x = 40.0
@@ -245,6 +272,8 @@ def _svg_trace(style: str, name: str, L: float, W: float, iw: float, ih: float, 
     if len(groups) > len(shown):
         p.append(f'<text x="40" y="{top + 16 + len(shown) * (bh + 6) + 14:.1f}" font-size="13" fill="{INK}">… et {len(groups) - len(shown)} '
                  'autre(s) découpe(s) : liste complète dans la réponse</text>')
+    p.append(f'<text x="400" y="860" font-size="15" font-weight="bold" fill="{INK}" text-anchor="middle">Ossature : fourrure en haut + '
+             f'cornière en bas, tout le tour — {bars} barre{"s" if bars > 1 else ""} de chaque</text>')
     p += ['<text x="400" y="885" font-size="13" fill="#5b625f" text-anchor="middle">Gris : chute. Cotes de découpe en cm. '
           'Faces B et D raccourcies de deux épaisseurs de plaque (2 × 12,5 mm).</text>', '</svg>']
     return "".join(p)
