@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -393,9 +394,12 @@ def health_ready():
     return JSONResponse({"status": "ready" if ok else "unavailable", "checks": checks}, status_code=200 if ok else 503)
 
 
+_BOOT = time.time()   # démarrage du processus : un « depuis » qui revient à 0 = le serveur a redémarré
+
+
 @app.get("/api/ping")
 def ping():
-    return {"ok": True, "app": "UniC AI", "version": __version__, "web_build": _web_build()}
+    return {"ok": True, "app": "UniC AI", "version": __version__, "web_build": _web_build(), "uptime_s": int(time.time() - _BOOT)}
 
 
 def _web_build() -> str:
