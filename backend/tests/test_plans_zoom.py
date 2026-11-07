@@ -201,11 +201,11 @@ def test_page_d_un_dossier_relue_avec_un_zoom(client, monkeypatch, tmp_path):
 def test_read_plan_passe_la_page_a_la_question(client, monkeypatch, tmp_path):
     from app.agent import AgentSession
     seen = {}
-    monkeypatch.setattr(plans, "ask", lambda db, fid, q, page=None: seen.update(q=q, page=page) or {"reponse": "ok"})
+    monkeypatch.setattr(plans, "ask", lambda db, fid, q, page=None, **kw: seen.update(q=q, page=page, **kw) or {"reponse": "ok"})
     fid = _upload(client, _pdf(tmp_path), "application/pdf")
     with SessionLocal() as db:
         AgentSession(db, None, {"last_file_id": fid})("read_plan", {"question": "cote SDB ?", "page": 2})
-    assert seen == {"q": "cote SDB ?", "page": 2}
+    assert seen == {"q": "cote SDB ?", "page": 2, "domaine": "plan", "annoter": False, "user_id": None}
 
 
 def test_consignes_de_zoom():

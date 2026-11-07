@@ -80,6 +80,10 @@ Application **mono-propriétaire**. Sur Internet, définis `UNIC_ACCESS_CODE` (e
 - **Calcul par pièce sans l'IA** (menu Entreprise, `/calcul`, `POST /api/calc/pieces` et `/api/calc/pieces/devis`) : pièces saisies à la main
   (faux plafond dalle ou IPN par éclipses, suspente haute en tiges de 1 m raccordées, cloison, peinture), matériel compté par le moteur,
   prix de la grille, devis brouillon. Aucun appel payant : marche quand l'API Claude est coupée.
+- **Photos lues par un expert du métier + réponse en photo** (outil IA `read_plan`, `domaine` électricité / climatisation / chantier,
+  `annoter`) : erreurs de câblage d'un coffret, pose d'un climatiseur, repérage sur un plan ; l'image revient avec des cadres numérotés
+  (couleur = gravité). **Électricité et clim** (outil `elec_calc`) : sections, calibres, points par circuit, chute de tension, puissance
+  froid d'une pièce — repères NF C 15-100 sourcés (`backend/app/elec.py`), conseil seulement (exclus des devis).
 - **Décors de plafond : traçage et découpe** (outil IA `pose_plan`, ouvrage « decor ») : distances aux murs, diagonales d'équerre,
   cote de chaque face de retombée, bandes coupées dans les plaques (morceaux, chutes) et nombre de plaques exact. Vis au paquet de 1 000.
 - Catalogue matériaux **sans prix inventés**

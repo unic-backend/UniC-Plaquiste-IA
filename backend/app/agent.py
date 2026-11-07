@@ -387,10 +387,18 @@ TOOLS: list[dict] = [
                         "Un détail trop petit (cote, texte, jonction) : la lecture fait elle-même des CAPTURES AGRANDIES de la zone "
                         "(zooms haute définition, sur un PDF, un scan ou une photo) ; `zooms` dit lesquelles. Gros dossier : page=N "
                         "pour une question sur une page précise. "
+                        "PHOTO ÉLECTRIQUE (coffret, tableau, prise, câblage) : domaine=\"electricite\" ; CLIMATISEUR (unités, liaisons, "
+                        "évacuation, plaque signalétique) : domaine=\"climatisation\" ; photo de chantier : domaine=\"chantier\" — l'œil d'un "
+                        "expert du métier, erreurs du technicien comprises. RÉPONSE EN PHOTO : annoter=true quand le patron veut VOIR "
+                        "(« montre », « où est », « repère », « entoure », erreurs d'un coffret) : l'image revient avec des cadres numérotés "
+                        "(couleur = gravité) et une légende ; ta réponse reprend les mêmes numéros. "
                         "Fonctionne à tout moment de la conversation, même plusieurs messages après l'envoi du fichier."),
         "input_schema": {"type": "object", "properties": {
             "file_id": {"type": "string"}, "refresh": {"type": "boolean"}, "question": {"type": "string"},
-            "page": {"type": "integer", "minimum": 1, "description": "Avec question : la page du dossier à regarder."}},
+            "page": {"type": "integer", "minimum": 1, "description": "Avec question : la page du dossier à regarder."},
+            "domaine": {"type": "string", "enum": ["plan", "electricite", "climatisation", "chantier"],
+                        "description": "Avec question : le métier de l'expert qui regarde (plan par défaut)."},
+            "annoter": {"type": "boolean", "description": "Avec question : répondre aussi EN PHOTO (repères numérotés dessinés sur l'image)."}},
             "additionalProperties": False},
     },
     {
@@ -774,6 +782,27 @@ TOOLS: list[dict] = [
             "required": ["length_m"], "additionalProperties": False},
     },
     {
+        "name": "elec_calc",
+        "description": ("ÉLECTRICITÉ et CLIMATISATION (conseil : UniC ne chiffre pas ces travaux, ils restent exclus des devis). Calculs faits en "
+                        "code sur les repères NF C 15-100 (tableau 10-1f), chaque règle avec sa source. action : "
+                        "\"regles\" (sections, calibres, points par circuit, couleurs des fils, différentiels 30 mA, pose d'un climatiseur) ; "
+                        "\"circuit\" (contrôle d'un circuit : usage, section_mm2, disjoncteur_a, points, longueur_m, puissance_w → danger / "
+                        "défaut / conforme) ; \"section\" (section et disjoncteur pour une puissance ou un courant, chute de tension "
+                        "comprise avec longueur_m) ; \"clim\" (puissance froid d'une pièce : surface_m2, hauteur_m, forte_chaleur ; avec "
+                        "courant_a de la plaque signalétique : disjoncteur et section de la ligne dédiée). Cite les nombres tels quels et "
+                        "rappelle la consigne de sécurité ; au Sénégal, la norme ASN fait foi pour un chantier réel."),
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["regles", "circuit", "section", "clim"]},
+            "usage": {"type": "string", "enum": ["eclairage", "prises_8", "prises_12", "prises_cuisine", "specialise", "frigo",
+                                                 "plaque_mono", "plaque_tri", "chauffe_eau", "volets", "autre"]},
+            "section_mm2": {"type": "number"}, "disjoncteur_a": {"type": "number"}, "points": {"type": "integer", "minimum": 1},
+            "longueur_m": {"type": "number", "description": "Longueur du câble, du tableau à l'appareil (aller)."},
+            "puissance_w": {"type": "number"}, "courant_a": {"type": "number"},
+            "surface_m2": {"type": "number"}, "hauteur_m": {"type": "number"},
+            "forte_chaleur": {"type": "boolean", "description": "Clim : pièce sous toiture, plein soleil ou mal isolée (125 W/m² au lieu de 100)."}},
+            "required": ["action"], "additionalProperties": False},
+    },
+    {
         "name": "round_table",
         "description": ("TABLE RONDE : 3 experts adaptés au problème (placo : métreur, contrôleur, commercial ; argent, droit, vente ou autre : "
                         "les leurs) donnent leur avis, puis DÉBATTENT (chacun lit les autres, conteste, corrige), et un arbitre rend la MEILLEURE "
@@ -850,7 +879,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "pose_plan": "Plan de pose dessiné", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "pose_plan": "Plan de pose dessiné", "elec_calc": "Calcul électricité / clim fait", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -1248,6 +1277,31 @@ class AgentSession:
                        "total à acheter) : ne recalcule jamais. Si `alerte` est présente, dis-la au patron avant de commander.")
         return out
 
+    def _t_elec_calc(self, action: str, usage: str = "autre", section_mm2: float | None = None, disjoncteur_a: float | None = None,
+                     points: int | None = None, longueur_m: float | None = None, puissance_w: float | None = None,
+                     courant_a: float | None = None, surface_m2: float | None = None, hauteur_m: float | None = None,
+                     forte_chaleur: bool = False) -> dict:
+        from app import elec
+        try:
+            if action == "regles":
+                return elec.regles()
+            if action == "circuit":
+                return elec.controle_circuit(usage, section_mm2, disjoncteur_a, points, longueur_m, puissance_w)
+            if action == "section":
+                amps = courant_a or (elec.courant(puissance_w) if puissance_w else None)
+                if not amps:
+                    return {"error": "Donne la puissance (W) ou le courant (A) de l'appareil."}
+                return {**elec.section_pour(amps, longueur_m, usage), "courant_a": amps, "securite": elec.SECURITE,
+                        "source": elec.SOURCES["nfc15100_tableau"]}
+            if action == "clim":
+                out = elec.clim_puissance(surface_m2, hauteur_m or 2.5, forte_chaleur=forte_chaleur) if surface_m2 else {}
+                if courant_a:
+                    out["alimentation"] = elec.clim_alimentation(courant_a, longueur_m)
+                return out or {"error": "Donne la surface de la pièce (m²) ou le courant de la plaque signalétique (A)."}
+        except elec.ElecError as exc:
+            return {"error": str(exc)}
+        return {"error": f"Action inconnue : {action}."}
+
     def _t_round_table(self, topic: str, context: str, experts: list | None = None) -> dict:
         from app import roundtable
         return roundtable.run(topic, context, experts)
@@ -1547,13 +1601,21 @@ class AgentSession:
                 "hypotheses": data["assumptions"][:80], "manquant": data["missing"],
                 "note": "Métré gardé : si le patron a demandé le devis, appelle create_quote (sans lines) avec le client et l'objet."}
 
-    def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "", page: int | None = None) -> dict:
+    def _t_read_plan(self, file_id: str = "", refresh: bool = False, question: str = "", page: int | None = None,
+                     domaine: str = "plan", annoter: bool = False) -> dict:
         from app import plans
         fid = file_id or self.state.get("last_file_id")
         if not fid:
             return {"error": "Aucun plan joint à la conversation."}
-        if (question or "").strip():   # question précise (angles, jonctions…) : on REGARDE l'image, le résumé en cache ne répond pas à cela
-            return plans.ask(self.db, fid, question, page)
+        if (question or "").strip() or annoter or domaine != "plan":   # question précise : on REGARDE l'image, pas le résumé en cache
+            out = plans.ask(self.db, fid, question or "Que vois-tu ? Repère ce qui compte.", page, domaine=domaine, annoter=annoter,
+                            user_id=self.user_id)
+            pic = out.get("photo_annotee")
+            if pic:
+                self.images.append({"id": pic["id"], "filename": pic["filename"], "title": "Réponse en photo"})
+                out["note"] = ("Image annotée affichée dans la conversation (bouton Partager). Reprends les MÊMES numéros que les cadres, "
+                               "une ligne par repère ; zones approximatives, dis-le si un repère est incertain.")
+            return {**out, **self._flag(out.get("reponse") or "", "photo ou plan reçu")}
         return plans.compact(plans.analyze(self.db, fid, refresh=bool(refresh)))
 
     # --- mémoire
