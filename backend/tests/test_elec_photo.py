@@ -48,6 +48,8 @@ def test_clim_puissance_et_ligne_dediee():
     assert a["section_mm2"] == 1.5 and a["disjoncteur_a"] == 16 and any("multiprise" in r for r in a["pose"])
     r = elec.regles()
     assert "vert-jaune" in " ".join(r["couleurs"]).lower() and "30 mA" in " ".join(r["differentiels"]) and r["sources"]
+    assert "rouge" in r["couleurs"][0] and "court-circuit" in r["couleurs"][0]           # règle du patron
+    assert "mêmes au Sénégal" in r["cadre"] and "à confirmer" not in r["cadre"]
 
 
 def test_outil_ia_elec_calc(c):
@@ -102,6 +104,7 @@ def test_reponse_en_photo_sur_un_coffret(c, monkeypatch):
         assert s.images and s.images[-1]["title"] == "Réponse en photo"
     prompt = calls[0][-1]["text"]
     assert "électricien expert" in prompt and "1,5 mm² → 16 A" in prompt and "couper le disjoncteur général" in prompt
+    assert "rouge raccordé au bleu" in prompt
     assert '"reperes"' in prompt
 
 

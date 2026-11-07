@@ -2,8 +2,7 @@
 ils restent exclus des devis). Chaque règle cite sa source ; rien n'est inventé.
 
 Référence : NF C 15-100 (norme française des installations basse tension, logements : art. 10.1.4.7.2, tableau 10-1f), reprise par les
-fabricants (Nexans, Legrand). Au Sénégal, l'ASN publie sa propre norme d'installations basse tension (bâtiments, ≤ 1 000 V alternatif) :
-son texte n'a pas pu être consulté ici, la NF C 15-100 sert donc de repère, à confirmer pour un chantier réel. Tension du réseau : 230 V /
+fabricants (Nexans, Legrand). Au Sénégal, règle du patron : les mêmes règles s'appliquent, pas de règle locale différente. Tension du réseau : 230 V /
 50 Hz (sources secondaires). Une photo ou un calcul ne remplace ni un électricien qualifié ni les mesures sur place.
 """
 from __future__ import annotations
@@ -48,7 +47,8 @@ CIRCUITS = {
 SECTION_MAX_A = {1.5: 16, 2.5: 20, 4.0: 25, 6.0: 32, 10.0: 40}
 BREAKERS = (2, 10, 16, 20, 25, 32, 40)
 
-COULEURS = ("Vert-jaune : TERRE uniquement (jamais une phase ni un neutre).",
+COULEURS = ("Jamais relier une phase (rouge) au neutre (bleu) : c'est un court-circuit (règle du patron).",
+            "Vert-jaune : TERRE uniquement (jamais une phase ni un neutre).",
             "Bleu : NEUTRE uniquement.",
             "Phase : toute autre couleur (rouge, marron, noir les plus courantes) ; une navette (retour de lampe) peut être d'une autre couleur.",
             "Installation ancienne ou modifiée : ne jamais se fier à la couleur seule, vérifier au détecteur de tension.")
@@ -163,5 +163,5 @@ def regles() -> dict:
     return {"circuits": CIRCUITS, "section_disjoncteur_max": {f"{k:g} mm²": f"{v} A" for k, v in SECTION_MAX_A.items()},
             "couleurs": COULEURS, "differentiels": DIFFERENTIELS, "climatisation": CLIM_POSE, "securite": SECURITE,
             "chute_tension": "3 % éclairage, 5 % autres usages (depuis le compteur) ; ΔU = 2 × 0,0225 × L × I / S en monophasé.",
-            "cadre": "Repères NF C 15-100 (à confirmer avec la norme sénégalaise ASN pour un chantier réel). UniC ne chiffre pas ces "
+            "cadre": "Règles NF C 15-100, les mêmes au Sénégal (règle du patron). UniC ne chiffre pas ces "
                      "travaux : conseil seulement.", "sources": SOURCES}
