@@ -1040,8 +1040,8 @@ def decor_style(text: str) -> str | None:
 def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_m: float = 0.15,
               board_width: float = DEFAULTS["board_width_m"], board_height: float = DEFAULTS["board_height_m"],
               led: bool | None = None) -> CalcResult:
-    """L'idée de plafond choisie par le client devient des quantités : plaques des retombées (règle des plaques du moteur) et ruban
-    LED (mètres). L'ossature des retombées et le prix du LED restent à donner par le patron : signalés, jamais inventés."""
+    """L'idée de plafond choisie par le client devient des quantités : plaques des retombées (découpe réelle des bandes), ossature des
+    retombées (méthode du patron : fourrure en haut, cornière en bas) et ruban LED (mètres). Le prix du LED reste à donner : signalé."""
     from app import plafond_design
     if result.inputs.get("zones"):
         result.missing.append(f"Décor « {style} » : dis dans quelle pièce (plusieurs zones), il n'est pas compté.")
@@ -1059,11 +1059,22 @@ def add_decor(result: CalcResult, style: str, *, marge_m: float = 0.6, retombee_
                                               f"⌈ pourtour {d['led_ml']:g} ml ⌉", STATUS_ESTIMATED))
     result.steps.append(CalcStep(f"Décor : {d['nom']}", "retombée = pourtour × hauteur",
                                  {"pourtour": d["retombee_ml"], "hauteur": retombee_m}, d["retombee_m2"], "m²", STATUS_CALCULATED))
-    result.inputs["decor"] = {k: d[k] for k in ("style", "nom", "interieur", "retombee_m", "retombee_ml", "retombee_m2", "led_ml")}
+    bars = d["ossature"]["barres"]   # méthode du patron : fourrure en haut de la retombée, cornière en bas, tout le tour
+    for sku, name, role in (("UC-BARRE-DE-FOURRURE-2-90-M", f"Barre de fourrure ({BAR_TXT} m)", "fourrure en haut des retombées"),
+                            ("UC-CORNIERES", f"Cornière de rive (barre de {BAR_TXT} m)", "cornière en bas des retombées")):
+        line = next((q for q in result.quantities if q.sku == sku), None)
+        if line is None:
+            result.quantities.append(QuantityLine(sku, name, bars, "barre", f"{bars} : {role}", STATUS_CONFIRMED))
+        else:
+            line.quantity += bars
+            line.formula += f" + {bars} {role}"
+    result.inputs["decor"] = {**{k: d[k] for k in ("style", "nom", "interieur", "retombee_m", "retombee_ml", "retombee_m2", "led_ml")},
+                              "ossature_barres": bars}
     result.understanding = result.understanding.rstrip(".") + f", décor {d['nom'].lower()}."
     result.assumptions.append(f"{d['nom']} : retombée de {retombee_m * 100:g} cm sur {d['retombee_ml']:g} ml ({d['retombee_m2']:g} m²)"
                               + (f", ruban LED {d['led_ml']:g} ml" if d["led_ml"] else "") + ".")
-    result.missing.append("Ossature des retombées (fourrures, cornières, tiges en plus) : à chiffrer selon ta méthode.")
+    result.assumptions.append(f"Ossature des retombées (méthode du patron) : fourrure en haut sur tout le tour (elle sert aussi de rive du "
+                              f"niveau haut), cornière en bas sur tout le tour : + {bars} barre(s) de fourrure et + {bars} de cornière.")
     if d["led_ml"]:
         result.missing.append("Ruban LED : prix et longueur des rouleaux (et transformateur) à donner.")
     return result
@@ -1977,7 +1988,7 @@ def verify(result: "CalcResult") -> dict[str, Any]:
                 if not (isinstance(got, int) and lo + m <= got <= hi + m):
                     problems.append(f"Plaques : moteur {got} hors du contrôle ({lo + m} à {hi + m}).")
             pers = [2 * (a + b) for a, b in zones]   # cornière de rive : chaque zone a ses 4 côtés
-            rive = _min_count(sum(pers, Fraction(0)), _F(BAR_LENGTH_M)) + m
+            rive = _min_count(sum(pers, Fraction(0)), _F(BAR_LENGTH_M)) + m + int((inp.get("decor") or {}).get("ossature_barres", 0))
             if "UC-CORNIERES" in qty and qty["UC-CORNIERES"] != rive:
                 problems.append(f"Cornières : moteur {qty['UC-CORNIERES']} ≠ contrôle {rive} barres.")
             fx = {**FIXINGS_DEFAULT, **(inp.get("fixings") or {})}

@@ -697,12 +697,18 @@ OWNER_RULES_V19 = (
     "place de la cheville à laiton ; suspente de plus de 1 m : tiges de 1 m raccordées à chaque point.",
 )
 
+OWNER_RULES_V20 = (
+    "Ossature d'une retombée de décor (caisson, gorge, bandeau, îlot), méthode du patron : en posant les fourrures, il prévoit une "
+    "fourrure sur la ligne de la retombée, tout le tour ; la retombée se visse dessus en haut (la fourrure fait fourrure et rive). "
+    "En bas, une cornière sur tout le tour couvre et tient la retombée. Barres de 2,80 m.",
+)
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
               "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12,
               "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14,
               "v15": OWNER_RULES_V15, "v16": OWNER_RULES_V16, "v17": OWNER_RULES_V17,
-              "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19}
+              "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19, "v20": OWNER_RULES_V20}
 
 
 def seed_owner_rules(db: Session) -> int:
