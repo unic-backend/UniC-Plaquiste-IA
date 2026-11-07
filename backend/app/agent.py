@@ -755,9 +755,14 @@ TOOLS: list[dict] = [
                         "montants tous les 60 cm (plaque debout) ou 50 cm (plaque couchée), 2 montants à chaque jonction, rails, plaques "
                         "entières depuis le mur et le sol, morceau en haut. Plaques comptées en entières par sens, morceaux en plaques "
                         "entières ; dit si le plan consomme plus de plaques que le devis. Pour « plan de pose », « calepinage », « comment "
-                        "poser les plaques », « montre aux ouvriers ». Une pièce ou un mur droit par appel."),
+                        "poser les plaques », « montre aux ouvriers ». DÉCOR (ouvrage=\"decor\" + decor_style) : TRAÇAGE au cordeau (distances "
+                        "aux murs, diagonales d'équerre) et DÉCOUPE des bandes de retombée dans les plaques (cote de chaque face, morceaux, chutes, "
+                        "plaques), pour « comment tracer », « comment couper la déco ». Une pièce ou un mur droit par appel."),
         "input_schema": {"type": "object", "properties": {
-            "ouvrage": {"type": "string", "enum": ["plafond", "cloison"], "description": "plafond par défaut."},
+            "ouvrage": {"type": "string", "enum": ["plafond", "cloison", "decor"], "description": "plafond par défaut."},
+            "decor_style": {"type": "string", "enum": ["caisson", "gorge", "bandeau", "ilot"], "description": "Décor : le style choisi."},
+            "marge_m": {"type": "number", "description": "Décor : distance du décor aux murs (0,60 m par défaut)."},
+            "retombee_m": {"type": "number", "description": "Décor : hauteur de la retombée (0,15 m par défaut)."},
             "length_m": {"type": "number", "description": "Plafond : longueur ; cloison : longueur du mur."},
             "width_m": {"type": "number", "description": "Plafond : largeur."},
             "height_m": {"type": "number", "description": "Cloison : hauteur."},
@@ -1186,11 +1191,10 @@ class AgentSession:
                            retombee_m: float = 0.15, piece: str = "") -> dict:
         from app import diagrams, plafond_design
         co = company_dict(self.db)
-        board = (co.get("board_width_m") or 1.2) * (co.get("board_height_m") or 2.0)
         conseil = "" if styles else plafond_design.suggest(piece, length_m, width_m)[1]
         try:
             ideas = plafond_design.designs(length_m, width_m, styles, piece, marge_m=marge_m, retombee_m=retombee_m,
-                                           waste=co.get("default_waste") or 0.0, board_m2=board)
+                                           board_width=co.get("board_width_m") or 1.2, board_height=co.get("board_height_m") or 2.0)
         except ValueError as exc:
             return {"error": str(exc)}
         out = []
@@ -1208,13 +1212,19 @@ class AgentSession:
 
     def _t_pose_plan(self, length_m: float, width_m: float | None = None, plaque_m: float | None = None,
                      entraxe_cm: int | None = None, ouvrage: str = "plafond", height_m: float | None = None,
-                     sides: int = 2) -> dict:
+                     sides: int = 2, decor_style: str = "", marge_m: float = 0.6, retombee_m: float = 0.15) -> dict:
         from app import diagrams, plan_pose
         co = company_dict(self.db)
         board = {"board_width": co.get("board_width_m") or 1.2, "board_height": plaque_m or co.get("board_height_m") or 2.0,
                  "waste": co.get("default_waste") or 0.0}
         try:
-            if ouvrage == "cloison":
+            if ouvrage == "decor":
+                if not (width_m and decor_style):
+                    return {"error": "Décor : largeur de la pièce et style (caisson, gorge, bandeau, îlot) requis."}
+                from app import plafond_design
+                out = plafond_design.trace_decoupe(decor_style, length_m, width_m, marge_m=marge_m, retombee_m=retombee_m,
+                                                   board_width=board["board_width"], board_height=board["board_height"])
+            elif ouvrage == "cloison":
                 if not height_m:
                     return {"error": "Hauteur de la cloison manquante : demande-la au patron."}
                 out = plan_pose.plan_cloison(length_m, height_m, sides=sides or 2, entraxe_cm=entraxe_cm or 60, **board)
@@ -1226,9 +1236,10 @@ class AgentSession:
             return {"error": str(exc)}
         svg = out.pop("svg")
         try:
-            art = diagrams.render(self.db, "Plan de pose", svg, self.user_id)
+            art = diagrams.render(self.db, "Traçage et découpe" if ouvrage == "decor" else "Plan de pose", svg, self.user_id)
             dims = f"{length_m:g} × {(height_m if ouvrage == 'cloison' else width_m):g} m"
-            self.images.append({"id": art.id, "filename": art.filename, "title": f"Plan de pose — {dims}"})
+            self.images.append({"id": art.id, "filename": art.filename,
+                                "title": f"{'Traçage et découpe' if ouvrage == 'decor' else 'Plan de pose'} — {dims}"})
         except diagrams.DiagramError as exc:
             out["dessin"] = f"non dessiné : {exc}"
         out["note"] = ("Plan affiché dans la conversation (bouton Partager pour l'équipe). Donne les consignes en quelques lignes, "
@@ -1934,6 +1945,7 @@ class AgentSession:
             calc.make_hydrofuge(res)
         if res.kind == "ceiling" and res.quantities and (support == "ipn" or (suspente_m or 0) > calc.ROD_M):   # IPN : éclipses ; plafond haut : tiges raccordées
             calc.hang_from(res, support, suspente_m)
+        calc.pack_screws(res)   # vis vendues au paquet de 1 000 (règle du patron)
         data = res.to_dict()
         self.state["last_calc"] = data   # utilisé par create_quote / bons
         self.state.pop("calc_quote_id", None)   # nouveau calcul = nouveau devis possible

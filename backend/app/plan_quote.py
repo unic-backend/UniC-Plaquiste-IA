@@ -267,6 +267,9 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
                                + (", plaques hydrofuges" if sy["hydro"] else "") + (f", laine {sy['laine_mm']} mm" if sy["laine_mm"] else "")
                                + f", montants de {sy['ossature_mm']} ; pas de marge sur les cloisons.")
 
+    if "VIS-PLAQUE" in others:   # vis de toutes les pièces additionnées, puis au paquet de 1 000 une seule fois
+        vis = others.pop("VIS-PLAQUE")
+        others[calc.SCREW_PACK_SKU] = asdict(calc.screw_pack_line(int(vis["quantity"]), "toutes les pièces du plan"))
     for sku, n in pieces.items():   # paquets recalculés sur le total des pièces
         if sku in others:
             others[sku]["quantity"] = calc.ceil_int(n / pack[sku])
