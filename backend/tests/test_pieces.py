@@ -218,5 +218,36 @@ def test_script_de_calcul_pour_claude_code(tmp_path):
     assert next(x for x in d["lignes"] if x["sku"] == "BA13-2000x1200")["prix_unitaire"] == 4500
     # règle du patron : chutes de fourrure raccordées → ⌈ 45 ml / 2,80 ⌉ = 17, + 3 de marge (et non 18 + 3 ligne par ligne)
     assert next(x for x in d["lignes"] if x["sku"] == "UC-BARRE-DE-FOURRURE-2-90-M")["quantity"] == 20
+    dev = subprocess.run([sys.executable, str(script), rooms, "--main-oeuvre", "4000", "--devis", "Awa Fall", "--lieu", "Médina", "--json"],
+                         env=env, capture_output=True, text=True, timeout=120)
+    assert dev.returncode == 0, dev.stderr
+    q = json.loads(dev.stdout)["devis"]
+    assert q["numero"].endswith("-AF") and q["pdf"] and Path(q["pdf"]).read_bytes()[:4] == b"%PDF"   # devis brouillon + vrai PDF
     bad = subprocess.run([sys.executable, str(script), '[{"kind": "garage"}]'], env=env, capture_output=True, text=True, timeout=120)
     assert bad.returncode != 0 and "type inconnu" in bad.stderr
+
+
+def test_script_factures_pour_claude_code(tmp_path):
+    """scripts/unic_facture.py : facture brouillon + PDF depuis un devis complet ; refus si des lignes n'ont pas de prix."""
+    import os
+    import sqlite3
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "scripts"
+    env = {**os.environ, "UNIC_DATA_DIR": str(tmp_path)}
+    run = lambda *a: subprocess.run([sys.executable, *a], env=env, capture_output=True, text=True, timeout=120)   # noqa: E731
+    rooms = '[{"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4}]'
+    assert run(str(root / "unic_calcul.py"), rooms, "--devis", "Awa Fall").returncode == 0
+    numero = next(l.split()[0] for l in run(str(root / "unic_facture.py"), "liste").stdout.splitlines() if "Awa Fall" in l)
+    refus = run(str(root / "unic_facture.py"), "depuis-devis", numero)
+    assert refus.returncode != 0 and "sans prix" in refus.stderr                     # bande / enduit non chiffrés : jamais facturé
+    db = sqlite3.connect(next(tmp_path.rglob("*.db")))
+    db.execute("UPDATE quotation_items SET unit_price = 1000, total = quantity * 1000 WHERE unit_price IS NULL")
+    db.execute("UPDATE quotations SET prices_complete = 1")
+    db.commit()
+    db.close()
+    ok = run(str(root / "unic_facture.py"), "depuis-devis", numero)
+    assert ok.returncode == 0, ok.stderr
+    assert f"{numero}-F" in ok.stdout and Path(ok.stdout.rsplit("PDF : ", 1)[1].strip()).read_bytes()[:4] == b"%PDF"
+    assert f"{numero}-F" in run(str(root / "unic_facture.py"), "liste").stdout
