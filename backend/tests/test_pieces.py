@@ -218,5 +218,10 @@ def test_script_de_calcul_pour_claude_code(tmp_path):
     assert next(x for x in d["lignes"] if x["sku"] == "BA13-2000x1200")["prix_unitaire"] == 4500
     # règle du patron : chutes de fourrure raccordées → ⌈ 45 ml / 2,80 ⌉ = 17, + 3 de marge (et non 18 + 3 ligne par ligne)
     assert next(x for x in d["lignes"] if x["sku"] == "UC-BARRE-DE-FOURRURE-2-90-M")["quantity"] == 20
+    dev = subprocess.run([sys.executable, str(script), rooms, "--main-oeuvre", "4000", "--devis", "Awa Fall", "--lieu", "Médina", "--json"],
+                         env=env, capture_output=True, text=True, timeout=120)
+    assert dev.returncode == 0, dev.stderr
+    q = json.loads(dev.stdout)["devis"]
+    assert q["numero"].endswith("-AF") and q["pdf"] and Path(q["pdf"]).read_bytes()[:4] == b"%PDF"   # devis brouillon + vrai PDF
     bad = subprocess.run([sys.executable, str(script), '[{"kind": "garage"}]'], env=env, capture_output=True, text=True, timeout=120)
     assert bad.returncode != 0 and "type inconnu" in bad.stderr
