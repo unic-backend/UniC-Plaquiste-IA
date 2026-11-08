@@ -572,6 +572,26 @@ def apply_owner_tape_v16(db: Session) -> int:
     return n
 
 
+def apply_owner_compound_v17(db: Session) -> int:
+    """Règle du patron (08/11/2026) : l'enduit à joints se vend au sac de 20 kg (prix de la grille « Sac enduit » = prix du sac).
+    Libellé et unité de l'article corrigés ; le prix n'est pas touché. Une seule fois."""
+    from app.calc import COMPOUND_BAG_KG, COMPOUND_BAG_SKU
+    from app.models import AppSetting
+
+    flag = "seed_owner_compound_v17"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    m = db.query(Material).filter(Material.sku == COMPOUND_BAG_SKU).first()
+    if m is not None:
+        m.name, m.unit = f"Enduit (sac de {COMPOUND_BAG_KG} kg)", "sac"
+        m.notes = f"Sac de {COMPOUND_BAG_KG} kg (donné par le patron). Le moteur compte les kg puis arrondit au sac sur tout le chantier."
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_prices_v3(db: Session) -> int:
     """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
     from app.models import AppSetting

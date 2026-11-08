@@ -144,10 +144,12 @@ def calculate(db: Session, rooms: list[dict], entraxe_cm: int | None = None, lab
                                            "status": q.get("status"), "formula": []})
             line["quantity"] = round(line["quantity"] + float(q.get("quantity") or 0), 2)
             line["formula"].append(f"{names} : {q.get('formula') or ''}".strip(" :"))
-    for key, line in list(merged.items()):   # vis au paquet de 1 000, bande au rouleau de 150 m : une seule fois pour tout le chantier
-        if line["sku"] in ("VIS-PLAQUE", "BANDE-JOINT"):
-            pack = (calc.screw_pack_line(int(line["quantity"]), "toutes les pièces") if line["sku"] == "VIS-PLAQUE"
-                    else calc.tape_roll_line(float(line["quantity"]), "toutes les pièces"))
+    packers = {"VIS-PLAQUE": lambda n: calc.screw_pack_line(int(n), "toutes les pièces"),
+               "BANDE-JOINT": lambda n: calc.tape_roll_line(float(n), "toutes les pièces"),
+               "ENDUIT-JOINT": lambda n: calc.compound_bag_line(float(n), "toutes les pièces")}
+    for key, line in list(merged.items()):   # vis, bande, enduit : au paquet / rouleau / sac une seule fois pour tout le chantier
+        if line["sku"] in packers:
+            pack = packers[line["sku"]](line["quantity"])
             merged[key] = {**line, "sku": pack.sku, "name": pack.name, "unit": pack.unit, "quantity": pack.quantity, "status": pack.status,
                            "formula": [pack.formula, *line["formula"]]}
     lines, total, missing = [], 0.0, []

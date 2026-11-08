@@ -995,14 +995,27 @@ def tape_roll_line(ml: float, how: str) -> QuantityLine:
                         f"⌈ {round(ml, 2):g} ml ({how}) / {TAPE_ROLL_M} ⌉", STATUS_CONFIRMED)
 
 
+COMPOUND_BAG_KG = 20   # règle du patron : un sac d'enduit fait 20 kg
+COMPOUND_BAG_SKU = "UC-SAC-ENDUIT"   # « Sac enduit » de la grille du patron, prix du sac
+
+
+def compound_bag_line(kg: float, how: str) -> QuantityLine:
+    """Enduit compté en kg par le moteur, vendu au sac de 20 kg : arrondi au sac, les kg restent dans la formule."""
+    return QuantityLine(COMPOUND_BAG_SKU, f"Enduit (sac de {COMPOUND_BAG_KG} kg)", ceil_int(kg / COMPOUND_BAG_KG), "sac",
+                        f"⌈ {round(kg, 2):g} kg ({how}) / {COMPOUND_BAG_KG} ⌉", STATUS_CONFIRMED)
+
+
 def pack_screws(result: CalcResult, mm: int = 25) -> CalcResult:
-    """Remplace la ligne « Vis à plaque » (en vis) par des paquets de 1 000 et la bande (en mètres) par des rouleaux de 150 m.
+    """Remplace la ligne « Vis à plaque » (en vis) par des paquets de 1 000, la bande (en mètres) par des rouleaux de 150 m et l'enduit
+    (en kg) par des sacs de 20 kg.
     À appeler une fois les pièces regroupées, jamais pièce par pièce (5 pièces à 300 vis = 2 paquets, pas 5)."""
     for i, q in enumerate(result.quantities):
         if q.sku == "VIS-PLAQUE":
             result.quantities[i] = screw_pack_line(int(q.quantity), q.formula, mm)
         elif q.sku == "BANDE-JOINT":
             result.quantities[i] = tape_roll_line(float(q.quantity), q.formula)
+        elif q.sku == "ENDUIT-JOINT":
+            result.quantities[i] = compound_bag_line(float(q.quantity), q.formula)
     return result
 
 
