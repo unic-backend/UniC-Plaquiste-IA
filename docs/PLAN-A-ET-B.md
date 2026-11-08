@@ -16,6 +16,7 @@ Le **serveur** reste la base de référence (clients, prix, documents). Les deux
 2. **Ouvrir Claude Code** sur ce dépôt et écrire : **« Plan A : suis docs/PLAN-A-ET-B.md »** en joignant la sauvegarde.
 3. Claude **restaure** la sauvegarde dans une base locale (`backup.restore(données, mot_de_passe)`) et travaille avec le vrai code : calculs, prix, PDF, numérotation qui continue.
    Il prépare des **brouillons**. **Toi seul** envoies, publies ou paies.
+   Il lit d'abord `docs/MEMOIRE-CLAUDE.md` (prix, règles, savoir d'UniC) ; un calcul de pièces se fait avec `python scripts/unic_calcul.py`.
 4. **Ramener le travail au serveur** : `python scripts/planb_export.py` produit `dossier-claude-AAAA-MM-JJ.json` (devis, factures et clients créés depuis la sauvegarde).
    Dans l'appli : **Paramètres › Moteur & santé › Sauvegardes › « Importer un dossier de Claude… »**.
    - Rejouer le même fichier ne crée **aucun doublon**.
