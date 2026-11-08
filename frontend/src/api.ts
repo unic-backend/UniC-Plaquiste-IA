@@ -528,6 +528,7 @@ export const api = {
   agendaFeed: () => request<{ enabled: boolean; url: string; webcal: string }>("/api/agenda/feed"),
   setAgendaFeed: (on: boolean) => request<{ enabled: boolean; url: string; webcal: string }>("/api/agenda/feed", { method: "POST", body: JSON.stringify({ on }) }),
   backupNow: () => request<any>("/api/backups", { method: "POST" }),
+  importPlanA: (bundle: unknown) => request<any>("/api/import/plan-a", { method: "POST", body: JSON.stringify(bundle) }),
   restoreBackup: (file: File, password = "") => { const fd = new FormData(); fd.append("file", file); if (password) fd.append("password", password); return request<any>("/api/backups/restore", { method: "POST", body: fd }); },
   backupPassword: (password: string) => request<{ encrypted: boolean }>("/api/backups/password", { method: "PUT", body: JSON.stringify({ password }) }),
   backupPasswordOff: () => request<{ encrypted: boolean }>("/api/backups/password", { method: "DELETE" }),
