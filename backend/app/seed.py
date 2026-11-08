@@ -544,6 +544,9 @@ def apply_owner_prices_v15(db: Session) -> int:
         if m is not None:
             _set_price(db, m, amount, "donné par le patron", "Prix confirmé par le patron le 08/11/2026")
             n += 1
+    pack = db.query(Material).filter(Material.sku == "UC-FOURRURES").first()
+    if pack is not None and (pack.name or "").strip().lower() == "fourrures":   # nom saisi à la main, ambigu avec la barre à 1 200
+        pack.name, pack.unit = "Paquet de fourrures", "paquet"
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

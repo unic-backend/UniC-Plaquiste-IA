@@ -711,7 +711,8 @@ OWNER_RULES_V21 = (
 OWNER_RULES_V22 = (
     "Prix tranchés par le patron (8/11/2026) : éclipse pour IPN = 12 000 FCFA le paquet de 100 ; vis 9 mm = 6 500 FCFA ; "
     "bande à joints = 4 000 FCFA ; colle silicone = 3 000 FCFA (colle à pompe 3 500) ; plaque hydrofuge 2 m = 5 500 FCFA ; "
-    "lambris PVC 32 cm = 6 000 FCFA ; lambris PVC 16 cm = 3 500 FCFA. La barre de 2,90 m n'existe plus : barres de 2,80 m.",
+    "lambris PVC 32 cm = 6 000 FCFA ; lambris PVC 16 cm = 3 500 FCFA. La barre de 2,90 m n'existe plus : barres de 2,80 m. "
+    "Fourrure : 1 200 FCFA la barre (à l'unité), 12 000 FCFA le paquet : deux prix justes, ne jamais les confondre.",
 )
 # souvenirs que ces prix rendent faux (archivés, jamais effacés) : motif → texte qui le remplace (None : la règle V22 suffit)
 _V22_REPLACED = {

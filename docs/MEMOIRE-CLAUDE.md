@@ -134,8 +134,9 @@ Plus haute que 2,80 m : rallonge + raccord de rail de 40 cm.
 
 Appliqué au serveur par `apply_owner_prices_v15` (prix) et la règle mémoire `v22` (souvenirs contraires archivés, jamais effacés).
 
+6. **Fourrure** : **1 200 la barre** (à l'unité) et **12 000 le paquet** : deux prix justes. `UC-FOURRURES` s'appelle maintenant « Paquet de fourrures ».
+
 **Encore ouvert** :
-- Fourrures « paquet » 12 000 et « Barres Fourrures » 1 200 : doublon avec « Barre de fourrure (2,80 m) » (1 200). Un seul devrait rester.
 - Largeur du lambris : la mémoire dit 30 cm, le patron dit 32 cm et 16 cm.
 
 ## Mise à jour

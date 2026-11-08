@@ -146,9 +146,12 @@ def test_prix_tranches_par_le_patron_v15(c):
         bande = db.query(Material).filter(Material.sku == "UC-BANDE-A-JOINTS").one()
         before = len(bande.prices)
         db.add_all([MaterialPrice(material_id=bande.id, kind="selling", amount=a, currency="FCFA", source="saisie manuelle") for a in (3000, 5000)])
+        db.add(Material(sku="UC-FOURRURES", name="Fourrures", category="ossature", unit="u", waste_coefficient=0.0))
         db.delete(db.get(AppSetting, "seed_owner_prices_v15"))
         db.commit()
-        assert apply_owner_prices_v15(db) == len(OWNER_PRICES_V15)   # base partagée : d'autres tests rejouent les anciennes étapes
+        assert apply_owner_prices_v15(db) == len(OWNER_PRICES_V15)
+        pack = db.query(Material).filter(Material.sku == "UC-FOURRURES").one()
+        assert (pack.name, pack.unit) == ("Paquet de fourrures", "paquet")   # plus confondu avec la barre à 1 200   # base partagée : d'autres tests rejouent les anciennes étapes
         for sku, amount in OWNER_PRICES_V15.items():
             assert selling_price_for_sku(db, sku)[0] == amount, sku
         db.refresh(bande)
@@ -169,7 +172,7 @@ def test_memoire_v22_archive_les_prix_contraires(c):
         mem.seed_owner_rules(db)
         assert all(db.get(Memory, m.id).state == "archived" for m in olds)
         active = " ".join(m.text for m in db.query(Memory).filter(Memory.state == "active"))
-        assert "éclipse pour IPN = 12 000" in active and "hydrofuge 2 m = 6 000" not in active and "Colle silicone = 3 500" not in active
+        assert "éclipse pour IPN = 12 000" in active and "12 000 FCFA le paquet : deux prix justes" in active and "hydrofuge 2 m = 6 000" not in active and "Colle silicone = 3 500" not in active
 
 
 def test_vis_au_paquet_de_1000_une_fois_par_chantier(c):
