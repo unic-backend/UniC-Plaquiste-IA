@@ -62,7 +62,7 @@ def test_une_longue_conversation_garde_son_debut(client, seen):
 
 
 def test_conversation_courte_sans_fil(client, seen):
-    client.post("/api/chat", json={"message": "Bonjour, comment vas-tu ?"})
+    client.post("/api/chat", json={"message": "Raconte-moi une blague courte"})   # (un simple bonjour ne part plus à l'IA)
     assert "PLUS TÔT DANS CETTE CONVERSATION" not in seen[-1][0][1]["content"]
 
 

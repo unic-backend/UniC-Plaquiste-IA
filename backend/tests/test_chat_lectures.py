@@ -50,6 +50,12 @@ def test_la_fiche_creee_par_le_chat(monkeypatch):
     ("prix des plaques BA13", "prices"),
     ("Bonjour UniC", "greeting"),
     ("salut unic ai !", "greeting"),
+    ("Salut, ça va ?", "greeting"),                       # salutations et remerciements : réponse locale, sans appel à Claude
+    ("bonjour comment tu vas", "greeting"),
+    ("merci", "thanks"),
+    ("Ok merci beaucoup !", "thanks"),
+    ("merci, fais le devis de Diop", "create_quote"),    # une vraie demande derrière le merci : pas un simple remerciement
+    ("bonjour, calcule une cloison de 12 m sur 2,50 m", "calculate"),
 ])
 def test_le_chat_comprend_ce_qui_est_vraiment_demande(text, intent):
     assert orchestrator._intent(text, {}) == intent

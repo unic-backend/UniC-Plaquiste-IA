@@ -453,8 +453,10 @@ def _intent(text: str, state: dict) -> str:
     if re.fullmatch(r"\s*(aide|help|que peux[- ]tu faire\s*\??|what can you do\s*\??)[\s!.?]*", t):
         return "help"
     if re.fullmatch(r"\s*(bonjour|salut|bonsoir|coucou|hello|hi|salam|salaam|salam aleykum|salam maleekum|nanga def|nanga def\s*\?)"
-                    r"(?:\s+unic(?:\s+ai)?)?[\s!.?]*", t):
-        return "greeting"
+                    r"(?:\s+unic(?:\s+ai)?)?[\s,!.?]*(?:(?:[çc]a\s+va|comment\s+(?:tu\s+vas|vas[- ]tu|[çc]a\s+va))(?:\s+unic)?[\s!.?]*)?", t):
+        return "greeting"   # salutation seule : réponse locale, aucun appel payant
+    if re.fullmatch(r"\s*(?:(?:ok|d'?accord|super|parfait|top)[\s,!.]+)?(?:merci|thanks|j[eë]r[eë]j[eë]f)(?:\s+(?:beaucoup|bien|infiniment|unic(?:\s+ai)?))*[\s!.]*", t):
+        return "thanks"     # simple remerciement : réponse locale, aucun appel payant
     if _QUESTION.match(t) and not has_doc_number:
         return "chat"
     if re.search(r"sant[eé] du syst[eè]me|\bhealth\b|statut (du )?serveur", t):
@@ -717,7 +719,7 @@ def handle_turn(
     # (Claude, ou Vibecode en relais), c'est LUI qui lit la conversation, calcule et crée le document avec les outils.
     chain0 = provider_chain(deep)
     if chain0 and chain0[0].id in ("claude", "vibecode") and intent in (
-            "greeting", "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
+            "help", "calculate", "prices", "knowledge", "create_quote", "create_po", "create_dn", "create_invoice",
             "list_customers", "list_suppliers", "list_projects", "list_quotes", "list_invoices",
             "create_customer", "create_supplier", "create_project", "analyze_doc", "analyze_photo", "search_doc",
             # UniC est universel : « envoie un mail à ma banque », « publie une annonce pour recruter », « rapport de la réunion »
@@ -746,6 +748,8 @@ def handle_turn(
         caps.append("briefing")
     elif intent == "greeting":
         reply_text = "Bonjour ! Je vous écoute."
+    elif intent == "thanks":
+        reply_text = "Avec plaisir. Je reste là si tu as besoin."
     elif intent == "help":
         reply_text = _help_text()
     elif intent == "health":
