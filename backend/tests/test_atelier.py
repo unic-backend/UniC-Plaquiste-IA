@@ -56,7 +56,8 @@ def test_le_banc_utilise_les_vraies_consignes_et_compte_les_actions_inventees(cl
     assert not ok["pdf-attestation"]["ok"] and any("Action inventée" in p for p in ok["pdf-attestation"]["problems"])
     system, kw = seen[0]
     assert agent.AGENT_PROMPT[:60] in system and "AUJOURD'HUI" in system           # mêmes consignes que la conversation
-    assert kw["model"] == settings.anthropic_model and kw["effort"] == "high"      # un courrier = enjeu : même modèle qu'en vrai
+    # même modèle qu'en vraie conversation : Sonnet par défaut (décision du patron), réflexion automatique coupée
+    assert kw["model"] == settings.anthropic_fast_model and kw["effort"] == "medium"
 
 
 def test_le_banc_laisse_consulter_avant_d_agir(client):

@@ -506,6 +506,25 @@ def apply_owner_eclipse_v13(db: Session) -> int:
     return n
 
 
+def apply_owner_sonnet_v14(db: Session) -> int:
+    """Décision du patron (8/11/2026, coût de l'API) : Sonnet pour tout, devis et calculs compris ; Opus seulement quand il le
+    demande (« réfléchis », bouton Réflexion profonde). Coupe la réflexion automatique sur les sujets à enjeu. Une seule fois :
+    la case « Réflexion approfondie » des Réglages la rallume s'il le veut."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_sonnet_v14"
+    if db.get(AppSetting, flag):
+        return 0
+    co = db.query(CompanySettings).first()
+    n = 0
+    if co is not None and co.ai_deep_stakes is not False:
+        co.ai_deep_stakes = False
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_prices_v3(db: Session) -> int:
     """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
     from app.models import AppSetting
