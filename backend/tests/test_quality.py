@@ -103,6 +103,11 @@ def test_depenses_hors_conversation_comptees_par_source(db):
     usage.record_detached(res, "plan")
     usage.record_detached(SimpleNamespace(raw={"usage": []}, model="x", provider="claude"), "photo")   # rien consommé : rien noté
     usage.record_detached(SimpleNamespace(raw=None, model="x", provider="claude"), "photo")
-    assert usage.flush_pending(db) == 1 and usage.flush_pending(db) == 0
-    plan = next(s for s in usage.summary(db)["par_source"] if s["source"] == "plan")
-    assert plan["appels"] == 1 and plan["cout_usd"] == 4.0          # 1 M de jetons d'entrée Opus au tarif de la table
+    try:
+        assert usage.flush_pending(db) == 1 and usage.flush_pending(db) == 0
+        plan = next(s for s in usage.summary(db)["par_source"] if s["source"] == "plan")
+        assert plan["appels"] == 1 and plan["cout_usd"] == 4.0      # 1 M de jetons d'entrée Opus au tarif de la table
+    finally:   # base partagée entre les tests : cette ligne à 4 $ fausserait la moyenne par message des autres
+        from app.models import UsageLog
+        db.query(UsageLog).filter(UsageLog.source == "plan").delete()
+        db.commit()
