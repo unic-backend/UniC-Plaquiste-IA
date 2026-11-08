@@ -270,6 +270,9 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     if "VIS-PLAQUE" in others:   # vis de toutes les pièces additionnées, puis au paquet de 1 000 une seule fois
         vis = others.pop("VIS-PLAQUE")
         others[calc.SCREW_PACK_SKU] = asdict(calc.screw_pack_line(int(vis["quantity"]), "toutes les pièces du plan"))
+    if "BANDE-JOINT" in others:   # bande de toutes les pièces additionnée, puis au rouleau de 150 m une seule fois
+        bande = others.pop("BANDE-JOINT")
+        others[calc.TAPE_ROLL_SKU] = asdict(calc.tape_roll_line(float(bande["quantity"]), "toutes les pièces du plan"))
     for sku, n in pieces.items():   # paquets recalculés sur le total des pièces
         if sku in others:
             others[sku]["quantity"] = calc.ceil_int(n / pack[sku])

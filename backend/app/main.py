@@ -283,7 +283,7 @@ def startup():
                                   apply_owner_doors_v7, apply_owner_prices_v5, apply_owner_studs_v6, apply_owner_bars_v8,
                                   apply_owner_studs_v9, apply_owner_margin_v10, apply_owner_margin_v11,
                                   apply_owner_fixings_v12, apply_owner_eclipse_v13, apply_owner_sonnet_v14,
-                                  apply_owner_prices_v15)
+                                  apply_owner_prices_v15, apply_owner_tape_v16)
             apply_owner_prices_v1(db)
             apply_owner_prices_v2(db)
             apply_owner_prices_v3(db)
@@ -299,6 +299,7 @@ def startup():
             apply_owner_eclipse_v13(db)
             apply_owner_sonnet_v14(db)
             apply_owner_prices_v15(db)
+            apply_owner_tape_v16(db)
         except Exception:
             pass
         try:

@@ -552,6 +552,26 @@ def apply_owner_prices_v15(db: Session) -> int:
     return n
 
 
+def apply_owner_tape_v16(db: Session) -> int:
+    """Règle du patron (08/11/2026) : la bande à joints se vend au rouleau de 150 m (prix de la grille = prix du rouleau). Libellé et unité
+    de l'article corrigés ; le prix n'est pas touché. Une seule fois."""
+    from app.calc import TAPE_ROLL_M, TAPE_ROLL_SKU
+    from app.models import AppSetting
+
+    flag = "seed_owner_tape_v16"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    m = db.query(Material).filter(Material.sku == TAPE_ROLL_SKU).first()
+    if m is not None:
+        m.name, m.unit = f"Bande à joints (rouleau de {TAPE_ROLL_M} m)", "rouleau"
+        m.notes = f"Rouleau de {TAPE_ROLL_M} m (donné par le patron). Le moteur compte les mètres puis arrondit au rouleau sur tout le chantier."
+        n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
 def apply_owner_prices_v3(db: Session) -> int:
     """Plaque hydrofuge 2 m = 6 000 FCFA (confirmé par le patron). Une seule fois, ancien prix gardé dans l'historique."""
     from app.models import AppSetting
