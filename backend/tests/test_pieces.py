@@ -195,3 +195,23 @@ def test_outil_ia_et_plan_vis_au_paquet(c):
     plan = plan_quote.build({"pieces": [{"nom": f"Bureau {i}", "surface_m2": 20, "longueur_m": 5, "largeur_m": 4, "plafond": "oui"} for i in range(4)]})
     vis = [q for q in plan["quantities"] if q["sku"] in (calc.SCREW_PACK_SKU, "VIS-PLAQUE")]
     assert [(q["sku"], q["quantity"]) for q in vis] == [(calc.SCREW_PACK_SKU, 2)]   # 4 × 300 = 1 200 vis → 2 paquets
+
+
+def test_script_de_calcul_pour_claude_code(tmp_path):
+    """scripts/unic_calcul.py : le moteur et la grille du patron dans une session Claude Code, sans l'IA."""
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[2] / "scripts" / "unic_calcul.py"
+    rooms = '[{"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4}]'
+    env = {**os.environ, "UNIC_DATA_DIR": str(tmp_path)}
+    out = subprocess.run([sys.executable, str(script), rooms, "--main-oeuvre", "4000", "--json"], env=env, capture_output=True,
+                         text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    d = json.loads(out.stdout)
+    assert d["main_oeuvre"]["montant"] == 80000 and d["ok"]
+    assert next(x for x in d["lignes"] if x["sku"] == "BA13-2000x1200")["prix_unitaire"] == 4500
+    bad = subprocess.run([sys.executable, str(script), '[{"kind": "garage"}]'], env=env, capture_output=True, text=True, timeout=120)
+    assert bad.returncode != 0 and "type inconnu" in bad.stderr

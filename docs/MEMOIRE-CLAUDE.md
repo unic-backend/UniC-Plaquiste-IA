@@ -139,6 +139,44 @@ Appliqué au serveur par `apply_owner_prices_v15` (prix) et la règle mémoire `
 **Encore ouvert** :
 - Largeur du lambris : la mémoire dit 30 cm, le patron dit 32 cm et 16 cm.
 
+## Savoir appris par UniC en conversation (sauvegarde du 08/11/2026)
+
+217 souvenirs actifs : 43 confirmés (déjà dans les règles ci-dessus), le reste appris en parlant avec le patron.
+Les clients, téléphones et chantiers restent dans la sauvegarde, **jamais dans le dépôt**.
+
+**Confirmé**
+- Tiges : 300 la tige de 1 m, 30 000 le paquet. Dans un devis, les tiges s'écrivent à l'unité, pas en paquet.
+- Vis 25 mm : écrire « vis 25mm » tout court, jamais « ou 35 ».
+- Le patron donne la quantité et le prix d'une ligne : on reporte tel quel, sans redemander.
+- Une image ou une capture du patron sert de référence, pas les anciens devis.
+- Main-d'œuvre : surface du plan du client, jamais déduite des matériaux ; si elle manque, la demander.
+- Lambris : une chute resert si **un seul** morceau complète la rangée (4,5 m : une lame coupée en 2 complète les deux restes).
+
+**Appris, à confirmer avant usage**
+- Raccords de tiges : 7 000 le paquet de 100. Vis 35 mm : 10 000 le paquet. Ces deux articles ne sont pas dans la grille.
+- Paiement d'un chantier en 3 tranches : 40 % au démarrage, 40 % à mi-chantier, 20 % après la finition.
+- Les 32 cm sous la dalle sont l'espace du faux plafond (la laine de verre s'y cache) : dalle à 3 m → 2,68 m sous plafond.
+- Dalle très haute : tiges de 1 m raccordées (4 m = 4 tiges). Sur IPN : éclipses.
+- Chutes de plaque de 50 cm et plus : comptées comme morceaux réutilisables.
+- Relevés incomplets : récapitulatif en texte d'abord, devis seulement après validation du patron.
+- Cloison fermée sur une seule face quand un mur est derrière.
+- Sur un plan de cloisons : 1 montant de plus à chaque angle.
+
+**Dépassé, ne plus appliquer**
+- « Marge de 3 % sur chaque pièce » : remplacée par la marge en pièces (faux plafond seulement).
+- « Les plaques coûtent toujours 2 500 » : faux, le patron l'a corrigé.
+
+## Outils d'UniC que Claude utilise directement (même code que le serveur, sans l'IA, sans frais)
+
+- **Calcul de pièces + prix** : `python scripts/unic_calcul.py '[{"name":"Salon","kind":"ceiling","length_m":5,"width_m":4}]' --main-oeuvre 4000`.
+  Types : `ceiling` (`support` dalle ou ipn, `suspente_m`), `partition` (`height_m`, `sides`, `doors`), `paint` (`area_m2`, `coats`).
+  Base de `UNIC_DATA_DIR` : une sauvegarde restaurée donne les prix du jour ; une base neuve prend la grille du dépôt.
+- **Décor de plafond** (traçage, découpe, plaques exactes) : `app.plafond_design.trace_decoupe(style, longueur, largeur)`.
+- **Électricité et clim** (conseil, jamais chiffré) : `app.elec` (`controle_circuit`, `section_pour`, `chute_tension`, `clim_puissance`, `clim_alimentation`).
+- **Devis et factures** : restaurer la sauvegarde, travailler dans la base locale, puis `scripts/planb_export.py` (voir `docs/PLAN-A-ET-B.md`).
+
+**Encore ouvert** : bande à joints et enduit. Le moteur compte en mètres et en kg, mais la grille vend à l'unité, donc il ne les chiffre pas. Il manque la longueur d'un rouleau de bande et le poids d'un sac d'enduit (le seau fait 20 kg).
+
 ## Mise à jour
 Quand les prix changent : appli › Paramètres › Sauvegardes › « Sauvegarder maintenant », télécharger le `.zip`, le joindre à une session Claude Code, puis « mets à jour docs/MEMOIRE-CLAUDE.md ».
 Ne jamais coller de clé API, de mot de passe ou de jeton dans une conversation.
