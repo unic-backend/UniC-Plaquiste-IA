@@ -81,7 +81,7 @@ def _ceiling(group: list[dict], cfg: dict) -> calc.CalcResult:
         calc.make_hydrofuge(res, "Plaques hydrofuges (pièce humide cochée).")
     if group[0]["support"] == "ipn" or (group[0]["suspente_m"] or 0) > calc.ROD_M:
         calc.hang_from(res, group[0]["support"], group[0]["suspente_m"])
-    return calc.pack_screws(res)
+    return res   # vis et bande : arrondies au paquet / rouleau une seule fois sur tout le chantier (calculate)
 
 
 def _partition(group: list[dict], cfg: dict) -> calc.CalcResult:
@@ -97,7 +97,7 @@ def _partition(group: list[dict], cfg: dict) -> calc.CalcResult:
                                    fixing_values=cfg["fixings"], sides_known=True, openings_known=True)
     if group[0].get("hydrofuge"):
         calc.make_hydrofuge(res, "Plaques hydrofuges (pièce humide cochée).")
-    return calc.pack_screws(res)
+    return res   # vis et bande : arrondies au paquet / rouleau une seule fois sur tout le chantier (calculate)
 
 
 def _groups(rooms: list[dict]) -> list[tuple[str, list[dict]]]:
@@ -144,6 +144,12 @@ def calculate(db: Session, rooms: list[dict], entraxe_cm: int | None = None, lab
                                            "status": q.get("status"), "formula": []})
             line["quantity"] = round(line["quantity"] + float(q.get("quantity") or 0), 2)
             line["formula"].append(f"{names} : {q.get('formula') or ''}".strip(" :"))
+    for key, line in list(merged.items()):   # vis au paquet de 1 000, bande au rouleau de 150 m : une seule fois pour tout le chantier
+        if line["sku"] in ("VIS-PLAQUE", "BANDE-JOINT"):
+            pack = (calc.screw_pack_line(int(line["quantity"]), "toutes les pièces") if line["sku"] == "VIS-PLAQUE"
+                    else calc.tape_roll_line(float(line["quantity"]), "toutes les pièces"))
+            merged[key] = {**line, "sku": pack.sku, "name": pack.name, "unit": pack.unit, "quantity": pack.quantity, "status": pack.status,
+                           "formula": [pack.formula, *line["formula"]]}
     lines, total, missing = [], 0.0, []
     for line in merged.values():
         price = selling_price_for_sku(db, line["sku"])[0] if line["sku"] and material_by_sku(db, line["sku"]) else None

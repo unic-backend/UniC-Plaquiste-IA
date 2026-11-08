@@ -251,3 +251,29 @@ def test_script_factures_pour_claude_code(tmp_path):
     assert ok.returncode == 0, ok.stderr
     assert f"{numero}-F" in ok.stdout and Path(ok.stdout.rsplit("PDF : ", 1)[1].strip()).read_bytes()[:4] == b"%PDF"
     assert f"{numero}-F" in run(str(root / "unic_facture.py"), "liste").stdout
+
+
+def test_bande_au_rouleau_de_150_m_une_fois_par_chantier(c):
+    """Règle du patron : rouleau de 150 m à 4 000. Plafond 28 ml + cloison 42 ml = 70 ml → 1 rouleau (pas 1 + 1) ; vis 300 + 395 → 1 paquet."""
+    from app import memory as mem
+    from app.models import AppSetting, Material, Memory
+    from app.seed import apply_owner_tape_v16
+    rooms = [{"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4},
+             {"name": "Mur", "kind": "partition", "length_m": 6, "height_m": 2.5}]
+    with SessionLocal() as db:
+        d = pieces.calculate(db, rooms)
+        bande = next(l for l in d["lignes"] if l["sku"] == calc.TAPE_ROLL_SKU)
+        assert (bande["quantity"], bande["unit"], bande["prix_unitaire"]) == (1, "rouleau", 4000) and "70 ml" in bande["formula"]
+        assert next(l for l in d["lignes"] if l["sku"] == calc.SCREW_PACK_SKU)["quantity"] == 1
+        assert "Bande à joint" not in d["prix_manquants"]
+        assert calc.tape_roll_line(210, "x").quantity == 2
+        db.delete(db.get(AppSetting, "seed_owner_tape_v16"))
+        db.commit()
+        assert apply_owner_tape_v16(db) == 1 and apply_owner_tape_v16(db) == 0
+        m = db.query(Material).filter(Material.sku == calc.TAPE_ROLL_SKU).one()
+        assert m.unit == "rouleau" and "150 m" in m.name
+        if db.get(AppSetting, "seed_owner_rules_v24"):
+            db.delete(db.get(AppSetting, "seed_owner_rules_v24"))
+            db.commit()
+        mem.seed_owner_rules(db)
+        assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("Bande à joints : vendue au rouleau de 150 m%")).count() == 1

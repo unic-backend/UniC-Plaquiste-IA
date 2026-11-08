@@ -985,12 +985,24 @@ def screw_pack_line(screws: int, how: str, mm: int = 25) -> QuantityLine:
                         f"⌈ {screws} vis ({how}) / {SCREW_PACK} ⌉", STATUS_CONFIRMED)
 
 
+TAPE_ROLL_M = 150   # règle du patron : un rouleau de bande à joints fait 150 m
+TAPE_ROLL_SKU = "UC-BANDE-A-JOINTS"   # « Bande à joints » de la grille du patron, prix du rouleau
+
+
+def tape_roll_line(ml: float, how: str) -> QuantityLine:
+    """Bande comptée en mètres par le moteur, vendue au rouleau de 150 m : arrondi au rouleau, les mètres restent dans la formule."""
+    return QuantityLine(TAPE_ROLL_SKU, f"Bande à joints (rouleau de {TAPE_ROLL_M} m)", ceil_int(ml / TAPE_ROLL_M), "rouleau",
+                        f"⌈ {round(ml, 2):g} ml ({how}) / {TAPE_ROLL_M} ⌉", STATUS_CONFIRMED)
+
+
 def pack_screws(result: CalcResult, mm: int = 25) -> CalcResult:
-    """Remplace la ligne « Vis à plaque » (en vis) par des paquets de 1 000. À appeler une fois les pièces regroupées, jamais pièce par pièce
-    (5 pièces à 300 vis = 2 paquets, pas 5)."""
+    """Remplace la ligne « Vis à plaque » (en vis) par des paquets de 1 000 et la bande (en mètres) par des rouleaux de 150 m.
+    À appeler une fois les pièces regroupées, jamais pièce par pièce (5 pièces à 300 vis = 2 paquets, pas 5)."""
     for i, q in enumerate(result.quantities):
         if q.sku == "VIS-PLAQUE":
             result.quantities[i] = screw_pack_line(int(q.quantity), q.formula, mm)
+        elif q.sku == "BANDE-JOINT":
+            result.quantities[i] = tape_roll_line(float(q.quantity), q.formula)
     return result
 
 

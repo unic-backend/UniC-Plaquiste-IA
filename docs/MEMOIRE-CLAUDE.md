@@ -20,7 +20,7 @@ Un article a parfois plusieurs prix « ouverts » dans la base : le serveur pren
 | Article | Unité | Prix de vente (FCFA) | Code |
 |---|---|---:|---|
 | Bande armée | u | 6 500 | `UC-BANDE-ARMEE` |
-| Bande à joints | u | 4 000 | `UC-BANDE-A-JOINTS` |
+| Bande à joints (rouleau de 150 m) | rouleau | 4 000 | `UC-BANDE-A-JOINTS` |
 | Ciment plâtre (5 kg) | u | 250 | `UC-CIMENT-PLATRE-5-KG` |
 | Enduit coloris | u | 11 000 | `UC-ENDUIT-COLORIS` |
 | Paquet papier enduit | paquet | 10 000 | `UC-PAQUET-PAPIER-ENDUIT` |
@@ -119,7 +119,7 @@ Chevilles à frapper : une tous les 30 cm de cornière ou de rail. **Marge** (fa
 **Cloison** : un montant tous les 0,60 m (0,50 si plaque couchée), 2 montants à chaque jonction de plaques ; 3 montants de renfort par porte ; aucune marge.
 Plus haute que 2,80 m : rallonge + raccord de rail de 40 cm.
 
-**Finitions** : vis à plaque 15/m², **paquet de 1 000 vis** ; bande 1,40 ml/m² ; enduit 0,35 kg/m² par couche (2 couches) ; 4 vis de 9 mm par montant.
+**Finitions** : vis à plaque 15/m², **paquet de 1 000 vis** ; bande 1,40 ml/m², **rouleau de 150 m** (arrondi une fois sur tout le chantier) ; enduit 0,35 kg/m² par couche (2 couches) ; 4 vis de 9 mm par montant.
 **Lambris PVC** : 32 cm = 6 000 la lame, 16 cm = 3 500 ; lames de 3 m, toujours dans le sens de la largeur ; le patron donne lui-même les quantités d'ossature.
 
 **Électricité / clim** (conseil, jamais chiffré dans un devis) : mêmes règles qu'ailleurs (NF C 15-100) ; jamais rouge (phase) sur bleu (neutre).
@@ -175,7 +175,7 @@ Les clients, téléphones et chantiers restent dans la sauvegarde, **jamais dans
 - **Électricité et clim** (conseil, jamais chiffré) : `app.elec` (`controle_circuit`, `section_pour`, `chute_tension`, `clim_puissance`, `clim_alimentation`).
 - **Devis et factures** : restaurer la sauvegarde, travailler dans la base locale, puis `scripts/planb_export.py` (voir `docs/PLAN-A-ET-B.md`).
 
-**Encore ouvert** : bande à joints et enduit. Le moteur compte en mètres et en kg, mais la grille vend à l'unité, donc il ne les chiffre pas. Il manque la longueur d'un rouleau de bande et le poids d'un sac d'enduit (le seau fait 20 kg).
+**Bande à joints** : chiffrée au rouleau de 150 m (réponse du patron, 08/11/2026). **Encore ouvert** : l'enduit. Le moteur le compte en kg, la grille le vend au sac ou au seau ; il manque le poids d'un sac (le seau fait 20 kg).
 
 ## Méthode de travail : deux moteurs ensemble (Claude + UniC)
 
