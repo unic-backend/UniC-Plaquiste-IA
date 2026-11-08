@@ -714,6 +714,10 @@ OWNER_RULES_V22 = (
     "lambris PVC 32 cm = 6 000 FCFA ; lambris PVC 16 cm = 3 500 FCFA. La barre de 2,90 m n'existe plus : barres de 2,80 m. "
     "Fourrure : 1 200 FCFA la barre (à l'unité), 12 000 FCFA le paquet : deux prix justes, ne jamais les confondre.",
 )
+OWNER_RULES_V23 = (
+    "Fourrures de faux plafond : le patron raccorde les chutes. On compte la longueur totale des lignes ÷ 2,80 m, arrondi au-dessus "
+    "(45 ml → 17 barres), pas des barres neuves ligne par ligne.",
+)
 # souvenirs que ces prix rendent faux (archivés, jamais effacés) : motif → texte qui le remplace (None : la règle V22 suffit)
 _V22_REPLACED = {
     "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000%":
@@ -737,7 +741,7 @@ _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, 
               "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14,
               "v15": OWNER_RULES_V15, "v16": OWNER_RULES_V16, "v17": OWNER_RULES_V17,
               "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19, "v20": OWNER_RULES_V20, "v21": OWNER_RULES_V21,
-              "v22": OWNER_RULES_V22}
+              "v22": OWNER_RULES_V22, "v23": OWNER_RULES_V23}
 
 
 def seed_owner_rules(db: Session) -> int:
