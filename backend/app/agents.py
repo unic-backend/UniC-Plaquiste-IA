@@ -257,7 +257,7 @@ def run(db: Session, a: CustomAgent) -> dict:
         executor.shutdown(wait=False)
     if res is not None and res.raw:
         try:
-            usage.record(db, res.raw.get("usage"), res.model)
+            usage.record(db, res.raw.get("usage"), res.model, source="agent")
         except Exception:
             pass
     with SessionLocal() as fresh:   # état final écrit par une session neuve (le fil du modèle peut encore tenir l'ancienne)

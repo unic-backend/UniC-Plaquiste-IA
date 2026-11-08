@@ -56,7 +56,7 @@ def run(db: Session, question: str, user_id: str | None = None) -> dict:
                           web=True, web_max_uses=MAX_SEARCHES, sources_raw=True, thinking=True, effort="high",
                           model=settings.anthropic_model, max_tokens=8000)
     try:
-        usage.record(db, (res.raw or {}).get("usage"), res.model)
+        usage.record(db, (res.raw or {}).get("usage"), res.model, source="recherche")
     except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire perdre un rapport
         pass
     if not res.available or not (res.text or "").strip():

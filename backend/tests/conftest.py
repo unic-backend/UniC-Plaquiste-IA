@@ -2,6 +2,7 @@ import os
 
 # Les tests tournent hors production : sans code d'accès, le serveur de production refuse l'API (voir main.access_code_guard).
 os.environ.setdefault("UNIC_ENV", "development")
+os.environ.setdefault("UNIC_NO_BACKGROUND", "1")   # aucun fil de fond en test (surveillance, sauvegarde, écriture différée des coûts)
 
 
 import pytest  # noqa: E402

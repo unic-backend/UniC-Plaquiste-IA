@@ -59,6 +59,8 @@ def _ask(system: str, user: str, **kw) -> str:
     res = ClaudeAIProvider().complete(
         [{"role": "system", "content": system}, {"role": "user", "content": user}],
         max_tokens=kw.get("max_tokens", 900), model=kw.get("model") or settings.anthropic_fast_model)
+    from app import usage
+    usage.record_detached(res, "table_ronde")
     return res.text.strip() if res.available else ""
 
 

@@ -51,6 +51,8 @@ def _ask(b64: str) -> str:
     ]
     res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=2000,
                                       model=settings.anthropic_fast_model)
+    from app import usage
+    usage.record_detached(res, "photo")
     return res.text.strip() if res.available else ""
 
 
@@ -127,6 +129,8 @@ def describe_frames(frames: list[tuple[float, Path]]) -> str:
                         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}}]
         content.append({"type": "text", "text": FRAMES_PROMPT})
         res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=1500, model=settings.anthropic_fast_model)
+        from app import usage
+        usage.record_detached(res, "video")
         return res.text.strip() if res.available else ""
     except Exception as exc:
         logger.warning("Vision vidéo impossible : %s", exc)

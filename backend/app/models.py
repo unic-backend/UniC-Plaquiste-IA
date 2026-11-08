@@ -686,6 +686,7 @@ class UsageLog(Base):
     web_searches: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     price_known: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str] = mapped_column(String(24), default="")   # d'où vient la dépense : chat, plan, photo, relecture…
 
 
 class AppSetting(Base):

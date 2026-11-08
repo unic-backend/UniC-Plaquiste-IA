@@ -119,7 +119,7 @@ def learn_page(db: Session, url: str, user_id: str | None = None) -> dict:
                           web=True, fetch=True, web_max_uses=1, sources_raw=True, model=settings.anthropic_fast_model,
                           effort="medium", max_tokens=8000)
     try:
-        usage.record(db, (res.raw or {}).get("usage"), res.model)
+        usage.record(db, (res.raw or {}).get("usage"), res.model, source="bibliotheque")
     except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire perdre la lecture
         pass
     text = (res.text or "").strip()

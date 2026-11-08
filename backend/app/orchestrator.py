@@ -1263,7 +1263,7 @@ def handle_turn(
                         ai = chat_complete(msgs, deep=deep, web=can_search, tools=tool_defs if tools_on else None,
                                            tool_handler=session, effort="low", max_tokens=1200)
                 if ai.provider in ("claude", "vibecode") and ai.raw:
-                    usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider)   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
+                    usage.record(db, ai.raw.get("usage"), ai.model, provider=ai.provider, source="chat")   # tarif Anthropic ou tarif Vibecode selon le fournisseur réellement utilisé
                 phantom = claims.unbacked(ai.text, session.succeeded, known=known_documents(db, ai.text)) \
                     if (session is not None and ai.available and ai.text) else []
                 if phantom:
@@ -1275,7 +1275,7 @@ def handle_turn(
                                               **{k: v for k, v in voice_kw.items() if k != "model"})
                     if again.available and again.text and again.error != "refusal":
                         if again.provider in ("claude", "vibecode") and again.raw:
-                            usage.record(db, again.raw.get("usage"), again.model, provider=again.provider)
+                            usage.record(db, again.raw.get("usage"), again.model, provider=again.provider, source="chat")
                         ai = again
                     still = claims.unbacked(ai.text, session.succeeded, known=known_documents(db, ai.text))
                     if still:

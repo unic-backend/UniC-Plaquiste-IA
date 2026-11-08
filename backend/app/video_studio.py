@@ -374,6 +374,8 @@ def _ask(system: str, user: str, tool: dict) -> dict:
                                              tools=[tool], tool_handler=handler, max_tokens=MAX_ASK_TOKENS, effort="high", thinking=True)
     finally:
         ai.STREAM_CB.reset(tok)
+    from app import usage
+    usage.record_detached(res, "video_studio")
     if not got:
         raise repair.RepairError(f"Claude n'a pas rendu de scénario ({res.error or 'réponse sans scénario'}).", 502)
     return got

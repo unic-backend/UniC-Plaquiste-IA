@@ -101,7 +101,7 @@ def _one(db: Session, topic: str, today: str, user_id: str | None) -> dict:
         web=True, web_max_uses=SEARCHES_PER_TOPIC, sources_raw=True, model=settings.anthropic_fast_model, effort="medium",
         max_tokens=2500)
     try:
-        usage.record(db, (res.raw or {}).get("usage"), res.model)
+        usage.record(db, (res.raw or {}).get("usage"), res.model, source="veille")
     except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire perdre la veille
         pass
     text = (res.text or "").strip()

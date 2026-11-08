@@ -6,6 +6,9 @@ au tarif Sonnet et marqué « tarif inconnu » : jamais présenté comme exact.
 """
 from __future__ import annotations
 
+import os
+import threading
+from collections import deque
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
@@ -57,13 +60,75 @@ def cost_of(model: str, rows: list[dict], provider: str = "claude") -> tuple[dic
     return total, round(usd, 6), known
 
 
-def record(db: Session, rows: list[dict] | None, model: str, provider: str = "claude") -> None:
+def record(db: Session, rows: list[dict] | None, model: str, provider: str = "claude", source: str = "") -> None:
     if not rows:
         return
     total, usd, known = cost_of(model, rows, provider=provider)
     db.add(UsageLog(model=model, input_tokens=total["input"], output_tokens=total["output"],
                     cache_read_tokens=total["cache_read"], cache_write_tokens=total["cache_write"],
-                    web_searches=total["web"], cost_usd=usd, price_known=known))
+                    web_searches=total["web"], cost_usd=usd, price_known=known, source=source[:24]))
+
+
+_PENDING: deque = deque(maxlen=2000)   # dépenses hors conversation en attente d'écriture (aucune écriture en base depuis un fil de lecture)
+
+
+def record_detached(res, source: str) -> None:
+    """Dépense d'un appel à Claude fait hors conversation (lecture de plan, photo, table ronde, banc d'essai…) : mise en file en
+    mémoire, puis écrite quelques secondes plus tard par un fil à part (flush_pending) dans « Coût de Claude ». Jamais d'écriture ici :
+    ces appels tournent dans des fils de lecture pendant qu'une autre session tient l'écriture (SQLite n'a qu'un écrivain). Ne fait
+    jamais échouer l'appel.
+    shortcut: un redémarrage du serveur dans les secondes qui suivent perd cette dépense ; à revoir si le compte doit être exact au centime."""
+    try:
+        raw = getattr(res, "raw", None) or {}
+        if raw.get("usage"):
+            _PENDING.append({"rows": list(raw["usage"]), "model": getattr(res, "model", "") or "",
+                             "provider": getattr(res, "provider", "claude") or "claude", "source": source})
+            _schedule_flush()
+    except Exception:   # noqa: BLE001
+        pass
+
+
+_timer_lock = threading.Lock()
+_timer: threading.Timer | None = None
+FLUSH_DELAY_S = 5.0
+
+
+def _schedule_flush() -> None:
+    """Un seul fil d'écriture en attente à la fois ; il attend son tour d'écrivain (busy_timeout) sans bloquer la requête.
+    UNIC_NO_BACKGROUND (tests) : pas de fil, flush_pending() est appelé à la main."""
+    global _timer
+    if os.environ.get("UNIC_NO_BACKGROUND"):
+        return
+    with _timer_lock:
+        if _timer is not None:
+            return
+
+        def run() -> None:
+            global _timer
+            with _timer_lock:
+                _timer = None
+            try:
+                from app.database import SessionLocal
+                with SessionLocal() as db:
+                    flush_pending(db)
+            except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire de bruit
+                pass
+
+        _timer = threading.Timer(FLUSH_DELAY_S, run)
+        _timer.daemon = True
+        _timer.start()
+
+
+def flush_pending(db: Session) -> int:
+    """Écrit les dépenses en attente, avec la session donnée (jamais celle d'une requête en cours : voir _schedule_flush)."""
+    n = 0
+    while _PENDING:
+        it = _PENDING.popleft()
+        record(db, it["rows"], it["model"], provider=it["provider"], source=it["source"])
+        n += 1
+    if n:
+        db.commit()
+    return n
 
 
 def _get(db: Session, key: str) -> str:
@@ -98,6 +163,11 @@ def summary(db: Session, now: datetime | None = None) -> dict:
     total, n_total = _sum(db)
     models = [{"model": m, "messages": n, "cout_usd": round(float(c or 0), 4)} for m, n, c in
               db.query(UsageLog.model, func.count(UsageLog.id), func.sum(UsageLog.cost_usd)).group_by(UsageLog.model).all()]
+    # d'où vient l'argent : le mois en cours, par source (les lignes d'avant le suivi détaillé n'ont pas de source)
+    sources = [{"source": s or "(non classé)", "appels": n, "cout_usd": round(float(c or 0), 4)} for s, n, c in
+               db.query(UsageLog.source, func.count(UsageLog.id), func.sum(UsageLog.cost_usd))
+               .filter(UsageLog.created_at >= day0.replace(day=1)).group_by(UsageLog.source)
+               .order_by(func.sum(UsageLog.cost_usd).desc()).all()]
     days = []
     for i in range(13, -1, -1):
         start = day0 - timedelta(days=i)
@@ -118,7 +188,7 @@ def summary(db: Session, now: datetime | None = None) -> dict:
     return {
         "aujourdhui_usd": round(today, 4), "semaine_usd": round(week, 4), "mois_usd": round(month, 4),
         "total_usd": round(total, 4), "messages_aujourdhui": n_today, "messages_mois": n_month, "messages_total": n_total,
-        "moyenne_par_message_usd": avg, "par_modele": models, "jours": days,
+        "moyenne_par_message_usd": avg, "par_modele": models, "par_source": sources, "jours": days,
         "credit_usd": float(credit) if credit else None, "credit_depuis": since or None, "reste_usd": left,
         "messages_restants_estimes": int(left / avg) if (left and avg and left > 0) else None,
         "tarif_inconnu": bool(db.query(UsageLog).filter(UsageLog.price_known.is_(False)).first()),

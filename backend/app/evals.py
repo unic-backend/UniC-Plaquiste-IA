@@ -200,6 +200,8 @@ def run(db: Session, cases: list[dict] | None = None, complete=None) -> dict:
                             {"role": "user", "content": case["message"]}],
                            tools=agent.TOOLS, tool_handler=handler, max_tokens=4000, effort="high" if deep else "medium",
                            model=settings.anthropic_model if deep else settings.anthropic_fast_model)
+            from app import usage
+            usage.record_detached(res, "banc")   # le banc coûte ≈ 31 appels : il doit se voir dans « Coût de Claude »
             err = str(getattr(res, "error", "") or "")
             if not calls and err and err not in ANSWERED_ERRORS and not (getattr(res, "text", "") or ""):
                 # Claude n'a pas répondu (crédit, quota, clé, réseau) : ce n'est pas l'IA qui se trompe, rien n'est noté pour ce cas
