@@ -273,6 +273,9 @@ def build(analysis: dict, *, rooms: list[str] | None = None, include_to_confirm:
     if "BANDE-JOINT" in others:   # bande de toutes les pièces additionnée, puis au rouleau de 150 m une seule fois
         bande = others.pop("BANDE-JOINT")
         others[calc.TAPE_ROLL_SKU] = asdict(calc.tape_roll_line(float(bande["quantity"]), "toutes les pièces du plan"))
+    if "ENDUIT-JOINT" in others:   # enduit de toutes les pièces additionné, puis au sac de 20 kg une seule fois
+        enduit = others.pop("ENDUIT-JOINT")
+        others[calc.COMPOUND_BAG_SKU] = asdict(calc.compound_bag_line(float(enduit["quantity"]), "toutes les pièces du plan"))
     for sku, n in pieces.items():   # paquets recalculés sur le total des pièces
         if sku in others:
             others[sku]["quantity"] = calc.ceil_int(n / pack[sku])

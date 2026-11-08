@@ -240,11 +240,12 @@ def test_script_factures_pour_claude_code(tmp_path):
     rooms = '[{"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4}]'
     assert run(str(root / "unic_calcul.py"), rooms, "--devis", "Awa Fall").returncode == 0
     numero = next(l.split()[0] for l in run(str(root / "unic_facture.py"), "liste").stdout.splitlines() if "Awa Fall" in l)
-    refus = run(str(root / "unic_facture.py"), "depuis-devis", numero)
-    assert refus.returncode != 0 and "sans prix" in refus.stderr                     # bande / enduit non chiffrés : jamais facturé
     db = sqlite3.connect(next(tmp_path.rglob("*.db")))
-    db.execute("UPDATE quotation_items SET unit_price = 1000, total = quantity * 1000 WHERE unit_price IS NULL")
-    db.execute("UPDATE quotations SET prices_complete = 1")
+    db.execute("UPDATE quotations SET prices_complete = 0")                         # une ligne sans prix : jamais facturé
+    db.commit()
+    refus = run(str(root / "unic_facture.py"), "depuis-devis", numero)
+    assert refus.returncode != 0 and "sans prix" in refus.stderr
+    db.execute("UPDATE quotations SET prices_complete = 1")                         # devis complet (vis, bande, enduit chiffrés)
     db.commit()
     db.close()
     ok = run(str(root / "unic_facture.py"), "depuis-devis", numero)
@@ -277,3 +278,21 @@ def test_bande_au_rouleau_de_150_m_une_fois_par_chantier(c):
             db.commit()
         mem.seed_owner_rules(db)
         assert db.query(Memory).filter(Memory.state == "active", Memory.text.like("Bande à joints : vendue au rouleau de 150 m%")).count() == 1
+
+
+def test_enduit_au_sac_de_20_kg_une_fois_par_chantier(c):
+    """Règle du patron : sac de 20 kg (« Sac enduit », 12 000). Plafond 14 kg + cloison 21 kg = 35 kg → 2 sacs ; devis sans prix manquant."""
+    from app.models import AppSetting, Material
+    from app.seed import apply_owner_compound_v17
+    rooms = [{"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4},
+             {"name": "Mur", "kind": "partition", "length_m": 6, "height_m": 2.5}]
+    with SessionLocal() as db:
+        d = pieces.calculate(db, rooms)
+        enduit = next(l for l in d["lignes"] if l["sku"] == calc.COMPOUND_BAG_SKU)
+        assert (enduit["quantity"], enduit["unit"], enduit["prix_unitaire"]) == (2, "sac", 12000) and "35 kg" in enduit["formula"]
+        assert d["complet"] and d["prix_manquants"] == []
+        db.delete(db.get(AppSetting, "seed_owner_compound_v17"))
+        db.commit()
+        assert apply_owner_compound_v17(db) == 1 and apply_owner_compound_v17(db) == 0
+        m = db.query(Material).filter(Material.sku == calc.COMPOUND_BAG_SKU).one()
+        assert m.unit == "sac" and "20 kg" in m.name

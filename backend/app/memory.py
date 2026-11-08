@@ -722,6 +722,10 @@ OWNER_RULES_V24 = (
     "Bande à joints : vendue au rouleau de 150 m, 4 000 FCFA le rouleau. Le moteur compte la bande en mètres (1,40 m par m²) puis "
     "arrondit au rouleau une seule fois sur tout le chantier (210 m → 2 rouleaux).",
 )
+OWNER_RULES_V25 = (
+    "Enduit à joints : vendu au sac de 20 kg (« Sac enduit », 12 000 FCFA). Le moteur compte 0,35 kg par m² et par couche (2 couches) "
+    "puis arrondit au sac une seule fois sur tout le chantier (35 kg → 2 sacs).",
+)
 # souvenirs que ces prix rendent faux (archivés, jamais effacés) : motif → texte qui le remplace (None : la règle V22 suffit)
 _V22_REPLACED = {
     "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000%":
@@ -746,7 +750,7 @@ _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, 
               "v15": OWNER_RULES_V15, "v16": OWNER_RULES_V16, "v17": OWNER_RULES_V17,
               "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19, "v20": OWNER_RULES_V20, "v21": OWNER_RULES_V21,
               "v22": OWNER_RULES_V22, "v23": OWNER_RULES_V23,
-              "v24": OWNER_RULES_V24}
+              "v24": OWNER_RULES_V24, "v25": OWNER_RULES_V25}
 
 
 def seed_owner_rules(db: Session) -> int:
