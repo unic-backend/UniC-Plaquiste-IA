@@ -149,7 +149,7 @@ def test_price_not_invented_in_quote_when_missing(client, token):
             assert it["unit_price"] is None, it
         # vis de 9 mm et chevilles à frapper comptées au paquet : prix du paquet dans la grille du patron
         if it["description"].startswith(("Vis 9 mm", "Chevilles à frapper")):
-            assert it["unit"] == "paquet" and it["unit_price"] == 5000, it
+            assert it["unit"] == "paquet" and it["unit_price"] == (6500 if it["description"].startswith("Vis") else 5000), it
         # rails comptés en barres de 2,80 m : prix de la grille du patron
         if it["description"].startswith(("Plaque", "Montant", "Rails")):
             assert it["unit_price"] is not None, it
@@ -2998,7 +2998,7 @@ def test_owner_moulures_glue_and_paint_prices(client):
             m = db.query(Material).filter(Material.sku == sku).first()
             return [p.amount for p in m.prices if p.kind == "selling" and p.valid_to is None][0], m.unit
         assert price("UC-MOULURE-TAILLE-4-BARRE-DE-3-M") == (3500.0, "u") and price("UC-MOULURE-TAILLE-2-BARRE-DE-3-M") == (2500.0, "u")
-        assert price("UC-COLLE-SILICONE")[0] == 3500.0 and price("UC-COLLE-A-POMPE")[0] == 3500.0
+        assert price("UC-COLLE-SILICONE")[0] == 3000.0 and price("UC-COLLE-A-POMPE")[0] == 3500.0   # silicone : patron, 08/11/2026
         assert price("UC-SEAU-ENDUIT") == (11000.0, "seau") and price("UC-PEINTURE-EN-EAU-GYLATEX-COLORIS") == (11000.0, "seau")
         assert price("UC-PAPIER-PONCAGE") == (8000.0, "paquet") and price("UC-TOILE") == (5000.0, "rouleau")
         s = AgentSession(db, None, {})
@@ -3006,7 +3006,7 @@ def test_owner_moulures_glue_and_paint_prices(client):
                                 "objet": "Fourniture et pose de moulures taille 4 dans le salon, Médina, Dakar.",
                                 "lines": [{"article": "moulure taille 4", "quantity": 6}, {"article": "colle silicone", "quantity": 2}]})
         assert "error" not in r and r["lignes_sans_prix"] == [], r
-        assert r["total"] == 6 * 3500 + 2 * 3500
+        assert r["total"] == 6 * 3500 + 2 * 3000
 
 
 def test_glue_rule_is_in_owner_memory(client):

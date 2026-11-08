@@ -708,12 +708,36 @@ OWNER_RULES_V21 = (
     "le rouge (phase) au bleu (neutre) : court-circuit.",
 )
 
+OWNER_RULES_V22 = (
+    "Prix tranchés par le patron (8/11/2026) : éclipse pour IPN = 12 000 FCFA le paquet de 100 ; vis 9 mm = 6 500 FCFA ; "
+    "bande à joints = 4 000 FCFA ; colle silicone = 3 000 FCFA (colle à pompe 3 500) ; plaque hydrofuge 2 m = 5 500 FCFA ; "
+    "lambris PVC 32 cm = 6 000 FCFA ; lambris PVC 16 cm = 3 500 FCFA. La barre de 2,90 m n'existe plus : barres de 2,80 m. "
+    "Fourrure : 1 200 FCFA la barre (à l'unité), 12 000 FCFA le paquet : deux prix justes, ne jamais les confondre.",
+)
+# souvenirs que ces prix rendent faux (archivés, jamais effacés) : motif → texte qui le remplace (None : la règle V22 suffit)
+_V22_REPLACED = {
+    "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 6 000%":
+        "Prix des plaques BA13 : standard 2 m × 1,20 m = 4 500 FCFA ; hydrofuge 2 m = 5 500 FCFA ; standard 2,50 m = 6 500 FCFA ; "
+        "hydrofuge 2,50 m = 8 000 FCFA. Chaque taille a son prix : ne jamais appliquer le prix de l'une à l'autre.",
+    "Plaques : si le patron donne un nombre de plaques SANS préciser la taille%":
+        "Plaques : nombre de plaques sans taille (« 20 plaques ») = plaque de 2 m (standard 4 500 FCFA, hydrofuge 5 500 FCFA), sans "
+        "redemander. Plaque de 2,50 m (6 500 ; hydrofuge 8 000) seulement si le patron dit « 2,50 ». Le patron choisit la plaque.",
+    "Moulures : barres de 3 m ; taille 4 = 3 500 FCFA la barre%Colle silicone = 3 500%":
+        "Moulures : barres de 3 m ; taille 4 = 3 500 FCFA la barre, taille 2 = 2 500 FCFA la barre ; nombre de barres = "
+        "⌈ longueur à couvrir / 3 ⌉. Colle silicone = 3 000 FCFA l'unité ; colle à pompe = 3 500 FCFA l'unité.",
+    "Correction du patron : plaque hydrofuge 2 m × 1,20 m = 6 000%": None,
+    "Le prix de l'hydrofuge 2m est de 6000%": None,
+    "Colle silicone : 3 500 FCFA (et non 3 000)%": None,
+    "Éclipse support = 6 000%": None,
+}
+
 _RULE_SETS = {"v1": OWNER_RULES_V1, "v2": OWNER_RULES_V2, "v3": OWNER_RULES_V3, "v4": OWNER_RULES_V4, "v5": OWNER_RULES_V5,
               "v6": OWNER_RULES_V6, "v7": OWNER_RULES_V7, "v8": OWNER_RULES_V8, "v9": OWNER_RULES_V9, "v10": OWNER_RULES_V10,
               "v11": OWNER_RULES_V11, "v12": OWNER_RULES_V12,
               "v13": OWNER_RULES_V13, "v14": OWNER_RULES_V14,
               "v15": OWNER_RULES_V15, "v16": OWNER_RULES_V16, "v17": OWNER_RULES_V17,
-              "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19, "v20": OWNER_RULES_V20, "v21": OWNER_RULES_V21}
+              "v18": OWNER_RULES_V18, "v19": OWNER_RULES_V19, "v20": OWNER_RULES_V20, "v21": OWNER_RULES_V21,
+              "v22": OWNER_RULES_V22}
 
 
 def seed_owner_rules(db: Session) -> int:
@@ -737,6 +761,13 @@ def seed_owner_rules(db: Session) -> int:
         if version == "v14":   # l'ancienne règle « jonction partagée » (V10) est archivée : 2 montants à chaque jonction
             for m in db.query(Memory).filter(Memory.state == "active", Memory.text.like("Cloison : chaque plaque (1,20 m de large) prend 3 montants%")):
                 m.state = "archived"
+        if version == "v22":   # prix tranchés par le patron : les souvenirs contraires sont archivés, remplacés s'il le faut
+            for pattern, new in _V22_REPLACED.items():
+                old = db.query(Memory).filter(Memory.state == "active", Memory.text.like(pattern)).all()
+                for m in old:
+                    m.state = "archived"
+                if old and new:
+                    rules = rules + (new,)
         if version == "v12":   # barres de 2,80 m : l'ancienne règle « 2,90 m » est archivée (rien à remplacer sur une base neuve)
             old = db.query(Memory).filter(Memory.state == "active", Memory.text.like("%barre%2,90 m%")).all()
             for m in old:

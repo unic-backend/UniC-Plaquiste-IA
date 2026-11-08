@@ -195,8 +195,8 @@ def _set_price(db: Session, mat, amount: float, source: str, note: str) -> None:
     from app.models import MaterialPrice, utcnow
 
     cur = [p for p in mat.prices if p.kind == "selling" and p.valid_to is None]
-    if cur and cur[0].amount == amount:
-        return
+    if len(cur) == 1 and cur[0].amount == amount:
+        return   # plusieurs prix ouverts (doublons saisis) : tous clos, un seul reste
     currency = next((p.currency for p in cur if p.currency), "") or "FCFA"
     for p in cur:
         p.valid_to = utcnow()
@@ -520,6 +520,33 @@ def apply_owner_sonnet_v14(db: Session) -> int:
     if co is not None and co.ai_deep_stakes is not False:
         co.ai_deep_stakes = False
         n = 1
+    db.add(AppSetting(key=flag, value="1"))
+    db.commit()
+    return n
+
+
+# Réponses du patron du 08/11/2026 (docs/MEMOIRE-CLAUDE.md) : sku : prix de vente. Les lambris arrivent par la grille métier.
+OWNER_PRICES_V15 = {"UC-ECLIPSE-IPN": 12000.0, "UC-VIS-9-MM": 6500.0, "UC-BANDE-A-JOINTS": 4000.0, "UC-COLLE-SILICONE": 3000.0,
+                    "BA13-2000x1200-H": 5500.0}
+
+
+def apply_owner_prices_v15(db: Session) -> int:
+    """Prix tranchés par le patron (éclipse IPN au paquet de 100, vis 9 mm, bande à joints, colle silicone, hydrofuge 2 m).
+    Anciens prix clos, gardés dans l'historique. Un article absent n'est pas créé (la grille métier s'en charge). Une seule fois."""
+    from app.models import AppSetting
+
+    flag = "seed_owner_prices_v15"
+    if db.get(AppSetting, flag):
+        return 0
+    n = 0
+    for sku, amount in OWNER_PRICES_V15.items():
+        m = db.query(Material).filter(Material.sku == sku).first()
+        if m is not None:
+            _set_price(db, m, amount, "donné par le patron", "Prix confirmé par le patron le 08/11/2026")
+            n += 1
+    pack = db.query(Material).filter(Material.sku == "UC-FOURRURES").first()
+    if pack is not None and (pack.name or "").strip().lower() == "fourrures":   # nom saisi à la main, ambigu avec la barre à 1 200
+        pack.name, pack.unit = "Paquet de fourrures", "paquet"
     db.add(AppSetting(key=flag, value="1"))
     db.commit()
     return n

@@ -87,7 +87,7 @@ def test_api_calcul_puis_devis_sans_ia(c):
     assert r.status_code == 200, r.text
     d = r.json()
     eclipse = next(l for l in d["lignes"] if l["sku"] == calc.ECLIPSE_SKU)
-    assert eclipse["prix_unitaire"] is None and eclipse["name"] in d["prix_manquants"]   # base neuve : prix à saisir, jamais inventé
+    assert eclipse["prix_unitaire"] == 12000 and eclipse["name"] not in d["prix_manquants"]   # prix du patron (grille, 08/11/2026)
     assert c.post("/api/calc/pieces/devis", json=body).status_code == 400     # pas de devis sans client
     r = c.post("/api/calc/pieces/devis", json={**body, "client": "Oumar Pieces", "lieu": "Colobane"})
     assert r.status_code == 200, r.text
@@ -133,6 +133,46 @@ def test_eclipse_du_patron_reprise_avec_son_prix(c):
         assert apply_owner_eclipse_v13(db) == 0                      # une seule fois
         db.query(MaterialPrice).filter(MaterialPrice.material_id == m.id, MaterialPrice.source == "saisie manuelle").delete()
         db.commit()                                                  # base partagée : on remet la grille comme avant
+
+
+def test_prix_tranches_par_le_patron_v15(c):
+    """Réponses du patron (08/11/2026) : prix appliqués une seule fois, doublons de prix ouverts clos, ancien prix gardé."""
+    from app.models import AppSetting, Material, MaterialPrice
+    from app.seed import OWNER_PRICES_V15, apply_owner_prices_v15
+    from app.services import selling_price_for_sku
+    with SessionLocal() as db:
+        for sku, amount in (("UC-LAMBRIS-PVC-32-CM", 6000), ("UC-LAMBRIS-PVC-16-CM", 3500), ("UC-COLLE-A-POMPE", 3500)):
+            assert selling_price_for_sku(db, sku)[0] == amount, sku   # grille métier
+        bande = db.query(Material).filter(Material.sku == "UC-BANDE-A-JOINTS").one()
+        before = len(bande.prices)
+        db.add_all([MaterialPrice(material_id=bande.id, kind="selling", amount=a, currency="FCFA", source="saisie manuelle") for a in (3000, 5000)])
+        db.add(Material(sku="UC-FOURRURES", name="Fourrures", category="ossature", unit="u", waste_coefficient=0.0))
+        db.delete(db.get(AppSetting, "seed_owner_prices_v15"))
+        db.commit()
+        assert apply_owner_prices_v15(db) == len(OWNER_PRICES_V15)
+        pack = db.query(Material).filter(Material.sku == "UC-FOURRURES").one()
+        assert (pack.name, pack.unit) == ("Paquet de fourrures", "paquet")   # plus confondu avec la barre à 1 200   # base partagée : d'autres tests rejouent les anciennes étapes
+        for sku, amount in OWNER_PRICES_V15.items():
+            assert selling_price_for_sku(db, sku)[0] == amount, sku
+        db.refresh(bande)
+        assert [p.amount for p in bande.prices if p.kind == "selling" and p.valid_to is None] == [4000]   # un seul prix ouvert
+        assert len(bande.prices) == before + 3                                                        # historique gardé
+        assert apply_owner_prices_v15(db) == 0                                                        # une seule fois
+
+
+def test_memoire_v22_archive_les_prix_contraires(c):
+    """Les souvenirs que les prix du patron rendent faux sont archivés (jamais effacés), remplacés quand il le faut."""
+    from app import memory as mem
+    from app.models import AppSetting, Memory
+    with SessionLocal() as db:
+        olds = [mem.add(db, t, source="user", pinned=True) for t in (
+            "Le prix de l'hydrofuge 2m est de 6000 (et non 5500)", "Éclipse support = 6 000 FCFA le paquet de 100 pièces.")]
+        db.delete(db.get(AppSetting, "seed_owner_rules_v22"))
+        db.commit()
+        mem.seed_owner_rules(db)
+        assert all(db.get(Memory, m.id).state == "archived" for m in olds)
+        active = " ".join(m.text for m in db.query(Memory).filter(Memory.state == "active"))
+        assert "éclipse pour IPN = 12 000" in active and "12 000 FCFA le paquet : deux prix justes" in active and "hydrofuge 2 m = 6 000" not in active and "Colle silicone = 3 500" not in active
 
 
 def test_vis_au_paquet_de_1000_une_fois_par_chantier(c):
