@@ -265,7 +265,8 @@ def _put(db: Session, key: str, value: str) -> None:
 def _call(content: list[dict]) -> str:
     from app.ai import ClaudeAIProvider
 
-    res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=6000)
+    res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=6000,
+                                      model=settings.anthropic_fast_model)   # Sonnet : décision du patron (coût) ; lecture page par page
     from app import usage
     usage.record_detached(res, "plan")   # lecture de plan : appelée page par page, la dépense compte
     return res.text if res.available else ""

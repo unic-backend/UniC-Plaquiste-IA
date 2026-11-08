@@ -66,7 +66,23 @@ def test_conversation_courte_sans_fil(client, seen):
     assert "PLUS TÔT DANS CETTE CONVERSATION" not in seen[-1][0][1]["content"]
 
 
-def test_les_sujets_a_enjeu_declenchent_la_reflexion_approfondie(client, seen):
+@pytest.fixture
+def stakes_on(client):
+    """Réflexion automatique allumée (le patron l'a coupée par défaut : Sonnet partout) : le réglage doit toujours marcher."""
+    client.put("/api/settings", json={"ai_deep_stakes": True})
+    yield
+    client.put("/api/settings", json={"ai_deep_stakes": False})
+
+
+def test_par_defaut_sonnet_partout_opus_sur_demande(client, seen):
+    """Décision du patron (coût) : un devis passe par Sonnet ; « réfléchis » demande toujours Opus."""
+    client.post("/api/chat", json={"message": "Prépare le devis de la cloison de 12 m pour M. Diop"})
+    assert seen[-1][1]["deep"] is False
+    client.post("/api/chat", json={"message": "Réfléchis bien à ce devis"})
+    assert seen[-1][1]["deep"] is True
+
+
+def test_les_sujets_a_enjeu_declenchent_la_reflexion_approfondie(client, seen, stakes_on):
     client.post("/api/chat", json={"message": "Prépare le devis de la cloison de 12 m pour M. Diop"})
     assert seen[-1][1]["deep"] is True
     client.post("/api/chat", json={"message": "Raconte-moi une blague"})
@@ -85,7 +101,7 @@ def test_le_reglage_coupe_la_reflexion_automatique(client, seen):
         client.post("/api/chat", json={"message": "Réfléchis en profondeur à ce devis"})
         assert seen[-1][1]["deep"] is True                          # la demande explicite reste possible
     finally:
-        client.put("/api/settings", json={"ai_deep_stakes": True})
+        client.put("/api/settings", json={"ai_deep_stakes": False})   # défaut du patron : Sonnet partout
 
 
 # ---------- boucle d'outils ----------
@@ -140,7 +156,7 @@ def test_la_reflexion_est_annoncee_pendant_le_flux():
     assert {"t": "status", "text": "Je réfléchis…"} in events and {"t": "delta", "text": "Réponse"} in events
 
 
-def test_un_oui_apres_une_proposition_de_devis_herite_de_l_enjeu(client, seen):
+def test_un_oui_apres_une_proposition_de_devis_herite_de_l_enjeu(client, seen, stakes_on):
     cid = client.post("/api/chat", json={"message": "Prépare le devis de la cloison de 12 m pour M. Diop"}).json()["conversation_id"]
     client.post("/api/chat", json={"message": "oui vas-y", "conversation_id": cid})
     assert seen[-1][1]["deep"] is True                              # avant : « oui » = banalité, modèle le plus léger
@@ -182,7 +198,7 @@ def test_les_demandes_universelles_vont_a_l_ia_pas_a_une_reponse_toute_faite(cli
     assert len(seen) == before + 1 and r["content"] == "ok"        # avant : texte figé, ou un PDF « rapport » vide
 
 
-def test_l_enjeu_couvre_tous_les_domaines(client, seen):
+def test_l_enjeu_couvre_tous_les_domaines(client, seen, stakes_on):
     for msg, deep in (("Aide-moi à rédiger un contrat de travail pour un ouvrier", True),
                       ("Calcule mon impot sur 12 000 000 F de bénéfice", True),
                       ("J'ai des symptômes de paludisme, que faire ?", True),

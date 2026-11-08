@@ -279,7 +279,8 @@ def _ask(db, question: str, reply: str, context: str, errors: list[str], tool_re
     user = (f"CONTEXTE FOURNI À LA RÉDACTION :\n{context[:CONTEXT_CHARS] or '(aucun)'}{tools}\n\nQUESTION DU PATRON :\n{question[:3000]}\n\n"
             f"RÉPONSE À RELIRE :\n{reply}{found}")
     res = claude.complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
-                          model=settings.anthropic_model, effort="medium", max_tokens=min(8000, 1500 + 2 * len(reply)))
+                          model=settings.anthropic_fast_model, effort="medium",   # Sonnet : décision du patron (coût), la relecture reste
+                          max_tokens=min(8000, 1500 + 2 * len(reply)))
     try:
         usage.record(db, (res.raw or {}).get("usage"), res.model, source="relecture")
     except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire perdre la relecture
