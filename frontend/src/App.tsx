@@ -2085,6 +2085,7 @@ function BackupCard() {
   const [locked, setLocked] = useState<File | null>(null);   // copie chiffrée venue d'un autre serveur : mot de passe demandé
   const [rpw, setRpw] = useState("");
   const ref = useRef<HTMLInputElement>(null);
+  const dossierRef = useRef<HTMLInputElement>(null);
   const load = () => api.backups().then(setD).catch((e) => setMsg(e?.message || "Erreur"));
   const restore = async (f: File, password = "") => {
     setBusy("restore"); setMsg("");
@@ -2139,7 +2140,21 @@ function BackupCard() {
           } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
         }}>{busy === "save" ? "Sauvegarde…" : "Sauvegarder maintenant"}</button>
         <button className="btn btn-line" disabled={!!busy} onClick={() => ref.current?.click()}>Restaurer…</button>
+        <button className="btn btn-line" disabled={!!busy} onClick={() => dossierRef.current?.click()}>Importer un dossier de Claude…</button>
       </div>
+      <input ref={dossierRef} type="file" accept=".json,application/json" hidden onChange={async (e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (!f) return;
+        setBusy("import"); setMsg("");
+        try {
+          const r = await api.importPlanA(JSON.parse(await f.text()));
+          const n = (k: string) => (r[k] || []).length;
+          setMsg(`Importé : ${n("devis_crees")} devis, ${n("factures_creees")} facture(s), ${n("clients_crees")} client(s) créé(s). Déjà là : ${n("devis_deja_la") + n("factures_deja_la")}.`
+            + (n("conflits") ? ` ⚠️ ${n("conflits")} conflit(s), rien n'est écrasé : ${r.conflits.map((c: any) => c.numero).join(", ")}.` : "")
+            + (n("ignores") ? ` À noter : ${r.ignores.join(" ; ")}.` : ""));
+        } catch (err: any) { setMsg(err instanceof SyntaxError ? "Ce fichier n'est pas un dossier UniC (JSON illisible)." : err?.message || "Erreur"); }
+        finally { setBusy(""); }
+      }} />
       <input ref={ref} type="file" accept=".zip,.enc,application/zip,application/octet-stream" hidden onChange={async (e) => {
         const f = e.target.files?.[0]; e.target.value = "";
         if (!f) return;

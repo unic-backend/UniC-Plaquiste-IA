@@ -2490,6 +2490,24 @@ def backups_download(name: str, user: User = Depends(require_roles("admin", "man
     return FileResponse(p, media_type="application/zip", filename=name)
 
 
+@router.post("/import/plan-a")
+async def import_plan_a(request: Request, db: Session = Depends(get_db), user: User = Depends(require_roles("admin", "manager"))):
+    """Dossier d'une session Claude Code (devis, factures, clients) vers le serveur : une seule base. Rejouable, rien n'est écrasé."""
+    import json as _json
+    from app import planb
+    raw = await request.body()
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(413, "Dossier trop gros (8 Mo au plus) : découpe-le.")
+    try:
+        bundle = _json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "Ce fichier n'est pas un dossier UniC (JSON illisible).")
+    try:
+        return planb.import_bundle(db, bundle, user.id)
+    except planb.PlanBError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/backups/restore")
 async def backups_restore(file: UploadFile = File(...), password: str = Form("", max_length=200),
                           user: User = Depends(require_roles("admin"))):

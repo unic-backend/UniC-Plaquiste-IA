@@ -1,3 +1,5 @@
+> **Remplacé par `docs/PLAN-A-ET-B.md`** (décision du patron : Claude = plan A, UniC IA = plan B ; l'import des dossiers vers le serveur existe maintenant). Ce texte garde la première version.
+
 # Plan B : travailler quand UniC IA ne répond pas (plus de crédit API)
 
 Plan A : UniC IA (le chat de l'appli) appelle l'API Claude, payante à l'usage. Quand le crédit est vide, le chat ne répond plus.

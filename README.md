@@ -80,6 +80,8 @@ Application **mono-propriétaire**. Sur Internet, définis `UNIC_ACCESS_CODE` (e
 - **Calcul par pièce sans l'IA** (menu Entreprise, `/calcul`, `POST /api/calc/pieces` et `/api/calc/pieces/devis`) : pièces saisies à la main
   (faux plafond dalle ou IPN par éclipses, suspente haute en tiges de 1 m raccordées, cloison, peinture), matériel compté par le moteur,
   prix de la grille, devis brouillon. Aucun appel payant : marche quand l'API Claude est coupée.
+- **Plan A (Claude Code, abonnement) et plan B (UniC IA)** : `docs/PLAN-A-ET-B.md`. Un dossier de devis, factures et clients fait dans une session
+  Claude Code revient dans le serveur par `scripts/planb_export.py` puis Paramètres › Sauvegardes › « Importer un dossier de Claude » (sans doublon, sans rien écraser).
 - **Photos lues par un expert du métier + réponse en photo** (outil IA `read_plan`, `domaine` électricité / climatisation / chantier,
   `annoter`) : erreurs de câblage d'un coffret, pose d'un climatiseur, repérage sur un plan ; l'image revient avec des cadres numérotés
   (couleur = gravité). **Électricité et clim** (outil `elec_calc`) : sections, calibres, points par circuit, chute de tension, puissance
