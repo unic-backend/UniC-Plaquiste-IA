@@ -6,6 +6,8 @@ au tarif Sonnet et marqué « tarif inconnu » : jamais présenté comme exact.
 """
 from __future__ import annotations
 
+import os
+import threading
 from collections import deque
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -72,20 +74,53 @@ _PENDING: deque = deque(maxlen=2000)   # dépenses hors conversation en attente 
 
 def record_detached(res, source: str) -> None:
     """Dépense d'un appel à Claude fait hors conversation (lecture de plan, photo, table ronde, banc d'essai…) : mise en file en
-    mémoire, écrite par la surveillance (flush_pending) dans « Coût de Claude ». Jamais d'écriture ici : ces appels tournent dans des
-    fils de lecture pendant qu'une autre session tient l'écriture (SQLite n'a qu'un écrivain). Ne fait jamais échouer l'appel.
-    shortcut: un redémarrage du serveur perd au plus la dernière minute de dépenses en file."""
+    mémoire, puis écrite quelques secondes plus tard par un fil à part (flush_pending) dans « Coût de Claude ». Jamais d'écriture ici :
+    ces appels tournent dans des fils de lecture pendant qu'une autre session tient l'écriture (SQLite n'a qu'un écrivain). Ne fait
+    jamais échouer l'appel.
+    shortcut: un redémarrage du serveur dans les secondes qui suivent perd cette dépense ; à revoir si le compte doit être exact au centime."""
     try:
         raw = getattr(res, "raw", None) or {}
         if raw.get("usage"):
             _PENDING.append({"rows": list(raw["usage"]), "model": getattr(res, "model", "") or "",
                              "provider": getattr(res, "provider", "claude") or "claude", "source": source})
+            _schedule_flush()
     except Exception:   # noqa: BLE001
         pass
 
 
+_timer_lock = threading.Lock()
+_timer: threading.Timer | None = None
+FLUSH_DELAY_S = 5.0
+
+
+def _schedule_flush() -> None:
+    """Un seul fil d'écriture en attente à la fois ; il attend son tour d'écrivain (busy_timeout) sans bloquer la requête.
+    UNIC_NO_BACKGROUND (tests) : pas de fil, flush_pending() est appelé à la main."""
+    global _timer
+    if os.environ.get("UNIC_NO_BACKGROUND"):
+        return
+    with _timer_lock:
+        if _timer is not None:
+            return
+
+        def run() -> None:
+            global _timer
+            with _timer_lock:
+                _timer = None
+            try:
+                from app.database import SessionLocal
+                with SessionLocal() as db:
+                    flush_pending(db)
+            except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire de bruit
+                pass
+
+        _timer = threading.Timer(FLUSH_DELAY_S, run)
+        _timer.daemon = True
+        _timer.start()
+
+
 def flush_pending(db: Session) -> int:
-    """Écrit les dépenses en attente (appelé par la surveillance, toutes les minutes)."""
+    """Écrit les dépenses en attente, avec la session donnée (jamais celle d'une requête en cours : voir _schedule_flush)."""
     n = 0
     while _PENDING:
         it = _PENDING.popleft()

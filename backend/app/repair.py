@@ -289,8 +289,6 @@ def _claude(system: str, user: str, tool: dict, deep: bool) -> dict:
         model=settings.anthropic_model if deep else settings.anthropic_fast_model,
         tools=[tool], tool_handler=handler, max_tokens=16000 if deep else 2000, effort="high" if deep else None,
         thinking=deep)
-    from app import usage
-    usage.record_detached(res, "atelier")
     if not got:
         raise RepairError(f"Claude n'a pas rendu de proposition ({res.error or 'réponse sans correctif'}).", 502)
     return got
