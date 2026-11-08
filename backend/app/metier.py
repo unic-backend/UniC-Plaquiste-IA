@@ -32,6 +32,7 @@ EXISTING_SKU = {
     "Montant 48 mm": "MONTANT-M48",
     "Montant 7 cm (70 mm)": "MONTANT-M70",
     "Barre de fourrure (2,80 m)": "UC-BARRE-DE-FOURRURE-2-90-M",   # identifiant historique gardé (prix du patron) ; barre de 2,80 m
+    "Éclipse pour IPN (paquet de 100)": "UC-ECLIPSE-IPN",           # code du moteur (calc.ECLIPSE_SKU)
 }
 LABOR_SKU = "UC-MAIN-OEUVRE-M2"
 
@@ -61,9 +62,9 @@ def _unit(article: str) -> str:
 
 def _category(article: str) -> str:
     low = article.lower()
-    if "plaque" in low:
+    if "plaque" in low or "lambris" in low:
         return "plaques"
-    if any(w in low for w in ("rail", "montant", "corni", "fourrure")):
+    if any(w in low for w in ("rail", "montant", "corni", "fourrure", "clipse")):
         return "ossature"
     if any(w in low for w in ("enduit", "bande", "toile", "papier", "katex", "ciment")):
         return "finition"

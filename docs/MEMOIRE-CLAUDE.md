@@ -42,7 +42,7 @@ Un article a parfois plusieurs prix « ouverts » dans la base : le serveur pren
 | Pivot (paquet de 100) | paquet | 6 500 | `UC-PIVOT` |
 | Scotch isolant | u | 1 000 | `UC-SCOTCH-ISOLANT` |
 | Tiges (à l'unité) | u | 300 | `UC-TIGES-A-L-UNITE` |
-| Vis 9 mm | u | 5 000 | `UC-VIS-9-MM` |
+| Vis 9 mm | u | 6 500 | `UC-VIS-9-MM` |
 | Vis à plaque | u | 5 000 | `VIS-PLAQUE` |
 
 **Main_oeuvre**
@@ -55,7 +55,7 @@ Un article a parfois plusieurs prix « ouverts » dans la base : le serveur pren
 
 | Article | Unité | Prix de vente (FCFA) | Code |
 |---|---|---:|---|
-| Colle silicone | u | 3 500 | `UC-COLLE-SILICONE` |
+| Colle silicone | u | 3 000 | `UC-COLLE-SILICONE` |
 | Colle à pompe | u | 3 500 | `UC-COLLE-A-POMPE` |
 | Moulure taille 2 (barre de 3 m) | u | 2 500 | `UC-MOULURE-TAILLE-2-BARRE-DE-3-M` |
 | Moulure taille 4 (barre de 3 m) | u | 3 500 | `UC-MOULURE-TAILLE-4-BARRE-DE-3-M` |
@@ -84,7 +84,7 @@ Un article a parfois plusieurs prix « ouverts » dans la base : le serveur pren
 
 | Article | Unité | Prix de vente (FCFA) | Code |
 |---|---|---:|---|
-| Plaque BA13 hydrofuge 2000×1200 | u | 6 000 | `BA13-2000x1200-H` |
+| Plaque BA13 hydrofuge 2000×1200 | u | 5 500 | `BA13-2000x1200-H` |
 | Plaque BA13 hydrofuge 2500×1200 | u | 8 000 | `BA13-2500x1200-H` |
 | Plaque de plâtre BA13 2000×1200 | u | 4 500 | `BA13-2000x1200` |
 | Plaque de plâtre BA13 2500×1200 | u | 6 500 | `BA13-2500x1200` |
@@ -108,7 +108,7 @@ Aussi dans la grille d'origine (`backend/app/metier_data/metier_unic.json`) : mo
 - Moulures, colles et peinture : seulement si le patron les demande.
 - Jamais de prix, TVA ou taux inventé : ils viennent du patron ou des réglages.
 
-**Plaques** : par défaut **2 m × 1,20 m** (standard 4 500 ; hydrofuge 6 000). **2,50 m** seulement si le patron le dit (6 500 ; hydrofuge 8 000). Chaque taille a son prix.
+**Plaques** : par défaut **2 m × 1,20 m** (standard 4 500 ; hydrofuge 5 500). **2,50 m** seulement si le patron le dit (6 500 ; hydrofuge 8 000). Chaque taille a son prix.
 **Barres** (fourrure, montant, rail, cornière) : **2,80 m** au Sénégal. Une barre n'est pas un paquet.
 
 **Faux plafond** : fourrures tous les 0,50 m, plaque posée en travers ; tiges : la première à 0,30 m du mur puis une tous les 0,90 m ; pas de « suspente » :
@@ -120,18 +120,23 @@ Chevilles à frapper : une tous les 30 cm de cornière ou de rail. **Marge** (fa
 Plus haute que 2,80 m : rallonge + raccord de rail de 40 cm.
 
 **Finitions** : vis à plaque 15/m², **paquet de 1 000 vis** ; bande 1,40 ml/m² ; enduit 0,35 kg/m² par couche (2 couches) ; 4 vis de 9 mm par montant.
-**Lambris** : lames de 3 m × 0,30 m, toujours dans le sens de la largeur ; le patron donne lui-même les quantités d'ossature.
+**Lambris PVC** : 32 cm = 6 000 la lame, 16 cm = 3 500 ; lames de 3 m, toujours dans le sens de la largeur ; le patron donne lui-même les quantités d'ossature.
 
 **Électricité / clim** (conseil, jamais chiffré dans un devis) : mêmes règles qu'ailleurs (NF C 15-100) ; jamais rouge (phase) sur bleu (neutre).
 
-## Contradictions à faire trancher par le patron (je ne choisis pas à sa place)
+## Contradictions tranchées par le patron (08/11/2026)
 
-1. **Éclipse pour IPN** : la base n'a **aucun prix**. Le patron m'a dit 12 000 FCFA le paquet de 100 (capture d'écran), mais sa mémoire contient « éclipse support = 6 000 FCFA le paquet de 100 ». Est-ce le même article ?
-2. **Vis 9 mm** : sa mémoire dit « 6 500 FCFA (article distinct) », la grille dit **5 000**. Lequel est juste ?
-3. **Bande à joints** : trois prix actifs (3 000, 5 000, 4 000). Le plus récent, 4 000, est utilisé. Confirmer.
-4. **Lambris** (6 000 la lame) : **absent de la grille**, donc jamais chiffré par le moteur.
-5. **Anciens textes de mémoire** encore présents mais remplacés : barre de 2,90 m (maintenant 2,80 m), colle silicone 3 000 (maintenant 3 500), hydrofuge 2 m à 5 500 (maintenant 6 000).
-6. **Fourrures « paquet » 12 000** et « Barres Fourrures 1 200 » : doublon avec « Barre de fourrure (2,80 m) » (1 200). Un seul devrait rester.
+1. **Éclipse pour IPN** = **12 000 FCFA le paquet de 100** (`UC-ECLIPSE-IPN`). L'ancien souvenir « éclipse support 6 000 » est archivé.
+2. **Vis 9 mm** = **6 500**.
+3. **Bande à joints** = **4 000** (un seul prix ouvert, les autres clos).
+4. **Lambris PVC** : 32 cm = **6 000**, 16 cm = **3 500** (ajoutés à la grille : `UC-LAMBRIS-PVC-32-CM`, `UC-LAMBRIS-PVC-16-CM`).
+5. **Barre de 2,90 m** : n'existe plus (barres de 2,80 m). **Colle silicone** = **3 000** (colle à pompe : 3 500, inchangée). **Plaque hydrofuge 2 m** = **5 500**.
+
+Appliqué au serveur par `apply_owner_prices_v15` (prix) et la règle mémoire `v22` (souvenirs contraires archivés, jamais effacés).
+
+**Encore ouvert** :
+- Fourrures « paquet » 12 000 et « Barres Fourrures » 1 200 : doublon avec « Barre de fourrure (2,80 m) » (1 200). Un seul devrait rester.
+- Largeur du lambris : la mémoire dit 30 cm, le patron dit 32 cm et 16 cm.
 
 ## Mise à jour
 Quand les prix changent : appli › Paramètres › Sauvegardes › « Sauvegarder maintenant », télécharger le `.zip`, le joindre à une session Claude Code, puis « mets à jour docs/MEMOIRE-CLAUDE.md ».
