@@ -273,6 +273,8 @@ def tick() -> None:
     try:
         wake_sleepers()
         flush(db)
+        from app import usage
+        usage.flush_pending(db)
         if auto_enabled(db):
             if _check_due(db):
                 self_check(db)

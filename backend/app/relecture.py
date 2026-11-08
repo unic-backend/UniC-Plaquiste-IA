@@ -281,7 +281,7 @@ def _ask(db, question: str, reply: str, context: str, errors: list[str], tool_re
     res = claude.complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
                           model=settings.anthropic_model, effort="medium", max_tokens=min(8000, 1500 + 2 * len(reply)))
     try:
-        usage.record(db, (res.raw or {}).get("usage"), res.model)
+        usage.record(db, (res.raw or {}).get("usage"), res.model, source="relecture")
     except Exception:   # noqa: BLE001 — le compteur ne doit jamais faire perdre la relecture
         pass
     return res

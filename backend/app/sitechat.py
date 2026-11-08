@@ -182,7 +182,7 @@ def _claude(db: Session, sess: WebChatSession, turns: list[dict]) -> str:
     if res.raw:
         try:
             from app import usage
-            usage.record(db, res.raw.get("usage"), res.model)   # le coût du chat public apparaît dans « Coût de Claude »
+            usage.record(db, res.raw.get("usage"), res.model, source="site")   # le coût du chat public apparaît dans « Coût de Claude »
         except Exception:
             pass
     return res.text.strip() if res.available else ""

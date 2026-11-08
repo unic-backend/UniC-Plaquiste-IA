@@ -92,3 +92,17 @@ def test_quality_route_is_closed_without_code_and_open_with_it(client):
     assert r.status_code in (200, 401)
     if r.status_code == 200:   # pas de code d'accès configuré dans ce test : la structure doit être complète
         assert r.json()["cle"]["id"] == "faux_certains"
+
+
+def test_depenses_hors_conversation_comptees_par_source(db):
+    """Lecture de plan, photo, table ronde, banc : mises en file puis écrites, et visibles « d'où vient la dépense »."""
+    from types import SimpleNamespace
+    from app import usage
+    res = SimpleNamespace(raw={"usage": [{"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0, "web": 0}]},
+                          model="claude-opus-5-5", provider="claude")
+    usage.record_detached(res, "plan")
+    usage.record_detached(SimpleNamespace(raw={"usage": []}, model="x", provider="claude"), "photo")   # rien consommé : rien noté
+    usage.record_detached(SimpleNamespace(raw=None, model="x", provider="claude"), "photo")
+    assert usage.flush_pending(db) == 1 and usage.flush_pending(db) == 0
+    plan = next(s for s in usage.summary(db)["par_source"] if s["source"] == "plan")
+    assert plan["appels"] == 1 and plan["cout_usd"] == 4.0          # 1 M de jetons d'entrée Opus au tarif de la table

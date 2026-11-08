@@ -210,7 +210,8 @@ export type MemConflict = { a: { id: string; text: string }; b: { id: string; te
 export type Usage = {
   aujourdhui_usd: number; semaine_usd: number; mois_usd: number; total_usd: number; moyenne_par_message_usd: number;
   messages_aujourdhui: number; messages_mois: number; messages_total: number;
-  par_modele: { model: string; messages: number; cout_usd: number }[]; jours: { jour: string; cout_usd: number }[];
+  par_modele: { model: string; messages: number; cout_usd: number }[];
+  par_source: { source: string; appels: number; cout_usd: number }[]; jours: { jour: string; cout_usd: number }[];
   credit_usd: number | null; reste_usd: number | null; messages_restants_estimes: number | null; tarif_inconnu: boolean; avertissement: string;
 };
 export type JournalRow = { id: string; at: string | null; action: string; label: string; target: string; details: string };

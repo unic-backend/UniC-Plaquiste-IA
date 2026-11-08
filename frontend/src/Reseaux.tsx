@@ -785,6 +785,16 @@ export function Couts() {
             ))}
           </div>
         </section>
+        {u.par_source?.length > 0 && (
+          <section className="card-box">
+            <label>D'où vient la dépense (ce mois-ci)</label>
+            {u.par_source.map((s) => (
+              <div className="toolbar" key={s.source}>
+                <b>{s.source}</b><span className="hint">{s.appels} appel(s)</span><span>{usd(s.cout_usd)}</span>
+              </div>
+            ))}
+          </section>
+        )}
         {u.par_modele.length > 0 && (
           <section className="card-box">
             <label>Par modèle</label>

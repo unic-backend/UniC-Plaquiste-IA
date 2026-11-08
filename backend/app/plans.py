@@ -266,6 +266,8 @@ def _call(content: list[dict]) -> str:
     from app.ai import ClaudeAIProvider
 
     res = ClaudeAIProvider().complete([{"role": "user", "content": content}], max_tokens=6000)
+    from app import usage
+    usage.record_detached(res, "plan")   # lecture de plan : appelée page par page, la dépense compte
     return res.text if res.available else ""
 
 
