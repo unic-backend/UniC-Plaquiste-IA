@@ -167,11 +167,14 @@ def test_memoire_v22_archive_les_prix_contraires(c):
     with SessionLocal() as db:
         olds = [mem.add(db, t, source="user", pinned=True) for t in (
             "Le prix de l'hydrofuge 2m est de 6000 (et non 5500)", "Éclipse support = 6 000 FCFA le paquet de 100 pièces.")]
-        db.delete(db.get(AppSetting, "seed_owner_rules_v22"))
+        for flag in ("seed_owner_rules_v22", "seed_owner_rules_v23"):   # base partagée : d'autres tests vident la mémoire
+            if db.get(AppSetting, flag):
+                db.delete(db.get(AppSetting, flag))
         db.commit()
         mem.seed_owner_rules(db)
         assert all(db.get(Memory, m.id).state == "archived" for m in olds)
         active = " ".join(m.text for m in db.query(Memory).filter(Memory.state == "active"))
+        assert "le patron raccorde les chutes" in active                    # v23 : fourrures à la longueur totale
         assert "éclipse pour IPN = 12 000" in active and "12 000 FCFA le paquet : deux prix justes" in active and "hydrofuge 2 m = 6 000" not in active and "Colle silicone = 3 500" not in active
 
 
@@ -213,5 +216,7 @@ def test_script_de_calcul_pour_claude_code(tmp_path):
     d = json.loads(out.stdout)
     assert d["main_oeuvre"]["montant"] == 80000 and d["ok"]
     assert next(x for x in d["lignes"] if x["sku"] == "BA13-2000x1200")["prix_unitaire"] == 4500
+    # règle du patron : chutes de fourrure raccordées → ⌈ 45 ml / 2,80 ⌉ = 17, + 3 de marge (et non 18 + 3 ligne par ligne)
+    assert next(x for x in d["lignes"] if x["sku"] == "UC-BARRE-DE-FOURRURE-2-90-M")["quantity"] == 20
     bad = subprocess.run([sys.executable, str(script), '[{"kind": "garage"}]'], env=env, capture_output=True, text=True, timeout=120)
     assert bad.returncode != 0 and "type inconnu" in bad.stderr
