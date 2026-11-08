@@ -177,6 +177,21 @@ Les clients, téléphones et chantiers restent dans la sauvegarde, **jamais dans
 
 **Encore ouvert** : bande à joints et enduit. Le moteur compte en mètres et en kg, mais la grille vend à l'unité, donc il ne les chiffre pas. Il manque la longueur d'un rouleau de bande et le poids d'un sac d'enduit (le seau fait 20 kg).
 
+## Méthode de travail : deux moteurs ensemble (Claude + UniC)
+
+Je ne recopie jamais le moteur d'UniC les yeux fermés, et je ne calcule pas seul non plus.
+1. **Lire** la demande, le plan ou la photo : cotes, support (dalle ou IPN), hauteur, ouvertures, décors.
+2. **Moteur UniC** : `scripts/unic_calcul.py --json`. Il applique les règles du patron et la grille de prix, avec ses formules.
+3. **Contre-calcul par Claude**, fait à part, à la main, pièce par pièce : plan de pose des plaques, barres coupées ligne par ligne, tiges, montants, rails, vis.
+4. **Comparer**. Si un écart apparaît, j'en cherche la cause et je n'en choisis pas un au hasard. S'il reste un doute, je pose la question au patron.
+5. **Ce que le moteur ne voit pas** : un article oublié, une ouverture, une retombée, l'accès au chantier, une ligne sans prix, une contradiction avec la mémoire.
+6. **Récapitulatif en texte** au patron. Il valide, puis le devis part en brouillon. Rien n'est envoyé sans son clic.
+7. **Une erreur du moteur** se corrige dans le code, avec un test (PR) : UniC IA progresse aussi, plus de double travail.
+
+Premier contre-calcul (plafond 5 × 4 m et cloison 6 × 2,50 m deux faces avec une porte) : plaques, tiges, cornières, montants, rails et vis sont identiques.
+**Un écart sur les fourrures** : le moteur divise la longueur totale (45 ml ÷ 2,80 = 17 barres). Coupées ligne par ligne, il en faut 18 :
+chaque ligne de 5 m = 2,80 + 2,20, et la chute de 0,60 m ne sert pas. Sur un plafond de 10 × 10 m, l'écart monte à 9 barres. À trancher par le patron : chutes raccordées ou non.
+
 ## Mise à jour
 Quand les prix changent : appli › Paramètres › Sauvegardes › « Sauvegarder maintenant », télécharger le `.zip`, le joindre à une session Claude Code, puis « mets à jour docs/MEMOIRE-CLAUDE.md ».
 Ne jamais coller de clé API, de mot de passe ou de jeton dans une conversation.
