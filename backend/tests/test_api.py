@@ -1369,10 +1369,13 @@ def test_hello_gets_a_greeting_not_the_manual(client):
     assert "Exemples" in out2
 
 
-def test_hello_goes_to_claude_when_available(client, claude):
+def test_hello_and_thanks_never_cost_a_claude_call(client, claude):
+    """Règle du patron : un simple bonjour ou merci ne paie pas un appel à Claude (79 outils envoyés) ; une vraie demande, si."""
     fake = claude(_scripted([("text", "Bonjour patron, que puis-je faire pour vous ?")]))
-    out = client.post("/api/chat", json={"message": "salut"}).json()["message"]["content"]
-    assert "Bonjour patron" in out and "Exemples" not in out and fake.calls
+    for msg in ("salut", "Bonjour, ça va ?", "merci beaucoup"):
+        out = client.post("/api/chat", json={"message": msg}).json()["message"]["content"]
+        assert out and "Exemples" not in out
+    assert not fake.calls
 
 
 def test_every_document_pdf_lists_its_lines(client):
