@@ -190,7 +190,8 @@ Je ne recopie jamais le moteur d'UniC les yeux fermés, et je ne calcule pas seu
 
 Premier contre-calcul (plafond 5 × 4 m et cloison 6 × 2,50 m deux faces avec une porte) : plaques, tiges, cornières, montants, rails et vis sont identiques.
 **Un écart sur les fourrures** : le moteur divise la longueur totale (45 ml ÷ 2,80 = 17 barres). Coupées ligne par ligne, il en faut 18 :
-chaque ligne de 5 m = 2,80 + 2,20, et la chute de 0,60 m ne sert pas. Sur un plafond de 10 × 10 m, l'écart monte à 9 barres. À trancher par le patron : chutes raccordées ou non.
+chaque ligne de 5 m = 2,80 + 2,20, et la chute de 0,60 m ne sert pas.
+**Tranché par le patron (08/11/2026) : « je raccorde les chutes ».** Le moteur a raison (longueur totale ÷ 2,80), rien à changer. Règle mise dans la mémoire d'UniC (v23).
 
 ## Mise à jour
 Quand les prix changent : appli › Paramètres › Sauvegardes › « Sauvegarder maintenant », télécharger le `.zip`, le joindre à une session Claude Code, puis « mets à jour docs/MEMOIRE-CLAUDE.md ».
