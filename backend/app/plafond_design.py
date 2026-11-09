@@ -153,6 +153,91 @@ def _svg(style: str, name: str, L: float, W: float, marge: float, iw: float, ih:
     return "".join(parts)
 
 
+def vue_3d(d: dict, hauteur_m: float | None = None) -> str:
+    """Vue 3D du plafond pour le CLIENT (maquette coupée, mur avant retiré), 800 × 600, depuis la géométrie exacte de `design` :
+    murs, sol, retombées en relief, lumière LED, spots. Hauteur sous plafond : celle du patron, sinon 2,80 m (dite « supposée »)."""
+    L, W = d["piece"]                     # longueur = profondeur de la vue, largeur = de gauche à droite
+    iw, ih = d["interieur"]
+    style, r = d["style"], d["retombee_m"]
+    H = hauteur_m or 2.8
+    x0, x1, y0, y1 = (W - ih) / 2, (W + ih) / 2, (L - iw) / 2, (L + iw) / 2
+    cam, pitch = (W / 2, -0.6 * L, 1.0), math.radians(42)   # œil en recul, levé vers le plafond : le plafond remplit l'image
+    zw = max(0.0, H - 1.4)                # murs montrés sur leur haut seulement (le sol n'apporte rien au client)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+
+    def proj(p):
+        dx, dy, dz = p[0] - cam[0], p[1] - cam[1], p[2] - cam[2]
+        depth = dy * cp + dz * sp
+        return dx / depth, -(-dy * sp + dz * cp) / depth, depth
+
+    def quad(a, b, z):                    # rectangle horizontal (coins opposés a, b) à la hauteur z
+        return [(a[0], a[1], z), (b[0], a[1], z), (b[0], b[1], z), (a[0], b[1], z)]
+
+    polys: list[tuple[list, str, str]] = []   # (points 3D, remplissage, opacité), dans l'ordre de dessin
+    add = lambda pts, fill, op="1": polys.append((pts, fill, op))
+    add([(0, L, zw), (W, L, zw), (W, L, H), (0, L, H)], "#ece7df")                      # mur du fond
+    add([(0, 0, zw), (0, L, zw), (0, L, H), (0, 0, H)], "#e1dbd1")                      # mur gauche
+    add([(W, 0, zw), (W, L, zw), (W, L, H), (W, 0, H)], "#e5e0d7")                      # mur droit
+    lit = style in ("caisson", "gorge", "ilot")
+    if style == "ilot":
+        add(quad((0, 0), (W, L), H), "#ffffff")
+        g = 0.35
+        for k, op in ((g, "0.35"), (g / 3, "0.55")):   # halo LED sur le plafond autour de l'îlot
+            add(quad((x0 - k, y0 - k), (x1 + k, y1 + k), H), "#ffcf73", op)
+        add(quad((x0, y0), (x1, y1), H), "#ffffff")
+        low = H - r
+    else:
+        add(quad((x0, y0), (x1, y1), H), "#ffffff")                                      # partie haute (centre)
+        if lit:
+            wash = (0.6, 0.2) if style == "gorge" else (0.22, 0.07)   # gorge : lumière indirecte large ; caisson : ruban net
+            for k, op in ((wash[0], "0.35"), (wash[1], "0.6")):   # lumière LED qui baigne le bord du centre
+                for a, b in (((x0, y0), (x1, y0 + k)), ((x0, y1 - k), (x1, y1)), ((x0, y0), (x0 + k, y1)), ((x1 - k, y0), (x1, y1))):
+                    add(quad(a, b, H), "#ffcf73", op)
+        low = H - r
+    sides = [((x0, y0), (x1, y0), (0, 1)), ((x0, y1), (x1, y1), (0, -1)), ((x0, y0), (x0, y1), (1, 0)), ((x1, y0), (x1, y1), (-1, 0))]
+    if style == "ilot":
+        sides = [(a, b, (-n[0], -n[1])) for a, b, n in sides]   # l'îlot montre ses faces vers l'extérieur
+    faces = []
+    for a, b, n in sides:   # retombées visibles seulement (face tournée vers l'œil)
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        if n[0] * (cam[0] - mid[0]) + n[1] * (cam[1] - mid[1]) > 0:
+            faces.append((proj((*mid, H - r / 2))[2], [(*a, low), (*b, low), (*b, H), (*a, H)]))
+    if style == "ilot":
+        add(quad((x0, y0), (x1, y1), low), "#f5f5f3")                                    # dessous de l'îlot, puis ses faces devant
+    for _, pts in sorted(faces, reverse=True):
+        add(pts, "#d9d9d6")
+    if style != "ilot":
+        for a, b in (((0, 0), (W, y0)), ((0, y1), (W, L)), ((0, y0), (x0, y1)), ((x1, y0), (W, y1))):
+            add(quad(a, b, low), "#f7f7f5")                                              # bandeau abaissé tout autour
+    spots = []
+    if style == "bandeau":   # spots au milieu du bandeau, un tous les ~1 m (exemple, comme la vue de dessus)
+        mx, my = x0 / 2, y0 / 2
+        for (ax, ay), (bx, by) in (((mx, my), (W - mx, my)), ((mx, L - my), (W - mx, L - my)), ((mx, my), (mx, L - my)), ((W - mx, my), (W - mx, L - my))):
+            n = max(2, round(math.hypot(bx - ax, by - ay)))
+            spots += [(ax + (bx - ax) * k / n, ay + (by - ay) * k / n, low) for k in range(n + 1)]
+    flat = [proj(p) for pts, _, _ in polys for p in pts]
+    minx, maxx = min(p[0] for p in flat), max(p[0] for p in flat)
+    miny, maxy = min(p[1] for p in flat), max(p[1] for p in flat)
+    s = min(760 / (maxx - minx), 450 / (maxy - miny))
+    ox, oy = 400 - s * (minx + maxx) / 2, 315 - s * (miny + maxy) / 2
+    xy = lambda p: (ox + s * proj(p)[0], oy + s * proj(p)[1])
+    out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" font-family="Arial">',
+           '<rect x="0" y="0" width="800" height="600" fill="#ffffff"/>',
+           f'<text x="400" y="40" font-size="26" font-weight="bold" fill="{GREEN}" text-anchor="middle">{d["nom"]} — vue 3D</text>']
+    for pts, fill, op in polys:
+        pp = " ".join(f"{u:.1f},{v:.1f}" for u, v in map(xy, pts))
+        out.append(f'<polygon points="{pp}" fill="{fill}" fill-opacity="{op}" stroke="#00000022" stroke-width="1"/>')
+    for p in spots:
+        u, v = xy(p)
+        out.append(f'<circle cx="{u:.1f}" cy="{v:.1f}" r="{max(2.5, 18 / proj(p)[2]):.1f}" fill="#fff4cf" stroke="{COPPER}" stroke-width="1.5"/>')
+    out += [f'<text x="400" y="560" font-size="15" fill="{INK}" text-anchor="middle">Pièce {_fmt(L)} × {_fmt(W)} m · hauteur '
+            f'{_fmt(H)} m{"" if hauteur_m else " (supposée)"} · retombée {_fmt(r * 100)} cm' + (' · ruban LED' if lit else '')
+            + (' · spots' if style == "bandeau" else '') + '</text>',
+            '<text x="400" y="584" font-size="13" fill="#5b625f" text-anchor="middle">Illustration UniC Plaquiste : proportions réelles, '
+            'couleurs et lumière indicatives — mur avant retiré pour voir le plafond</text>', '</svg>']
+    return "".join(out)
+
+
 def suggest(piece: str, length_m: float, width_m: float) -> tuple[tuple, str]:
     """Styles à proposer quand le patron n'en choisit pas : selon la pièce nommée, sinon selon la forme de la pièce."""
     low = (piece or "").lower()

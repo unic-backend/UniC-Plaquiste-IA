@@ -756,7 +756,7 @@ TOOLS: list[dict] = [
     {
         "name": "ceiling_designs",
         "description": ("IDÉES DE PLAFOND DESSINÉES pour une pièce : caisson central, gorge lumineuse (LED cachée), bandeau périphérique "
-                        "(spots), îlot suspendu. Chaque idée est dessinée en vue de dessus cotée (PNG partageable au client) avec la longueur "
+                        "(spots), îlot suspendu. Chaque idée est dessinée en vue de dessus cotée ET en vue 3D pour le client (PNG partageables) avec la longueur "
                         "de retombée, le ruban LED et les plaques des retombées. Pour « idées / modèles / designs de plafond », « montre au "
                         "client », « plafond moderne pour mon salon 5x4 ». Dimensions données par le patron uniquement."),
         "input_schema": {"type": "object", "properties": {
@@ -765,7 +765,8 @@ TOOLS: list[dict] = [
                        "description": "Omis : les styles conseillés pour la pièce (sinon caisson, gorge, îlot)."},
             "piece": {"type": "string", "description": "La pièce si le patron la nomme (salon, chambre, cuisine, couloir, bureau, salle de bain…)."},
             "marge_m": {"type": "number", "description": "Largeur du bandeau / distance aux murs (0,60 m par défaut)."},
-            "retombee_m": {"type": "number", "description": "Hauteur de la retombée (0,15 m par défaut)."}},
+            "retombee_m": {"type": "number", "description": "Hauteur de la retombée (0,15 m par défaut)."},
+            "hauteur_m": {"type": "number", "description": "Hauteur sous plafond si le patron la donne (vue 3D ; sinon 2,80 m dite « supposée »)."}},
             "required": ["length_m", "width_m"], "additionalProperties": False},
     },
     {
@@ -1229,7 +1230,7 @@ class AgentSession:
         return {"ok": True, "note": "Schéma affiché dans la conversation avec un bouton Partager. Décris-le en une ligne."}
 
     def _t_ceiling_designs(self, length_m: float, width_m: float, styles: list | None = None, marge_m: float = 0.6,
-                           retombee_m: float = 0.15, piece: str = "") -> dict:
+                           retombee_m: float = 0.15, piece: str = "", hauteur_m: float | None = None) -> dict:
         from app import diagrams, plafond_design
         co = company_dict(self.db)
         conseil = "" if styles else plafond_design.suggest(piece, length_m, width_m)[1]
@@ -1240,13 +1241,15 @@ class AgentSession:
             return {"error": str(exc)}
         out = []
         for idea in ideas:
-            try:
-                art = diagrams.render(self.db, f"Plafond {idea['nom']}", idea.pop("svg"), self.user_id)
-                self.images.append({"id": art.id, "filename": art.filename, "title": f"{idea['nom']} — {length_m:g} × {width_m:g} m"})
-            except diagrams.DiagramError as exc:
-                idea["dessin"] = f"non dessiné : {exc}"
+            views = ((idea.pop("svg"), ""), (plafond_design.vue_3d(idea, hauteur_m), " — vue 3D"))
+            for svg, label in views:
+                try:
+                    art = diagrams.render(self.db, f"Plafond {idea['nom']}{label}", svg, self.user_id)
+                    self.images.append({"id": art.id, "filename": art.filename, "title": f"{idea['nom']}{label} — {length_m:g} × {width_m:g} m"})
+                except diagrams.DiagramError as exc:
+                    idea["dessin" + ("_3d" if label else "")] = f"non dessiné : {exc}"
             out.append(idea)
-        return {"idees": out, **({"conseil": conseil} if conseil else {}), "note": ("Dessins affichés dans la conversation (bouton Partager pour le client). Présente chaque idée en une "
+        return {"idees": out, **({"conseil": conseil} if conseil else {}), "note": ("Dessins affichés dans la conversation (vue de dessus et vue 3D, bouton Partager pour le client). Présente chaque idée en une "
                                        "ligne (nom, effet, retombée et LED en ml). Ce sont des propositions. Quand le client a choisi : "
                                        "calculate_materials(kind=\"ceiling\", decor_style=…) pour le métré du devis (plaques des retombées, LED) ; "
                                        "ossature des retombées comptée selon la méthode du patron (fourrure en haut, cornière en bas) ; le prix du LED se demande au patron. "
