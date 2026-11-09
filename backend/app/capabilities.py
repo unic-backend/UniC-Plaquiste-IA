@@ -96,6 +96,8 @@ def registry_snapshot(db=None) -> list[dict]:
                    {"nom": "str"}, {"result": "object"}, ["user"], True),
         Capability("weather", "Météo réelle d'un chantier (Open-Meteo) : maintenant et 7 jours, pluie, humidité, vent, chaleur, conseils de chantier calculés",
                    {"lieu": "str"}, {"result": "object"}, ["user"], True),
+        Capability("exchange_rate", "Taux de change réels : FCFA ↔ euro (parité fixe 655,957) et dollar, yuan, livre… (taux BCE du jour)",
+                   {"montant": "float", "de": "str"}, {"result": "object"}, ["user"], True),
         Capability("business_calc", "Calculs d'affaires exacts : échéancier (acompte/avancement/solde), délai tenable, marge, « et si… », niveaux de risque, poids de chaque client dans le CA",
                    {"action": "str"}, {"result": "object"}, ["user"], True),
         Capability("visit_report", "Compte rendu de visite ou de réunion à partir d'un texte dicté/collé : mesures en code, rédaction sans rien inventer (décidé ≠ proposé, actions avec responsable/échéance seulement s'ils sont dits)",

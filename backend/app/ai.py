@@ -227,7 +227,7 @@ TOOL_LABELS = {
     "list_google_reviews": "Je regarde les avis Google…", "google_profile_audit": "J'analyse ta fiche Google…",
     "self_check": "Je me vérifie…", "list_incidents": "Je regarde mes problèmes…", "improve_myself": "Je lance ma correction…",
     "create_agent": "Je crée l'agent…", "code_app": "Je confie la modification à mon développeur…", "code_project": "Je confie le projet à mon développeur…",
-    "mail_cleanup_propose": "Je repère les mails inutiles…", "business_calc": "Je fais le calcul…", "weather": "Je regarde la météo…", "method": "Je suis la méthode…", "visit_report": "Je prépare le compte rendu…",
+    "mail_cleanup_propose": "Je repère les mails inutiles…", "business_calc": "Je fais le calcul…", "weather": "Je regarde la météo…", "exchange_rate": "Je regarde le taux de change…", "method": "Je suis la méthode…", "visit_report": "Je prépare le compte rendu…",
 }
 
 

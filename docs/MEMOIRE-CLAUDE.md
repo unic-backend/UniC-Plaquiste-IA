@@ -174,6 +174,14 @@ Les clients, téléphones et chantiers restent dans la sauvegarde, **jamais dans
 - **Décor de plafond** (traçage, découpe, plaques exactes) : `app.plafond_design.trace_decoupe(style, longueur, largeur)`.
 - **Électricité et clim** (conseil, jamais chiffré) : `app.elec` (`controle_circuit`, `section_pour`, `chute_tension`, `clim_puissance`, `clim_alimentation`).
 - **Devis et factures** : restaurer la sauvegarde, travailler dans la base locale, puis `scripts/planb_export.py` (voir `docs/PLAN-A-ET-B.md`).
+- **Taux de change réels** : `python scripts/unic_change.py 1500 USD` (vers FCFA par défaut ; `... 2000000 FCFA EUR`). Même module que l'outil
+  `exchange_rate` d'UniC IA (`app.change`). FCFA ↔ euro = parité fixe 655,957, sans réseau ; dollar, yuan, livre… = taux BCE du jour (Frankfurter),
+  avec sa date et une note sur la marge de la banque. Jamais de taux de tête.
+- **Météo de chantier** : `app.meteo.prevision("Thiès", 3)` (Open-Meteo, conseils de pose calculés en code). Outil `weather` d'UniC IA.
+
+**Règle tirée des vidéos de formation (09/11/2026)** : une date, un prix, un taux, une météo se demandent à une source en direct, jamais de mémoire.
+Catalogue de sources gratuites : github.com/public-apis/public-apis (licence MIT). Testé : jours fériés Nager.Date **refusé** pour le Sénégal
+(il manque Tabaski, Korité, Tamkharit, Magal, Maouloud : dates fausses), Open-Meteo déjà dans UniC, Frankfurter ajouté.
 
 **Bande à joints** : chiffrée au rouleau de 150 m (réponse du patron, 08/11/2026). **Enduit** : chiffré au sac de 20 kg, « Sac enduit » 12 000 (réponse du patron, 08/11/2026). Un devis du moteur n'a plus de ligne sans prix.
 
