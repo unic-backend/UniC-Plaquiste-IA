@@ -6,7 +6,7 @@ description: Montage vidéo UniC Plaquiste à partir des vraies vidéos et photo
 # Vidéos UniC (à la demande)
 
 ## 1. Comprendre la demande
-Sujet, durée, format (vertical 9:16 pour Reels/TikTok, horizontal 16:9 pour YouTube, carré 1:1), textes voulus, musique ou non (le montage est muet par défaut).
+Sujet, durée, format (vertical 9:16 pour Reels/TikTok, horizontal 16:9 pour YouTube, carré 1:1), textes voulus, musique ou non (le montage est muet par défaut), voix off ou non (voix française gratuite : recette « Voix off » de `docs/VIDEO-RECETTES.md`).
 Une info manque : UNE question courte.
 
 ## 2. Médias
