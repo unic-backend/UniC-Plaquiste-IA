@@ -41,7 +41,8 @@ def test_l_ia_dessine_les_idees_pour_le_client():
         s = AgentSession(db, None, {})
         out = s("ceiling_designs", {"length_m": 5, "width_m": 4})
         assert [i["nom"] for i in out["idees"]] == ["Caisson central", "Gorge lumineuse", "Îlot suspendu"]
-        assert len(s.images) == 3 and all(img["filename"].endswith(".png") for img in s.images)
+        assert len(s.images) == 6 and all(img["filename"].endswith(".png") for img in s.images)   # vue de dessus + vue 3D
+        assert [img["title"].endswith("vue 3D — 5 × 4 m") for img in s.images] == [False, True] * 3
         assert "svg" not in out["idees"][0]                               # le dessin part en image, pas dans le texte
         assert "error" in s("ceiling_designs", {"length_m": 3, "width_m": 1.2})
 
@@ -110,3 +111,13 @@ def test_outil_plan_de_pose_decor(monkeypatch):
         out = s._t_pose_plan(5, 4, ouvrage="decor", decor_style="gorge")
         assert out["plaques_retombees"] == 1 and out["tracage"] and s.images[0]["title"].startswith("Traçage et découpe")
         assert "error" in s._t_pose_plan(5, 4, ouvrage="decor")
+
+
+@pytest.mark.parametrize("style", ["caisson", "gorge", "bandeau", "ilot"])
+def test_vue_3d_pour_le_client(style):
+    """Vue 3D tirée de la même géométrie : SVG propre, hauteur supposée dite comme telle, celle du patron sinon."""
+    d = pd.design(style, 5, 4)
+    svg = diagrams.sanitize(pd.vue_3d(d))
+    assert "vue 3D" in svg and "2,8 m (supposée)" in svg and svg.count("<polygon") >= 8
+    assert ("spots" in svg) == (style == "bandeau") and ("ruban LED" in svg) == (style != "bandeau")
+    assert "(supposée)" not in pd.vue_3d(d, 3.1) and "3,1 m" in pd.vue_3d(d, 3.1)

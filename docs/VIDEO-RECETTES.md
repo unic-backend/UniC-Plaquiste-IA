@@ -72,6 +72,7 @@ Vérité partout : un chiffre vient de la demande ou d'une source sûre ; s'il i
 - Voix off (Chatterbox, Qwen3-TTS) : très lent sans carte graphique ; Kokoro (ci-dessus) suffit.
 - HyperFrames `reverse-any-video` (refaire une vidéo plan par plan) : fonction payante « Pro » de HeyGen, avec télémétrie et rendu dans leur nuage : non.
 - Catalogue HeyGen (10 000 musiques, bruitages, 75 000 images) : compte HeyGen gratuit nécessaire, droits d'usage commercial à vérifier : décision du patron.
+- Liste « 12 skills, one film crew » (09/11/2026) : ElevenLabs (clé payante ; Kokoro suffit), musique IA type Suno (droits commerciaux incertains), ComfyUI, WebGPU, shaders (carte graphique ou pages web lourdes) : non. Storyboards « réalisateur » : notre `spec.json` découpe déjà en plans.
 
 ## Garder l'atelier d'une session à l'autre
 La machine de Claude est effacée entre deux sessions. Script à coller une fois par le patron dans les réglages de l'environnement
