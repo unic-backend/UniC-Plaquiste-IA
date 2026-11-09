@@ -41,6 +41,7 @@ Vérifier avant de rendre : `hyperframes lint`, puis `hyperframes snapshot --at 
 | Couper les silences | auto-editor (Unlicense) | `--edit audio:threshold=0.04 --margin 0.15sec` |
 | Vidéos de référence | yt-dlp (Unlicense) | `--js-runtimes node` ; une vidéo de tiers sert à étudier, jamais à republier |
 | Stabiliser, ralentir, niveau sonore | FFmpeg (déjà là) | filtres `vidstabdetect/vidstabtransform`, `minterpolate`, `loudnorm` |
+| Voix off en français, sans carte graphique ni compte | Kokoro-82M (Apache-2.0) via `hyperframes tts` (Apache-2.0) | `HYPERFRAMES_PYTHON=/opt/atelier-video/bin/python npx hyperframes tts "texte" -v ff_siwis -s 0.95 -o voix.wav` (≈ 9 s de voix en quelques secondes). Écrire « Unik Plaquiste » (sinon « unissé ») et le numéro en lettres (« soixante-dix-sept, sept cent huit… »). Contrôle : retranscrire avec faster-whisper avant de monter. |
 
 ## Maîtrise universelle (règle du patron : tous les domaines, pas seulement le placo)
 Chaque style se choisit d'après ce qu'il faut MONTRER, jamais d'après le métier. Même outil, autre domaine :
@@ -68,7 +69,9 @@ Vérité partout : un chiffre vient de la demande ou d'une source sûre ; s'il i
 - Usage commercial interdit : video-talkcraft, anything2explainer (PolyForm Noncommercial), video-editor-skills (DaVinci payant, non commercial).
 - Remotion : licence payante au-delà de 3 personnes dans l'entreprise. OpenMontage (AGPL) : lu pour apprendre, aucun code repris.
 - Carte graphique nécessaire : ComfyUI, FreeVideo, Real-ESRGAN, RIFE. Applications à écran : Audacity, Subtitle Edit, OpenToonz, Penpot, cables.gl.
-- Voix off (Chatterbox, Qwen3-TTS) : possible mais très lent sans carte graphique, pas encore testé.
+- Voix off (Chatterbox, Qwen3-TTS) : très lent sans carte graphique ; Kokoro (ci-dessus) suffit.
+- HyperFrames `reverse-any-video` (refaire une vidéo plan par plan) : fonction payante « Pro » de HeyGen, avec télémétrie et rendu dans leur nuage : non.
+- Catalogue HeyGen (10 000 musiques, bruitages, 75 000 images) : compte HeyGen gratuit nécessaire, droits d'usage commercial à vérifier : décision du patron.
 
 ## Garder l'atelier d'une session à l'autre
 La machine de Claude est effacée entre deux sessions. Script à coller une fois par le patron dans les réglages de l'environnement
@@ -77,8 +80,8 @@ La machine de Claude est effacée entre deux sessions. Script à coller une fois
 apt-get install -y -q --no-install-recommends libegl1 libgles2 libgl1 || true
 python3 -m venv /opt/atelier-video
 /opt/atelier-video/bin/pip install -q faster-whisper==1.2.1 librosa==0.11.0 scenedetect==0.7.2 auto-editor==29.3.1 \
-  "rembg[cpu]==2.0.69" color-matcher==0.6.0 yt-dlp==2026.10.26 pillow==10.4.0
-npm install --prefix "$HOME/.cache/unic-video" --no-save --silent hyperframes@0.8.179 three@0.187.0 gsap@3.15.1 \
+  "rembg[cpu]==2.0.69" color-matcher==0.6.0 yt-dlp==2026.10.26 pillow==10.4.0 kokoro-onnx==0.6.1 soundfile==0.14.0
+npm install --prefix "$HOME/.cache/unic-video" --no-save --silent hyperframes@0.9.26 three@0.187.0 gsap@3.15.1 \
   @fontsource/anton@5.3.0 @fontsource/inter@5.3.0
 git clone -q --depth 1 https://github.com/Vibha-Ramprakash/claude-video-effects /opt/atelier-video/effects \
   && bash /opt/atelier-video/effects/scripts/setup.sh
@@ -86,5 +89,5 @@ git clone -q --depth 1 https://github.com/Vibha-Ramprakash/claude-video-effects 
 HyperFrames : toujours `HYPERFRAMES_NO_TELEMETRY=1 DO_NOT_TRACK=1` (statistiques coupées) et jamais `hyperframes publish`.
 
 ## Pas encore
-Voix off générée ; ces modèles dans le Studio de l'appli (il faudrait installer HyperFrames dans `.github/workflows/video.yml`, zone protégée : décision du patron) ;
+Ces modèles dans le Studio de l'appli (il faudrait installer HyperFrames dans `.github/workflows/video.yml`, zone protégée : décision du patron) ;
 Blender ; une vraie vidéo du patron face caméra pour les effets.
