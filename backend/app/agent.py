@@ -489,6 +489,18 @@ TOOLS: list[dict] = [
             "additionalProperties": False},
     },
     {
+        "name": "exchange_rate",
+        "description": ("TAUX DE CHANGE RÉELS (jamais devinés) : convertit un montant entre FCFA, euro, dollar, yuan, livre et les autres monnaies "
+                        "publiées par la BCE. FCFA ↔ euro = parité fixe officielle (1 € = 655,957 FCFA) ; les autres = taux de référence du jour "
+                        "de la Banque centrale européenne. Pour un matériau acheté à l'étranger ou une offre en devise. Cite le résultat, le taux, "
+                        "sa date et la note sur la marge de la banque, tels quels."),
+        "input_schema": {"type": "object", "properties": {
+            "montant": {"type": "number", "minimum": 0, "description": "montant à convertir"},
+            "de": {"type": "string", "description": "monnaie de départ (USD, EUR, CNY, GBP, FCFA, « dollar », « yuan »…)"},
+            "vers": {"type": "string", "description": "monnaie d'arrivée (FCFA par défaut)"}},
+            "required": ["montant", "de"], "additionalProperties": False},
+    },
+    {
         "name": "business_calc",
         "description": ("CALCULS D'AFFAIRES EXACTS (en code, jamais de tête) : « echeancier » (répartir un montant en acompte/avancement/solde selon des pourcentages : "
                         "la somme des étapes égale toujours le total), « delai » (un délai demandé est-il tenable en comptant le risque de retard), « marge » "
@@ -883,7 +895,7 @@ TOOL_LABELS = {
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
-    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "weather": "Météo consultée", "method": "Méthode suivie", "visit_report": "Compte rendu préparé",
+    "create_agent": "Agent créé", "list_agents": "Agents consultés", "business_calc": "Calcul d'affaires fait", "weather": "Météo consultée", "exchange_rate": "Taux de change consulté", "method": "Méthode suivie", "visit_report": "Compte rendu préparé",
 }
 
 SHOW_CARDS = 5   # cartes de documents affichées après une recherche
@@ -1410,6 +1422,10 @@ class AgentSession:
     def _t_weather(self, lieu: str = "", jours: int = 3) -> dict:
         from app import meteo
         return meteo.prevision(lieu, jours, defaut=company_dict(self.db).get("city") or "")
+
+    def _t_exchange_rate(self, montant, de: str, vers: str = "FCFA") -> dict:
+        from app import change
+        return change.convertir(montant, de, vers or "FCFA")
 
     def _t_business_calc(self, action: str, total=None, etapes=None, jours_disponibles=None, jours_estimes=None, jours_risque=0,
                          revenu=None, couts=None, base=None, variantes=None, facteurs=None) -> dict:
