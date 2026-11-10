@@ -201,6 +201,27 @@ Premier contre-calcul (plafond 5 × 4 m et cloison 6 × 2,50 m deux faces avec u
 chaque ligne de 5 m = 2,80 + 2,20, et la chute de 0,60 m ne sert pas.
 **Tranché par le patron (08/11/2026) : « je raccorde les chutes ».** Le moteur a raison (longueur totale ÷ 2,80), rien à changer. Règle mise dans la mémoire d'UniC (v23).
 
+## Cours Anthropic « Construire des agents » (Claude Managed Agents, 1 h 37, étudié le 09/11/2026)
+
+Ce que j'applique à mon travail, aux agents planifiés d'UniC et à UniC IA :
+1. **Un agent = un modèle + des outils, en boucle.** Ce qui l'entoure (consignes, garde-fous) repose sur des suppositions sur le modèle,
+   et ces suppositions vieillissent : à chaque nouveau modèle, relire les consignes des agents et retirer les béquilles devenues inutiles.
+2. **Résultat attendu + grille de contrôle.** Une tâche longue se termine par une relecture contre une grille écrite d'avance
+   (« le livrable existe, les chiffres ont une source, rien n'est parti hors règle »), faite à part, pas par celui qui a produit. Non conforme : recommencer.
+3. **Le journal est la seule chose précieuse.** Tout le reste se relance. Chez nous : les rapports envoyés par e-mail et `docs/MEMOIRE-CLAUDE.md`.
+   Une session perdue ne doit rien faire perdre : écrire au fur et à mesure.
+4. **Les secrets n'entrent jamais là où l'agent travaille.** L'agent ne voit pas les clés ; elles sont ajoutées à la sortie, pour les seuls sites autorisés.
+   C'est la règle UniC « jamais de clé dans une conversation ni dans le code » : elle protège aussi contre un texte piégé lu sur le web.
+5. **Mémoire partagée + « rêve ».** Les agents écrivent ce qu'ils apprennent ; une relecture périodique des anciens passages corrige et regroupe
+   cette mémoire (erreurs répétées, lacunes d'une compétence). Chez nous : relire les rapports du mois et mettre à jour ce fichier et les compétences.
+6. **Sous-agents spécialisés, pas de schéma imposé.** Dire le but et laisser l'agent répartir le travail donne de meilleurs résultats que lui dicter un organigramme.
+7. **Travail récurrent = tâche planifiée avec message de départ complet** (c'est ce que font nos 5 agents) ; un long travail donne des points d'étape au patron.
+8. **Mesurer avant de croire.** Une amélioration se juge sur des cas réels passés (anciens devis, anciens rapports), pas à l'impression.
+   Des cas mal choisis donnent 100 % sans rien prouver.
+9. **Tout ce que l'agent écrit comme code est à tenir pour douteux** : exécution à part, dégâts possibles limités, une tâche par bac à sable.
+
+Non retenu : passer nos agents sur Claude Managed Agents (facturé à l'usage, clé API à gérer) : nos tâches planifiées font le même travail dans l'abonnement.
+
 ## Mise à jour
 Quand les prix changent : appli › Paramètres › Sauvegardes › « Sauvegarder maintenant », télécharger le `.zip`, le joindre à une session Claude Code, puis « mets à jour docs/MEMOIRE-CLAUDE.md ».
 Ne jamais coller de clé API, de mot de passe ou de jeton dans une conversation.

@@ -676,12 +676,16 @@ def _analyze_pages(db: Session, rec: StoredFile, refresh: bool, budget_s: float)
         with _LOCK:
             job = _JOBS.get(rec.id)
             if not (job and job["thread"].is_alive()):
-                job = {"resultats": {}, "erreurs": {}}
-                job["thread"] = threading.Thread(target=_run, args=(job, rec.path, todo, {p.page_number: p.text for p in pages}),
-                                                 name=f"unic-plan-{rec.id[:8]}", daemon=True)
-                _JOBS[rec.id] = job
-                job["thread"].start()
-        job["thread"].join(timeout=max(0.0, budget_s))
+                _absorb(db, rec.id)   # le fil a pu finir juste après la lecture du cache : ses dernières pages ne sont pas relues
+                todo = [n for n in numbers if n not in _cached_pages(db, rec.id, numbers)]
+                if todo:
+                    job = {"resultats": {}, "erreurs": {}}
+                    job["thread"] = threading.Thread(target=_run, args=(job, rec.path, todo, {p.page_number: p.text for p in pages}),
+                                                     name=f"unic-plan-{rec.id[:8]}", daemon=True)
+                    _JOBS[rec.id] = job
+                    job["thread"].start()
+        if job:
+            job["thread"].join(timeout=max(0.0, budget_s))
         _absorb(db, rec.id)
         done = _cached_pages(db, rec.id, numbers)
     job = _JOBS.get(rec.id) or {}
