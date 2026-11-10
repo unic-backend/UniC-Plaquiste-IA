@@ -1,7 +1,14 @@
 # Mémoire de Claude : ce que je sais de l'entreprise UniC Plaquiste
 
+> **RÉSUMÉ (lire ceci seulement ; le reste sur demande).** Entreprise : UniC Plaquiste, Dakar (faux plafonds, cloisons, plâtrerie).
+> - Devis : un travail = un seul devis ; matériaux et main-d'œuvre en deux tableaux ; jamais de prix, TVA ou taux inventé.
+> - Plaques 2 m × 1,20 m par défaut (4 500 ; hydrofuge 5 500) ; barres 2,80 m ; vis par paquet de 1 000 ; bande en rouleau de 150 m.
+> - Faux plafond : fourrures tous les 0,50 m ; tiges 0,30 m du mur puis 0,90 m. Cloison : montant tous les 0,60 m.
+> - Électricité / clim : conseil seulement, jamais chiffré.
+> - Détail : § Prix (l.6), § Règles (l.102), § Outils (l.169), § Méthode (l.188). Chercher avec grep, ne pas tout lire.
+
 Source : sauvegarde du **8/11/2026 20:17 UTC** (prix et règles donnés par le patron dans l'appli). Aucun nom ni coordonnée de client ici.
-À relire au début de chaque session. À refaire quand les prix changent (voir la fin).
+À relire (bloc RÉSUMÉ seulement) au début de chaque session. À refaire quand les prix changent (voir la fin).
 
 ## Prix de vente en vigueur (FCFA)
 
