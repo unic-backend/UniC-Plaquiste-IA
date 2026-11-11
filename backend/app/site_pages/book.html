@@ -622,6 +622,7 @@ var Atropos=function(){"use strict";function t(){return t=Object.assign?Object.a
     for (var i = 0; i < cards.length; i++){
       var r = cards[i].getBoundingClientRect(), d = ((r.left + r.width / 2) - vw / 2) / vw, a = Math.min(1, Math.abs(d));
       cards[i].style.transform = "scale(" + (1 - a * .12).toFixed(3) + ") rotate(" + (d * 5).toFixed(2) + "deg)";
+      var at = cards[i].firstElementChild; if (at && at.classList.contains("atropos")) at.style.transform = "rotateY(" + (-Math.max(-1, Math.min(1, d)) * 32).toFixed(1) + "deg)";   /* inclinaison 3D pendant le défilement (téléphone) */
     }
   }
   measure(); onScroll();
