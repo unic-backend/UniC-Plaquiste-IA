@@ -38,5 +38,16 @@ python scripts/unic_calcul.py '<pièces JSON>' --main-oeuvre <prix_m2> --devis "
 Crée le devis brouillon (numéro UniC, PDF) dans la base locale. Un travail = un seul devis ; une correction modifie le devis existant.
 Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres › Sauvegardes › « Importer un dossier de Claude ».
 
+## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
+- [ ] Un seul devis pour ce travail (une correction modifie l'existant).
+- [ ] Matériaux et main-d'œuvre dans deux tableaux séparés ; main-d'œuvre = prix au m² du patron.
+- [ ] Aucun prix, TVA ou taux inventé ; lignes sans prix signalées.
+- [ ] Plaques 2 m × 1,20 sauf ordre contraire ; barres 2,80 m ; vis par paquet de 1 000 ; bande en rouleau de 150 m.
+- [ ] Contre-calcul fait, aucun écart inexpliqué avec le moteur ; totaux recalculés.
+- [ ] Livraison : prix du patron ou « à la charge du client » ; moulures, colles, peinture seulement s'il les a demandées.
+
+## Règle d'or
+Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
+
 ## Interdits
 Rien ne part (e-mail, WhatsApp) sans le clic du patron. Jamais de prix inventé. Moulures, colles, peinture seulement s'il les demande.
