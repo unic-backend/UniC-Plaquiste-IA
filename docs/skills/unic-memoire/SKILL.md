@@ -23,3 +23,10 @@ Cherche le sujet dans les colonnes (mot exact, sans accent, synonymes : « placo
 ## Mettre l'index à jour
 Une fois par mois (ou quand Ousmane le demande) : Ousmane exporte ses données (claude.ai › Paramètres › Confidentialité › Exporter), envoie
 `conversations-000.zip` dans une session Claude Code, et dit « mets à jour l'index des conversations ». Aucun outil ne peut lire les conversations tout seul.
+
+## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
+- [ ] Réponse tirée de l'index (une seule lecture), avec la date et le titre de la conversation.
+- [ ] Conversation sans texte dans l'export : dit franchement, rien d'inventé.
+
+## Règle d'or
+Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
