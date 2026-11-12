@@ -6,9 +6,15 @@ description: Devis, métré et liste de matériaux UniC Plaquiste (faux plafond,
 # Devis et matériaux UniC (à la demande)
 
 Deux moteurs travaillent ensemble : le moteur d'UniC (règles du patron codées, grille de prix) et ton contre-calcul.
-Tu ne recopies jamais le moteur sans vérifier, et tu ne calcules jamais seul sans le moteur.
+Tu ne recopies jamais le moteur sans vérifier.
 
-## 1. Lire avant tout
+## 0. Claude chat (sans dépôt ni scripts)
+- Lis `PRIX-ET-REGLES.md` (dans cette compétence) AVANT tout chiffre : ce sont les SEULS prix permis. Jamais de prix « estimé ».
+- Article absent de la grille = ligne « prix à donner par le patron », sans montant.
+- Calcule à la main en suivant les règles du fichier (étape 4), montre le calcul, puis la liste « Travail fini ».
+- Pas de moteur ni de PDF ici : dis-le, et propose de faire le devis officiel dans l'appli UniC.
+
+## 1. Lire avant tout (Claude Code)
 - Dépôt `unic-backend/unic-plaquiste-ia` (sinon demande au patron de l'ouvrir). `docs/MEMOIRE-CLAUDE.md` : prix en vigueur, règles du patron, méthode à deux moteurs.
 - Base de travail : `UNIC_DATA_DIR` d'une sauvegarde restaurée = prix du jour (voir `docs/PLAN-A-ET-B.md`). Base neuve = grille du dépôt.
 
@@ -41,7 +47,8 @@ Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres
 ## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
 - [ ] Un seul devis pour ce travail (une correction modifie l'existant).
 - [ ] Matériaux et main-d'œuvre dans deux tableaux séparés ; main-d'œuvre = prix au m² du patron.
-- [ ] Aucun prix, TVA ou taux inventé ; lignes sans prix signalées.
+- [ ] Tous les prix viennent de `PRIX-ET-REGLES.md` (ou de la base) ; aucun prix, TVA ou taux inventé ni « estimé » ; lignes sans prix signalées.
+- [ ] Mots du patron : « tige + pivot + cheville », jamais « suspente ».
 - [ ] Plaques 2 m × 1,20 sauf ordre contraire ; barres 2,80 m ; vis par paquet de 1 000 ; bande en rouleau de 150 m.
 - [ ] Contre-calcul fait, aucun écart inexpliqué avec le moteur ; totaux recalculés.
 - [ ] Livraison : prix du patron ou « à la charge du client » ; moulures, colles, peinture seulement s'il les a demandées.
