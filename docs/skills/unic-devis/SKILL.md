@@ -11,8 +11,13 @@ Tu ne recopies jamais le moteur sans vérifier.
 ## 0. Claude chat (sans dépôt ni scripts)
 - Lis `PRIX-ET-REGLES.md` (dans cette compétence) AVANT tout chiffre : ce sont les SEULS prix permis. Jamais de prix « estimé ».
 - Article absent de la grille = ligne « prix à donner par le patron », sans montant.
-- Calcule à la main en suivant les règles du fichier (étape 4), montre le calcul, puis la liste « Travail fini ».
+- Calcule comme `EXEMPLES.md` (méthode pas à pas du salon 5 × 4) : mêmes étapes, même ordre. Jamais « surface ÷ surface d'une plaque ».
+- Résultat court : tableau matériaux, tableau main-d'œuvre, total, liste « Travail fini ». Pas de long texte.
 - Pas de moteur ni de PDF ici : dis-le, et propose de faire le devis officiel dans l'appli UniC.
+
+## Économie (règle du patron)
+- Lis `PRIX-ET-REGLES.md` et `EXEMPLES.md` UNE fois par conversation. Rien d'autre : pas de recherche web, pas d'autres fichiers, pas d'autres compétences.
+- Une cote manque : UNE question, puis tu calcules. Pas de variantes ni d'options non demandées.
 
 ## 1. Lire avant tout (Claude Code)
 - Dépôt `unic-backend/unic-plaquiste-ia` (sinon demande au patron de l'ouvrir). `docs/MEMOIRE-CLAUDE.md` : prix en vigueur, règles du patron, méthode à deux moteurs.
