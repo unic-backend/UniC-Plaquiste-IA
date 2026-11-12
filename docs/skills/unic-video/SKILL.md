@@ -30,5 +30,14 @@ VIDEO_ALLOW_LOCAL=1 python3 scripts/video/make.py spec.json sortie.mp4   # "fps"
 - Envoie la vidéo au patron (fichier) et range-la dans le Drive (dossier `04_Videos_Chantiers`).
 - S'il le demande : publication EN ATTENTE DE VALIDATION dans Metricool (`createScheduledPostForReview`), jamais de publication directe.
 
+## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
+- [ ] Accroche dans les 3 premières secondes ; format demandé (9:16, 16:9 ou 1:1).
+- [ ] Seulement de vrais médias UniC ; aucun prix, faux chiffre ou client nommé sans accord.
+- [ ] Durée vérifiée (`ffprobe`) et 2 ou 3 images regardées ; voix off réécoutée si présente.
+- [ ] Fin avec contact (+221 77 708 50 92) ; rien publié sans le clic du patron.
+
+## Règle d'or
+Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
+
 ## Interdits
 Rien n'est publié ni envoyé sans le clic du patron. Pas d'image d'un autre compte. Pas de crédit Higgsfield dépensé sans sa confirmation.

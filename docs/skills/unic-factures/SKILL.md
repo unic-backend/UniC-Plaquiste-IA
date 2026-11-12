@@ -33,5 +33,13 @@ Brouillon + PDF, même numérotation que l'appli. Donne au patron le numéro, le
 ## Limites (le dire au patron)
 - Versements, acomptes par tranche, bons de commande et de livraison : à faire dans l'appli (pas encore dans cet outil).
 
+## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
+- [ ] La facture part d'un devis existant, sans doublon (« -F » déjà présent ?).
+- [ ] Toutes les lignes ont un prix ; montant identique au devis ; client et lieu relus avec le patron.
+- [ ] Numéro, total et chemin du PDF donnés au patron ; rien n'est envoyé sans son clic.
+
+## Règle d'or
+Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
+
 ## Interdits
 Rien ne part (e-mail, WhatsApp) sans le clic du patron. Jamais de montant inventé. Une facture = un devis existant.

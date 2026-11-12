@@ -22,3 +22,10 @@ Seulement si Ousmane le demande : ouvre le PDF nommé dans le registre (recherch
 ## Tenir le registre à jour
 Après CHAQUE nouveau devis, facture ou avoir créé pour Ousmane (compétences unic-devis et unic-factures comprises) : propose d'ajouter la ligne au registre
 (numéro, type, date, client, lieu / objet, total, « vérifié », nom du PDF, titre de la conversation). Une ligne corrigée : mets à jour le total et passe la fiabilité à « vérifié ».
+
+## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
+- [ ] Réponse tirée du registre (une seule lecture), avec le numéro UC- et la ligne source.
+- [ ] Total « vérifié », « probable » ou « à vérifier » dit tel quel ; rien d'inventé.
+
+## Règle d'or
+Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
