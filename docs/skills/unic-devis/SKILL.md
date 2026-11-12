@@ -1,6 +1,6 @@
 ---
 name: unic-devis
-description: Devis, métré et liste de matériaux UniC Plaquiste (faux plafond, cloison BA13, peinture, décor). À utiliser dès que le patron demande un devis, un calcul de matériaux, un métré, des quantités, un prix de chantier, ou envoie des cotes, un plan ou une photo de pièce à chiffrer. Ne tourne jamais tout seul : seulement à la demande.
+description: Devis complet (matériaux + main-d'œuvre), métré et liste de matériaux UniC Plaquiste (faux plafond, cloison BA13, peinture, décor). À utiliser dès que le patron demande un devis, un calcul de matériaux, un métré, des quantités, un prix de chantier, ou envoie des cotes, un plan ou une photo de pièce à chiffrer. Ne tourne jamais tout seul : seulement à la demande.
 ---
 
 # Devis et matériaux UniC (à la demande)
@@ -17,7 +17,8 @@ Tu ne recopies jamais le moteur sans vérifier.
 
 ## Économie (règle du patron)
 - Lis `PRIX-ET-REGLES.md` et `EXEMPLES.md` UNE fois par conversation. Rien d'autre : pas de recherche web, pas d'autres fichiers, pas d'autres compétences.
-- Une cote manque : UNE question, puis tu calcules. Pas de variantes ni d'options non demandées.
+- Un devis = TOUJOURS matériaux complets (tableau de `EXEMPLES.md`) + main-d'œuvre à part + total, du premier coup, sans demander « j'ajoute les fournitures ? ».
+- Question seulement si une COTE manque (longueur, largeur, support dalle ou IPN). Pas de variantes non demandées.
 
 ## 1. Lire avant tout (Claude Code)
 - Dépôt `unic-backend/unic-plaquiste-ia` (sinon demande au patron de l'ouvrir). `docs/MEMOIRE-CLAUDE.md` : prix en vigueur, règles du patron, méthode à deux moteurs.
