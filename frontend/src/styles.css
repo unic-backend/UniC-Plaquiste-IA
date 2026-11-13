@@ -936,6 +936,7 @@ body, .card-box, .page, .topbar, .composer, .bubble { transition: background-col
 
 .link-btn { background: none; border: 0; color: var(--copper); font: inherit; font-size: 14px; padding: 6px 0; cursor: pointer; text-align: center; }
 .link-btn.muted { color: var(--muted); font-size: 12.5px; }
+.older-msgs { display: block; margin: 22px auto 14px; padding: 10px 16px; min-height: 44px; }
 .account-card { margin-top: 24px; }
 .login-card { display: flex; flex-direction: column; gap: 8px; } .login-card input { width: 100%; box-sizing: border-box; } .login-card > .btn { width: 100%; margin-top: 6px; }
 

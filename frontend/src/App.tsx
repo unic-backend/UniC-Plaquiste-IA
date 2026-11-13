@@ -1,4 +1,4 @@
-import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { lazyPage } from "./lazyPage";
 import { isWakeScreen, wakeApi } from "./phone";
 import { AppLockCard, AppLockGate } from "./AppLock";
@@ -665,10 +665,22 @@ function Shell({ user, children }: { user: User; children: React.ReactNode }) {
   );
 }
 
+const RECENT = 60;   // messages affichés à l'ouverture d'une conversation ; les précédents sur demande
+
 function Chat({ initialId }: { initialId?: string }) {
   const nav = useNavigate();
   const [cid, setCid] = useState<string | undefined>(initialId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Longue conversation : seuls les derniers messages sont affichés (400 messages = 18 000 éléments, 1,5 s de blocage sur un petit téléphone).
+  const [older, setOlder] = useState(0);
+  const firstShown = Math.max(0, messages.length - RECENT - older);
+  // Les messages précédents s'ajoutent au-dessus : on garde à l'écran celui qu'on lisait, au lieu de sauter tout en haut.
+  const keepPlace = useRef<{ el: Element; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const k = keepPlace.current;
+    if (k) k.el.scrollTop += k.el.scrollHeight - k.h;
+    keepPlace.current = null;
+  }, [older]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<{ status: string; text: string }>({ status: "", text: "" });
@@ -722,6 +734,7 @@ function Chat({ initialId }: { initialId?: string }) {
   busyRef.current = busy;
   useEffect(() => {
     setCid(initialId);
+    setOlder(0);
     if (!initialId) {
       ++turn.current;   // nouvelle conversation : l'attente précédente s'arrête (le serveur finit quand même)
       setBusy(false);
@@ -967,13 +980,16 @@ function Chat({ initialId }: { initialId?: string }) {
               <div className="hero-date">{new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</div>
             </div>
           )}
-          {messages.map((m, i) => (
+          {firstShown > 0 && (
+            <button className="link-btn older-msgs" onClick={(e) => { const el = e.currentTarget.closest(".chat"); if (el) keepPlace.current = { el, h: el.scrollHeight }; setOlder((o) => o + RECENT); }}>Voir les messages précédents ({firstShown})</button>
+          )}
+          {messages.slice(firstShown).map((m, k) => (
             <MessageRow
-              key={m.id + i}
+              key={m.id + (firstShown + k)}
               m={m}
               onEdit={editMsg}
               onRegenerate={
-                !busy && i === messages.length - 1 && m.role === "assistant" && m.id !== "err"
+                !busy && firstShown + k === messages.length - 1 && m.role === "assistant" && m.id !== "err"
                   ? () => {
                       const lastUser = [...messages].reverse().find((x) => x.role === "user");
                       if (lastUser) send(lastUser.content);

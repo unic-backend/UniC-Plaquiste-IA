@@ -14,6 +14,7 @@ import uuid
 
 os.environ["UNIC_DATA_DIR"] = tempfile.mkdtemp(prefix="unic-bench-")
 os.environ["UNIC_NO_BACKGROUND"] = "1"
+os.environ.setdefault("UNIC_ENV", "development")   # hors production : sans code d'accès, le serveur refuserait toute l'API (503)
 sys.path.insert(0, os.getcwd())
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -22,8 +23,9 @@ from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Customer, Invoice, InvoiceItem, Quotation, QuotationItem  # noqa: E402
 
-ROUTES = ["/api/ping", "/api/health/ready", "/api/customers", "/api/materials", "/api/quotes", "/api/invoices",
-          "/api/projects", "/api/briefing", "/api/unpaid", "/api/export/invoices.csv", "/api/conversations"]
+# Les routes telles que l'interface les appelle (listes en résumé).
+ROUTES = ["/api/ping", "/api/health/ready", "/api/customers", "/api/materials", "/api/quotes?summary=1", "/api/invoices?summary=1",
+          "/api/projects", "/api/briefing", "/api/invoices-unpaid", "/api/tresorerie", "/api/tracking", "/api/export/invoices.csv", "/api/conversations"]
 
 
 def seed(n: int = 300) -> None:
