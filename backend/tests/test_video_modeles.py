@@ -9,7 +9,7 @@ EXTERNE = re.compile(r"""(?:src|href)\s*=\s*["']https?://|url\(\s*["']?https?://
 
 
 def test_les_modeles_sont_trouves():
-    assert {p.parent.name for p in MODELES} >= {"cloison", "plafond", "devis", "references", "etapes", "points", "bonhomme", "trajet", "etsi"}
+    assert {p.parent.name for p in MODELES} >= {"cloison", "plafond", "devis", "references", "etapes", "points", "bonhomme", "trajet", "etsi", "enquete", "produit"}
 
 
 @pytest.mark.parametrize("page", MODELES, ids=lambda p: p.parent.name)

@@ -91,6 +91,9 @@ def test_le_controle_du_montage_repere_ce_qui_rend_une_video_molle():
     assert any("Scène 2 : 13 s sur un même texte" in c for c in long_)
     mono = vs.critique(_scenes(("title", 3, {}), ("text", 4, {}), ("quote", 4, {}), ("photo", 4, {})))
     assert any("Les scènes 1 à 3 sont toutes du texte" in c for c in mono)
+    creux = vs.critique(_scenes(("title", 3, {"l1": "Un plafond révolutionnaire"}), ("photo", 4, {}), ("outro", 3, {})))
+    assert creux == ["Scène 1 : « révolutionnaire » ne dit rien au client. Écris ce que ça fait, avec ses mots à lui."]
+    assert "2 à 7 mots" in vs.SYSTEM and "LISTE NUMÉROTÉE" in vs.SYSTEM and "DOCUMENTAIRE" in vs.SYSTEM
     plat = vs.critique(_scenes(*[("photo", 3, {})] * 5))
     assert plat == ["Toutes les scènes durent 3 s : varie le rythme (2 à 4 s pour l'énergie, plus long pour expliquer)."]
     sain = vs.critique(_scenes(("title", 3, {"l1": "Dakar"}), ("photo", 5, {}), ("stats", 6, {"items": [{"value": 1857, "label": "Fondation"}]}), ("outro", 3, {})))
