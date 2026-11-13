@@ -18,6 +18,8 @@ Rendu : `bash scripts/video/modeles/preparer.sh <modèle> [sortie.mp4]` (1080×1
 | `bonhomme` | histoire en bonhomme bâton (« /stick-figure », V2) | 12 s | Pièce nue → message à UniC (« devis gratuit sous 48 h ») → le plaquiste arrive → la plaque devient un faux plafond LED |
 | `trajet` | trajet sur carte (« /map-route », V2) | 11 s | Dakar → Diamniadio sur la vraie côte (Natural Earth, domaine public), 28 km à vol d'oiseau, les 4 grands projets |
 | `etsi` | 3D cartoon « et si ? » (V2) | 10 s | Maquette de salon (contours noirs, 3 tons) ; la caméra entre, les caissons jaillissent du plafond, la LED puis les spots s'allument |
+| `enquete` | documentaire collage (façon Vox, référence du 13/11/2026) | 23 s | « 4 sites, un seul plaquiste » : papier quadrillé, photos des 4 sites JOJ Dakar 2026 en noir et blanc tramé à bord déchiré, bandeaux noirs, serif italique rouge, surligneur jaune, cercle et flèche bleus à la main, fil pointillé que la caméra suit d'un site à l'autre, 8 ans / 180+ / 98 %, carte de fin sombre |
+| `produit` | pub de produit (« motion ad » d'application, référence du 13/11/2026) | 18 s | Fond clair et sol de points en perspective ; téléphone dont l'écran est construit en code ; un doigt appuie, les 4 services sortent de l'écran en cartes ; message tapé lettre par lettre ; le bleu de la marque inonde l'image jusqu'à la carte de fin |
 
 Chiffres et coordonnées = ceux de `FACTS` / `FACT_STATS` (`backend/app/video_studio.py`) ; photos = dossier `images/` du site.
 
@@ -27,7 +29,7 @@ Tout doit dépendre du temps `t` seulement (pas d'horloge, pas de hasard non fix
 Bibliothèques et polices en local (`lib/`, `fonts/`, copiées par `preparer.sh`), jamais depuis un CDN.
 Un trait qui se dessine : `pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"`, animé par `attr: { "stroke-dashoffset": 0 }`
 (animé en style, GSAP arrondit les px et le trait apparaît d'un coup). Un compteur suit le même temps que ce qu'il compte (`onUpdate`).
-Vérifier avant de rendre : `hyperframes lint`, puis `hyperframes snapshot --at 1.2,4.5,…` et regarder les images.
+Vérifier avant de rendre : `UNIC_VIDEO_IMAGES="1.2,4.5,9" bash scripts/video/modeles/preparer.sh <modèle> dossier` écrit ces images arrêtées (et une planche) sans filmer : les regarder.
 `backend/tests/test_video_modeles.py` refuse un modèle qui charge quelque chose depuis Internet ou qui dépend de l'horloge ou du hasard.
 
 ## Recettes testées
@@ -39,6 +41,7 @@ Vérifier avant de rendre : `hyperframes lint`, puis `hyperframes snapshot --at 
 | Trouver les plans d'une vidéo | PySceneDetect (BSD) | `detect(video, ContentDetector())` |
 | Détourer une personne sans fond vert | rembg (MIT) | modèle `u2net_human_seg` |
 | Couper les silences | auto-editor (Unlicense) | `--edit audio:threshold=0.04 --margin 0.15sec` |
+| Étudier une référence image par image | `scripts/video/etudier.py` (ffmpeg) | `python scripts/video/etudier.py ref.mp4 dossier` → une image tous les quarts de seconde, en planches ; les regarder TOUTES avant d'écrire le brief. Sert aussi à relire son propre rendu (`… 2` = 2 images/s) |
 | Vidéos de référence | yt-dlp (Unlicense) | `--js-runtimes node` ; une vidéo de tiers sert à étudier, jamais à republier |
 | Stabiliser, ralentir, niveau sonore | FFmpeg (déjà là) | filtres `vidstabdetect/vidstabtransform`, `minterpolate`, `loudnorm` |
 | Voix off en français, sans carte graphique ni compte | Kokoro-82M (Apache-2.0) via `hyperframes tts` (Apache-2.0) | `HYPERFRAMES_PYTHON=/opt/atelier-video/bin/python npx hyperframes tts "texte" -v ff_siwis -s 0.95 -o voix.wav` (≈ 9 s de voix en quelques secondes). Écrire « Unik Plaquiste » (sinon « unissé ») et le numéro en lettres (« soixante-dix-sept, sept cent huit… »). Contrôle : retranscrire avec faster-whisper avant de monter. |
@@ -65,6 +68,15 @@ Vérité partout : un chiffre vient de la demande ou d'une source sûre ; s'il i
 - **Mise en scène** : un sujet qui remplit 60 à 85 % du cadre ; une idée par plan ; 3D seulement quand elle explique (vue éclatée, lumière) ; légendes rangées en colonne sans traits qui se croisent.
 - **Lumière 3D** sans carte graphique : panneaux lumineux (`RectAreaLight`) pour une gorge LED, lumière qui rebondit (hémisphère chaude) sinon le plafond reste noir.
 
+## Méthode « comme la référence » (apprise le 13/11/2026 : trois vidéos faites avec Claude, et le skill cinetic, MIT)
+1. **Étudier, pas survoler** : `etudier.py` sur la référence, toutes les planches regardées ; noter le fond, les polices, les couleurs (3 au plus), ce qui bouge, comment une scène passe à la suivante, la durée de chaque plan.
+2. **Un brief, puis une fabrication neuve** : les idées en vrac du patron deviennent UN brief écrit (sujet, format, durée, style, faits vrais, interdits) ; la fabrication part de ce brief, pas du fil de la discussion. Une idée nouvelle en cours de route s'ajoute au brief, elle ne fait pas tout refaire.
+3. **Corriger par liste numérotée** : après chaque rendu, les défauts sont écrits « 1. … 2. … » ; on change seulement ce qui est sur la liste, on laisse tout le reste. Le Studio de l'appli fait pareil (« Corriger le scénario »).
+4. **Règles de film** (cinetic) : ce que c'est se comprend en 3 s ; lignes de 2 à 7 mots, mots d'un client, jamais de formule creuse ; l'image prouve la ligne sans la répéter ; un élément passe d'une scène à l'autre (le fil pointillé, le téléphone, la marque) ; une coupe se cache dans un flou ou un mouvement, jamais de fondu enchaîné de deux scènes ; un seul fond, changé une fois au plus (la carte de fin) ; rien d'immobile plus d'une seconde (zoom lent, sol qui avance) ; la carte de fin continue d'avancer jusqu'à la dernière image.
+5. **Juger sur images** : `UNIC_VIDEO_IMAGES=…` avant de filmer, `etudier.py sortie.mp4 dossier 2` après.
+
+Vaut pour toute vidéo, d'UniC ou personnelle (anniversaire, famille, sport, autre métier) : seuls les faits et les médias changent, ils viennent du patron.
+
 ## Écartés (et pourquoi)
 - Usage commercial interdit : video-talkcraft, anything2explainer (PolyForm Noncommercial), video-editor-skills (DaVinci payant, non commercial).
 - Remotion : licence payante au-delà de 3 personnes dans l'entreprise. OpenMontage (AGPL) : lu pour apprendre, aucun code repris.
@@ -72,6 +84,7 @@ Vérité partout : un chiffre vient de la demande ou d'une source sûre ; s'il i
 - Voix off (Chatterbox, Qwen3-TTS) : très lent sans carte graphique ; Kokoro (ci-dessus) suffit.
 - HyperFrames `reverse-any-video` (refaire une vidéo plan par plan) : fonction payante « Pro » de HeyGen, avec télémétrie et rendu dans leur nuage : non.
 - Catalogue HeyGen (10 000 musiques, bruitages, 75 000 images) : compte HeyGen gratuit nécessaire, droits d'usage commercial à vérifier : décision du patron.
+- cinetic lui-même (13/11/2026) : son moteur par défaut est Remotion (licence payante, voir plus haut) et ses contrôles demandent scipy, opencv, librosa et une musique sous licence à chaque film ; ses RÈGLES sont reprises ci-dessus, aucun code copié.
 - Liste « 12 skills, one film crew » (09/11/2026) : ElevenLabs (clé payante ; Kokoro suffit), musique IA type Suno (droits commerciaux incertains), ComfyUI, WebGPU, shaders (carte graphique ou pages web lourdes) : non. Storyboards « réalisateur » : notre `spec.json` découpe déjà en plans.
 
 ## Garder l'atelier d'une session à l'autre
@@ -83,7 +96,7 @@ python3 -m venv /opt/atelier-video
 /opt/atelier-video/bin/pip install -q faster-whisper==1.2.1 librosa==0.11.0 scenedetect==0.7.2 auto-editor==29.3.1 \
   "rembg[cpu]==2.0.69" color-matcher==0.6.0 yt-dlp==2026.10.26 pillow==10.4.0 kokoro-onnx==0.6.1 soundfile==0.14.0
 npm install --prefix "$HOME/.cache/unic-video" --no-save --silent hyperframes@0.9.26 three@0.187.0 gsap@3.15.1 \
-  @fontsource/anton@5.3.0 @fontsource/inter@5.3.0
+  @fontsource/anton@5.3.0 @fontsource/inter@5.3.0 @fontsource/instrument-serif@5.2.8
 git clone -q --depth 1 https://github.com/Vibha-Ramprakash/claude-video-effects /opt/atelier-video/effects \
   && bash /opt/atelier-video/effects/scripts/setup.sh
 ```

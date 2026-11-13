@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      /* Style « pub de produit » : fond clair et sol de points en perspective, téléphone dont l'écran est construit en code,
+         cartes qui sortent de l'écran, doigt qui appuie, puis la couleur de la marque inonde l'image jusqu'à la carte de fin. */
+      @font-face { font-family: InterL; font-weight: 800; src: url(fonts/inter-latin-800-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 700; src: url(fonts/inter-latin-700-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #f2f5fb; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; font-family: InterL, sans-serif; color: #0a1030;
+        background: radial-gradient(900px 700px at 15% 8%, #dfe9ff 0%, rgba(223,233,255,0) 70%), radial-gradient(800px 700px at 95% 30%, #fff3cf 0%, rgba(255,243,207,0) 65%), #f2f5fb; }
+      #sol { position: absolute; left: -660px; top: 900px; width: 2400px; height: 2400px; transform: perspective(1100px) rotateX(66deg); transform-origin: 50% 0;
+        background: radial-gradient(circle, rgba(7,26,125,.34) 0 3.2px, transparent 3.8px) 0 0 / 44px 44px;
+        -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%); }
+      #marque { position: absolute; left: 0; top: 640px; width: 1080px; text-align: center; transform-origin: 50% 0; }
+      #marque .rond { width: 280px; height: 280px; margin: 0 auto; border-radius: 50%; background: #071a7d url(assets/logo.webp) center/88% no-repeat; box-shadow: 0 30px 60px rgba(7,26,125,.28); }
+      #marque .n { margin-top: 44px; font: 800 86px/1 InterL; letter-spacing: .02em; color: #071a7d; }
+      #marque .s { margin-top: 26px; font: 500 38px InterL; color: #3b446b; }
+      .ligne { position: absolute; left: 0; top: 330px; width: 1080px; text-align: center; font: 800 92px/1.05 InterL; letter-spacing: -.02em; opacity: 0; }
+      .ligne b { color: #1c3df0; font-weight: 800; }
+      #tel { position: absolute; left: 305px; top: 560px; width: 470px; height: 980px; border-radius: 70px; background: #0b0f24; padding: 13px; box-shadow: 0 50px 90px rgba(10,16,48,.32), 0 0 0 2px #2a3052 inset; transform-origin: 50% 50%; }
+      #ecran { position: relative; width: 100%; height: 100%; border-radius: 58px; overflow: hidden; background: #fff; }
+      #ecran::before { content: ""; position: absolute; left: 50%; top: 14px; width: 120px; height: 30px; margin-left: -60px; border-radius: 20px; background: #0b0f24; z-index: 5; }
+      .vue { position: absolute; inset: 0; padding: 62px 20px 20px; }
+      .tete { display: flex; align-items: center; gap: 12px; font: 800 24px InterL; color: #071a7d; }
+      .tete i { width: 44px; height: 44px; border-radius: 50%; background: #071a7d url(assets/logo.webp) center/88% no-repeat; }
+      .tete small { display: block; font: 500 16px InterL; color: #6a7296; }
+      .photo { margin-top: 16px; height: 232px; border-radius: 22px; overflow: hidden; }
+      .photo img, .rang img, .carte img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .titre { margin: 20px 4px 8px; font: 800 24px InterL; }
+      .rang { display: flex; align-items: center; gap: 14px; height: 86px; margin-top: 10px; padding: 9px; border-radius: 20px; background: #f3f5fb; font: 700 24px InterL; }
+      .rang i { width: 68px; height: 68px; border-radius: 14px; overflow: hidden; flex: none; }
+      .rang em { margin-left: auto; margin-right: 10px; font: 500 26px InterL; font-style: normal; color: #9aa2c4; }
+      .bouton { position: absolute; left: 20px; right: 20px; bottom: 24px; height: 70px; border-radius: 35px; background: #071a7d; color: #fff; font: 700 24px/70px InterL; text-align: center; }
+      #v2 { background: #eef1f8; }
+      .bulle { margin: 26px 0 0 60px; padding: 18px 20px; border-radius: 24px 24px 6px 24px; background: #071a7d; color: #fff; font: 500 29px/1.3 InterL; min-height: 172px; margin-top: 14px; }
+      .recu { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; padding: 14px 20px; border-radius: 24px 24px 24px 6px; background: #fff; font: 700 27px InterL; color: #0a1030; box-shadow: 0 8px 20px rgba(10,16,48,.08); }
+      .recu i { width: 30px; height: 30px; border-radius: 50%; background: #ffc400; position: relative; }
+      .recu i::after { content: ""; position: absolute; left: 9px; top: 6px; width: 8px; height: 14px; border: solid #071a7d; border-width: 0 4px 4px 0; transform: rotate(40deg); }
+      .carte { position: absolute; left: 560px; width: 450px; height: 200px; border-radius: 30px; background: #fff; overflow: hidden; display: flex; align-items: center; box-shadow: 0 26px 50px rgba(10,16,48,.16); outline: 0 solid #1c3df0; }
+      .carte i { width: 200px; height: 200px; flex: none; }
+      .carte span { padding-left: 28px; font: 800 44px InterL; }
+      .carte u { position: absolute; right: 22px; top: 22px; width: 26px; height: 26px; border-radius: 50%; background: #ffc400; transform: scale(0); }
+      #doigt { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; background: rgba(28,61,240,.22); border: 5px solid #fff; box-shadow: 0 8px 22px rgba(10,16,48,.3); opacity: 0; z-index: 8; }
+      #flot { position: absolute; left: 540px; top: 1478px; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: #02083a; transform: scale(0); z-index: 9; }
+      #fin { position: absolute; inset: 0; z-index: 10; color: #fff; text-align: center; opacity: 0; overflow: hidden; }
+      #fin .raie { position: absolute; left: -400px; width: 1900px; height: 190px; background: linear-gradient(90deg, rgba(28,61,240,0), rgba(60,110,255,.55), rgba(28,61,240,0)); filter: blur(40px); transform: rotate(-32deg); }
+      #fin .rond { position: absolute; left: 390px; top: 520px; width: 300px; height: 300px; border-radius: 50%; background: #071a7d url(assets/logo.webp) center/88% no-repeat; box-shadow: 0 0 0 9px #ffc400; }
+      #fin .n { position: absolute; left: 0; top: 900px; width: 1080px; font: 800 88px InterL; letter-spacing: .03em; }
+      #fin .n span { color: #ffc400; }
+      #fin .c { position: absolute; left: 0; top: 1050px; width: 1080px; font: 500 34px InterL; letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.82); }
+      #fin .p { position: absolute; left: 190px; top: 1170px; width: 700px; height: 112px; border-radius: 56px; background: #ffc400; color: #02083a; font: 800 58px/112px InterL; }
+      #fin .w { position: absolute; left: 0; top: 1330px; width: 1080px; font: 500 38px InterL; color: rgba(255,255,255,.75); }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="18" data-width="1080" data-height="1920">
+      <div id="sol"></div>
+      <div id="marque"><div class="rond"></div><div class="n">UNIC PLAQUISTE</div><div class="s">Plafonds · Cloisons · Peinture · Déco</div></div>
+      <div class="ligne" id="l1">Une seule <b>équipe.</b></div>
+      <div class="ligne" id="l2">Un <b>message</b> suffit.</div>
+      <div id="tel"><div id="ecran">
+        <div class="vue" id="v1">
+          <div class="tete"><i></i><div>UniC Plaquiste<small>Dakar · Sénégal</small></div></div>
+          <div class="photo"><img src="assets/hero-01.webp" alt=""></div>
+          <div class="titre">Nos services</div>
+          <div id="rangs"></div>
+          <div class="bouton">Devis gratuit sous 48 h</div>
+        </div>
+        <div class="vue" id="v2">
+          <div class="tete"><i></i><div>UniC Plaquiste<small>+221 77 708 50 92</small></div></div>
+          <div class="photo" id="choix" style="height:270px;margin-left:60px"><img src="assets/hero-01.webp" alt=""></div>
+          <div class="bulle" id="bulle"></div>
+          <div class="recu" id="recu"><i></i>Devis gratuit sous 48 h</div>
+          <div class="bouton">Demander un devis</div>
+        </div>
+      </div></div>
+      <div id="cartes"></div>
+      <div id="doigt"></div>
+      <div id="flot"></div>
+      <div id="fin"><div class="raie" style="top:260px"></div><div class="raie" style="top:1500px"></div>
+        <div class="rond"></div><div class="n">UNIC <span>PLAQUISTE</span></div><div class="c">Devis gratuit sous 48 h</div>
+        <div class="p">+221 77 708 50 92</div><div class="w">unicplaquiste.com</div></div>
+    </div>
+    <script>
+      // Les 4 services de l'entreprise (FACTS « Plafonds · Cloisons · Peinture · Déco ») avec de vraies photos de chantiers du site.
+      const SERVICES = [["hero-01", "Plafonds"], ["realis-02-cloisons", "Cloisons"], ["realis-07-habillage-mural", "Peinture"], ["realis-05-deco-murale", "Déco"]];
+      const MESSAGE = "Bonjour, je voudrais un devis pour un faux plafond.";
+      const rangs = document.getElementById("rangs"), cartes = document.getElementById("cartes");
+      SERVICES.forEach(([img, nom], i) => {
+        rangs.insertAdjacentHTML("beforeend", `<div class="rang" id="r${i}"><i><img src="assets/${img}.webp" alt=""></i>${nom}<em>›</em></div>`);
+        cartes.insertAdjacentHTML("beforeend", `<div class="carte" id="c${i}" style="top:${690 + i * 232}px"><i><img src="assets/${img}.webp" alt=""></i><span>${nom}</span><u></u></div>`);
+      });
+      const E = "power3.out", tl = gsap.timeline({ paused: true });
+      gsap.set("#v2", { xPercent: 100 });
+      gsap.set("#tel", { y: 1500, opacity: 0 });
+      gsap.set(".carte", { opacity: 0 });
+      const appui = (x, y, t) => tl.set("#doigt", { x: x + 160, y: y + 220 }, t - 0.7).to("#doigt", { opacity: 1, duration: 0.2 }, t - 0.7)
+        .to("#doigt", { x, y, duration: 0.6, ease: "power3.inOut" }, t - 0.65).to("#doigt", { scale: 0.72, duration: 0.1, yoyo: true, repeat: 1 }, t)
+        .to("#doigt", { opacity: 0, duration: 0.25 }, t + 0.35);
+      const ligne = (sel, t, fin) => tl.fromTo(sel, { opacity: 0, y: 40, filter: "blur(14px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.55, ease: E }, t)
+        .to(sel, { opacity: 0, y: -30, filter: "blur(12px)", duration: 0.4, ease: "power2.in" }, fin);
+
+      // Le sol avance tout le film : rien n'est jamais immobile.
+      tl.fromTo("#sol", { backgroundPositionY: "0px" }, { backgroundPositionY: "352px", duration: 18, ease: "none" }, 0);
+
+      // 0 – 2,3 s : la marque et ce qu'elle fait
+      tl.from("#marque .rond", { scale: 0.4, opacity: 0, duration: 0.7, ease: "back.out(1.5)" }, 0.1)
+        .from("#marque .n", { y: 50, opacity: 0, filter: "blur(12px)", duration: 0.55, ease: E }, 0.4)
+        .from("#marque .s", { y: 30, opacity: 0, duration: 0.5, ease: E }, 0.7)
+        // 2,3 s : la marque monte, le téléphone arrive dessous (un seul élément change de place, pas de coupe)
+        .to("#marque", { y: -560, scale: 0.42, duration: 0.8, ease: "power3.inOut" }, 2.3)
+        .to("#marque .s", { opacity: 0, duration: 0.3 }, 2.3)
+        .to("#tel", { y: 0, opacity: 1, duration: 0.9, ease: E }, 2.45)
+        .from("#v1 .photo, #v1 .titre, #v1 .rang, #v1 .bouton", { y: 40, opacity: 0, duration: 0.45, stagger: 0.07, ease: E }, 2.9);
+      ligne("#l1", 3.3, 9.2);
+      appui(540, 1010, 4.9);
+      tl.to("#r0", { backgroundColor: "#dfe6ff", duration: 0.15 }, 4.9);
+
+      // 5,3 – 9,3 s : le téléphone se range à gauche, les 4 services sortent de l'écran
+      tl.to("#tel", { x: -262, scale: 0.8, duration: 0.8, ease: "power3.inOut" }, 5.3);
+      SERVICES.forEach((_, i) => {
+        tl.fromTo(`#c${i}`, { x: -330, y: 300 - i * 150, scale: 0.3, opacity: 0, filter: "blur(16px)" },
+          { x: 0, y: 0, scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.7, ease: E }, 5.6 + i * 0.16)
+          .to(`#r${i}`, { opacity: 0.25, duration: 0.3 }, 5.6 + i * 0.16);
+      });
+      tl.to("#c0", { outlineWidth: 6, duration: 0.3, ease: E }, 7.4).to("#c0 u", { scale: 1, duration: 0.4, ease: "back.out(2)" }, 7.45)
+        .to("#c0", { scale: 1.05, duration: 1.6, ease: "power1.out" }, 7.4)
+        .to(".carte", { x: 620, opacity: 0, filter: "blur(18px)", duration: 0.5, stagger: 0.06, ease: "power2.in" }, 9.0)
+        // 9,3 – 13,3 s : le message, tapé lettre par lettre
+        .to("#tel", { x: 0, scale: 1, duration: 0.8, ease: "power3.inOut" }, 9.3)
+        .to("#v1", { xPercent: -100, duration: 0.6, ease: "power3.inOut" }, 9.4)
+        .to("#v2", { xPercent: 0, duration: 0.6, ease: "power3.inOut" }, 9.4);
+      ligne("#l2", 9.9, 13.5);
+      tl.from("#choix", { scale: 0.7, opacity: 0, duration: 0.5, ease: E, transformOrigin: "100% 100%" }, 9.8);
+      const frappe = { n: 0 }, bulle = document.getElementById("bulle");
+      tl.to(frappe, { n: MESSAGE.length, duration: 1.9, ease: "none", onUpdate: () => { bulle.textContent = MESSAGE.slice(0, Math.round(frappe.n)); } }, 10.2)
+        .from("#recu", { y: 30, opacity: 0, scale: 0.8, duration: 0.5, ease: "back.out(1.8)" }, 12.4);
+
+      // 13,4 – 18 s : le doigt appuie, le bleu de la marque inonde l'image, la carte de fin avance jusqu'à la dernière image
+      appui(540, 1478, 13.6);
+      tl.to("#flot", { scale: 40, duration: 0.8, ease: "power3.in" }, 13.75)
+        .to("#fin", { opacity: 1, duration: 0.3 }, 14.3)
+        .from("#fin .rond", { scale: 0.5, opacity: 0, duration: 0.7, ease: "back.out(1.6)" }, 14.4)
+        .from("#fin .n", { y: 50, opacity: 0, filter: "blur(12px)", duration: 0.55, ease: E }, 14.7)
+        .from("#fin .c", { opacity: 0, letterSpacing: ".6em", duration: 0.7, ease: E }, 15.0)
+        .from("#fin .p", { scale: 0.7, opacity: 0, duration: 0.55, ease: "back.out(1.7)" }, 15.4)
+        .from("#fin .w", { opacity: 0, duration: 0.5 }, 15.8)
+        .fromTo("#fin .raie", { x: -300 }, { x: 300, duration: 3.8, ease: "none" }, 14.2)
+        .fromTo("#fin .rond, #fin .n, #fin .c, #fin .p, #fin .w", { scale: 1 }, { scale: 1.03, duration: 2.0, ease: "none" }, 16.0)
+        .to({}, { duration: 0.01 }, 17.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
