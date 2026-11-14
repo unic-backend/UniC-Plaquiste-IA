@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="lib/gsap.min.js"></script>
+    <style>
+      /* Vidéo hors UniC (règle du patron : tous les sujets). Documentaire sportif : terrain tracé au trait, tableau d'affichage,
+         chiffres géants, couleurs du drapeau. Un ballon passe d'une date à la suivante : aucune coupe sèche. Faits : FIFA et CAF. */
+      @font-face { font-family: Anton; src: url(fonts/anton-latin-400-normal.woff2) format("woff2"); }
+      @font-face { font-family: Instr; font-style: italic; src: url(fonts/instrument-serif-latin-400-italic.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 800; src: url(fonts/inter-latin-800-normal.woff2) format("woff2"); }
+      @font-face { font-family: InterL; font-weight: 500; src: url(fonts/inter-latin-500-normal.woff2) format("woff2"); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: #062b1c; }
+      #root { position: relative; width: 1080px; height: 1920px; overflow: hidden; font-family: InterL, sans-serif; color: #f4f1e8;
+        background: radial-gradient(1100px 900px at 50% 40%, #0b4a30 0%, #062b1c 70%); }
+      #terrain { position: absolute; left: 90px; top: 360px; width: 900px; height: 1200px; opacity: .22; }
+      #terrain path, #terrain circle, #terrain rect { fill: none; stroke: #f4f1e8; stroke-width: 4; }
+      .sc { position: absolute; inset: 0; opacity: 0; }
+      .date { position: absolute; left: 0; width: 1080px; text-align: center; font: italic 400 96px Instr; color: #fdef42; }
+      .big { position: absolute; left: 0; width: 1080px; text-align: center; font: 400 150px/0.98 Anton; text-transform: uppercase; letter-spacing: .01em; }
+      .big em { font-style: normal; color: #fdef42; }
+      .small { position: absolute; left: 0; width: 1080px; text-align: center; font: 500 42px/1.35 InterL; color: rgba(244,241,232,.82); }
+      .score { position: absolute; left: 120px; width: 840px; height: 250px; border-radius: 28px; background: #04170f; border: 3px solid rgba(244,241,232,.18);
+        display: grid; grid-template-columns: 1fr 260px 1fr; align-items: center; box-shadow: 0 40px 80px rgba(0,0,0,.4); }
+      .score .eq { text-align: center; font: 800 46px InterL; letter-spacing: .06em; text-transform: uppercase; }
+      .score .res { text-align: center; font: 400 150px/1 Anton; color: #fdef42; }
+      .tag { position: absolute; left: 0; width: 1080px; text-align: center; }
+      .tag span { display: inline-block; padding: 14px 30px 12px; background: #e31b23; color: #fff; font: 800 38px InterL; letter-spacing: .1em; text-transform: uppercase; }
+      #ballon { position: absolute; left: 0; top: 0; width: 110px; height: 110px; margin: -55px 0 0 -55px; z-index: 5; }
+      #drapeau { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; display: flex; opacity: 0; }
+      #drapeau i { flex: 1; transform-origin: 50% 100%; }
+      #fin .etoile { position: absolute; left: 390px; top: 520px; width: 300px; height: 300px; }
+      .bande { position: absolute; left: 0; top: 880px; width: 1080px; padding: 50px 0 44px; background: #062b1c; box-shadow: 0 30px 60px rgba(0,0,0,.35); }
+      .src { position: absolute; left: 0; bottom: 70px; width: 1080px; text-align: center; font: 500 28px InterL; color: rgba(244,241,232,.5); letter-spacing: .04em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="24" data-width="1080" data-height="1920">
+      <svg id="terrain" viewBox="0 0 900 1200">
+        <rect pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" x="2" y="2" width="896" height="1196" />
+        <path pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" d="M2 600 H898" />
+        <circle pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" cx="450" cy="600" r="130" />
+        <path pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" d="M230 2 V180 H670 V2 M230 1198 V1020 H670 V1198" />
+      </svg>
+
+      <!-- 1. Accroche : 31 mai 2002 -->
+      <div class="sc" id="s1">
+        <div class="date" style="top:330px">31 mai 2002</div>
+        <div class="big" style="top:500px">Le Sénégal<br>affronte<br><em>la France.</em></div>
+        <div class="small" style="top:1010px">Premier match de sa première<br>Coupe du monde.</div>
+      </div>
+      <!-- 2. Le score -->
+      <div class="sc" id="s2">
+        <div class="tag" style="top:420px"><span>Séoul · Coupe du monde</span></div>
+        <div class="score" style="top:620px"><div class="eq">Sénégal</div><div class="res">1–0</div><div class="eq">France</div></div>
+        <div class="small" style="top:960px">But de Papa Bouba Diop.<br>Les champions du monde sont battus.</div>
+      </div>
+      <!-- 3. Quart de finale -->
+      <div class="sc" id="s3">
+        <div class="big" style="top:520px">Jusqu'en<br><em>quart</em><br>de finale.</div>
+        <div class="small" style="top:1030px">Comme le Cameroun en 1990 :<br>l'Afrique n'était jamais allée plus loin.</div>
+      </div>
+      <!-- 4. 20 ans d'attente -->
+      <div class="sc" id="s4">
+        <div class="small" style="top:470px">Puis l'attente.</div>
+        <div class="big" style="top:600px;font-size:330px"><em id="n20">0</em></div>
+        <div class="big" style="top:950px;font-size:110px">ans sans titre<br>africain.</div>
+      </div>
+      <!-- 5. CAN gagnée -->
+      <div class="sc" id="s5">
+        <div class="date" style="top:330px">6 février 2022</div>
+        <div class="tag" style="top:500px"><span>Finale · CAN</span></div>
+        <div class="score" style="top:660px"><div class="eq">Sénégal</div><div class="res" style="font-size:110px">0–0</div><div class="eq">Égypte</div></div>
+        <div class="small" style="top:980px">4 tirs au but à 2.<br>Sadio Mané marque le dernier.</div>
+        <div class="big" style="top:1180px;font-size:120px"><em>Champions</em><br>d'Afrique.</div>
+      </div>
+      <!-- 6. Qatar 2022 -->
+      <div class="sc" id="s6">
+        <div class="date" style="top:420px">Qatar 2022</div>
+        <div class="big" style="top:580px">Huitièmes<br>de <em>finale.</em></div>
+        <div class="small" style="top:950px">Sortis par l'Angleterre.</div>
+      </div>
+      <!-- 7. 2026 -->
+      <div class="sc" id="s7">
+        <div class="date" style="top:420px">2026</div>
+        <div class="big" style="top:580px;font-size:118px">De retour à la<br><em>Coupe du monde.</em></div>
+        <div class="small" style="top:950px">Qualifiés pour l'Amérique du Nord.</div>
+      </div>
+
+      <div id="drapeau"><i style="background:#00853f"></i><i style="background:#fdef42"></i><i style="background:#e31b23"></i></div>
+      <div class="sc" id="fin">
+        <svg class="etoile" viewBox="0 0 24 24"><path id="et" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" fill="#00853f" fill-opacity="0" stroke="#00853f" stroke-width=".6" d="M12 2l2.9 6.6 7.1.7-5.4 4.8 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.3l7.1-.7L12 2z" /></svg>
+        <div class="bande"><div class="big" style="position:static;width:auto">Allez<br>les <em>Lions.</em></div></div>
+        <div class="src" style="color:#062b1c;font-weight:800">Sources : FIFA, CAF</div>
+      </div>
+
+      <svg id="ballon" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="46" fill="#f4f1e8" stroke="#04170f" stroke-width="4" />
+        <path d="M50 30 L68 43 L61 64 L39 64 L32 43 Z" fill="#04170f" />
+        <path d="M50 30 V6 M68 43 L91 36 M61 64 L75 85 M39 64 L25 85 M32 43 L9 36" stroke="#04170f" stroke-width="4" fill="none" />
+      </svg>
+    </div>
+    <script>
+      const E = "power3.out", tl = gsap.timeline({ paused: true });
+      const ent = (s, t) => tl.set(s, { opacity: 1 }, t)
+        .from(`${s} > *`, { y: 60, opacity: 0, filter: "blur(14px)", duration: 0.6, stagger: 0.22, ease: E }, t + 0.05);
+      const sort = (s, t) => tl.to(s, { opacity: 0, filter: "blur(16px)", duration: 0.35, ease: "power2.in" }, t);
+      // Le ballon traverse l'image à chaque changement : la scène suivante apparaît dans son sillage.
+      const passe = (t, y1, y2, sens = 1) => tl.fromTo("#ballon", { x: sens > 0 ? -120 : 1200, y: y1, rotation: 0 },
+        { x: sens > 0 ? 1200 : -120, y: y2, rotation: 540 * sens, duration: 0.7, ease: "power2.inOut" }, t);
+
+      // Le terrain se trace pendant l'accroche, puis reste en fond, discret.
+      tl.to("#terrain rect, #terrain path, #terrain circle", { attr: { "stroke-dashoffset": 0 }, duration: 1.6, stagger: 0.2, ease: "power2.inOut" }, 0);
+      ent("#s1", 0.15);
+      sort("#s1", 3.0); passe(2.9, 1500, 1300);
+      ent("#s2", 3.3);
+      tl.from("#s2 .score", { scale: 0.85, duration: 0.6, ease: "back.out(1.6)" }, 3.4);
+      sort("#s2", 6.3); passe(6.2, 600, 900, -1);
+      ent("#s3", 6.6);
+      sort("#s3", 9.1); passe(9.0, 1200, 1100);
+      ent("#s4", 9.4);
+      const c = { n: 0 }, out = document.getElementById("n20");
+      tl.to(c, { n: 20, duration: 1.4, ease: "power2.out", onUpdate: () => { out.textContent = Math.round(c.n); } }, 9.7);
+      sort("#s4", 12.0); passe(11.9, 800, 1500, -1);
+      ent("#s5", 12.3);
+      tl.from("#s5 .score", { scale: 0.85, duration: 0.6, ease: "back.out(1.6)" }, 12.6);
+      sort("#s5", 16.0); passe(15.9, 1400, 700);
+      ent("#s6", 16.3);
+      sort("#s6", 18.5); passe(18.4, 700, 1300, -1);
+      ent("#s7", 18.8);
+      // Fin : le drapeau monte (le fond change une seule fois), l'étoile se trace et se remplit.
+      tl.to("#s7", { opacity: 0, duration: 0.3 }, 20.9)
+        .set("#drapeau", { opacity: 1 }, 20.9)
+        .from("#drapeau i", { scaleY: 0, duration: 0.6, stagger: 0.1, ease: "power3.inOut" }, 20.9)
+        .set("#fin", { opacity: 1 }, 21.4)
+        .to("#et", { attr: { "stroke-dashoffset": 0 }, duration: 0.7, ease: "power2.inOut" }, 21.4)
+        .to("#et", { attr: { "fill-opacity": 1 }, duration: 0.4 }, 22.0)
+        .from("#fin .bande", { scaleY: 0, duration: 0.45, ease: "power3.out" }, 21.6)
+        .from("#fin .big", { y: 50, opacity: 0, duration: 0.6, ease: E }, 21.8)
+        .from("#fin .src", { opacity: 0, duration: 0.5 }, 22.2)
+        .fromTo("#fin .etoile", { scale: 1 }, { scale: 1.06, rotation: 4, duration: 2.6, ease: "none", transformOrigin: "50% 50%" }, 21.4)
+        .to({}, { duration: 0.01 }, 23.99);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

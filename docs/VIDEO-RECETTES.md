@@ -20,6 +20,7 @@ Rendu : `bash scripts/video/modeles/preparer.sh <modèle> [sortie.mp4]` (1080×1
 | `etsi` | 3D cartoon « et si ? » (V2) | 10 s | Maquette de salon (contours noirs, 3 tons) ; la caméra entre, les caissons jaillissent du plafond, la LED puis les spots s'allument |
 | `enquete` | documentaire collage (façon Vox, référence du 13/11/2026) | 23 s | « 4 sites, un seul plaquiste » : papier quadrillé, photos des 4 sites JOJ Dakar 2026 en noir et blanc tramé à bord déchiré, bandeaux noirs, serif italique rouge, surligneur jaune, cercle et flèche bleus à la main, fil pointillé que la caméra suit d'un site à l'autre, 8 ans / 180+ / 98 %, carte de fin sombre |
 | `produit` | pub de produit (« motion ad » d'application, référence du 13/11/2026) | 18 s | Fond clair et sol de points en perspective ; téléphone dont l'écran est construit en code ; un doigt appuie, les 4 services sortent de l'écran en cartes ; message tapé lettre par lettre ; le bleu de la marque inonde l'image jusqu'à la carte de fin |
+| `lions` | documentaire sportif, **hors UniC** (règle : tous les sujets) | 24 s | « Le parcours des Lions » : terrain tracé au trait, tableaux d'affichage, compteur, un ballon passe d'une date à l'autre, fin sur le drapeau. Faits vérifiés (FIFA, CAF) ; un fait contesté est laissé de côté ; aucune photo de joueur (droits) |
 
 Chiffres et coordonnées = ceux de `FACTS` / `FACT_STATS` (`backend/app/video_studio.py`) ; photos = dossier `images/` du site.
 
