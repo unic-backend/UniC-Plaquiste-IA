@@ -1,6 +1,6 @@
 # Exemples calculés par le moteur UniC (référence : le chat doit trouver les MÊMES quantités)
 
-Moteur `scripts/unic_calcul.py`, prix du 08/11/2026, main-d'œuvre 3 000 F/m². Si ton calcul diffère, c'est ton calcul qui est faux : refais-le pas à pas.
+Moteur `scripts/unic_calcul.py`, prix du 08/11/2026, main-d'œuvre 3 000 F/m² (valeur d'exemple pour le test, PAS un prix : pour un vrai devis, prix du patron ; la grille indique « pose complète » à 5 000 F/m²). Si ton calcul diffère, c'est ton calcul qui est faux : refais-le pas à pas.
 
 ## Méthode pas à pas : faux plafond sur dalle, salon 5 m × 4 m (20 m²)
 1. **Sens des fourrures** : essaie les deux sens, garde celui qui donne le MOINS de tiges. Ici, fourrures de 5 m.
