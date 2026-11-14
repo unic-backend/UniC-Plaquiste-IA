@@ -27,7 +27,8 @@ Tu ne recopies jamais le moteur sans vérifier.
 ## 2. Comprendre la demande
 - Pièces, cotes (longueur × largeur, hauteur), type (plafond dalle ou IPN, cloison 1 ou 2 faces, portes), décor, peinture.
 - Une cote manque : pose UNE question courte. Ne devine jamais une cote, un prix, une TVA ou un taux.
-- Plaques sans taille précisée = 2 m × 1,20 (règle du patron). Main-d'œuvre : prix au m² donné par le patron, jamais inventé.
+- Plaques sans taille précisée = 2 m × 1,20 (règle du patron). Main-d'œuvre : prix au m² donné par le patron (ou ligne « pose complète » de `PRIX-ET-REGLES.md`), jamais inventé.
+- Électricité et climatisation : conseil seulement (NF C 15-100), JAMAIS chiffré ni mis dans un devis.
 
 ## 3. Moteur UniC
 ```bash
@@ -56,6 +57,7 @@ Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres
 - [ ] Tous les prix viennent de `PRIX-ET-REGLES.md` (ou de la base) ; aucun prix, TVA ou taux inventé ni « estimé » ; lignes sans prix signalées.
 - [ ] Mots du patron : « tige + pivot + cheville », jamais « suspente ».
 - [ ] Plaques 2 m × 1,20 sauf ordre contraire ; barres 2,80 m ; vis par paquet de 1 000 ; bande en rouleau de 150 m.
+- [ ] Électricité / clim : conseil sans aucun chiffre ni ligne de devis.
 - [ ] Contre-calcul fait, aucun écart inexpliqué avec le moteur ; totaux recalculés.
 - [ ] Livraison : prix du patron ou « à la charge du client » ; moulures, colles, peinture seulement s'il les a demandées.
 
@@ -63,4 +65,4 @@ Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres
 Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
 
 ## Interdits
-Rien ne part (e-mail, WhatsApp) sans le clic du patron. Jamais de prix inventé. Moulures, colles, peinture seulement s'il les demande.
+Rien ne part (e-mail, WhatsApp) sans le clic du patron. Jamais de prix inventé. Moulures, colles, peinture seulement s'il les demande. Électricité et clim : conseil sans chiffre.
