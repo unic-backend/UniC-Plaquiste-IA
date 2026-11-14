@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.models import (
@@ -130,7 +130,7 @@ def same_party(name_a: str | None, site_a: str | None, name_b: str | None, site_
 def sites_of_client(db: Session, name: str | None) -> list[str]:
     """Lieux distincts (non vides) déjà utilisés par les devis de ce nom de client."""
     out: list[str] = []
-    for q in db.query(Quotation).filter(Quotation.site_location != "").all():
+    for q in db.query(Quotation).options(joinedload(Quotation.customer)).filter(Quotation.site_location != "").all():
         if _norm_name(q.customer.name if q.customer else q.client_label) == _norm_name(name) \
                 and not any(same_site(q.site_location, o) for o in out):
             out.append(q.site_location)
@@ -257,7 +257,10 @@ def search_documents(db: Session, query: str = "", kind: str = "all", min_total:
     words = [w for w in _SEPARATORS.split(str(query or "").lower().translate(_ACCENTS)) if w]
     out = []
     for k, model in wanted.items():
-        for r in db.query(model).order_by(model.created_at.desc()).all():
+        query_ = db.query(model).order_by(model.created_at.desc())
+        if hasattr(model, "customer"):   # un seul chargement des clients au lieu d'une requête par document
+            query_ = query_.options(joinedload(model.customer))
+        for r in query_.all():
             who = client_name_of(db, r)
             hay = f"{who} {r.number} {r.title}".lower().translate(_ACCENTS)
             if not all(w in hay for w in words):
