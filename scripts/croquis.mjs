@@ -1,5 +1,5 @@
 // Croquis Sketchy hors de l'appli : rapports, documents, vidéos (Claude Code). Même moteur que le chat UniC IA.
-// usage : node scripts/croquis.mjs scene.txt dossier/ [--largeur 1080]
+// usage : node scripts/croquis.mjs scene.txt dossier/ [--largeur 1080] [--echelle 2]   (--echelle 4 : images nettes pour une vidéo 1080)
 // sortie : croquis.png (dessin entier), etape-1.png… (une image par étape, entourée en rouge), croquis.svg,
 //          croquis.html + sketchy.js (page interactive, sans Internet), etapes.json (titre et texte de chaque étape).
 // Scène : la syntaxe de frontend/public/vendor/sketchy (voir docs/skills/unic-croquis/SKILL.md). Jamais de coordonnées.
@@ -11,8 +11,9 @@ const { chromium } = createRequire(import.meta.url)("playwright");   // require 
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf(name); return i < 0 ? def : args.splice(i, 2)[1]; };
 const width = Number(opt("--largeur", "1080"));
+const scale = Number(opt("--echelle", "2"));
 const [SCENE, OUT] = args;
-if (!SCENE || !OUT) { console.error("usage : node scripts/croquis.mjs scene.txt dossier/ [--largeur 1080]"); process.exit(2); }
+if (!SCENE || !OUT) { console.error("usage : node scripts/croquis.mjs scene.txt dossier/ [--largeur 1080] [--echelle 2]"); process.exit(2); }
 const scene = fs.readFileSync(SCENE, "utf8");
 const BUNDLE = new URL("../frontend/public/vendor/sketchy/sketchy.js", import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
@@ -27,7 +28,7 @@ fs.copyFileSync(BUNDLE, path.join(OUT, "sketchy.js"));
 
 const b = await chromium.launch();
 try {
-  const p = await (await b.newContext({ viewport: { width: width + 32, height: 900 }, deviceScaleFactor: 2 })).newPage();
+  const p = await (await b.newContext({ viewport: { width: width + 32, height: 900 }, deviceScaleFactor: scale })).newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   await p.goto("file://" + path.resolve(OUT, "croquis.html"));

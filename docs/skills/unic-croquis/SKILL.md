@@ -16,7 +16,7 @@ Même moteur partout : `frontend/public/vendor/sketchy/sketchy.js` (copie relue,
 | Claude Code : rapport, document, vidéo | `node scripts/croquis.mjs scene.txt dossier/` → `croquis.png`, `etape-1.png`…, `croquis.svg`, `croquis.html` (+ `sketchy.js`, interactif, sans Internet), `etapes.json` |
 
 - **Rapport / document (docx, pdf, page)** : insère `croquis.png` (ou `croquis.svg`) ; pour un pas-à-pas, les `etape-N.png` avec le texte de `etapes.json`.
-- **Vidéo** : une scène par idée ; chaque `etape-N.png` est une image de la vidéo (le rouge entoure ce que dit la voix), dans un modèle de `scripts/video/modeles/` en `<img>`. Option `--largeur 1080` pour du vertical net.
+- **Vidéo** : une scène par idée ; chaque `etape-N.png` est une image de la vidéo (le rouge entoure ce que dit la voix), dans un modèle de `scripts/video/modeles/` en `<img>`. Pour une vidéo 1080 : `--echelle 4` (images nettes) ; la caméra peut viser la boîte rouge de chaque étape (repérée sur l'image, pixels rouges).
 - **Partage** : envoyer le dossier `croquis.html` + `sketchy.js` (s'ouvre dans un navigateur, cliquable).
 
 ## Syntaxe (une ligne par élément)
