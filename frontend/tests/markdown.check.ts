@@ -40,5 +40,9 @@ eq("texte simple", md("Bonjour"), "<p>Bonjour</p>");
 eq("vide", md(""), "");
 // texte en cours de flux : tableau incomplet ne plante pas
 has("flux : en-tête seul", md("| a | b |\n|---|"), "|---|");
+// croquis Sketchy : la scène passe en attribut, guillemets et balises échappés (pas d'injection), texte lisible en secours
+has("croquis : bloc dessinable", md("```sketchy\na -> b\n```"), '<div class="sketchy" data-scene="a -&gt; b">');
+has("croquis : guillemet échappé", md('```sketchy\na" onmouseover="x <img>\n```'), 'data-scene="a&quot; onmouseover=&quot;x &lt;img&gt;"');
+has("croquis : secours texte", md("```sketchy\na -> b\n```"), "<pre><code>a -&gt; b</code></pre></div>");
 console.log(`markdown : OK ${ok}  ÉCHECS ${ko}`);
 if (ko) process.exit(1);

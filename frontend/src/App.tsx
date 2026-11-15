@@ -1,5 +1,6 @@
 import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { lazyPage } from "./lazyPage";
+import { drawSketches } from "./sketchy";
 import { isWakeScreen, wakeApi } from "./phone";
 import { AppLockCard, AppLockGate } from "./AppLock";
 import ErrorBoundary from "./ErrorBoundary";
@@ -257,6 +258,8 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
   const tw = useReveal(m.content.length, !!m.fresh && m.role === "assistant");
   const revealing = m.role === "assistant" && !!m.fresh && !tw.done;
   const html = useMemo(() => (revealing ? revealHtml(md(m.content)) : md(m.content)), [m.content, revealing]);   // pas de re-découpage du Markdown à chaque appui ailleurs
+  const mdRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!revealing) drawSketches(mdRef.current); }, [html, revealing]);   // croquis dessinés une fois le texte affiché en entier
   const structured = m.meta?.structured;
   const arts = m.meta?.artifacts || [];
   // fichiers joints : cartes séparées, au-dessus de la question (aperçu de la photo ou du plan)
@@ -267,7 +270,7 @@ function MessageView({ m, onRegenerate, onEdit }: { m: ChatMessage; onRegenerate
       <div className="msg-col">
       {m.role === "user" && <AttachRow items={sent} className="sent" />}
       <div className={`bubble ${m.fresh ? "fresh" : ""} ${m.fresh && !tw.done ? "typing" : ""}`} onClick={m.fresh && !tw.done ? tw.skip : undefined}>
-        <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="md" ref={mdRef} dangerouslySetInnerHTML={{ __html: html }} />
         {m.role === "user" && (
           <div className="msg-actions">
             <button onClick={async () => { try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* presse-papiers indisponible */ } }}>

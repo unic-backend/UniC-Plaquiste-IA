@@ -51,3 +51,15 @@ def test_cloison_sans_marge_et_quiz_revision(c):
 def test_quiz_reponses_valides():
     for q in formation.QUIZ:
         assert 0 <= q["ok"] < len(q["choix"])
+
+
+def test_croquis_sketchy_copie_verifiee():
+    """Le moteur Sketchy est servi par l'appli (pas de CDN) : le fichier doit être celui relu (empreinte du README)."""
+    import hashlib
+    import re
+    from pathlib import Path
+    vendor = Path(__file__).resolve().parents[2] / "frontend" / "public" / "vendor" / "sketchy"
+    want = re.search(r"sha256 : ([0-9a-f]{64})", (vendor / "README.md").read_text(encoding="utf-8")).group(1)
+    assert hashlib.sha256((vendor / "sketchy.js").read_bytes()).hexdigest() == want
+    assert "MIT" in (vendor / "LICENSE").read_text(encoding="utf-8")
+    assert all(m["croquis"].startswith("title ") for m in formation.MODULES if "croquis" in m)

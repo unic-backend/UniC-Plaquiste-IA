@@ -1553,6 +1553,7 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .md a { color: var(--copper-text, var(--copper-d)); text-decoration: underline; text-underline-offset: 2px; word-break: break-word; }
 .md pre { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; overflow-x: auto; background: var(--surface-2); font-size: 13px; line-height: 1.45; }
+.md .sketchy { margin: 0 0 12px; max-width: 100%; overflow-x: auto; border-radius: 14px; }
 .md pre code { background: none; padding: 0; }
 .md s { opacity: .7; }
 /* Listes de documents : fiches compactes sur téléphone, états vides qui guident, filtres repliés */

@@ -29,6 +29,12 @@ MODULES = [
         "Suspente de plus de 1 m : tiges de 1 m raccordées (2 tiges par point).",
         "Cornière de rive tout le tour ; une cheville à frapper tous les 30 cm.",
     ], "pieges": ["Sens des fourrures : essayer les deux sens et garder celui qui donne le moins de tiges."],
+        "croquis": "title Faux plafond sur dalle\ndir down\ndalle Dalle béton\ntige Tige + pivot + cheville ~ 1re à 0,30 m du mur, puis tous les 0,90 m\n"
+                   "fourrure Fourrure !accent ~ une ligne tous les 0,50 m\nplaque Plaque BA13 ~ 2 m × 1,20 m, posée en travers\n"
+                   "dalle -> tige accroche\ntige -> fourrure porte\nfourrure -> plaque vissée\n"
+                   "step Accroche: La tige est chevillée dans la dalle | dalle tige dalle->tige\n"
+                   "step Ossature: La tige porte la fourrure | tige fourrure tige->fourrure\n"
+                   "step Plaque: La plaque se visse sur les fourrures | fourrure plaque fourrure->plaque",
         "exemple": {"name": "Salon", "kind": "ceiling", "length_m": 5, "width_m": 4, "support": "dalle"}},
     {"id": "marge", "titre": "3. Plaques et marge", "points": [
         "Compter les plaques entières de mur à mur, puis les morceaux ; jamais « surface ÷ surface d'une plaque ».",
@@ -44,6 +50,12 @@ MODULES = [
         "4 vis de 9 mm par montant.",
         "Cloison plus haute que 2,80 m : rallonge + raccord de rail de 40 cm.",
     ], "pieges": ["Plaque debout ou couchée : l'écart des montants change (0,60 ou 0,50)."],
+        "croquis": "title Cloison\ndir down\nrail Rails haut et bas ~ longueur × 2 ÷ 2,80\nmontant Montants !accent ~ tous les 0,60 m, 2 aux jonctions, 3 par porte\n"
+                   "plaque Plaques des 2 côtés\nbande Bande + enduit ~ 1,40 ml et 0,35 kg × 2 couches par m²\n"
+                   "rail -> montant tient\nmontant -> plaque vissée\nplaque -> bande joints\n"
+                   "step Rails: Les rails se fixent au sol et au plafond | rail\n"
+                   "step Montants: Les montants entrent dans les rails | rail montant rail->montant\n"
+                   "step Finition: Plaques vissées, puis bande et enduit | plaque bande plaque->bande",
         "exemple": {"name": "Cloison", "kind": "partition", "length_m": 6, "height_m": 2.5, "sides": 2, "doors": 1}},
     {"id": "finition", "titre": "5. Vis, bande, enduit", "points": [
         "Vis à plaque : 15 par m².",

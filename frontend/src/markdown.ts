@@ -33,9 +33,12 @@ export function md(text: string): string {
     // bloc de code ```
     if (/^\s*```/.test(line)) {
       flushPara(); closeList();
+      const sketch = /^\s*```\s*sketchy\b/i.test(line);
       const code: string[] = [];
       for (i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) code.push(lines[i]);
-      out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+      // croquis : dessiné après coup par sketchy.ts ; la scène reste lisible en texte si le dessin échoue
+      out.push(sketch ? `<div class="sketchy" data-scene="${esc(code.join("\n")).replace(/"/g, "&quot;")}"><pre><code>${esc(code.join("\n"))}</code></pre></div>`
+        : `<pre><code>${esc(code.join("\n"))}</code></pre>`);
       continue;
     }
     // tableau : une ligne d'en-tête, puis la ligne de séparation (---|---)

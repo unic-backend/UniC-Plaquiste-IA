@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import * as I from "./Icons";
+import { drawSketches } from "./sketchy";
 
 /**
  * Formation UniC : un cours déjà écrit (règles du patron), des questions et des exercices corrigés par le moteur de calcul.
@@ -65,14 +66,17 @@ function useRun() {
 function Cours({ c, who }: { c: any; who: string }) {
   const { busy, err, run } = useRun();
   const [done, setDone] = useState<string[]>([]);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => { if (who) api.formationSuivi(who).then((p) => setDone(p.lecons), () => {}); }, [who]);
+  useEffect(() => { drawSketches(box.current); }, [c]);
   return (
-    <div className="mat-list">
+    <div className="mat-list" ref={box}>
       {c.modules.map((m: any) => (
         <section key={m.id} className="mat-row fo-mod">
           <div className="mat-head"><b>{m.titre}</b>{done.includes(m.id) && <span className="fo-ok"><I.Check size={14} /> compris</span>}</div>
           <ul>{m.points.map((p: string) => <li key={p}>{p}</li>)}</ul>
           {m.pieges.length > 0 && <p className="fo-trap"><b>Piège :</b> {m.pieges.join(" ")}</p>}
+          {m.croquis && <div className="sketchy fo-sketch" data-scene={m.croquis} dangerouslySetInnerHTML={{ __html: "" }} />}
           {m.exemple && (
             <details className="pc-why" open>
               <summary>Exemple résolu : {m.exemple.enonce}</summary>
