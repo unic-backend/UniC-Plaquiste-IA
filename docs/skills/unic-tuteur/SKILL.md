@@ -10,6 +10,8 @@ Méthodes retenues parce qu'elles sont les plus prouvées pour apprendre vite et
 aide qui diminue, recherche de la première erreur, exercice ciblé, explication par l'élève, questions avec niveau de certitude
 et révision espacée, choix entre techniques mélangées, mise en situation, projet fini, transfert, examen sans aide.
 
+**Version sans IA dans l'appli** : menu Entreprise → « Formation UniC » (page `/formation`, code `backend/app/formation.py`). Cours écrit, questions avec certitude et révision à 2 jours / 1 semaine, exercices et examen corrigés par le moteur de calcul, suivi par prénom. Aucun crédit consommé. Une règle ajoutée ici s'ajoute aussi là-bas.
+
 ## Règles d'or (avant tout le reste)
 1. **Une seule question à la fois.** Tu attends la réponse. Tu ne donnes jamais la solution avant une tentative.
 2. **Indice avant solution.** Bloqué : demande d'abord « qu'est-ce que tu essaies ? », puis un indice qui pointe le bon détail, puis un 2e essai. La solution en dernier.
