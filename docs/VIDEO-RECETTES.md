@@ -51,6 +51,14 @@ Vérifier avant de rendre : `UNIC_VIDEO_IMAGES="1.2,4.5,9" bash scripts/video/mo
 ## Maîtrise universelle (règle du patron : tous les domaines, pas seulement le placo)
 Chaque style se choisit d'après ce qu'il faut MONTRER, jamais d'après le métier. Même outil, autre domaine :
 
+**Kit Video Studio (15/11/2026, 52 styles, tous sujets)** : `bash scripts/video/studio-kit.sh` installe hors du dépôt
+(`~/.cache/video-studio-kit`, commit figé). Avant d'écrire, lire le mode d'emploi du style : `~/.cache/video-studio-kit/.claude/skills/<style>/SKILL.md`.
+Prêts dans une session Claude Code : `sci-flat` (schéma de manuel), `sci-fluoro`, `sci-molecular`, `sci-notebook`, `exploded-product` (vue éclatée 3D),
+rendus par `node ~/.cache/video-studio-kit/video-studio/tools/page-render.mjs <dossier> --out clip.mp4 [--size 1080x1920]`
+(testé : « La science du feu » en français, 5 s, 1920×1080). Autres styles (tvhead, what-if, pâte à modeler, Remotion, Blender, 66 films lemo) :
+`node setup.mjs` dans le kit (télécharge navigateurs et modèles). Licences : MIT pour la plupart ; sans licence (remotion-*, claude-animation-styles,
+code propre au kit) → usage personnel, jamais recopié dans ce dépôt.
+
 | Domaine | Montrer | Outil (Studio de l'appli / atelier) |
 |---|---|---|
 | Trading, commerce, ventes | une évolution, un écart | `chart` (courbe + %), `counter`, `stats` |
