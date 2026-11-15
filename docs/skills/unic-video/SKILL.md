@@ -14,7 +14,8 @@ Une info manque : UNE question courte.
 2. Écris UN brief (sujet, format, durée, style vu, faits vrais, interdits) et fabrique à partir de lui, pas du fil de la discussion.
 3. Styles prêts (`scripts/video/modeles/`, tableau de `docs/VIDEO-RECETTES.md`) : `enquete` (documentaire collage), `produit` (pub d'appli), `references`, `devis`, `cloison`, `plafond`, `points`, `etapes`, `trajet`, `bonhomme`, `etsi`. Copie le plus proche et change textes, photos, durées.
 4. Contrôle : `UNIC_VIDEO_IMAGES="1,4,9" bash scripts/video/modeles/preparer.sh <modèle> dossier` (images arrêtées), puis rendu, puis `etudier.py sortie.mp4 dossier 2`.
-5. Défauts = liste numérotée ; corrige seulement la liste, garde le reste.
+5. Expliquer une méthode, un ordre ou une comparaison : croquis dessiné à la main, une image par étape (`node scripts/croquis.mjs scene.txt dossier/`, voir `docs/skills/unic-croquis/SKILL.md`), posé en `<img>` dans le modèle.
+6. Défauts = liste numérotée ; corrige seulement la liste, garde le reste.
 Vidéo personnelle (famille, fête, sport, autre métier) : même méthode ; pas de logo ni de téléphone UniC sauf demande.
 
 ## 2. Médias

@@ -46,6 +46,7 @@ Vérifier avant de rendre : `UNIC_VIDEO_IMAGES="1.2,4.5,9" bash scripts/video/mo
 | Vidéos de référence | yt-dlp (Unlicense) | `--js-runtimes node` ; une vidéo de tiers sert à étudier, jamais à republier |
 | Stabiliser, ralentir, niveau sonore | FFmpeg (déjà là) | filtres `vidstabdetect/vidstabtransform`, `minterpolate`, `loudnorm` |
 | Voix off en français, sans carte graphique ni compte | Kokoro-82M (Apache-2.0) via `hyperframes tts` (Apache-2.0) | `HYPERFRAMES_PYTHON=/opt/atelier-video/bin/python npx hyperframes tts "texte" -v ff_siwis -s 0.95 -o voix.wav` (≈ 9 s de voix en quelques secondes). Écrire « Unik Plaquiste » (sinon « unissé ») et le numéro en lettres (« soixante-dix-sept, sept cent huit… »). Contrôle : retranscrire avec faster-whisper avant de monter. |
+| Croquis expliqué, étape par étape | Sketchy (MIT), copie dans `frontend/public/vendor/sketchy` | `node scripts/croquis.mjs scene.txt dossier/` → `etape-N.png` (l'élément dont parle la voix entouré en rouge) ; mode d'emploi `docs/skills/unic-croquis/SKILL.md` |
 
 ## Maîtrise universelle (règle du patron : tous les domaines, pas seulement le placo)
 Chaque style se choisit d'après ce qu'il faut MONTRER, jamais d'après le métier. Même outil, autre domaine :
