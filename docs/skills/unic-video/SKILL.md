@@ -1,6 +1,6 @@
 ---
 name: unic-video
-description: Vidéos pour UniC Plaquiste ou personnelles du patron (Reels, TikTok, YouTube, présentation client, documentaire, pub de produit, vidéo « comme cette référence ») à partir de ses vrais médias avec le moteur du dépôt (scripts/video, Chrome + ffmpeg). À utiliser dès que le patron demande une vidéo, un montage, un Reel, un TikTok, un avant/après filmé ou une vidéo de présentation. Ne tourne jamais tout seul : seulement à la demande.
+description: Vidéos sur TOUS les sujets (règle du patron : universel, comme un YouTubeur — science, histoire, sport, explications, « What if », pub, personnel) ET pour UniC Plaquiste (Reels, TikTok, YouTube, présentation client, documentaire, pub de produit, vidéo « comme cette référence ») à partir de ses vrais médias avec le moteur du dépôt (scripts/video, Chrome + ffmpeg). À utiliser dès que le patron demande une vidéo, un montage, un Reel, un TikTok, un avant/après filmé ou une vidéo de présentation. Ne tourne jamais tout seul : seulement à la demande.
 ---
 
 # Vidéos UniC (à la demande)
