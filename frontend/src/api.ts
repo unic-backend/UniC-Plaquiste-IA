@@ -469,6 +469,13 @@ export const api = {
   createProject: (body: any) =>
     request("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   quotes: () => request<any[]>("/api/quotes?summary=1"),
+  formation: () => request<any>("/api/formation"),
+  formationExercice: (type: string, seed: number) => request<any>(`/api/formation/exercice?type=${encodeURIComponent(type)}&seed=${seed}`),
+  formationCorriger: (body: any) => request<any>("/api/formation/exercice/corriger", { method: "POST", body: JSON.stringify(body) }),
+  formationQuiz: (eleve: string, question: string, choix: number, certitude: string) =>
+    request<any>("/api/formation/quiz", { method: "POST", body: JSON.stringify({ eleve, question, choix, certitude }) }),
+  formationLecon: (eleve: string, lecon: string) => request<any>("/api/formation/lecon", { method: "POST", body: JSON.stringify({ eleve, lecon }) }),
+  formationSuivi: (eleve: string) => request<any>("/api/formation/suivi", { method: "POST", body: JSON.stringify({ eleve }) }),
   calcPieces: (body: any) => request<any>("/api/calc/pieces", { method: "POST", body: JSON.stringify(body) }),
   calcPiecesQuote: (body: any) =>
     request<{ id: string; numero: string; total: number | null; complet: boolean }>("/api/calc/pieces/devis", { method: "POST", body: JSON.stringify(body) }),
