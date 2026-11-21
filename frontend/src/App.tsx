@@ -14,6 +14,7 @@ const Agenda = lazyPage(() => import("./Agenda"), "Agenda");
 const Equipe = lazyPage(() => import("./Equipe"), "Equipe");
 const Pieces = lazyPage(() => import("./Pieces"), "Pieces");
 const Formation = lazyPage(() => import("./Formation"), "Formation");
+const DriveDevis = lazyPage(() => import("./Drive"), "DriveDevis");
 const Bibliotheque = lazyPage(() => import("./Bibliotheque"), "Bibliotheque");
 const Analyse = lazyPage(() => import("./Analyse"), "Analyse");
 const Tresorerie = lazyPage(() => import("./Tresorerie"), "Tresorerie");
@@ -1517,7 +1518,7 @@ function DevisList() {
     <TablePage
       title="Devis"
       lede="Tous les devis de l'IA. Une correction modifie le même devis."
-      extra={<><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
+      extra={<><Link className="btn btn-line" to="/devis/drive">Importer du Drive</Link><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
       rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total != null ? fmt(q.total, q.currency || "FCFA") : "incomplet", q.prices_complete ? "oui" : "non"])}
       empty={{ title: "Aucun devis pour l'instant", hint: "Demande-le à UniC dans le chat : « Fais un devis pour une cloison de 12 m² chez M. Diop »." }}
@@ -2369,6 +2370,7 @@ export default function App() {
         <Route path="/chantiers/manuels" element={<ProjetsManuels />} />
         <Route path="/chantiers/:id" element={<ChantierDetail />} />
         <Route path="/devis" element={<DevisList />} />
+        <Route path="/devis/drive" element={<DriveDevis />} />
         <Route path="/devis/:id" element={<DocDetail kind="quote" />} />
         <Route path="/factures" element={<Factures />} />
         <Route path="/agenda" element={<Agenda />} />

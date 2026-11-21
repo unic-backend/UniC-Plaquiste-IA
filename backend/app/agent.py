@@ -562,6 +562,16 @@ TOOLS: list[dict] = [
             "required": ["decision"], "additionalProperties": False},
     },
     {
+        "name": "import_drive_quote",
+        "description": ("SUIVI : importe dans l'appli un devis PDF rangé dans Google Drive (fait hors de l'appli, ex. par Claude Code) : "
+                        "il devient un devis de l'appli (numéro, PDF signé, suivi, encaissement). query = client ou numéro (« Global Bridge »). "
+                        "accepted=true seulement si le patron dit que ce devis est accepté. Plusieurs fichiers → l'outil les liste : demande "
+                        "lequel (file_id), ne devine pas. Les prix du PDF sont gardés tels quels."),
+        "input_schema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "file_id": {"type": "string"}, "accepted": {"type": "boolean"}},
+            "additionalProperties": False},
+    },
+    {
         "name": "record_receipt",
         "description": ("SUIVI : le patron dit avoir REÇU une somme d'un client (avance, acompte, solde). Enregistre-la sur le bon devis "
                         "(l'argent reçu vaut acceptation) puis annonce le reste et les pourcentages donnés par l'outil. kind = avance / acompte / "
@@ -892,7 +902,7 @@ TOOL_LABELS = {
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
     "create_invoice": "Facture créée", "create_purchase_order": "Bon de commande créé",
     "create_delivery_note": "Bon de livraison créé", "list_documents": "Documents consultés",
-    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "pose_plan": "Plan de pose dessiné", "elec_calc": "Calcul électricité / clim fait", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
+    "read_plan": "Plan lu", "add_appointment": "Rendez-vous noté", "list_agenda": "Agenda consulté", "update_appointment": "Agenda mis à jour", "list_unpaid": "Impayés consultés", "list_tracking": "Suivi consulté", "client_statement": "Relevé client prêt", "quote_margin": "Marge calculée", "explain_quote": "Origine du devis expliquée", "mark_quote_decision": "Réponse du client notée", "import_drive_quote": "Devis importé du Drive", "record_receipt": "Versement enregistré", "record_expense": "Dépense de chantier notée", "record_work": "Travail de l'ouvrier noté", "record_worker_payment": "Paiement de l'ouvrier noté", "team_status": "Équipe consultée", "create_balance_invoice": "Facture de reliquat créée", "mail_signals": "E-mails analysés", "generate_visual": "Visuel créé", "pdf_tool": "PDF traité", "set_collect_reminder": "Rappel d'encaissement fixé", "calculate_from_plan": "Métré tiré du plan", "draw_diagram": "Schéma dessiné", "logo_guide": "Guide logo lu", "round_table": "Table ronde tenue", "ceiling_designs": "Plafonds dessinés", "pose_plan": "Plan de pose dessiné", "elec_calc": "Calcul électricité / clim fait", "audit_logo": "Logo audité", "remember": "Mémorisé", "site_memory": "Fiche client consultée", "list_memory": "Mémoire consultée", "table_info": "Tableur lu", "table_query": "Calcul fait sur le tableur", "business_report": "Chiffres de l'entreprise analysés", "cash_forecast": "Trésorerie prévue", "set_cash_balance": "Solde enregistré", "set_fixings": "Fixations enregistrées", "search_conversations": "Conversations retrouvées", "forget_memory": "Souvenir retiré",
     "list_files": "Fichiers retrouvés", "inspect_file": "Fichier lu", "edit_file": "Fichier modifié", "get_document": "Document ouvert", "revise_document": "Document corrigé", "discard_document": "Brouillon retiré", "plan_video": "Scénario vidéo prêt", "deep_research": "Recherche approfondie faite", "learn_page": "Page apprise",
     "list_directory": "Fiches consultées", "google_post_plan": "Rythme fiche Google consulté", "create_contact": "Fiche créée",
     "self_check": "Contrôle de santé fait", "list_incidents": "Problèmes consultés", "improve_myself": "Correction lancée",
@@ -1063,6 +1073,7 @@ OWNER_ASK = {
     "set_cash_balance": re.compile(r"solde|caisse|banque|compte|tr[ée]sorerie|wave|\d", re.I),
     "record_expense": re.compile(r"d[ée]pens|frais|achet|pay[ée]|co[uû]t|\d", re.I),
     "mark_quote_decision": re.compile(r"accept|refus|valid|d'accord|signé|ok\b|oui\b|non\b", re.I),
+    "import_drive_quote": re.compile(r"drive|import|accept|devis", re.I),
     "create_contact": re.compile(r"contact|fiche|ajoute|enregistr|cr[ée]e", re.I),
     "save_email_draft": re.compile(r"e-?mail|mail|courri|lettre|[ée]cri|r[ée]dig|r[ée]pon|envoi|message|dis[- ]lui|pr[ée]vien|inform", re.I),
 }
@@ -1495,6 +1506,25 @@ class AgentSession:
         row = self._tracked(lambda: tracking.set_decision(self.db, q, decision, self.user_id))
         self.state["last_quote_id"] = q.id
         return row
+
+    def _t_import_drive_quote(self, query: str = "", file_id: str = "", accepted: bool = False) -> dict:
+        from app import drive_quotes
+        try:
+            if not file_id:
+                found = drive_quotes.search(self.db, query)
+                if not found:
+                    return {"error": f"Aucun devis PDF trouvé dans le Drive pour « {query} »."}
+                if len(found) > 1:
+                    return {"choisir": found, "message": "Plusieurs devis trouvés : demande au patron lequel importer (file_id)."}
+                file_id = found[0]["id"]
+            out = drive_quotes.import_quote(self.db, self.user_id, file_id)
+        except drive_quotes.DriveError as exc:
+            raise ConnectorError(str(exc), 400)
+        q = self.db.get(drive_quotes.Quotation, out["id"])
+        if accepted:
+            out["decision"] = self._tracked(lambda: tracking.set_decision(self.db, q, "accepted", self.user_id))
+        self.state["last_quote_id"] = q.id
+        return out
 
     def _t_record_receipt(self, amount: float, client: str = "", quote_number: str = "", kind: str = "avance",
                           method: str = "", note: str = "") -> dict:

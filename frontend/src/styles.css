@@ -2005,3 +2005,4 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .uc-dot.s-proposed { background: #e0793f; }
 .uc-dot.s-failed, .uc-dot.s-closed { background: #c9604d; }
 @keyframes ucPulse { 50% { opacity: .35; } }
+.steps code { overflow-wrap: anywhere; word-break: break-word; }

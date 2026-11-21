@@ -515,6 +515,68 @@ def google_account_disconnect(db: Session = Depends(get_db), user: User = Depend
     return out
 
 
+class DriveAccountIn(BaseModel):
+    client_id: str = Field(max_length=300)
+    client_secret: str = Field(max_length=300)
+    refresh_token: str = Field(max_length=600)
+
+
+class DriveImportIn(BaseModel):
+    accepted: bool = False
+
+
+def _drive(fn, *a):
+    from app import drive_quotes
+    try:
+        return fn(*a)
+    except drive_quotes.DriveError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/drive/account")
+def drive_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import drive_quotes
+    return drive_quotes.status(db)
+
+
+@router.put("/drive/account")
+def drive_connect(body: DriveAccountIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Google Drive en lecture seule : identifiants testés auprès de Google AVANT d'être gardés (chiffrés)."""
+    from app import drive_quotes
+    out = _drive(drive_quotes.connect, db, body.client_id, body.client_secret, body.refresh_token)
+    audit(db, user.id, "drive_connect", "drive", "")
+    db.commit()
+    return out
+
+
+@router.delete("/drive/account")
+def drive_disconnect(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import drive_quotes
+    out = drive_quotes.disconnect(db)
+    audit(db, user.id, "drive_disconnect", "drive", "")
+    db.commit()
+    return out
+
+
+@router.get("/drive/quotes")
+def drive_quotes_list(q: str = "", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import drive_quotes
+    return _drive(drive_quotes.search, db, q[:120])
+
+
+@router.post("/drive/quotes/{file_id}/import")
+def drive_quote_import(file_id: str, body: DriveImportIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Devis du Drive → devis de l'appli (numéro, PDF signé, suivi) ; accepted=true l'enregistre aussi comme accepté (encaissement)."""
+    from app import drive_quotes, tracking
+    out = _drive(drive_quotes.import_quote, db, user.id, file_id)
+    if body.accepted:
+        q = db.get(drive_quotes.Quotation, out["id"])
+        out["decision"] = tracking.set_decision(db, q, "accepted", user.id)
+    audit(db, user.id, "drive_import", "quotation", out["id"], out["numero"])
+    db.commit()
+    return out
+
+
 @router.get("/google/status")
 def google_status(user: User = Depends(get_current_user)):
     return {"configured": gbp.configured(), "missing": gbp.missing_settings(), "ai": assistant.ai_available()}
