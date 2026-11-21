@@ -469,6 +469,13 @@ export const api = {
   createProject: (body: any) =>
     request("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   quotes: () => request<any[]>("/api/quotes?summary=1"),
+  driveAccount: () => request<{ connected: boolean }>("/api/drive/account"),
+  driveConnect: (client_id: string, client_secret: string, refresh_token: string) =>
+    request<{ connected: boolean }>("/api/drive/account", { method: "PUT", body: JSON.stringify({ client_id, client_secret, refresh_token }) }),
+  driveDisconnect: () => request<{ connected: boolean }>("/api/drive/account", { method: "DELETE" }),
+  driveQuotes: (q: string) => request<{ id: string; name: string; modified: string; size: number }[]>(`/api/drive/quotes?q=${encodeURIComponent(q)}`),
+  driveImport: (fileId: string, accepted: boolean) =>
+    request<any>(`/api/drive/quotes/${encodeURIComponent(fileId)}/import`, { method: "POST", body: JSON.stringify({ accepted }) }),
   formation: () => request<any>("/api/formation"),
   formationExercice: (type: string, seed: number) => request<any>(`/api/formation/exercice?type=${encodeURIComponent(type)}&seed=${seed}`),
   formationCorriger: (body: any) => request<any>("/api/formation/exercice/corriger", { method: "POST", body: JSON.stringify(body) }),
