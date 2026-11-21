@@ -65,3 +65,13 @@ def test_sans_connexion(c):
     r = c.get("/api/drive/quotes")
     assert r.status_code == 400 and "pas connecté" in r.json()["detail"]
     assert c.get("/api/drive/account").json() == {"connected": False}
+
+
+def test_devis_absent_renvoie_vers_le_drive(monkeypatch):
+    from app import agent as ag
+    from app.database import SessionLocal
+    monkeypatch.setattr(drive_quotes, "status", lambda db: {"connected": True})
+    with SessionLocal() as db:
+        out = ag.AgentSession(db, None, {"owner_message": "Madame Ribero a accepté"})(
+            "mark_quote_decision", {"decision": "accepted", "client": "Madame Ribero Inconnue"})
+        assert "import_drive_quote" in out["error"]

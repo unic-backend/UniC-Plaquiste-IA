@@ -565,8 +565,10 @@ TOOLS: list[dict] = [
         "name": "import_drive_quote",
         "description": ("SUIVI : importe dans l'appli un devis PDF rangé dans Google Drive (fait hors de l'appli, ex. par Claude Code) : "
                         "il devient un devis de l'appli (numéro, PDF signé, suivi, encaissement). query = client ou numéro (« Global Bridge »). "
-                        "accepted=true seulement si le patron dit que ce devis est accepté. Plusieurs fichiers → l'outil les liste : demande "
-                        "lequel (file_id), ne devine pas. Les prix du PDF sont gardés tels quels."),
+                        "À utiliser seul dès que le patron parle d'un devis qui n'est pas dans l'appli (« importe le devis de Mme X », « modifie le devis "
+                        "de X », « X a accepté ») ; une fois importé, c'est un devis normal : corrige-le, facture-le, encaisse-le avec les outils "
+                        "habituels. accepted=true seulement si le patron dit que ce devis est accepté. Plusieurs fichiers → l'outil les liste : "
+                        "demande lequel (file_id), ne devine pas. Les prix du PDF sont gardés tels quels."),
         "input_schema": {"type": "object", "properties": {
             "query": {"type": "string"}, "file_id": {"type": "string"}, "accepted": {"type": "boolean"}},
             "additionalProperties": False},
@@ -1407,7 +1409,12 @@ class AgentSession:
         try:
             return fn()
         except tracking.TrackingError as exc:
-            raise ConnectorError(str(exc), 400)
+            msg = str(exc)
+            if msg.startswith("Aucun devis"):   # devis fait hors de l'appli (Claude Code) : il est peut-être rangé dans le Drive
+                from app import drive_quotes
+                if drive_quotes.status(self.db)["connected"]:
+                    msg += " Il est peut-être dans Google Drive : cherche-le et importe-le avec import_drive_quote, puis refais l'action."
+            raise ConnectorError(msg, 400)
 
     def _t_list_tracking(self, client: str = "") -> dict:
         if client.strip():
