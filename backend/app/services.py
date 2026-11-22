@@ -458,6 +458,20 @@ def store_artifact(db: Session, path: Path, filename: str, entity_type: str, ent
 _UNSET = object()  # « TVA non précisée » ≠ « pas de TVA » (None)
 
 
+EXCLUSION_PREFIX = "Non inclus : "   # une ligne des notes du devis par exclusion demandée par le patron
+
+
+def exclusions_of(notes: str | None) -> list[str]:
+    """Liste « Ne sont pas inclus » du devis : seulement ce que le patron a demandé (lignes « Non inclus : … » des notes)."""
+    return [l[len(EXCLUSION_PREFIX):].strip() for l in (notes or "").splitlines() if l.startswith(EXCLUSION_PREFIX) and l[len(EXCLUSION_PREFIX):].strip()]
+
+
+def with_exclusions(notes: str | None, exclusions: list[str] | None) -> str:
+    """Remplace la liste « Ne sont pas inclus » dans les notes ([] = la retirer) ; le reste des notes est gardé."""
+    keep = [l for l in (notes or "").splitlines() if not l.startswith(EXCLUSION_PREFIX)]
+    return "\n".join(keep + [EXCLUSION_PREFIX + x.strip()[:200] for x in (exclusions or []) if x and x.strip()][:12]).strip()
+
+
 def quotation_from_quantities(
     db: Session,
     *,
@@ -473,8 +487,10 @@ def quotation_from_quantities(
     vat_rate: float | None | object = _UNSET,
     objet: str = "",
     lieu: str = "",
+    exclusions: list[str] | None = None,
 ) -> Quotation:
     company = company_dict(db)
+    notes = with_exclusions(notes, exclusions)
     known = db.get(Customer, customer_id) if customer_id else None
     label = known.name.strip() if known else nom_propre(client_name)
     number = document_number(db, label, lieu=lieu)
@@ -613,6 +629,7 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
         notes=q.notes,
         warnings=warnings,
         extra_paragraphs=extra,
+        exclusions=exclusions_of(q.notes),
     )
     art = store_artifact(db, dest, filename, "quotation", q.id, key, user_id)
     q.artifact_id = art.id

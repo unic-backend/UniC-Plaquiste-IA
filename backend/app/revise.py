@@ -108,7 +108,7 @@ def _recompute(kind: str, doc, items: list) -> None:
 def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | None = None, add: list[dict] | None = None,
            update: list[dict] | None = None, title: str | None = None, vat_rate: float | None = None,
            client_name: str | None = None, objet: str | None = None, lieu: str | None = None,
-           new_number: str | None = None) -> list[str]:
+           new_number: str | None = None, non_inclus: list[str] | None = None) -> list[str]:
     """Applique les corrections au document lui-même, recalcule, régénère le PDF. Renvoie ce qui a changé."""
     prev_status = doc.status
     if kind == "invoice" and prev_status != "draft":
@@ -177,6 +177,9 @@ def revise(db: Session, kind: str, doc, *, user_id: str | None, remove: list | N
     if objet and kind == "quote":
         doc.object_text = objet.strip()[:900]
         changes.append("objet du devis modifié")
+    if non_inclus is not None and kind == "quote":   # liste « Ne sont pas inclus » demandée par le patron ([] = la retirer)
+        doc.notes = svc.with_exclusions(doc.notes, non_inclus)
+        changes.append("« Ne sont pas inclus » : " + ("; ".join(svc.exclusions_of(doc.notes)) or "retiré"))
     if vat_rate is not None and kind in ("quote", "invoice"):
         doc.vat_rate = vat_rate
         changes.append(f"TVA {round(vat_rate * 100, 2)} %")
