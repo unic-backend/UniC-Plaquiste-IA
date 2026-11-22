@@ -42,6 +42,33 @@ def load() -> dict:
     return json.loads(DATA.read_text(encoding="utf-8"))
 
 
+_ELEC_RE = re.compile(r"[ée]lectri", re.I)
+_ENUM_RE = re.compile(r"(?:\s*[,;]\s*|\s+(?:et|ou)\s+)(?![^(]*\))")   # séparateurs d'une énumération, hors parenthèses
+
+
+def sans_electricite(items: list[str]) -> list[str]:
+    """Règle du patron : l'électricité ne figure plus dans « Ne sont pas inclus ». Une ligne qui ne parle que d'électricité
+    disparaît ; dans une énumération (« Électricité et plomberie. »), seule l'électricité est retirée (« Plomberie. »)."""
+    out = []
+    for x in items:
+        if not _ELEC_RE.search(x):
+            out.append(x)
+            continue
+        end = "." if x.rstrip().endswith(".") else ""
+        parts = [p.strip() for p in _ENUM_RE.split(x.strip().rstrip(".")) if p and p.strip()]
+        keep = [p for p in parts if not _ELEC_RE.search(p)]
+        if not keep:
+            continue
+        text = ", ".join(keep[:-1]) + (" et " if len(keep) > 1 else "") + keep[-1]
+        out.append(text[:1].upper() + text[1:] + end)
+    return out
+
+
+def exclusions() -> list[str]:
+    """Exclusions habituelles des devis, sans l'électricité (demande du patron)."""
+    return sans_electricite(list(load().get("exclusions_habituelles") or []))
+
+
 def _slug(label: str) -> str:
     base = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode().upper()
     return "UC-" + re.sub(r"[^A-Z0-9]+", "-", base).strip("-")[:56]
@@ -162,7 +189,7 @@ def _articles(m: dict) -> list[tuple[str, str, str, str]]:
     return [
         ("unic-regles-devis", "Règles de devis UniC", "company", "\n\n".join(rules)),
         ("unic-exclusions", "Exclusions et métiers hors périmètre", "company",
-         "Exclusions habituelles des devis :\n" + "\n".join(f"- {e}" for e in m["exclusions_habituelles"])
+         "Exclusions habituelles des devis :\n" + "\n".join(f"- {e}" for e in exclusions())
          + "\n\nMétiers qui ne sont pas ceux d'UniC (jamais chiffrés, renvoyer vers un corps de métier) : "
          + ", ".join(m["metiers_hors_perimetre"]) + "."),
         ("unic-engagements", "Ton et engagements de la maison", "company",
@@ -228,7 +255,7 @@ def calculate_unic(surface: float, faces: int = 2, parois: int | None = None,
     ]
     if estimated:
         res.assumptions.append(f"Nombre de parois non donné : estimé à {walls} sur la base d'une paroi de référence de {ref_wall:g} m² développés.")
-    res.missing = ["Transport / livraison : non chiffré.", *[f"Exclu : {e}" for e in m["exclusions_habituelles"][:2]]]
+    res.missing = ["Transport / livraison : non chiffré.", *[f"Exclu : {e}" for e in exclusions()[:2]]]
     return res
 
 

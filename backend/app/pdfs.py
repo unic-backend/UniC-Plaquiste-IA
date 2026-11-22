@@ -692,7 +692,7 @@ def _render(
         ]
         try:
             from app import metier
-            excl = list(metier.load().get("exclusions_habituelles") or [])
+            excl = metier.exclusions()   # sans l'électricité (demande du patron)
         except Exception:
             excl = []
         if not labour:
