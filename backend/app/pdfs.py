@@ -517,6 +517,7 @@ def _render(
     warnings: list[str] | None = None,
     extra_paragraphs: list[str] | None = None,
     qr_url: str = "",
+    exclusions: list[str] | None = None,
 ) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     e = _entreprise(company)
@@ -690,20 +691,14 @@ def _render(
             "UniC Plaquiste se charge de la commande, de la réception et de la vérification qualitative des matériaux.",
             "Les quantités pourront être ajustées selon la surface réelle constatée sur site.",
         ]
-        try:
-            from app import metier
-            excl = list(metier.load().get("exclusions_habituelles") or [])
-        except Exception:
-            excl = []
-        if not labour:
-            excl.insert(0, "La main-d'œuvre et l'exécution des travaux.")
-        if any(re.search(r"\bled\b", _strip(r[1]), re.I) for r in rows if len(r) > 1):   # ruban LED au devis (plafond à gorge, îlot…)
-            excl = [("Luminaires (le ruban LED listé au tableau est compris)." if re.search(r"\bLED\b", x) else x) for x in excl]
+        # « Ne sont pas inclus » : seulement la liste demandée par le patron pour CE devis (jamais une liste toute faite qui
+        # contredirait les lignes, ex. « électricité » exclue alors qu'un forfait électricité est au devis)
+        excl = [x.strip() for x in (exclusions or []) if x and x.strip()]
         cond = [Paragraph("Conditions", _st("ch", fontSize=9.5, textColor=BLUE, leading=12)), Spacer(1, P(2))] + \
                [Paragraph(b, bullet, bulletText="•") for b in important]
         exc = ([Paragraph("Ne sont pas inclus", _st("ex", fontSize=9.5, textColor=BLUE, leading=12)), Spacer(1, P(2))] +
                [Paragraph(x, bullet, bulletText="•") for x in excl]) if excl else ""
-        story += [Table([[cond, exc]], colWidths=[108 * mm, 72 * mm],
+        story += [Table([[cond, exc]] if exc else [[cond]], colWidths=[108 * mm, 72 * mm] if exc else [180 * mm],
                         style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                           ("RIGHTPADDING", (0, 0), (0, 0), 14), ("RIGHTPADDING", (1, 0), (1, 0), 0)])), Spacer(1, P(12))]
 

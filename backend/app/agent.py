@@ -244,6 +244,9 @@ TOOLS: list[dict] = [
             "nouveau": {"type": "boolean", "description": ("true seulement si le patron veut un devis DIFFÉRENT de celui qui existe déjà pour ce calcul. "
                                                            "Un devis identique (même client, même lieu, mêmes lignes) n'est jamais recréé : "
                                                            "pour corriger, utilise revise_document.")},
+            "non_inclus": {"type": "array", "items": {"type": "string"},
+                           "description": ("Liste « Ne sont pas inclus » imprimée sur le devis : SEULEMENT si le patron la demande, avec ses mots. "
+                                           "Sinon ne mets rien (aucune liste par défaut). Jamais un poste qui figure dans les lignes du devis.")},
             "objet": {"type": "string", "description": ("« Objet du devis » : 1 à 3 phrases claires pour le client, rédigées par toi : nature "
                                                       "des travaux (faux plafonds, cloisons sèches, moulures, peinture…), lieu si connu, ce qui est "
                                                       "fourni et/ou posé. Pas de jargon, pas de chiffres inventés.")}},
@@ -299,6 +302,8 @@ TOOLS: list[dict] = [
             "title": {"type": "string"}, "vat_rate": {"type": "number", "minimum": 0, "maximum": 1},
             "objet": {"type": "string", "description": "Nouvel « Objet du devis » (devis seulement)"},
             "lieu": {"type": "string", "description": "Nouveau lieu du chantier (devis seulement)"},
+            "non_inclus": {"type": "array", "items": {"type": "string"},
+                           "description": "Nouvelle liste « Ne sont pas inclus » du devis, demandée par le patron ; [] = la retirer"},
             "client_name": {"type": "string"},
             "new_number": {"type": "string", "description": ("Nouveau numéro d'un DEVIS brouillon, demandé par le patron "
                                                            "(ex. UC-2026-1008-MR). Le PDF est refait. Refusé si déjà pris ou si une facture est liée.")}},
@@ -2141,7 +2146,7 @@ class AgentSession:
 
     def _t_create_quote(self, client_name: str = "", title: str = "", vat_rate: float | None = None,
                         checks: str = "", objet: str = "", lines: list | None = None, lieu: str = "",
-                        nouveau: bool = False) -> dict:
+                        nouveau: bool = False, non_inclus: list | None = None) -> dict:
         from_lines = bool(lines)
         if lines:
             qty = self._lines_to_quantities(lines)
@@ -2175,7 +2180,8 @@ class AgentSession:
             project_id=self.project_id, user_id=self.user_id, client_name=None if cust else client_name or None,
             notes="Devis préparé par UniC à partir du métré de la conversation.",
             assumptions=(self.state.get("last_calc") or {}).get("assumptions"),
-            missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, lieu=lieu, **kwargs)
+            missing=(self.state.get("last_calc") or {}).get("missing"), objet=objet, lieu=lieu,
+            exclusions=[str(x) for x in (non_inclus or [])], **kwargs)
         anomalies = pricecheck.check_quote(q)
         if anomalies:   # un devis faux n'entre pas dans la bibliothèque
             revise.discard(self.db, "quote", q, self.user_id)
@@ -2251,12 +2257,14 @@ class AgentSession:
 
     def _t_revise_document(self, kind: str, number: str = "", remove: list | None = None, update: list | None = None,
                            add: list | None = None, title: str = "", vat_rate: float | None = None,
-                           client_name: str = "", objet: str = "", lieu: str = "", new_number: str = "") -> dict:
+                           client_name: str = "", objet: str = "", lieu: str = "", new_number: str = "",
+                           non_inclus: list | None = None) -> dict:
         last = self.state.get("last_quote_id") if kind == "quote" else None
         try:
             doc = revise.find(self.db, kind, number, last)
             fix = dict(remove=remove, update=update, add=add, title=title or None, vat_rate=vat_rate,
-                       client_name=client_name or None, objet=objet or None, lieu=lieu or None, new_number=new_number or None)
+                       client_name=client_name or None, objet=objet or None, lieu=lieu or None, new_number=new_number or None,
+                       **({"non_inclus": [str(x) for x in non_inclus]} if non_inclus is not None and kind == "quote" else {}))
             replaced = kind == "invoice" and doc.status != "draft"
             if replaced:   # facture émise : avoir + nouvelle facture, jamais réécrite
                 doc, changes = revise.reissue(self.db, doc, user_id=self.user_id, **fix)
