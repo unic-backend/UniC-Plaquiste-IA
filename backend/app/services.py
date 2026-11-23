@@ -633,6 +633,11 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     )
     art = store_artifact(db, dest, filename, "quotation", q.id, key, user_id)
     q.artifact_id = art.id
+    try:   # copie automatique dans Google Drive (règle du patron) : en arrière-plan, jamais bloquante
+        from app import drive_quotes
+        drive_quotes.copy_quote_pdf(db, q, dest)
+    except Exception:   # noqa: BLE001
+        __import__("logging").getLogger(__name__).exception("Copie Drive du devis %s non lancée", q.number)
     return art
 
 

@@ -11,6 +11,7 @@ type F = { id: string; name: string; modified: string; size: number };
 
 export function DriveDevis() {
   const [conn, setConn] = useState<boolean | null>(null);
+  const [last, setLast] = useState("");
   const [files, setFiles] = useState<F[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState("");
@@ -22,7 +23,7 @@ export function DriveDevis() {
     try { await fn(); } catch (e: any) { setMsg(e?.message || "Erreur"); } finally { setBusy(""); }
   };
   const search = () => run("search", async () => setFiles(await api.driveQuotes(q)));
-  useEffect(() => { api.driveAccount().then((r) => { setConn(r.connected); if (r.connected) search(); }, (e) => setMsg(e.message)); }, []);
+  useEffect(() => { api.driveAccount().then((r) => { setConn(r.connected); setLast(r.derniere_copie || ""); if (r.connected) search(); }, (e) => setMsg(e.message)); }, []);
 
   return (
     <div className="page">
@@ -32,11 +33,11 @@ export function DriveDevis() {
         {msg && <p className="error" role="alert">{msg}</p>}
         {conn === false && (
           <section className="mat-row">
-            <div className="mat-head"><b>Connecter Google Drive (lecture seule)</b></div>
+            <div className="mat-head"><b>Connecter Google Drive</b></div>
             <ol className="steps">
               <li>Google Cloud → ton projet → <b>Bibliothèque d'API</b> : active « Google Drive API ».</li>
               <li>Prends l'identifiant OAuth <b>Application Web</b> déjà créé pour la fiche Google (redirection <code>https://developers.google.com/oauthplayground</code>).</li>
-              <li>OAuth Playground → roue crantée → « Use your own OAuth credentials » → portée <code>https://www.googleapis.com/auth/drive.readonly</code> → autorise → échange le code → copie le <b>Refresh token</b>.</li>
+              <li>OAuth Playground → roue crantée → « Use your own OAuth credentials » → portées <code>https://www.googleapis.com/auth/drive.readonly</code> et <code>https://www.googleapis.com/auth/drive.file</code> (lire les devis, et y copier ceux de l'appli) → autorise → échange le code → copie le <b>Refresh token</b>.</li>
             </ol>
             <div className="mat-fields one">
               <label>Identifiant client<input autoComplete="off" placeholder="xxxx.apps.googleusercontent.com" value={cid} onChange={(e) => setCid(e.target.value)} /></label>
@@ -52,6 +53,7 @@ export function DriveDevis() {
         )}
         {conn && (
           <>
+            <p className="hint">Chaque devis de l'appli est copié tout seul dans ton Drive (nom « Devis_numéro_client.pdf »).{last ? ` Dernière copie : ${last}.` : ""}</p>
             <form className="mat-row" onSubmit={(e) => { e.preventDefault(); search(); }}>
               <div className="mat-fields one">
                 <label>Chercher (client, numéro)<input value={q} maxLength={120} placeholder="Ex. : Global Bridge" onChange={(e) => setQ(e.target.value)} /></label>

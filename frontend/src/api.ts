@@ -469,7 +469,7 @@ export const api = {
   createProject: (body: any) =>
     request("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   quotes: () => request<any[]>("/api/quotes?summary=1"),
-  driveAccount: () => request<{ connected: boolean }>("/api/drive/account"),
+  driveAccount: () => request<{ connected: boolean; derniere_copie?: string }>("/api/drive/account"),
   driveConnect: (client_id: string, client_secret: string, refresh_token: string) =>
     request<{ connected: boolean }>("/api/drive/account", { method: "PUT", body: JSON.stringify({ client_id, client_secret, refresh_token }) }),
   driveDisconnect: () => request<{ connected: boolean }>("/api/drive/account", { method: "DELETE" }),
