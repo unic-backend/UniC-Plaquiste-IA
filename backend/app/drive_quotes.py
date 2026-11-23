@@ -100,7 +100,70 @@ def disconnect(db: Session) -> dict:
 
 
 def status(db: Session) -> dict:
-    return {"connected": all(_get(db, k) for k in _KEYS)}
+    last = db.get(AppSetting, _LAST_COPY)
+    return {"connected": all(_get(db, k) for k in _KEYS), "derniere_copie": last.value if last else ""}
+
+
+# ---------- copie automatique des devis de l'appli dans le Drive (droit « drive.file » : seulement les fichiers créés par l'appli) ----------
+UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
+_COPY = "drive_copy:"   # AppSetting drive_copy:<id du devis> → id du fichier dans le Drive (une correction remplace le même fichier)
+_LAST_COPY = "drive_last_copy"
+
+
+def _copy_name(q: Quotation) -> str:
+    client = re.sub(r"[^\w-]+", "_", (q.client_label or (q.customer.name if q.customer else "") or "Client").strip()).strip("_")
+    return f"Devis_{q.number}_{client or 'Client'}.pdf"
+
+
+def push_pdf(creds: tuple[str, str, str], data: bytes, name: str, file_id: str = "") -> str:
+    """Envoie le PDF dans le Drive (nouveau fichier, ou remplace le contenu du fichier déjà créé par l'appli). Renvoie l'id du fichier."""
+    tok = _token(*creds)
+    auth = {"Authorization": f"Bearer {tok}"}
+    if file_id:
+        r = httpx.patch(f"{UPLOAD}/{file_id}", params={"uploadType": "media"}, content=data,
+                        headers={**auth, "Content-Type": "application/pdf"}, timeout=60)
+        if r.status_code == 200:
+            return file_id   # fichier supprimé du Drive entre-temps (404) : on en recrée un
+    boundary = "unicdevis" + re.sub(r"\W", "", name)[:20]
+    meta = ('{"name": %s, "mimeType": "application/pdf"}' % __import__("json").dumps(name)).encode()
+    body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode() + meta +
+            f"\r\n--{boundary}\r\nContent-Type: application/pdf\r\n\r\n".encode() + data + f"\r\n--{boundary}--".encode())
+    r = httpx.post(UPLOAD, params={"uploadType": "multipart", "fields": "id"}, content=body,
+                   headers={**auth, "Content-Type": f"multipart/related; boundary={boundary}"}, timeout=60)
+    if r.status_code != 200:
+        raise DriveError("Copie dans le Drive refusée : régénère le jeton avec aussi la portée « drive.file ».")
+    return r.json()["id"]
+
+
+def copy_quote_pdf(db: Session, q: Quotation, path) -> None:
+    """Après chaque PDF de devis : copie dans le Drive en arrière-plan. Ne bloque ni ne fait jamais échouer le devis."""
+    import os
+    import threading
+    from pathlib import Path
+    if os.environ.get("UNIC_NO_BACKGROUND") or not status(db)["connected"]:
+        return   # tests : pas de fil de fond ; Drive non connecté : rien à faire
+    try:
+        creds, data = _creds(db), Path(path).read_bytes()
+    except (DriveError, OSError):
+        return
+    row = db.get(AppSetting, _COPY + q.id)
+    args = (creds, data, _copy_name(q), row.value if row else "", q.id, q.number)
+    threading.Thread(target=_copy_job, args=args, name="drive-copy", daemon=True).start()
+
+
+def _copy_job(creds, data, name, file_id, quote_id, number) -> None:
+    from datetime import datetime, timezone
+    from app.database import SessionLocal
+    when = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M")
+    try:
+        fid, note = push_pdf(creds, data, name, file_id), f"{number} copié le {when}"
+    except Exception as exc:   # noqa: BLE001 — un échec de copie ne touche jamais le devis ; il est affiché sur la page Drive
+        fid, note = "", f"{number} non copié le {when} : {exc if isinstance(exc, DriveError) else 'Google Drive injoignable'}"
+    with SessionLocal() as db:
+        if fid:
+            _put(db, _COPY + quote_id, fid)
+        _put(db, _LAST_COPY, note[:300])
+        db.commit()
 
 
 # ---------- recherche et lecture ----------

@@ -64,7 +64,7 @@ def test_import_unique_puis_accepte(c, monkeypatch):
 def test_sans_connexion(c):
     r = c.get("/api/drive/quotes")
     assert r.status_code == 400 and "pas connecté" in r.json()["detail"]
-    assert c.get("/api/drive/account").json() == {"connected": False}
+    assert c.get("/api/drive/account").json()["connected"] is False
 
 
 def test_devis_absent_renvoie_vers_le_drive(monkeypatch):
@@ -75,3 +75,28 @@ def test_devis_absent_renvoie_vers_le_drive(monkeypatch):
         out = ag.AgentSession(db, None, {"owner_message": "Madame Ribero a accepté"})(
             "mark_quote_decision", {"decision": "accepted", "client": "Madame Ribero Inconnue"})
         assert "import_drive_quote" in out["error"]
+
+
+def test_copie_pdf_nouveau_puis_remplace(monkeypatch):
+    calls = []
+
+    class R:
+        def __init__(self, code, js=None): self.status_code, self._js = code, js or {}
+        def json(self): return self._js
+
+    monkeypatch.setattr(drive_quotes, "_token", lambda *a: "tok")
+    monkeypatch.setattr(drive_quotes.httpx, "post", lambda url, **kw: calls.append(("post", kw["headers"]["Content-Type"], kw["content"])) or R(200, {"id": "F123"}))
+    monkeypatch.setattr(drive_quotes.httpx, "patch", lambda url, **kw: calls.append(("patch", url)) or R(200))
+    assert drive_quotes.push_pdf(("a", "b", "c"), b"%PDF-1.4 x", "Devis_UC-1_Awa.pdf") == "F123"
+    assert calls[0][1].startswith("multipart/related") and b'"Devis_UC-1_Awa.pdf"' in calls[0][2] and b"%PDF-1.4 x" in calls[0][2]
+    assert drive_quotes.push_pdf(("a", "b", "c"), b"%PDF v2", "x.pdf", "F123") == "F123" and calls[1] == ("patch", f"{drive_quotes.UPLOAD}/F123")
+
+
+def test_copie_refusee_message_clair(monkeypatch):
+    class R:
+        status_code = 403
+        def json(self): return {}
+    monkeypatch.setattr(drive_quotes, "_token", lambda *a: "tok")
+    monkeypatch.setattr(drive_quotes.httpx, "post", lambda url, **kw: R())
+    with pytest.raises(drive_quotes.DriveError, match="drive.file"):
+        drive_quotes.push_pdf(("a", "b", "c"), b"%PDF", "x.pdf")
