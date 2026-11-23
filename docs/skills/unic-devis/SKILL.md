@@ -50,6 +50,10 @@ python scripts/unic_calcul.py '<pièces JSON>' --main-oeuvre <prix_m2> --devis "
 ```
 Crée le devis brouillon (numéro UniC, PDF) dans la base locale. Un travail = un seul devis ; une correction modifie le devis existant.
 Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres › Sauvegardes › « Importer un dossier de Claude ».
+**Toujours, sans attendre qu'il le demande (règle du patron, 23/11/2026)** : chaque devis PDF fini (signé) est rangé dans son Google Drive,
+à la racine, à côté des autres devis : nom `Devis_<numéro>_<Client_avec_tirets_bas>_signe.pdf` (connecteur Google Drive, `create_file`,
+PDF sans conversion). Une version corrigée remplace l'ancienne : nouvelle version rangée, l'ancienne mise à la corbeille seulement avec son accord.
+UniC IA pourra ensuite l'importer (Devis › Importer du Drive, ou « le devis de X est accepté »).
 
 ## Travail fini (à cocher avant de rendre, sinon on corrige d'abord)
 - [ ] Un seul devis pour ce travail (une correction modifie l'existant).
@@ -60,6 +64,8 @@ Pour le ramener dans l'appli : `python scripts/planb_export.py` puis Paramètres
 - [ ] Électricité / clim : conseil sans aucun chiffre ni ligne de devis.
 - [ ] Contre-calcul fait, aucun écart inexpliqué avec le moteur ; totaux recalculés.
 - [ ] Livraison : prix du patron ou « à la charge du client » ; moulures, colles, peinture seulement s'il les a demandées.
+- [ ] Aucun « Ne sont pas inclus » sauf liste demandée par le patron (jamais un poste présent dans les lignes).
+- [ ] PDF signé rangé dans le Drive (lien donné au patron).
 
 ## Règle d'or
 Une erreur signalée par le patron se corrige dans CE mode d'emploi (branche + PR), pas seulement dans le chat : sinon elle revient.
