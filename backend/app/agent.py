@@ -137,6 +137,14 @@ TOOLS: list[dict] = [
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "drive_photos",
+        "description": "Liste les photos de chantier du Google Drive du patron (nom, date, lien), dans un dossier cherché par son nom "
+                       "(ex. « Cloisons », « Armstrong ») ou les plus récentes. Lecture seule ; option à allumer dans Paramètres › Google Drive.",
+        "input_schema": {"type": "object", "properties": {
+            "folder": {"type": "string", "description": "Nom (ou partie du nom) du dossier Drive ; vide = photos les plus récentes."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "additionalProperties": False},
+    },
+    {
         "name": "google_profile_audit",
         "description": "Audite la fiche Google : lacunes réelles (site, horaires, description, catégories…).",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -886,7 +894,7 @@ TOOLS: list[dict] = [
 
 TOOL_LABELS = {
     "read_inbox": "Courrier consulté", "search_inbox": "Boîte mail fouillée", "read_email": "E-mail lu",
-    "save_email_reply_draft": "Brouillon de réponse préparé", "save_email_draft": "Brouillon d'e-mail préparé", "make_pdf": "PDF créé", "make_spreadsheet": "Fichier Excel créé", "list_google_reviews": "Avis Google consultés",
+    "save_email_reply_draft": "Brouillon de réponse préparé", "save_email_draft": "Brouillon d'e-mail préparé", "make_pdf": "PDF créé", "make_spreadsheet": "Fichier Excel créé", "list_google_reviews": "Avis Google consultés", "drive_photos": "Photos du Drive consultées",
     "google_profile_audit": "Fiche Google auditée", "save_google_review_reply_draft": "Réponse à un avis préparée",
     "save_social_post_draft": "Brouillon de publication préparé", "list_social_posts": "Publications consultées",
     "get_prices": "Prix consultés", "calculate_materials": "Calcul effectué", "create_quote": "Devis créé",
@@ -1044,7 +1052,7 @@ SELF_EDIT = re.compile(
 # Contenu de tiers lu pendant le tour (e-mail, fichier, plan, avis) : à partir de là, certaines actions exigent que le
 # patron les ait demandées DANS SON MESSAGE. Contrôle déterministe côté serveur : une consigne cachée dans un document
 # ne suffit jamais, quoi que le modèle en pense.
-UNTRUSTED_SOURCES = {"read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan", "weather"}
+UNTRUSTED_SOURCES = {"drive_photos", "read_inbox", "search_inbox", "read_email", "inspect_file", "table_info", "table_query", "read_plan", "list_google_reviews", "mail_signals", "calculate_from_plan", "weather"}
 OWNER_ASK = {
     "code_app": re.compile(r"corrig|modifi|chang|ajout|cr[ée]|fais|fait|mets|met |am[ée]lior|d[ée]velopp|r[ée]par|retire|supprim|bug|fonction|appli|code", re.I),
     "code_project": re.compile(r"cr[ée]|fais|fait|d[ée]velopp|programm|site|jeu|appli|script|outil|document|projet|continue|ajout|modifi|chang", re.I),
@@ -1835,6 +1843,16 @@ class AgentSession:
         reviews = connectors.google_call(gbp.list_reviews)
         flag = self._flag(" ".join(r.get("comment", "") for r in reviews), "avis Google")
         return {"avis": [{**r, "comment": r["comment"][:600]} for r in reviews], "note": UNTRUSTED_NOTE, **flag}
+
+    def _t_drive_photos(self, folder: str = "", limit: int = 30) -> dict:
+        from app import google_drive
+        try:
+            photos = google_drive.list_photos(self.db, folder, limit)
+        except google_drive.DriveError as exc:
+            raise ConnectorError(str(exc), 400) from exc
+        # noms de fichiers écrits par des tiers possibles : donnée, jamais consigne
+        return {"photos": photos, "nombre": len(photos), "note": UNTRUSTED_NOTE,
+                **self._flag(" ".join(p["name"] for p in photos), "noms de fichiers Drive")}
 
     def _t_google_profile_audit(self) -> dict:
         return connectors.google_call(lambda: gbp.audit_location(gbp.get_location()))

@@ -616,6 +616,8 @@ def generate_quote_pdf(db: Session, q: Quotation, user_id: str | None) -> Artifa
     )
     art = store_artifact(db, dest, filename, "quotation", q.id, key, user_id)
     q.artifact_id = art.id
+    from app import google_drive   # option du patron (coupée par défaut) : copie du PDF dans son Drive, jamais bloquante
+    google_drive.push_document(db, dest, "quotation", customer.name if customer else q.client_label, filename)
     return art
 
 
@@ -718,6 +720,8 @@ def generate_invoice_pdf(db: Session, inv: Invoice, user_id: str | None) -> Arti
     )
     art = store_artifact(db, dest, filename, "invoice", inv.id, f"unic-invoice-{inv.number.lower()}", user_id)
     inv.artifact_id = art.id
+    from app import google_drive   # option du patron (coupée par défaut) : copie du PDF dans son Drive, jamais bloquante
+    google_drive.push_document(db, dest, "invoice", customer.name if customer else getattr(inv, "client_label", ""), filename)
     return art
 
 

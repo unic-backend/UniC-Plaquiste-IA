@@ -236,6 +236,9 @@ export type HiggsfieldStatus = {
   connected: boolean; per_day: number; left_today: number; video_per_day: number; video_left_today: number;
 };
 
+export type DriveKey = "drive_docs" | "drive_backup" | "drive_photos";
+export type DriveState = { available: boolean; options: Record<DriveKey, boolean>; labels: Record<DriveKey, string>; folder: string; last_ok: string; last_error: string };
+
 export const net = {
   platforms: () =>
     request<{ platforms: Platform[]; auto_publish_note: string; ai_available: boolean }>("/api/reseaux/platforms"),
@@ -314,6 +317,8 @@ export const net = {
   gConnect: (client_id: string, client_secret: string, refresh_token: string) =>
     request<{ connected: boolean; title: string }>("/api/google/account", { method: "PUT", ...json({ client_id, client_secret, refresh_token }) }),
   gDisconnect: () => request<{ connected: boolean }>("/api/google/account", { method: "DELETE" }),
+  drive: () => request<DriveState>("/api/drive"),
+  driveSet: (b: Partial<Record<DriveKey, boolean>>) => request<DriveState>("/api/drive", { method: "PUT", ...json(b) }),
   gStatus: () => request<{ configured: boolean; missing: string[]; ai: boolean }>("/api/google/status"),
   gProfile: () => request<GProfile>("/api/google/profile"),
   gReviews: () => request<GReview[]>("/api/google/reviews"),

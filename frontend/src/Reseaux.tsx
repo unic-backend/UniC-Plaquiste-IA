@@ -7,7 +7,7 @@ import { TikTokActions, TikTokStudio } from "./TikTok";
 import { WhatsAppActions, WhatsAppStudio } from "./WhatsApp";
 import { sharePhoto } from "./Google";
 import { useEffect, useState } from "react";
-import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type Mail, type MailDraft, type Platform, type Post } from "./api";
+import { net, type JournalRow, type Usage, type MemConflict, type MemState, type Memo, type GProfile, type GReview, type DriveKey, type DriveState, type Mail, type MailDraft, type Platform, type Post } from "./api";
 
 const STATUS: Record<string, string> = { draft: "Brouillon", review: "En revue", approved: "Approuvé", published: "Publié" };
 const NEXT: Record<string, string> = { draft: "Passer en revue", review: "Approuver", approved: "Marquer publié (manuel)" };
@@ -29,6 +29,40 @@ async function copy(text: string, say: (m: string) => void) {
   } catch {
     say("Copie impossible : sélectionnez le texte.");
   }
+}
+
+/** Google Drive du patron (même compte Google) : chaque interrupteur est son clic, tout est coupé par défaut. */
+function DriveCard({ say }: { say: (m: string) => void }) {
+  const [d, setD] = useState<DriveState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { net.drive().then(setD).catch(() => {}); }, []);
+  if (!d) return null;
+  const keys = Object.keys(d.labels) as DriveKey[];
+  return (
+    <section className="card-box">
+      <h3>Google Drive</h3>
+      {!d.available ? (
+        <p className="hint">Connecte d'abord ton compte Google (fiche ci-dessus), avec les portées <code>drive.file</code> et <code>drive.readonly</code> en plus.</p>
+      ) : (
+        <>
+          <p className="hint">Les fichiers vont dans ton Drive, dossier « {d.folder} ». Rien n'y est jamais supprimé.</p>
+          {keys.map((k) => (
+            <label key={k} className="check-row" htmlFor={`drive-${k}`}>
+              <input id={`drive-${k}`} type="checkbox" checked={!!d.options[k]} disabled={busy}
+                onChange={async (e) => {
+                  setBusy(true);
+                  try { setD(await net.driveSet({ [k]: e.target.checked })); say("✓ Enregistré"); }
+                  catch (err: any) { say(err.message); } finally { setBusy(false); }
+                }} />
+              {d.labels[k]}
+            </label>
+          ))}
+          {d.last_error && <p className="hint" role="alert">Dernier dépôt raté : {d.last_error}</p>}
+          {!d.last_error && d.last_ok && <p className="hint"><I.Check size={16} /> Dernier dépôt réussi : {new Date(d.last_ok).toLocaleString("fr-FR")}</p>}
+        </>
+      )}
+    </section>
+  );
 }
 
 function GoogleFiche({ say, onDraft }: { say: (m: string) => void; onDraft: () => void }) {
@@ -68,7 +102,7 @@ function GoogleFiche({ say, onDraft }: { say: (m: string) => void; onDraft: () =
         <ol className="steps">
           <li>Google Cloud → projet approuvé → <b>Bibliothèque d'API</b> : active « My Business Account Management », « My Business Business Information » et « Google My Business ».</li>
           <li>Écran de consentement OAuth (Externe, mode test, ton Gmail en testeur), puis un identifiant <b>Application Web</b> avec la redirection <code>https://developers.google.com/oauthplayground</code>.</li>
-          <li>OAuth Playground → roue crantée → « Use your own OAuth credentials » → portée <code>https://www.googleapis.com/auth/business.manage</code> → autorise → échange le code → copie le <b>Refresh token</b>.</li>
+          <li>OAuth Playground → roue crantée → « Use your own OAuth credentials » → portées <code>https://www.googleapis.com/auth/business.manage</code> (+ <code>drive.file</code> et <code>drive.readonly</code> pour Google Drive) → autorise → échange le code → copie le <b>Refresh token</b>.</li>
         </ol>
         <label htmlFor="g-cid">Identifiant client</label>
         <input id="g-cid" autoComplete="off" placeholder="xxxx.apps.googleusercontent.com" value={cid} onChange={(e) => setCid(e.target.value)} />
@@ -271,6 +305,7 @@ export function Reseaux() {
         </div>
 
         {sel === "google_business" && <GoogleFiche say={say} onDraft={load} />}
+        {sel === "google_business" && <DriveCard say={say} />}
         {sel === "linkedin" && <LinkedInConnect say={say} onChange={refreshLi} />}
         {sel === "instagram" && <InstagramConnect say={say} onChange={refreshIg} />}
         {sel === "tiktok" && <TikTokStudio say={say} onDraft={load} />}

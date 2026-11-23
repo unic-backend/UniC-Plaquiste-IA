@@ -515,6 +515,38 @@ def google_account_disconnect(db: Session = Depends(get_db), user: User = Depend
     return out
 
 
+class DriveOptionsIn(BaseModel):
+    drive_docs: bool | None = None
+    drive_backup: bool | None = None
+    drive_photos: bool | None = None
+
+
+@router.get("/drive")
+def drive_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import google_drive
+    return google_drive.status(db)
+
+
+@router.put("/drive")
+def drive_options(body: DriveOptionsIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Options Google Drive : chaque interrupteur est le clic du patron (tout est coupé par défaut)."""
+    from app import google_drive
+    out = google_drive.set_options(db, body.model_dump(exclude_none=True))
+    audit(db, user.id, "drive_options", "google_drive", ",".join(k for k, v in out["options"].items() if v))
+    db.commit()
+    return out
+
+
+@router.get("/drive/photos")
+def drive_photos(folder: str = Query("", max_length=80), limit: int = Query(30, ge=1, le=100),
+                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app import google_drive
+    try:
+        return {"photos": google_drive.list_photos(db, folder, limit)}
+    except google_drive.DriveError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get("/google/status")
 def google_status(user: User = Depends(get_current_user)):
     return {"configured": gbp.configured(), "missing": gbp.missing_settings(), "ai": assistant.ai_available()}

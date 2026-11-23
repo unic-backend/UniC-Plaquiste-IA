@@ -600,6 +600,14 @@ def run_daily() -> dict | None:
             push_files_offsite()
         except (BackupError, OSError) as exc:
             _save_status(last_files_error=str(exc)[:300])
+    try:   # option du patron (coupée par défaut) : copie dans son Google Drive, chiffrée si un mot de passe est réglé
+        from app import google_drive
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            data = seal(path_of(made["name"]).read_bytes())
+            google_drive.push_backup(db, data, made["name"] + (ENC_SUFFIX if data.startswith(ENC_MAGIC) else ""))
+    except Exception:   # la sauvegarde locale est faite : un échec Drive ne la remet pas en cause
+        logger.exception("Copie Drive de la sauvegarde impossible")
     return made
 
 
