@@ -110,3 +110,23 @@ def test_livraison_a_la_charge_du_client_importable(c):
         data, total = Path(db.get(Artifact, q.artifact_id).path).read_bytes(), q.total
     p = drive_quotes.parse_quote_pdf(data)
     assert p["total"] == total and p["materials"][-1]["name"].startswith("Livraison") and p["materials"][-1]["total"] == 0
+
+
+def test_connexion_dit_quelle_case_corriger(monkeypatch):
+    """Erreur de saisie → la case fautive en clair (cas vécu : « Catherine » collé dans l'identifiant client)."""
+    called = []
+    monkeypatch.setattr(drive_quotes.httpx, "post", lambda *a, **kw: called.append(1))
+    with SessionLocal() as db:
+        with pytest.raises(drive_quotes.DriveError, match="Identifiant client incorrect"):
+            drive_quotes.connect(db, "Catherine", "GOCSPX-x", "1//x")
+    assert not called   # rien n'est envoyé à Google
+
+    class R:
+        status_code = 400
+        def __init__(self, err): self.err = err
+        def json(self): return {"error": self.err}
+    for err, words in (("invalid_client", "identifiant client ou le secret"), ("unauthorized_client", "autre identifiant client"),
+                       ("invalid_grant", "refresh token est refusé"), ("autre", "Recopie")):
+        monkeypatch.setattr(drive_quotes.httpx, "post", lambda *a, err=err, **kw: R(err))
+        with SessionLocal() as db, pytest.raises(drive_quotes.DriveError, match=words):
+            drive_quotes.connect(db, "123-abc.apps.googleusercontent.com", "GOCSPX-x", "1//x")

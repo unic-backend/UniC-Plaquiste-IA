@@ -42,6 +42,17 @@ def _put(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
+CLIENT_ID_END = ".apps.googleusercontent.com"
+# réponse de Google → cause en clair (le patron sait quelle case corriger)
+TOKEN_ERRORS = {
+    "invalid_client": "Google ne reconnaît pas l'identifiant client ou le secret : recopie-les depuis Google Cloud › Clients › "
+                      "ton client Application Web.",
+    "unauthorized_client": "Ce refresh token a été créé avec un autre identifiant client : refais-le dans OAuth Playground avec "
+                           "ton identifiant et ton secret (roue crantée › « Use your own OAuth credentials »).",
+    "invalid_grant": "Le refresh token est refusé (expiré, révoqué ou mal copié) : refais-le dans OAuth Playground et copie-le en entier.",
+}
+
+
 def _token(client_id: str, client_secret: str, refresh_token: str) -> str:
     try:
         r = httpx.post(TOKEN_URL, data={"client_id": client_id, "client_secret": client_secret, "refresh_token": refresh_token,
@@ -49,14 +60,19 @@ def _token(client_id: str, client_secret: str, refresh_token: str) -> str:
     except httpx.HTTPError:
         raise DriveError("Google ne répond pas. Réessaie dans un instant.") from None
     if r.status_code != 200:
-        raise DriveError("Google a refusé ces identifiants. Régénère le jeton avec le droit « drive.readonly ».")
+        try:
+            err = str(r.json().get("error") or "")
+        except ValueError:
+            err = ""
+        raise DriveError(TOKEN_ERRORS.get(err, "Google a refusé ces identifiants. Recopie l'identifiant client, le secret et le "
+                                                "refresh token, puis réessaie."))
     return r.json()["access_token"]
 
 
 def _creds(db: Session) -> tuple[str, str, str]:
     vals = tuple(_get(db, k) for k in _KEYS)
     if not all(vals):
-        raise DriveError("Google Drive n'est pas connecté : Paramètres › Google Drive.")
+        raise DriveError("Google Drive n'est pas connecté : Devis › Importer du Drive.")
     return vals   # type: ignore[return-value]
 
 
@@ -77,6 +93,9 @@ def connect(db: Session, client_id: str, client_secret: str, refresh_token: str)
     vals = [v.strip() for v in (client_id, client_secret, refresh_token)]
     if not all(vals):
         raise DriveError("Les trois champs sont requis.")
+    if not vals[0].endswith(CLIENT_ID_END) or " " in vals[0]:
+        raise DriveError(f"Identifiant client incorrect : il finit par « {CLIENT_ID_END} » "
+                         "(Google Cloud › Clients › ton client Application Web).")
     tok = _token(*vals)
     try:   # le droit de lecture du Drive est vérifié avant de garder quoi que ce soit
         r = httpx.get(FILES, params={"pageSize": 1, "fields": "files(id)"}, headers={"Authorization": f"Bearer {tok}"}, timeout=TIMEOUT)
