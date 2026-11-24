@@ -198,6 +198,8 @@ _NUM = re.compile(r"^-?\d{1,3}(?:[\s  ]\d{3})*(?:,\d+)?$|^-?\d+(?:,\d+)?$")
 
 def _num(s: str) -> float | None:
     s = re.sub(r"\s*(FCFA|F CFA|CFA|€|XOF)\s*$", "", s.strip(), flags=re.I)
+    if s in ("—", "–", "-"):   # montant nul : le PDF de l'appli écrit « — » (ex. « Livraison : à la charge du client »)
+        return 0.0
     if not _NUM.match(s):
         return None
     return float(re.sub(r"[\s  ]", "", s).replace(",", "."))

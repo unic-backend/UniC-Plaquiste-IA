@@ -100,3 +100,13 @@ def test_copie_refusee_message_clair(monkeypatch):
     monkeypatch.setattr(drive_quotes.httpx, "post", lambda url, **kw: R())
     with pytest.raises(drive_quotes.DriveError, match="drive.file"):
         drive_quotes.push_pdf(("a", "b", "c"), b"%PDF", "x.pdf")
+
+
+def test_livraison_a_la_charge_du_client_importable(c):
+    """Sans prix de livraison, l'appli ajoute « Livraison : à la charge du client » écrite « — » : la ligne se lit à 0."""
+    with SessionLocal() as db:
+        q = services.quotation_from_quantities(db, title="", quantities=[LINES[1], LINES[3]], customer_id=None, project_id=None,
+                                               user_id=None, client_name="Catherine", lieu=None, objet="Plafond", vat_rate=None)
+        data, total = Path(db.get(Artifact, q.artifact_id).path).read_bytes(), q.total
+    p = drive_quotes.parse_quote_pdf(data)
+    assert p["total"] == total and p["materials"][-1]["name"].startswith("Livraison") and p["materials"][-1]["total"] == 0
