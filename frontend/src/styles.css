@@ -2006,3 +2006,8 @@ input:where(:not([type=checkbox], [type=radio], [type=range], [type=file], [type
 .uc-dot.s-failed, .uc-dot.s-closed { background: #c9604d; }
 @keyframes ucPulse { 50% { opacity: .35; } }
 .steps code { overflow-wrap: anywhere; word-break: break-word; }
+
+/* Liste des devis : bouton « Supprimer » sous le statut (devis à valider), rangé à part et restaurable */
+.doc-status { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.doc-del { color: #c0392b; border: 1px solid rgba(192, 57, 43, 0.35); }
+.doc-del:hover { background: rgba(192, 57, 43, 0.08); }
