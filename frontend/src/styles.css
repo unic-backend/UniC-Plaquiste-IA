@@ -1588,6 +1588,11 @@ button { min-height: 36px; }                  /* plancher global : Copier, Écou
 /* actions de ta question : sous la bulle, sans la rallonger */
 .msg.user .bubble { position: relative; }
 .msg.user .msg-actions { position: absolute; right: 0; top: 100%; margin: 2px 0 0; z-index: 1; }
+/* sous ta bulle verte, les boutons sont sur le fond clair : texte de la bulle (blanc) illisible → couleur du texte secondaire, bien visible */
+.msg.user .msg-actions { opacity: 1; }
+.msg.user .msg-actions button { color: var(--muted); opacity: 1; font-weight: 600; }
+.msg.user .msg-actions button:hover { color: var(--ink); }
+.msg.user:has(.msg-actions) { padding-bottom: 30px; }   /* place réservée : les boutons ne chevauchent plus la réponse */
 .msg.user .avatar { font-size: 9.5px; letter-spacing: 0; }
 .bubble { min-width: 0; overflow-wrap: anywhere; }
 
