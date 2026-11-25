@@ -1157,11 +1157,12 @@ function DocFilters({ value, onChange, count, total, money = true }: {
 function useDocLibrary(load: () => Promise<any[]>) {
   const [rows, setRows] = useState<any[]>([]);
   const [f, setF] = useState<DocFilter>(NO_FILTER);
+  const reload = () => load().then(setRows);
   useEffect(() => {
-    load().then(setRows);
+    reload();
   }, []);
   const shown = applyDocFilter(rows, f);
-  return { rows, shown, f, setF };
+  return { rows, shown, f, setF, reload };
 }
 
 function TablePage({
@@ -1176,7 +1177,7 @@ function TablePage({
   title: string;
   lede?: string;
   columns: string[];
-  rows: (string | number | null | undefined)[][];
+  rows: React.ReactNode[][];
   onRow?: (i: number) => void;
   extra?: React.ReactNode;
   empty?: { title: string; hint: string };
@@ -1513,16 +1514,37 @@ function ExportButtons({ kind }: { kind: "quotes" | "invoices" }) {
 
 function DevisList() {
   const nav = useNavigate();
-  const { rows, shown, f, setF } = useDocLibrary(api.quotes);
+  const { rows, shown, f, setF, reload } = useDocLibrary(api.quotes);
+  const [trash, setTrash] = useState(false);   // devis supprimés (statut « annulé ») : à part, restaurables
+  const [err, setErr] = useState("");
+  const list = shown.filter((q) => (q.status === "cancelled") === trash);
+  const removed = rows.filter((q) => q.status === "cancelled").length;
+  const act = (e: React.MouseEvent, fn: () => Promise<any>) => {
+    e.stopPropagation(); setErr("");
+    fn().then(reload, (x) => setErr(x?.message || "Action impossible"));
+  };
+  const status = (q: any) => (
+    <span className="doc-status">
+      {statusFr(q.status)}
+      {q.status === "draft" && (
+        <button className="btn btn-ghost btn-small doc-del" onClick={(e) => window.confirm(`Supprimer le devis ${q.number} ? Il part dans « Devis supprimés », tu pourras le restaurer.`)
+          ? act(e, () => api.trackingRemove(q.id)) : e.stopPropagation()}>Supprimer</button>
+      )}
+      {q.status === "cancelled" && <button className="btn btn-line btn-small" onClick={(e) => act(e, () => api.trackingRestore(q.id))}>Restaurer</button>}
+    </span>
+  );
   return (
     <TablePage
-      title="Devis"
-      lede="Tous les devis de l'IA. Une correction modifie le même devis."
-      extra={<><Link className="btn btn-line" to="/devis/drive">Importer du Drive</Link><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={shown.length} total={rows.length} /></>}
+      title={trash ? "Devis supprimés" : "Devis"}
+      lede={trash ? "Devis retirés de la liste. Rien n'est effacé : « Restaurer » le remet comme avant." : "Tous les devis de l'IA. Une correction modifie le même devis."}
+      extra={<><Link className="btn btn-line" to="/devis/drive">Importer du Drive</Link><ExportButtons kind="quotes" /><DocFilters value={f} onChange={setF} count={list.length} total={rows.length} />
+        {(removed > 0 || trash) && <button className="btn btn-ghost btn-small" onClick={() => setTrash(!trash)}>{trash ? "← Retour aux devis" : `Devis supprimés (${removed})`}</button>}
+        {err && <p className="error" role="alert">{err}</p>}</>}
       columns={["N°", "Titre", "Client", "Statut", "Total", "Prix complets"]}
-      rows={shown.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, statusFr(q.status), q.total != null ? fmt(q.total, q.currency || "FCFA") : "incomplet", q.prices_complete ? "oui" : "non"])}
-      empty={{ title: "Aucun devis pour l'instant", hint: "Demande-le à UniC dans le chat : « Fais un devis pour une cloison de 12 m² chez M. Diop »." }}
-      onRow={(i) => nav(`/devis/${shown[i].id}`)}
+      rows={list.map((q) => [q.number, q.title, q.client_name || q.customer_name || q.client_label, status(q), q.total != null ? fmt(q.total, q.currency || "FCFA") : "incomplet", q.prices_complete ? "oui" : "non"])}
+      empty={trash ? { title: "Aucun devis supprimé", hint: "Les devis supprimés apparaissent ici et se restaurent en un clic." }
+        : { title: "Aucun devis pour l'instant", hint: "Demande-le à UniC dans le chat : « Fais un devis pour une cloison de 12 m² chez M. Diop »." }}
+      onRow={(i) => nav(`/devis/${list[i].id}`)}
     />
   );
 }
